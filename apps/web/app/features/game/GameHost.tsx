@@ -6,6 +6,7 @@ import {
   type GameRuntimeContext,
   type GameResult,
   type GamePresentation,
+  type OwoggCompletionPayload,
   type ScoreConfig,
 } from "@owogg/game-sdk";
 import {
@@ -23,8 +24,8 @@ import { GameThumbnail } from "../../components/ui/GameThumbnail";
 import { XIcon } from "../../components/ui/XIcon";
 import { IframeRuntime } from "./runtime/IframeRuntime";
 import { fetchGameSession } from "./gameSessionApi";
-import { acceptGameScore } from "./gameScoreAcceptApi";
-import { createGameScoreFlow } from "./gameScoreFlow";
+import { acceptGameResult } from "./gameResultAcceptApi";
+import { createGameResultFlow } from "./gameResultFlow";
 import { resolvePresentationLayout } from "./presentationLayoutResolver";
 import {
   shouldShowFullscreenControl,
@@ -133,15 +134,17 @@ export function shouldRemountIframeOnDifficultyChange(
  * GameResult's required shape.
  */
 export function buildGameResultFromBridgeComplete(
-  bridgeResult: { score?: number; metadata?: Record<string, unknown> },
+  bridgeResult: OwoggCompletionPayload & { metadata?: Record<string, unknown> },
   context: { slug: string; sessionId: string },
-): GameResult | null {
-  if (bridgeResult.score === undefined) return null;
+): GameResult {
   const now = Date.now();
   return {
     gameId: context.slug,
     sessionId: context.sessionId,
-    score: bridgeResult.score,
+    ...(bridgeResult.outcome !== undefined ? { outcome: bridgeResult.outcome } : {}),
+    ...(bridgeResult.score !== undefined ? { score: bridgeResult.score } : {}),
+    ...(bridgeResult.progression !== undefined ? { progression: bridgeResult.progression } : {}),
+    ...(bridgeResult.metrics !== undefined ? { metrics: bridgeResult.metrics } : {}),
     durationMs: 0,
     ...(bridgeResult.metadata !== undefined ? { metadata: bridgeResult.metadata } : {}),
     clientStartedAt: now,
@@ -406,6 +409,8 @@ function toScoreConfig(input: PublicGame["policy"]["score"]): ScoreConfig | unde
     direction: input.direction,
     min: input.min,
     max: input.max,
+    ...(input.precision !== undefined ? { precision: input.precision } : {}),
+    ...(input.outOfRange !== undefined ? { outOfRange: input.outOfRange } : {}),
     ...(input.displayPrefix !== undefined ? { displayPrefix: input.displayPrefix } : {}),
     ...(input.displaySuffix !== undefined ? { displaySuffix: input.displaySuffix } : {}),
   };
@@ -583,17 +588,19 @@ export function GameHost({ slug }: GameHostProps) {
 
   // The generic Game Session is acquired before each attempt and held only in this parent-side
   // controller. It is never included in HOST_INIT or any iframe bridge message.
-  const scoreFlow = useMemo(
+  const resultFlow = useMemo(
     () =>
-      createGameScoreFlow(
+      createGameResultFlow(
         {
           slug,
           fetchGameSession,
-          acceptScore: (gameSlug, input) =>
-            acceptGameScore(gameSlug, {
+          acceptResult: (gameSlug, input) => {
+            const playToken = consumeActivePlayToken();
+            return acceptGameResult(gameSlug, {
               ...input,
-              playToken: consumeActivePlayToken(),
-            }),
+              ...(playToken ? { playToken } : {}),
+            });
+          },
         },
         {
           onStatusChange: (state, message) => {
@@ -607,8 +614,8 @@ export function GameHost({ slug }: GameHostProps) {
 
   useEffect(() => {
     if (authLoading) return;
-    void scoreFlow.startAttempt(isAuthenticated, selectedDifficultyId);
-  }, [authLoading, isAuthenticated, scoreFlow, selectedDifficultyId, attemptKey]);
+    void resultFlow.startAttempt(isAuthenticated, selectedDifficultyId);
+  }, [authLoading, isAuthenticated, resultFlow, selectedDifficultyId, attemptKey]);
 
   // One generic detail fetch supplies canonical policy/presentation/media for both publishers.
   // No static manifest or sandbox-specific resolver is consulted on the primary play path.
@@ -635,11 +642,11 @@ export function GameHost({ slug }: GameHostProps) {
   }, [slug, dict.gamePlay.errorGameNotFound]);
 
   // Handle Score Submission (Authenticated Attempts Only)
-  const handleScoreSubmission = useCallback(
-    async (scoreToSubmit: number) => {
-      await scoreFlow.handleComplete(isAuthenticated, { score: scoreToSubmit });
+  const handleResultSubmission = useCallback(
+    async (completion: OwoggCompletionPayload) => {
+      await resultFlow.handleComplete(isAuthenticated, completion);
     },
-    [isAuthenticated, scoreFlow],
+    [isAuthenticated, resultFlow],
   );
 
   // Reset / Retry Game Attempt
@@ -685,7 +692,7 @@ export function GameHost({ slug }: GameHostProps) {
   // submission succeeding — guests and rejected submissions still get competitive context).
   // Skipped entirely for games with supportsLeaderboard: false.
   useEffect(() => {
-    if (!result || !game?.policy.leaderboard) return;
+    if (!result || result.score === undefined || !game?.policy.leaderboard) return;
     let isMounted = true;
     fetchLeaderboardApi(slug, selectedDifficultyId)
       .then((records) => {
@@ -715,7 +722,7 @@ export function GameHost({ slug }: GameHostProps) {
   >("idle");
 
   const buildShareText = useCallback(() => {
-    if (!result || !game) return null;
+    if (!result || result.score === undefined || !game) return null;
     const scoreText = formatScore(result.score, scoreConfig);
     const title = localizedTitle ?? game.title;
     return dict.gamePlay.shareText.replace("{title}", title).replace("{score}", scoreText);
@@ -810,15 +817,17 @@ export function GameHost({ slug }: GameHostProps) {
       complete: async (gameResult) => {
         setResult(gameResult);
 
-        const lowerIsBetter = scoreConfig?.direction === "asc";
-        saveLocalBestScore(slug, gameResult.score, lowerIsBetter);
+        if (gameResult.score !== undefined) {
+          const lowerIsBetter = scoreConfig?.direction === "asc";
+          saveLocalBestScore(slug, gameResult.score, lowerIsBetter);
+        }
 
         // Read isAuthenticated live at completion time rather than a value frozen at round
         // start — a frozen snapshot (the previous approach) went stale whenever the session
         // check hadn't resolved yet at mount, permanently showing the guest notice to an
         // already-logged-in player until their next retry happened to re-capture it correctly.
         if (isAuthenticated) {
-          await handleScoreSubmission(gameResult.score);
+          await handleResultSubmission(gameResult);
         } else {
           setSubmissionState("guest");
         }
@@ -835,7 +844,7 @@ export function GameHost({ slug }: GameHostProps) {
       navigate,
       slug,
       scoreConfig,
-      handleScoreSubmission,
+      handleResultSubmission,
       recordRecentPlay,
     ],
   );
@@ -847,10 +856,17 @@ export function GameHost({ slug }: GameHostProps) {
     void recordRecentPlay(slug);
   }, [recordRecentPlay, slug]);
 
+  const handleIframeEvent = useCallback(
+    (name: string) => {
+      resultFlow.recordEvent(name);
+    },
+    [resultFlow],
+  );
+
   const handleIframeComplete = useCallback(
-    (bridgeResult: { score?: number; metadata?: Record<string, unknown> }) => {
+    (bridgeResult: OwoggCompletionPayload & { metadata?: Record<string, unknown> }) => {
       const gameResult = buildGameResultFromBridgeComplete(bridgeResult, { slug, sessionId });
-      if (gameResult) void runtime.complete(gameResult);
+      void runtime.complete(gameResult);
     },
     [runtime, slug, sessionId],
   );
@@ -894,12 +910,20 @@ export function GameHost({ slug }: GameHostProps) {
             />
             <span className="text-sm font-bold text-text-secondary">{localizedTitle}</span>
           </div>
-          <p className="text-text-secondary text-sm mb-1">
-            {isAuthenticated ? dict.gamePlay.finalScoreLabel : dict.gamePlay.deviceBestLabel}
-          </p>
-          <p className="text-5xl font-black text-brand mb-1">
-            {formatScore(result.score, scoreConfig)}
-          </p>
+          {result.score !== undefined ? (
+            <>
+              <p className="text-text-secondary text-sm mb-1">
+                {isAuthenticated ? dict.gamePlay.finalScoreLabel : dict.gamePlay.deviceBestLabel}
+              </p>
+              <p className="text-5xl font-black text-brand mb-1">
+                {formatScore(result.score, scoreConfig)}
+              </p>
+            </>
+          ) : (
+            <p className="text-2xl font-black text-brand mb-1">
+              {result.outcome ?? dict.gamePlay.resultTitle}
+            </p>
+          )}
 
           {resultTier && (
             <span
@@ -978,13 +1002,6 @@ export function GameHost({ slug }: GameHostProps) {
                 <AlertCircle className="w-4 h-4" />
                 {submissionError || dict.gamePlay.errorSubmitFallback}
               </span>
-              <button
-                type="button"
-                onClick={() => void handleScoreSubmission(result.score)}
-                className="px-3 py-1 bg-surface border border-border hover:bg-surface-overlay text-text-primary text-xs font-bold rounded-lg transition-colors cursor-pointer"
-              >
-                {dict.gamePlay.retrySubmitCta}
-              </button>
             </div>
           )}
 
@@ -1288,6 +1305,7 @@ export function GameHost({ slug }: GameHostProps) {
                 iframeStyle={iframeElementStyle}
                 {...(game?.difficulty ? { difficultyId: selectedDifficultyId } : {})}
                 onStarted={handleIframeStarted}
+                onEvent={handleIframeEvent}
                 onComplete={handleIframeComplete}
                 onCancel={runtime.cancel}
                 onError={handleIframeError}

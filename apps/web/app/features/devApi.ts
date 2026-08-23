@@ -115,11 +115,11 @@ export async function uploadDevGameVersion(gameId: number, file: File) {
 }
 
 /**
- * Drag-and-drop registration: a single ZIP whose root contains `owogg.game.json`
+ * Drag-and-drop registration: a single ZIP whose root contains Creator Manifest v1 `owogg.json`
  * (slug/title/genre) creates the game *and* its first version in one call — see
  * SandboxGameUseCases.createGameFromBundle. Same multipart shape as uploadDevGameVersion, so it
- * shares that function's error-mapping (MANIFEST_MISSING/INVALID_SLUG/INVALID_GENRE/SLUG_TAKEN
- * etc. all surface as `code` on the thrown ApiClientError).
+ * shares that function's error-mapping (MANIFEST_MISSING/MANIFEST_INVALID/SLUG_TAKEN etc. all
+ * surface as `code` on the thrown ApiClientError).
  */
 export async function uploadGameFromBundle(file: File): Promise<SandboxGameUploadResponse> {
   const form = new FormData();

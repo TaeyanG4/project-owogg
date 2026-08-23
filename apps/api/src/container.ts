@@ -18,6 +18,8 @@ import {
   D1GameCreatorRepository,
   D1SandboxGameRepository,
   D1GameScoreAcceptanceRepository,
+  D1GameResultAcceptanceRepository,
+  D1GameAchievementRepository,
   D1GameIdentityRepository,
   D1GameVersionRepository,
   D1GameAssetRepository,
@@ -49,6 +51,8 @@ import {
   SandboxGameUseCases,
   OfficialGameUploadUseCases,
   GameScoreAcceptanceUseCases,
+  GameResultAcceptanceUseCases,
+  GameAchievementUseCases,
   GamePublicationService,
   SandboxGameVersionPublicationRepository,
   ComposedRuntimeGameRegistry,
@@ -75,6 +79,8 @@ import {
   type SandboxGameRepository,
   type GameBundleStorageRepository,
   type GameScoreAcceptanceRepository,
+  type GameResultAcceptanceRepository,
+  type GameAchievementRepository,
   type GameCanonicalRepository,
   type GameIdentityRepository,
   type GameVersionRepository,
@@ -108,6 +114,8 @@ export interface AppContainer {
   sandboxGameRepo: SandboxGameRepository;
   /** Provider-neutral atomic attempt consume + score insert (migration 0032). */
   gameScoreAcceptanceRepo: GameScoreAcceptanceRepository;
+  gameResultAcceptanceRepo: GameResultAcceptanceRepository;
+  gameAchievementRepo: GameAchievementRepository;
   gameBundleStorageRepo: GameBundleStorageRepository;
   /** True only when a complete Backblaze B2 config was passed to createContainer — routes should
    * check this (rather than try/catch-ing putBundle) to return a clean 503 before touching the
@@ -142,6 +150,8 @@ export interface AppContainer {
   sandboxGameUseCases: SandboxGameUseCases;
   officialGameUploadUseCases: OfficialGameUploadUseCases;
   gameScoreAcceptanceUseCases: GameScoreAcceptanceUseCases;
+  gameResultAcceptanceUseCases: GameResultAcceptanceUseCases;
+  gameAchievementUseCases: GameAchievementUseCases;
   gamePublicationService: GamePublicationService;
 }
 
@@ -177,6 +187,8 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
   const gameCreatorRepo = new D1GameCreatorRepository(db);
   const sandboxGameRepo = new D1SandboxGameRepository(db);
   const gameScoreAcceptanceRepo = new D1GameScoreAcceptanceRepository(db);
+  const gameResultAcceptanceRepo = new D1GameResultAcceptanceRepository(db);
+  const gameAchievementRepo = new D1GameAchievementRepository(db);
   const gameIdentityRepo = new D1GameIdentityRepository(db);
   const gameVersionRepo = new D1GameVersionRepository(db);
   const gameAssetRepo = new D1GameAssetRepository(db);
@@ -268,6 +280,13 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     gameSettingsRepo,
     gameScoreAcceptanceRepo,
   );
+  const gameResultAcceptanceUseCases = new GameResultAcceptanceUseCases(
+    runtimeGameRegistry,
+    runtimeGameAvailability,
+    gameSettingsRepo,
+    gameResultAcceptanceRepo,
+  );
+  const gameAchievementUseCases = new GameAchievementUseCases(gameAchievementRepo);
   return {
     userRepo,
     sessionRepo,
@@ -288,6 +307,8 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     gameCreatorRepo,
     sandboxGameRepo,
     gameScoreAcceptanceRepo,
+    gameResultAcceptanceRepo,
+    gameAchievementRepo,
     gameIdentityRepo,
     gameVersionRepo,
     gameAssetRepo,
@@ -318,6 +339,8 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     sandboxGameUseCases,
     officialGameUploadUseCases,
     gameScoreAcceptanceUseCases,
+    gameResultAcceptanceUseCases,
+    gameAchievementUseCases,
     gamePublicationService,
   };
 }

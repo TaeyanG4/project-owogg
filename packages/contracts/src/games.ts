@@ -5,6 +5,8 @@ const ScoreConfigSchema = z.object({
   direction: z.enum(["asc", "desc"]),
   min: z.number(),
   max: z.number(),
+  precision: z.number().int().min(0).max(6).optional(),
+  outOfRange: z.enum(["clamp", "reject"]).optional(),
   displayPrefix: z.string().optional(),
   displaySuffix: z.string().optional(),
 });
@@ -57,7 +59,7 @@ const TaxonomyCatalogSchema = z.object({
   categories: z.array(z.string()),
   tags: z.array(z.string()),
   modes: z.array(z.enum(["single", "local-multi", "online-multi"])),
-  inputMethods: z.array(z.enum(["mouse", "keyboard", "touch"])),
+  inputMethods: z.array(z.enum(["mouse", "keyboard", "touch", "gamepad"])),
   minPlayers: z.number().int().positive(),
   maxPlayers: z.number().int().positive(),
   thumbnail: z.string(),
@@ -69,6 +71,8 @@ const GenreModeCatalogSchema = z.object({
   type: z.literal("GENRE_MODE"),
   genre: z.string(),
   mode: z.enum(["single", "multi"]),
+  tags: z.array(z.string()).optional(),
+  inputMethods: z.array(z.enum(["mouse", "keyboard", "touch", "gamepad"])).optional(),
 });
 
 const PublicGameSchemaBase = {
@@ -143,3 +147,34 @@ export const GameScoreAcceptResponseSchema = z.object({
   newlyUnlockedAchievements: z.array(z.string()).optional(),
 });
 export type GameScoreAcceptResponse = z.infer<typeof GameScoreAcceptResponseSchema>;
+
+const CreatorFactKeySchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/);
+
+export const GameResultAcceptRequestSchema = z
+  .object({
+    token: z.string(),
+    outcome: z.enum(["neutral", "success", "failure", "win", "loss", "draw"]).optional(),
+    score: z.number().finite().optional(),
+    progression: z.object({ value: z.number().finite() }).strict().optional(),
+    metrics: z.record(CreatorFactKeySchema, z.number().finite()).optional(),
+    events: z.record(CreatorFactKeySchema, z.number().int().positive().max(10_000)).optional(),
+    difficulty: z.string().optional(),
+    playToken: z.string().optional(),
+  })
+  .strict();
+export type GameResultAcceptRequest = z.infer<typeof GameResultAcceptRequestSchema>;
+
+export const GameResultAcceptResponseSchema = z.object({
+  success: z.literal(true),
+  result_id: z.number().int().positive(),
+  score_id: z.number().int().positive().nullable(),
+  game_id: z.string(),
+  score: z.number().nullable(),
+  adjusted: z.boolean(),
+  rewardEligible: z.boolean(),
+  xpAwarded: z.number().int().min(0),
+  guildXpAwarded: z.number().int().min(0).optional(),
+  guildId: z.string().optional(),
+  newlyUnlockedAchievements: z.array(z.string()),
+});
+export type GameResultAcceptResponse = z.infer<typeof GameResultAcceptResponseSchema>;

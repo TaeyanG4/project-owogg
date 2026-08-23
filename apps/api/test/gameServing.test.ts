@@ -297,10 +297,12 @@ test("GET /games/:gameId/:versionId/index.html serves the published entry docume
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("Content-Type"), "text/html; charset=utf-8");
   assert.equal(res.headers.get("X-Owogg-Bundle-Source"), "published");
-  assert.equal(await res.text(), "<h1>hi</h1>");
+  const html = await res.text();
+  assert.match(html, /<script src="\/games\/bridge\/v1\.js" data-owogg-bridge="v1"><\/script>/);
+  assert.match(html, /<h1>hi<\/h1>/);
 
   const csp = res.headers.get("Content-Security-Policy") ?? "";
-  assert.match(csp, /connect-src 'none'/);
+  assert.match(csp, /connect-src 'self' blob:/);
   assert.match(csp, /frame-ancestors https:\/\/www\.owogg\.com/);
 });
 
@@ -324,7 +326,7 @@ test("the CSP's frame-ancestors comes from FRONTEND_URL, with no hardcoded host"
  * see apps/web/app/test/gameFrameSecurity.test.ts). The tests above cover the two directives that
  * were most obviously load-bearing; this one pins the whole set, because every directive here is
  * doing a specific job and a partial policy would still look "present" to a reviewer:
- * `connect-src 'none'` is what stops an uploaded game phoning home or reaching OwOGG's own API,
+ * `connect-src 'self' blob:` lets an engine load its own WASM/data but no remote origin,
  * `base-uri`/`form-action 'none'` close the two ways a document can redirect where its own
  * requests go without ever issuing a fetch, and `frame-ancestors` stops a third-party page from
  * embedding a game as bait.
@@ -342,7 +344,7 @@ test("the served CSP carries every directive the sandbox depends on, not just co
   const csp = res.headers.get("Content-Security-Policy") ?? "";
   for (const directive of [
     "default-src 'self'",
-    "connect-src 'none'",
+    "connect-src 'self' blob:",
     "base-uri 'none'",
     "form-action 'none'",
     "frame-ancestors https://www.owogg.com",
@@ -351,7 +353,7 @@ test("the served CSP carries every directive the sandbox depends on, not just co
   }
 });
 
-test("the CSP never widens connect-src to allow a game to reach the network", async () => {
+test("the CSP permits same-origin engine assets but no remote connect origin", async () => {
   const { db } = createDb({ game: LIVE_GAME, version: LIVE_VERSION });
   const res = await withStorage({ stored: publishedObjects() }, () =>
     app.request("/games/1/17/index.html", {}, { DB: db, ...B2_ENV } as any),
@@ -363,9 +365,7 @@ test("the CSP never widens connect-src to allow a game to reach the network", as
     .map((part) => part.trim())
     .find((part) => part.startsWith("connect-src"));
 
-  // Exactly 'none' — not "'self'", not "'none' https://api.owogg.com". A game that needs to talk
-  // to OwOGG does it through the host page, never directly from inside the iframe.
-  assert.equal(connectSrc, "connect-src 'none'");
+  assert.equal(connectSrc, "connect-src 'self' blob:");
 });
 
 // ── CORS on public bundle assets (2026-08-18 sandbox-iframe CORS bug) ────────
@@ -515,7 +515,16 @@ test("the exact generic asset path serves OWOGG publisher bytes from the numeric
   );
 
   assert.equal(res.status, 200);
-  assert.equal(await res.text(), "<h1>hi</h1>");
+  assert.match(await res.text(), /data-owogg-bridge="v1"/);
+});
+
+test("the injected browser API script is served on the game origin without DB or B2 access", async () => {
+  const res = await app.request("/games/bridge/v1.js", {}, { ...B2_ENV } as any);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("Content-Type") ?? "", /application\/javascript/);
+  const source = await res.text();
+  assert.match(source, /window\.OWOGG/);
+  assert.match(source, /GAME_COMPLETE/);
 });
 
 test("non-live, wrong-owner, and kill-switch-disabled exact versions are denied", async () => {

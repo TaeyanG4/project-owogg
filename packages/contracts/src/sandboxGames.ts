@@ -116,20 +116,6 @@ export type SandboxGameReviewAuditEntry = z.infer<typeof SandboxGameReviewAuditE
 
 // ── Developer-facing ──
 
-export const SandboxGameCreateRequestSchema = z.object({
-  slug: z
-    .string()
-    .trim()
-    .min(3)
-    .max(64)
-    .regex(/^[a-z0-9-]+$/, "영문 소문자/숫자/- 조합만 가능합니다."),
-  title: z.string().trim().min(1).max(60),
-  shortDescription: z.string().trim().max(200).nullable().optional(),
-  description: z.string().trim().max(4000).nullable().optional(),
-  genre: z.string().trim().min(1).max(40),
-});
-export type SandboxGameCreateRequest = z.infer<typeof SandboxGameCreateRequestSchema>;
-
 export const SandboxGameListResponseSchema = z.object({
   games: z.array(SandboxGameRecordSchema),
 });
@@ -142,7 +128,7 @@ export const SandboxGameDetailResponseSchema = z.object({
 });
 export type SandboxGameDetailResponse = z.infer<typeof SandboxGameDetailResponseSchema>;
 
-/** POST /api/dev/games/upload response — the combined "drag a ZIP with owogg.game.json onto the
+/** POST /api/dev/games/upload response — the combined "drag a ZIP with owogg.json onto the
  * Game Creator Center" flow (see AUTHORIZATION.md/GAME_CREATION_GUIDE.md). Both the created game
  * and its first version, since that one call does what the manual flow does in two. */
 export const SandboxGameUploadResponseSchema = z.object({

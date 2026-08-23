@@ -87,7 +87,7 @@ export function OfficialGameManagement() {
           <ShieldCheck className="h-4 w-4" /> OWOGG 공식 게임 업로드
         </h2>
         <p className="mt-1 text-xs leading-relaxed text-text-muted">
-          게임 크리에이터 센터와 동일하게 index.html, owogg.game.json, owogg.logo 파일이 포함된
+          게임 크리에이터 센터와 동일하게 index.html, owogg.json, owogg.logo 파일이 포함된
           standalone ZIP을 등록합니다. 이 관리자 경로의 제작자와 공식 표시는 서버가 OWOGG로 고정하며
           ZIP 내부 값으로 변경할 수 없습니다.
         </p>
@@ -95,7 +95,7 @@ export function OfficialGameManagement() {
 
       <GameBundleDropzone
         busy={uploading}
-        title="owogg.game.json이 포함된 ZIP을 여기로 끌어다 놓으면 OWOGG 공식 게임으로 게시됩니다"
+        title="owogg.json이 포함된 ZIP을 여기로 끌어다 놓으면 OWOGG 공식 게임으로 게시됩니다"
         onFile={handleOfficialUpload}
       />
 

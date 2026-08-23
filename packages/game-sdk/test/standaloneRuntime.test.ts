@@ -20,6 +20,7 @@ function createFakeClient(difficultyId?: string): {
     ...(difficultyId !== undefined ? { difficultyId } : {}),
     ready: () => calls.push("ready"),
     started: () => calls.push("started"),
+    event: () => calls.push("event"),
     complete: (result) => {
       calls.push("complete");
       completed.push(result);
@@ -70,21 +71,32 @@ test("runtime.emit(game_started) maps to client.started(), nothing else does", (
   assert.deepEqual(calls, ["started"]);
 });
 
-test("runtime.complete forwards score+metadata only, dropping every other GameResult field", async () => {
+test("runtime.complete forwards Creator result facts and legacy metadata, dropping host-only fields", async () => {
   const { client, completed } = createFakeClient();
   const runtime = createStandaloneBridgeRuntime(client);
 
   await runtime.complete({
     gameId: "aim-test",
     sessionId: runtime.sessionId,
+    outcome: "success",
     score: 4200,
+    progression: { value: 3 },
+    metrics: { targets: 30 },
     durationMs: 4200,
     metadata: { targets: 30, difficultyId: "hard" },
     clientStartedAt: 1000,
     clientEndedAt: 5200,
   });
 
-  assert.deepEqual(completed, [{ score: 4200, metadata: { targets: 30, difficultyId: "hard" } }]);
+  assert.deepEqual(completed, [
+    {
+      outcome: "success",
+      score: 4200,
+      progression: { value: 3 },
+      metrics: { targets: 30 },
+      metadata: { targets: 30, difficultyId: "hard" },
+    },
+  ]);
 });
 
 test("runtime.complete omits metadata entirely when the game result carried none", async () => {

@@ -9,6 +9,7 @@ test("generic production migrations avoid Cloudflare-incompatible TEMP table DDL
     "0031_game_version_write_convergence.sql",
     "0033_generic_game_assets.sql",
     "0034_unified_game_control_plane.sql",
+    "0035_creator_manifest_results.sql",
   ]) {
     const sql = fs.readFileSync(new URL(`../migrations/${filename}`, import.meta.url), "utf8");
     assert.doesNotMatch(sql, /\bCREATE\s+TEMP(?:ORARY)?\s+TABLE\b/i, filename);

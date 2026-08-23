@@ -214,6 +214,7 @@
     resize();
     resetState();
     running = true;
+    window.OWOGG?.start();
     rafId = requestAnimationFrame(loop);
   }
 
@@ -222,6 +223,10 @@
     if (rafId !== null) cancelAnimationFrame(rafId);
     finalTimeEl.textContent = "생존 시간: " + elapsedSec.toFixed(1) + "초";
     gameOverEl.classList.remove("hidden");
+    window.OWOGG?.complete({
+      outcome: "failure",
+      score: Math.round(elapsedSec * 10) / 10,
+    });
   }
 
   // Keyboard input (WASD + arrow keys).

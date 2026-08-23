@@ -1,7 +1,8 @@
-export interface GameResult {
+import type { OwoggCompletionPayload } from "./creatorManifest.js";
+
+export interface GameResult extends OwoggCompletionPayload {
   readonly gameId: string;
   readonly sessionId: string;
-  readonly score: number;
   readonly durationMs: number;
   readonly metadata?: Record<string, unknown> | undefined;
   readonly clientStartedAt: number;

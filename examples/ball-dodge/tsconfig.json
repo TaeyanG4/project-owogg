@@ -10,5 +10,5 @@
     "rootDir": ".",
     "outDir": "dist"
   },
-  "include": ["main.ts", "vendor/**/*.ts"]
+  "include": ["main.ts"]
 }

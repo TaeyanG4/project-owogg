@@ -2,7 +2,7 @@
 
 상태: 가이드
 
-마지막 검증: 2026-08-21
+마지막 검증: 2026-08-24
 
 기준 소스:
 
@@ -33,26 +33,34 @@ ZIP root에 최소 다음 파일을 둡니다.
 
 ```text
 index.html
-owogg.game.json
+owogg.json
 owogg.logo.<png|jpg|jpeg|webp|svg>
 ```
 
-`owogg.game.json` 예시:
+`owogg.json` 최소 예시:
 
 ```json
 {
-  "slug": "my-game",
-  "title": "My Game",
-  "genre": "arcade",
-  "shortDescription": "한 줄 소개",
-  "description": "상세 설명",
-  "mode": "single"
+  "$schema": "https://owogg.com/schemas/manifest/v1.json",
+  "schemaVersion": 1,
+  "game": {
+    "slug": "my-game",
+    "title": "My Game",
+    "genre": "arcade",
+    "mode": "single",
+    "shortDescription": "한 줄 소개"
+  },
+  "progression": { "type": "none" },
+  "result": { "score": null }
 }
 ```
 
 - ZIP 안에서 `index.html`이 직접 보이게 압축하는 것이 가장 명확합니다.
 - 모든 CSS/JS/image/WASM 경로는 bundle 안에서 해석되는 상대 경로여야 합니다.
-- source map, 개발 서버 설정, 비밀값, 서버 전용 코드는 넣지 않습니다.
+- source map, 개발 서버 설정, 비밀값, 서버 전용 코드는 넣지 않습니다. `userId`, session/token,
+  API URL도 manifest나 게임 코드에 넣지 않습니다.
+- `$schema`는 공개 schema URL이며, 서버는 JSON Schema 외에 range, 난이도, 도전과제 참조 관계를
+  추가로 엄격 검증합니다. 알 수 없는 필드는 거부됩니다.
 - 최대 compressed 20 MiB, extracted 50 MiB, 300 files, path depth 16, logo 2 MiB입니다.
 
 ## 3. 새 게임 업로드
@@ -73,7 +81,9 @@ owogg.logo.<png|jpg|jpeg|webp|svg>
 
 - owner 또는 허용된 admin만 접근할 수 있습니다.
 - 새 version은 기존 파일을 덮어쓰지 않고 새 numeric version prefix에 publication됩니다.
-- version upload는 게임 단위 metadata/logo를 자동 변경하지 않습니다.
+- 새 버전 ZIP에도 같은 slug의 유효한 `owogg.json`이 필수입니다. slug가 다르면 거부됩니다.
+- 새 버전에 `owogg.logo.*`가 있으면 게임 logo를 갱신하며, 없으면 기존 logo를 유지합니다.
+- 승인 또는 live-version 전환 시 해당 source archive의 manifest가 canonical로 동기화됩니다.
 - 심사 중인 게임 slot은 사용자별 최대 2개입니다. slot이 모두 사용 중이면 기존 submission을
   승인/반려/withdraw 처리한 뒤 다시 시도해야 합니다.
 
@@ -111,8 +121,7 @@ READY != APPROVED
 - `POST /api/dev/games/:id/withdraw`: pending version 철회
 - `DELETE /api/dev/games/:id`: 허용되는 미승인 게임 self-delete
 
-`POST /api/dev/games` manual catalog endpoint는 호환을 위해 남아 있지만 현재 UI가 사용하는 등록
-절차가 아닙니다.
+수동 catalog-only 등록 endpoint는 제거됐습니다. 새 게임은 항상 검증된 ZIP으로 등록합니다.
 
 ## 7. 승인 후 runtime 제공
 
@@ -121,9 +130,10 @@ READY != APPROVED
 ```text
 /play/:slug
 → /games/<gameId>/<versionId>/index.html
-→ GameHost → IframeRuntime → Bridge
+→ GameHost → IframeRuntime → 자동 주입된 window.OWOGG
 ```
 
+게임은 `OWOGG.start()`, `OWOGG.event()`, `OWOGG.complete()`, `OWOGG.cancel()`만 호출합니다.
 bundle URL은 version-scoped immutable 경로입니다. `/official-games/*`, release map,
 `CreatorGameHost`, `transitionalCreatorGameResolver`를 요구하는 가이드는 현재 구현과 맞지 않습니다.
 

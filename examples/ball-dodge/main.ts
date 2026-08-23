@@ -1,26 +1,19 @@
-/**
- * 공 피하기 — the Game Bridge (@owogg/game-sdk/bridge) reference integration: the first Creator
- * game wired to GameHost through IframeRuntime instead of the plain iframe embed every other
- * sandbox game still uses. Everything about the game itself (movement, spawn/difficulty ramp,
- * collision) is unchanged from the pipeline smoke-test fixture this is modeled on
- * (apps/api/test/fixtures/game-deploy-smoke-test/ball-dodge/) — that fixture deliberately has zero
- * SDK/postMessage integration by design (it exists to test upload/review/publish/serving in
- * isolation from the SDK); this is a separate bundle specifically to exercise the Bridge.
- *
- * Bridge wiring, at exactly the three lifecycle points the reference integration calls for:
- *   - ready()    called once the page's own setup (DOM refs, resize, first draw) has run, whether
- *                or not a host ever connects.
- *   - started()  called when the player actually starts a round (the "시작"/"다시 시작" click).
- *   - complete() called on game over, with `score` = seconds survived and a small metadata sample
- *                (ballsSpawned) to demonstrate the metadata path end to end.
- *
- * connectGameBridge() is fire-and-forget, never awaited before the rest of setup runs: this file
- * ships to the exact same static origin every sandbox game does, and must stay fully playable when
- * loaded without a bridge-aware host (GameFrame's existing embed, a developer's own preview tab,
- * or anything else that never sends HOST_INIT) — connectGameBridge() simply never resolves in that
- * case, per its own contract, and every bridge call below is a no-op until/unless it does.
- */
-import { connectGameBridge, type GameBridgeClient } from "./vendor/game-sdk-bridge/client.js";
+/** 공 피하기 — dependency-free `window.OWOGG` Creator Manifest v1 integration example. */
+
+export {};
+
+declare global {
+  interface Window {
+    OWOGG?: {
+      start(): void;
+      complete(result: {
+        outcome?: "failure";
+        score?: number;
+        metrics?: Record<string, number>;
+      }): void;
+    };
+  }
+}
 
 const canvas = document.getElementById("game") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;
@@ -67,12 +60,6 @@ let elapsedSec = 0;
 let msSinceLastSpawn = 0;
 let rafId: number | null = null;
 let ballsSpawnedThisRound = 0;
-
-let bridgeClient: GameBridgeClient | null = null;
-connectGameBridge().then((client) => {
-  bridgeClient = client;
-  client.ready();
-});
 
 function resize(): void {
   dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -240,7 +227,7 @@ function startGame(): void {
   resize();
   resetState();
   running = true;
-  bridgeClient?.started();
+  window.OWOGG?.start();
   rafId = requestAnimationFrame(loop);
 }
 
@@ -251,9 +238,10 @@ function endGame(): void {
   gameOverEl.classList.remove("hidden");
 
   const survivedSeconds = Math.round(elapsedSec * 10) / 10;
-  bridgeClient?.complete({
+  window.OWOGG?.complete({
+    outcome: "failure",
     score: survivedSeconds,
-    metadata: { ballsSpawned: ballsSpawnedThisRound },
+    metrics: { ballsSpawned: ballsSpawnedThisRound },
   });
 }
 
@@ -334,12 +322,6 @@ window.addEventListener("pointercancel", () => {
 
 startButton.addEventListener("click", startGame);
 restartButton.addEventListener("click", startGame);
-
-// Best-effort GAME_ERROR — demonstrates the error path end to end; never blocks or replaces the
-// browser's own error handling.
-window.addEventListener("error", (e) => {
-  bridgeClient?.error(e.message ? e.message.slice(0, 500) : undefined);
-});
 
 resize();
 draw();

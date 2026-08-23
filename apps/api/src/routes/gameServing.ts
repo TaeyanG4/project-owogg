@@ -7,6 +7,7 @@ import {
   publishedVersionPrefix,
   resolveBundleContentType,
 } from "@owogg/core";
+import { OWOGG_BROWSER_API_SOURCE } from "@owogg/game-sdk/bridge";
 import { createContainer } from "../container.js";
 import { edgeCache } from "../middleware/edgeCache.js";
 import { readB2Config } from "./devGames.js";
@@ -78,6 +79,8 @@ const LIVE_RESOLVER_MAX_AGE_SECONDS = 60;
  */
 export const gameServingRouter = new Hono<ApiEnv>();
 export const publishedGameAssetsRouter = new Hono<ApiEnv>();
+const BROWSER_API_PATH = "/bridge/v1.js";
+const BROWSER_API_TAG = '<script src="/games/bridge/v1.js" data-owogg-bridge="v1"></script>';
 
 /**
  * Origin boundary enforcement (2026-08-17 beta hardening) — registered first on both routers, so
@@ -111,6 +114,14 @@ const gameOriginHostGuard: MiddlewareHandler<ApiEnv> = async (c, next) => {
 
 gameServingRouter.use("*", gameOriginHostGuard);
 publishedGameAssetsRouter.use("*", gameOriginHostGuard);
+
+publishedGameAssetsRouter.get(BROWSER_API_PATH, (c) =>
+  c.body(OWOGG_BROWSER_API_SOURCE, 200, {
+    "Content-Type": "application/javascript; charset=utf-8",
+    "Cache-Control": "public, max-age=300",
+    "Access-Control-Allow-Origin": "*",
+  }),
+);
 
 // See middleware/edgeCache.ts's safety note: caching is sound on both routers because responses
 // depend only on the URL — no cookies are read, and nothing varies per viewer.
@@ -206,9 +217,9 @@ publishedGameAssetsRouter.use(
  * the other half is the `sandbox` attribute on the parent page's iframe, which a response header
  * cannot set (see apps/web/app/features/game/GameFrame.tsx).
  *
- * `connect-src 'none'` is the load-bearing line: an uploaded game cannot phone home, ship telemetry,
- * pull remote code, or reach OwOGG's own API. `frame-ancestors` means only the real site can frame
- * it, so a third-party page cannot embed a game and use it as bait. */
+ * `connect-src 'self' blob:` permits engine loaders to fetch their own WASM/data files while still
+ * preventing an uploaded game from phoning home or reaching OwOGG's separate API origin.
+ * `frame-ancestors` means only the real site can frame it. */
 function contentSecurityPolicy(frontendUrl: string): string {
   return [
     "default-src 'self'",
@@ -219,7 +230,7 @@ function contentSecurityPolicy(frontendUrl: string): string {
     "media-src 'self' data: blob:",
     "font-src 'self' data:",
     "worker-src 'self' blob:",
-    "connect-src 'none'",
+    "connect-src 'self' blob:",
     `frame-ancestors ${frontendUrl}`,
     "base-uri 'none'",
     "form-action 'none'",
@@ -303,7 +314,20 @@ function fileResponse(
     policy,
     frontendUrl,
   );
-  return new Response(file.bytes, { status: 200, headers });
+  return new Response(injectOwoggBrowserApi(file.bytes, path), { status: 200, headers });
+}
+
+function injectOwoggBrowserApi(bytes: ArrayBuffer, path: string): ArrayBuffer {
+  if (path !== BUNDLE_ENTRY_PATH) return bytes;
+  const html = new TextDecoder().decode(bytes);
+  if (html.includes('data-owogg-bridge="v1"')) return bytes;
+  const lower = html.toLowerCase();
+  const headClose = lower.indexOf("</head>");
+  const bodyClose = lower.indexOf("</body>");
+  const insertion = headClose >= 0 ? headClose : bodyClose >= 0 ? bodyClose : 0;
+  return new TextEncoder().encode(
+    `${html.slice(0, insertion)}${BROWSER_API_TAG}${html.slice(insertion)}`,
+  ).buffer;
 }
 
 /**
@@ -364,7 +388,10 @@ function gameAssetEdgeCache(options: {
         frontendUrl,
       );
       headers.set("X-Cache", "HIT");
-      return new Response(await cached.clone().arrayBuffer(), { status: 200, headers });
+      return new Response(injectOwoggBrowserApi(await cached.clone().arrayBuffer(), path), {
+        status: 200,
+        headers,
+      });
     }
 
     await next();

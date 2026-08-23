@@ -22,6 +22,14 @@ const B2_ENV = {
 
 const GAME_ID = 1;
 const NEW_VERSION_ID = 17;
+const CREATOR_MANIFEST = strToU8(
+  JSON.stringify({
+    schemaVersion: 1,
+    game: { slug: "my-game", title: "My Game", genre: "puzzle", mode: "single" },
+    progression: { type: "none" },
+    result: { score: null },
+  }),
+);
 
 /**
  * Minimal D1 stub covering just the statements the upload path issues: session lookup, developer
@@ -241,6 +249,7 @@ test("uploading a valid bundle stores the source archive once and publishes one 
     "index.html": strToU8("<h1>hi</h1>"),
     "Build/game.wasm": strToU8("\0asm"),
     "assets/logo.png": strToU8("PNG"),
+    "owogg.json": CREATOR_MANIFEST,
   });
   const storage = createStorageStub();
 
@@ -250,7 +259,7 @@ test("uploading a valid bundle stores the source archive once and publishes one 
 
     const body = (await res.json()) as { publishStatus: string; fileCount: number };
     assert.equal(body.publishStatus, "READY");
-    assert.equal(body.fileCount, 3);
+    assert.equal(body.fileCount, 4);
 
     const keys = storage.puts.map((p) => p.key);
     // Exactly one source archive, content-addressed under the game's id (never the slug).
@@ -262,15 +271,16 @@ test("uploading a valid bundle stores the source archive once and publishes one 
     assert.ok(keys.includes(`games/${GAME_ID}/${NEW_VERSION_ID}/index.html`));
     assert.ok(keys.includes(`games/${GAME_ID}/${NEW_VERSION_ID}/Build/game.wasm`));
     assert.ok(keys.includes(`games/${GAME_ID}/${NEW_VERSION_ID}/assets/logo.png`));
+    assert.ok(keys.includes(`games/${GAME_ID}/${NEW_VERSION_ID}/owogg.json`));
     assert.ok(keys.includes(`games/${GAME_ID}/${NEW_VERSION_ID}/.owogg-manifest.json`));
-    assert.equal(keys.length, 5);
+    assert.equal(keys.length, 6);
 
     // Content types are decided at publish time and stored with each object.
     const wasm = storage.puts.find((p) => p.key.endsWith("game.wasm"));
     assert.equal(wasm?.contentType, "application/wasm");
 
     assert.equal(versionRow.publish_status, "READY");
-    assert.equal(versionRow.file_count, 3);
+    assert.equal(versionRow.file_count, 4);
     assert.ok(versionRow.manifest_key);
   } finally {
     storage.restore();
@@ -282,6 +292,7 @@ test("Unity's Brotli-suffixed files are published with the inner type plus a Con
   const archive = zipSync({
     "index.html": strToU8("<h1>unity</h1>"),
     "Build/game.wasm.br": strToU8("brotli-ish"),
+    "owogg.json": CREATOR_MANIFEST,
   });
   const storage = createStorageStub();
 
@@ -352,6 +363,7 @@ test("a single wrapping folder is unwrapped, so index.html publishes at the vers
   const archive = zipSync({
     "MyGame/index.html": strToU8("<h1>wrapped</h1>"),
     "MyGame/Build/game.data": strToU8("data"),
+    "MyGame/owogg.json": CREATOR_MANIFEST,
   });
   const storage = createStorageStub();
 
@@ -373,6 +385,7 @@ test("a storage failure part-way through publishing leaves the version FAILED wi
   const archive = zipSync({
     "index.html": strToU8("<h1>hi</h1>"),
     "Build/game.wasm": strToU8("\0asm"),
+    "owogg.json": CREATOR_MANIFEST,
   });
   const storage = createStorageStub({ failPutContaining: "game.wasm" });
 
@@ -393,7 +406,10 @@ test("a storage failure part-way through publishing leaves the version FAILED wi
 
 test("a 5xx from storage is retried a bounded number of times, not aws4fetch's 10-deep default", async () => {
   const { db } = createDb();
-  const archive = zipSync({ "index.html": strToU8("<h1>hi</h1>") });
+  const archive = zipSync({
+    "index.html": strToU8("<h1>hi</h1>"),
+    "owogg.json": CREATOR_MANIFEST,
+  });
   // Every PUT fails, so this counts the full retry budget for one object. aws4fetch's default
   // (retries: 10, doubling backoff) would both spam the provider and stall the request for tens of
   // seconds inside a single Worker invocation — see B2_RETRIES.
@@ -459,7 +475,10 @@ test("the upload route enforces its own GAME_UPLOAD_RATE_LIMITER binding, separa
 
 test("the upload route is unaffected by a RATE_LIMITER (score-submit's binding) rejection", async () => {
   const { db } = createDb();
-  const archive = zipSync({ "index.html": strToU8("<h1>hi</h1>") });
+  const archive = zipSync({
+    "index.html": strToU8("<h1>hi</h1>"),
+    "owogg.json": CREATOR_MANIFEST,
+  });
   const storage = createStorageStub();
 
   try {

@@ -8,7 +8,7 @@ export type GameStatus = "draft" | "beta" | "published" | "hidden";
  * data collection, future filtering), not an enforcement mechanism. List every method the game
  * actually responds to; a game driven entirely by onClick handlers responds to both "mouse" and
  * "touch" (React's onClick fires for touch taps too), so most games list both. */
-export type InputMethod = "mouse" | "keyboard" | "touch";
+export type InputMethod = "mouse" | "keyboard" | "touch" | "gamepad";
 
 export interface DifficultyLevel {
   /** Stable identifier — used as the URL query param / score submission field / leaderboard
@@ -32,6 +32,8 @@ export interface ScoreConfig {
   readonly direction: "asc" | "desc";
   readonly min: number;
   readonly max: number;
+  readonly precision?: number;
+  readonly outOfRange?: "clamp" | "reject";
   /** Prefix prepended before the score number in display (e.g. "Level ") */
   readonly displayPrefix?: string;
   /** Suffix appended after the score number in display (e.g. " ms") */

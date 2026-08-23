@@ -27,7 +27,10 @@ export function createStandaloneBridgeRuntime(
     },
     complete: async (result: GameResult) => {
       client.complete({
-        score: result.score,
+        ...(result.outcome !== undefined ? { outcome: result.outcome } : {}),
+        ...(result.score !== undefined ? { score: result.score } : {}),
+        ...(result.progression !== undefined ? { progression: result.progression } : {}),
+        ...(result.metrics !== undefined ? { metrics: result.metrics } : {}),
         ...(result.metadata ? { metadata: result.metadata } : {}),
       });
     },

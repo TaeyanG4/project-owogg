@@ -13,13 +13,11 @@ import type { SandboxGameVisibility, SandboxGameMode } from "../domain/sandboxGa
 import {
   SANDBOX_GAME_POLICY,
   isValidSandboxGameSlug,
-  isValidSandboxGameMode,
   canSetVisibilityPublic,
   isPublishedVersion,
 } from "../domain/sandboxGames.js";
 import {
   sourceArchiveObjectKey,
-  extractGameRegistrationManifest,
   findGameLogoFile,
   sandboxGameLogoObjectKey,
   SANDBOX_BUNDLE_REJECTIONS,
@@ -28,6 +26,11 @@ import {
   type PreparedBundle,
   type PreparedBundleFile,
 } from "../domain/sandboxGameBundle.js";
+import {
+  CreatorManifestValidationError,
+  extractCreatorManifest,
+} from "../domain/creatorManifest.js";
+import { mapCreatorManifestToCanonical } from "../domain/creatorManifestCanonical.js";
 import { sha256Hex } from "../domain/contentHash.js";
 import {
   computeUserCanonicalScorePatch,
@@ -60,15 +63,14 @@ export type SandboxGameUseCaseError =
   /** withdrawSubmission was called on a game with no open slot and no pending version — there is
    * nothing left to withdraw. */
   | "NOTHING_TO_WITHDRAW"
-  /** createGameFromBundle: the zip has no owogg.game.json at its root at all — not the same as a
-   * present-but-broken one, which surfaces as BUNDLE_MALFORMED (a SandboxBundleRejection) instead. */
+  /** The zip has no root-level owogg.json. New registrations and every later version require it. */
   | "MANIFEST_MISSING"
-  /** createGameFromBundle: owogg.game.json is present and valid JSON, but its `genre` field is
-   * missing/blank. slug/title reuse INVALID_SLUG/INVALID_TITLE — the same codes the manual
-   * create-game form already produces for the same problems. */
+  /** owogg.json is malformed, violates v1, or a new version changes its immutable game slug. */
+  | "MANIFEST_INVALID"
+  /** Kept as route-level validation codes for metadata edit APIs. Creator ZIP validation reports
+   * MANIFEST_INVALID so callers get one stable manifest error contract. */
   | "INVALID_GENRE"
-  /** createGameFromBundle: owogg.game.json's `mode` field is missing or isn't "single"/"multi"
-   * (2026-08-18, required on every registration). */
+  /** Metadata edit API compatibility code; ZIP mode validation reports MANIFEST_INVALID. */
   | "INVALID_MODE"
   /** createGameFromBundle: no owogg.logo.{png,jpg,jpeg,webp,svg} at the bundle root (2026-08-18,
    * required on every registration going forward) — distinct from MANIFEST_MISSING, since the
@@ -122,6 +124,13 @@ export class SandboxGameUseCaseFailure extends Error {
 function asFailure(err: unknown): never {
   if (err instanceof SandboxBundleRejectionError) {
     throw new SandboxGameUseCaseFailure(err.code);
+  }
+  throw err;
+}
+
+function manifestFailure(err: unknown): never {
+  if (err instanceof CreatorManifestValidationError) {
+    throw new SandboxGameUseCaseFailure("MANIFEST_INVALID");
   }
   throw err;
 }
@@ -271,18 +280,42 @@ export class SandboxGameUseCases {
       }
     })();
 
+    const manifest = (() => {
+      try {
+        return extractCreatorManifest(prepared.files);
+      } catch (err) {
+        return manifestFailure(err);
+      }
+    })();
+    if (!manifest) throw new SandboxGameUseCaseFailure("MANIFEST_MISSING");
+    if (manifest.game.slug !== game.slug) {
+      throw new SandboxGameUseCaseFailure("MANIFEST_INVALID");
+    }
+
+    const logoFile = findGameLogoFile(prepared.files);
+    if (logoFile && logoFile.bytes.byteLength > SANDBOX_GAME_POLICY.MAX_LOGO_BYTES) {
+      throw new SandboxGameUseCaseFailure("LOGO_TOO_LARGE");
+    }
+    const publishablePrepared = logoFile
+      ? {
+          ...prepared,
+          files: prepared.files.filter((file) => file.path !== logoFile.path),
+          totalSize: prepared.totalSize - logoFile.bytes.byteLength,
+        }
+      : prepared;
+
     return this.uploadPreparedVersion({
       gameId: game.id,
       bytes: input.bytes,
       contentType: input.contentType,
-      prepared,
+      prepared: publishablePrepared,
+      ...(logoFile ? { logoFile } : {}),
     });
   }
 
   /**
    * Self-registering upload: a single ZIP whose root contains
-   * `GAME_REGISTRATION_MANIFEST_FILENAME` (`owogg.game.json`, e.g. `{"slug": "ball-dodge",
-   * "title": "공 피하기", "genre": "action"}`) creates the game *and* its first version in one
+   * `owogg.json` creates the game *and* its first version in one
    * call — the drag-and-drop path in the Game Creator Center. Reuses `createGame`'s own
    * slug/title validation and review-slot claim rather than duplicating them, so a manifest-driven
    * registration is held to exactly the same rules as the manual form. The archive is decompressed
@@ -309,21 +342,12 @@ export class SandboxGameUseCases {
 
     const manifest = (() => {
       try {
-        return extractGameRegistrationManifest(prepared.files);
+        return extractCreatorManifest(prepared.files);
       } catch (err) {
-        return asFailure(err);
+        return manifestFailure(err);
       }
     })();
     if (!manifest) throw new SandboxGameUseCaseFailure("MANIFEST_MISSING");
-
-    if (typeof manifest.slug !== "string") throw new SandboxGameUseCaseFailure("INVALID_SLUG");
-    if (typeof manifest.title !== "string") throw new SandboxGameUseCaseFailure("INVALID_TITLE");
-    if (typeof manifest.genre !== "string" || manifest.genre.trim().length === 0) {
-      throw new SandboxGameUseCaseFailure("INVALID_GENRE");
-    }
-    if (!isValidSandboxGameMode(manifest.mode)) {
-      throw new SandboxGameUseCaseFailure("INVALID_MODE");
-    }
 
     // Required on every registration (2026-08-18) — checked here, before createGame(), so a
     // missing/oversized logo never leaves a game row behind with nothing to show for it.
@@ -334,14 +358,13 @@ export class SandboxGameUseCases {
     }
 
     const game = await this.createGame({
-      slug: manifest.slug,
+      slug: manifest.game.slug,
       developerUserId: input.developerUserId,
-      title: manifest.title,
-      shortDescription:
-        typeof manifest.shortDescription === "string" ? manifest.shortDescription : null,
-      description: typeof manifest.description === "string" ? manifest.description : null,
-      genre: manifest.genre,
-      mode: manifest.mode,
+      title: manifest.game.title,
+      shortDescription: manifest.game.shortDescription ?? null,
+      description: manifest.game.description ?? null,
+      genre: manifest.game.genre,
+      mode: manifest.game.mode,
     });
 
     // The logo is a game-level asset, not a playable bundle file — excluded from what actually
@@ -477,11 +500,13 @@ export class SandboxGameUseCases {
   async republishVersion(versionId: number): Promise<SandboxGameVersionRecord> {
     const version = await this.repo.findVersionById(versionId);
     if (!version) throw new SandboxGameUseCaseFailure("VERSION_NOT_FOUND");
+    const game = await this.repo.findById(version.gameId);
+    if (!game) throw new SandboxGameUseCaseFailure("GAME_NOT_FOUND");
 
     const archive = await this.storage.getObject(version.objectKey);
     if (!archive) throw new SandboxGameUseCaseFailure("PUBLISH_FAILED");
 
-    const prepared = (() => {
+    const preparedWithMetadata = (() => {
       try {
         return this.publisher.prepare(archive);
       } catch (err) {
@@ -489,7 +514,82 @@ export class SandboxGameUseCases {
       }
     })();
 
+    const manifest = (() => {
+      try {
+        return extractCreatorManifest(preparedWithMetadata.files);
+      } catch (err) {
+        return manifestFailure(err);
+      }
+    })();
+    if (!manifest) throw new SandboxGameUseCaseFailure("MANIFEST_MISSING");
+    if (manifest.game.slug !== game.slug) throw new SandboxGameUseCaseFailure("MANIFEST_INVALID");
+    const logo = findGameLogoFile(preparedWithMetadata.files);
+    const prepared = logo
+      ? {
+          ...preparedWithMetadata,
+          files: preparedWithMetadata.files.filter((file) => file.path !== logo.path),
+          totalSize: preparedWithMetadata.totalSize - logo.bytes.byteLength,
+        }
+      : preparedWithMetadata;
+
     return this.publishOrFail(version, prepared);
+  }
+
+  private async synchronizeCanonicalFromVersion(
+    version: SandboxGameVersionRecord,
+    nowIso: string,
+  ): Promise<void> {
+    const game = await this.repo.findById(version.gameId);
+    if (!game) throw new SandboxGameUseCaseFailure("GAME_NOT_FOUND");
+    const archive = await this.storage.getObject(version.objectKey);
+    if (!archive) throw new SandboxGameUseCaseFailure("PUBLISH_FAILED");
+
+    let prepared: PreparedBundle;
+    try {
+      prepared = this.publisher.prepare(archive);
+    } catch {
+      throw new SandboxGameUseCaseFailure("PUBLISH_FAILED");
+    }
+
+    let manifest: ReturnType<typeof extractCreatorManifest>;
+    try {
+      manifest = extractCreatorManifest(prepared.files);
+    } catch (error) {
+      return manifestFailure(error);
+    }
+    if (!manifest) throw new SandboxGameUseCaseFailure("MANIFEST_MISSING");
+    if (manifest.game.slug !== game.slug) throw new SandboxGameUseCaseFailure("MANIFEST_INVALID");
+
+    try {
+      const previous = await this.gameCanonicalRepo.findBySlug(game.slug);
+      const score = manifest.result.score;
+      await this.repo.updateMetadata(
+        game.id,
+        {
+          title: manifest.game.title,
+          shortDescription: manifest.game.shortDescription ?? null,
+          description: manifest.game.description ?? null,
+          genre: manifest.game.genre,
+          scoreUnit: score?.unit ?? null,
+          scoreDirection: score?.direction ?? null,
+          scoreMin: score?.range.min ?? null,
+          scoreMax: score?.range.max ?? null,
+          scoreDisplayPrefix: null,
+          scoreDisplaySuffix: null,
+        },
+        nowIso,
+      );
+      await this.gameCanonicalRepo.save(
+        mapCreatorManifestToCanonical({
+          manifest,
+          publisherOfficial: false,
+          updatedAt: nowIso,
+          previous,
+        }),
+      );
+    } catch {
+      throw new SandboxGameUseCaseFailure("CANONICAL_SYNC_FAILED");
+    }
   }
 
   /**
@@ -643,6 +743,11 @@ export class SandboxGameUseCases {
 
     const nowIso = new Date().toISOString();
     const reason = input.reason?.trim() || null;
+    if (input.decision === "APPROVED") {
+      // Canonical must describe the exact source archive being promoted. Write it before the D1
+      // live pointer changes so runtime reads never observe a new build with an old contract.
+      await this.synchronizeCanonicalFromVersion(version, nowIso);
+    }
     const decided = await this.repo.decideVersion(
       version.id,
       input.decision,
@@ -743,6 +848,7 @@ export class SandboxGameUseCases {
     }
 
     const nowIso = new Date().toISOString();
+    await this.synchronizeCanonicalFromVersion(version, nowIso);
     const updated = await this.repo.setLiveVersion(gameId, versionId, nowIso);
     await this.repo.appendReviewAudit({
       gameId,

@@ -8,13 +8,8 @@
   </head>
   <body>
     <!--
-      Game Bridge (@owogg/game-sdk/bridge) reference integration — the first Creator game wired to
-      GameHost + IframeRuntime through READY/STARTED/GAME_COMPLETE. See src/main.ts's doc comment
-      for the bridge wiring itself, and dist/vendor/game-sdk-bridge/ (built, not committed) for the
-      vendored SDK source this bundle actually ships.
-
-      Still fully playable standalone (no host, no bridge messages) — connectGameBridge() never
-      blocks page setup; see main.ts.
+      OWOGG Creator Manifest v1 reference integration. The serving layer injects window.OWOGG;
+      optional chaining keeps the game playable in a standalone local preview.
     -->
     <div id="app">
       <div id="hud">

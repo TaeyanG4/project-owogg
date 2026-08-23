@@ -100,7 +100,7 @@ adminGamesRouter.post(
           ? "동일한 slug가 사용자 게임 또는 삭제된 게임에 이미 사용되고 있습니다."
           : error.code === "PUBLISH_FAILED"
             ? "OWOGG 게임을 D1/B2에 게시하지 못했습니다."
-            : "게임 ZIP 또는 owogg.game.json이 올바르지 않습니다.";
+            : "게임 ZIP 또는 owogg.json Creator Manifest v1이 올바르지 않습니다.";
       return c.json({ error: { code: error.code, message } }, status);
     }
   },

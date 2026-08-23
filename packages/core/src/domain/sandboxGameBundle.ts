@@ -55,69 +55,6 @@ export const PUBLISHED_MANIFEST_FILENAME = ".owogg-manifest.json";
 /** The file a bundle must contain, and what `/play/:slug` resolves to. */
 export const BUNDLE_ENTRY_PATH = "index.html";
 
-/**
- * Optional file a game creator can include at the bundle root to skip the separate "create game"
- * form step — drop a ZIP with this file in it onto the Game Creator Center and the game gets
- * registered from its contents in one action (see SandboxGameUseCases.createGameFromBundle).
- * Distinct from {@link PUBLISHED_MANIFEST_FILENAME}, which is OwOGG's own auto-generated
- * published-files listing, never something a creator writes by hand.
- */
-export const GAME_REGISTRATION_MANIFEST_FILENAME = "owogg.game.json";
-
-/** Raw, not-yet-validated shape read from {@link GAME_REGISTRATION_MANIFEST_FILENAME} — field
- *-level validation (slug format, title/genre length, mode enum) stays in SandboxGameUseCases. */
-export interface RawGameRegistrationManifest {
-  slug?: unknown;
-  title?: unknown;
-  genre?: unknown;
-  shortDescription?: unknown;
-  description?: unknown;
-  /** "single" | "multi" (2026-08-18) — required, see SandboxGameMode's doc comment
-   * (domain/sandboxGames.ts) for why only these two coarse values exist. */
-  mode?: unknown;
-  /** Optional canonical metadata used by the trusted admin OWOGG publication path. Creator
-   * uploads keep using the smaller slug/title/genre/mode subset; these fields never grant
-   * official authority because the route, not the archive, selects the publisher. */
-  policy?: unknown;
-  catalog?: unknown;
-  presentation?: unknown;
-  difficulty?: unknown;
-  supportsReplay?: unknown;
-}
-
-/**
- * Looks for {@link GAME_REGISTRATION_MANIFEST_FILENAME} among a prepared bundle's files. Returns
- * `null` when it's simply not there — that is not an error at THIS layer (an existing game's
- * plain version re-upload has no reason to carry one), but SandboxGameUseCases.createGameFromBundle
- * (the only registration path since the manual form was removed, 2026-08-18) treats a null result
- * as MANIFEST_MISSING. Throws `BUNDLE_MALFORMED` when the file exists but isn't valid JSON or
- * isn't a JSON object, since a bundle that clearly *intends* to self-register but has a broken
- * manifest should fail loudly rather than silently falling back to "nothing happened."
- */
-export function extractGameRegistrationManifest(
-  files: PreparedBundleFile[],
-): RawGameRegistrationManifest | null {
-  const entry = files.find((f) => f.path === GAME_REGISTRATION_MANIFEST_FILENAME);
-  if (!entry) return null;
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(new TextDecoder().decode(entry.bytes));
-  } catch {
-    throw new SandboxBundleRejectionError(
-      "BUNDLE_MALFORMED",
-      `${GAME_REGISTRATION_MANIFEST_FILENAME} is not valid JSON`,
-    );
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new SandboxBundleRejectionError(
-      "BUNDLE_MALFORMED",
-      `${GAME_REGISTRATION_MANIFEST_FILENAME} must be a JSON object`,
-    );
-  }
-  return parsed as RawGameRegistrationManifest;
-}
-
 /** Reserved basename (2026-08-18) for a game's catalog-card logo — `owogg.logo.<ext>` at the
  * bundle root, any of {@link LOGO_EXTENSIONS}. Required on every new registration
  * (SandboxGameUseCases.createGameFromBundle rejects a missing one with LOGO_REQUIRED) — a game

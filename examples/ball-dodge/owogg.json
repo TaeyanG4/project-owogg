@@ -1,0 +1,44 @@
+{
+  "$schema": "https://owogg.com/schemas/manifest/v1.json",
+  "schemaVersion": 1,
+  "game": {
+    "slug": "ball-dodge",
+    "title": "공 피하기",
+    "genre": "arcade",
+    "mode": "single",
+    "shortDescription": "마우스/키보드로 캐릭터를 움직여 떨어지는 공을 피하는 OWOGG API 참조 게임",
+    "tags": ["arcade", "survival"]
+  },
+  "input": ["keyboard", "mouse", "touch"],
+  "presentation": {
+    "orientation": "landscape",
+    "aspectRatio": "16:9"
+  },
+  "progression": {
+    "type": "endless"
+  },
+  "result": {
+    "outcome": { "values": ["failure"] },
+    "score": {
+      "unit": "seconds",
+      "direction": "desc",
+      "precision": 1,
+      "range": { "min": 0, "max": 3600, "outOfRange": "clamp" }
+    },
+    "metrics": {
+      "ballsSpawned": {
+        "type": "integer",
+        "range": { "min": 0, "max": 10000, "outOfRange": "clamp" }
+      }
+    }
+  },
+  "leaderboard": { "enabled": true },
+  "achievements": [
+    {
+      "id": "survive-30",
+      "title": "30초 생존",
+      "scope": "session",
+      "condition": { "source": "score", "operator": ">=", "value": 30 }
+    }
+  ]
+}

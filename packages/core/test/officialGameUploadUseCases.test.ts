@@ -119,15 +119,19 @@ class FakeOfficialRepository implements OfficialGameUploadRepository {
 const files = {
   "index.html": encoder.encode("<html>game</html>"),
   "owogg.logo.svg": encoder.encode("<svg/>"),
-  "owogg.game.json": encoder.encode(
+  "owogg.json": encoder.encode(
     JSON.stringify({
-      slug: "admin-game",
-      title: "관리자 게임",
-      shortDescription: "설명",
-      description: "OWOGG 관리자 업로드 테스트",
-      genre: "arcade",
-      mode: "single",
-      publisher: { official: false },
+      schemaVersion: 1,
+      game: {
+        slug: "admin-game",
+        title: "관리자 게임",
+        shortDescription: "설명",
+        description: "OWOGG 관리자 업로드 테스트",
+        genre: "arcade",
+        mode: "single",
+      },
+      progression: { type: "none" },
+      result: { score: null },
     }),
   ),
 };

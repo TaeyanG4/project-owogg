@@ -1,7 +1,5 @@
 #!/usr/bin/env node
-// Builds the ball-dodge Game Bridge reference bundle: vendors the CURRENT @owogg/game-sdk/bridge
-// source (copied fresh from packages/game-sdk/src/bridge on every build, never duplicated in
-// git), compiles it together with main.ts into plain ES modules, copies the static assets, and
+// Builds the ball-dodge OWOGG Browser API reference bundle: compiles main.ts, copies the static assets, and
 // zips the result — producing dist/ball-dodge.zip, the exact artifact a Creator would drag onto
 // the Game Creator Center to register/upload this game through the existing
 // upload/review/publish/B2 pipeline. Nothing here is wired into `pnpm build`/CI: this bundle is
@@ -16,21 +14,10 @@ import { zipSync } from "fflate";
 import ts from "typescript";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(here, "../..");
 const distDir = path.join(here, "dist");
-const vendorDir = path.join(here, "vendor", "game-sdk-bridge");
 
 rmSync(distDir, { recursive: true, force: true });
-rmSync(path.join(here, "vendor"), { recursive: true, force: true });
-mkdirSync(vendorDir, { recursive: true });
-
-// Vendor the actual bridge source — not a reimplementation. Copied fresh on every build so this
-// bundle can never silently drift from packages/game-sdk/src/bridge; gitignored (see .gitignore),
-// same as dist/.
-const bridgeSrc = path.join(repoRoot, "packages", "game-sdk", "src", "bridge");
-for (const file of ["protocol.ts", "client.ts", "index.ts"]) {
-  copyFileSync(path.join(bridgeSrc, file), path.join(vendorDir, file));
-}
+mkdirSync(distDir, { recursive: true });
 
 // Compile main.ts + the vendored bridge together (one tsconfig, one rootDir covering both) so
 // main.ts's relative import ("./vendor/game-sdk-bridge/client.js") resolves identically before
@@ -59,7 +46,7 @@ if (emitResult.emitSkipped || diagnostics.some((d) => d.category === ts.Diagnost
 }
 
 // Static assets, copied alongside the compiled JS.
-for (const file of ["index.html", "style.css", "owogg.game.json", "owogg.logo.svg"]) {
+for (const file of ["index.html", "style.css", "owogg.json", "owogg.logo.svg"]) {
   copyFileSync(path.join(here, file), path.join(distDir, file));
 }
 
