@@ -1,20 +1,13 @@
 import {
-  extractGameRegistrationManifest,
   findGameLogoFile,
   sandboxGameLogoObjectKey,
   sourceArchiveObjectKey,
   type PreparedBundle,
 } from "../domain/sandboxGameBundle.js";
-import {
-  SANDBOX_GAME_POLICY,
-  isValidSandboxGameMode,
-  isValidSandboxGameSlug,
-} from "../domain/sandboxGames.js";
-import {
-  GAME_CANONICAL_SCHEMA_VERSION,
-  parseGameCanonicalDocument,
-  type GameCanonicalDocument,
-} from "../modules/game/domain/gameCanonicalDocument.js";
+import { extractCreatorManifest } from "../domain/creatorManifest.js";
+import { mapCreatorManifestToCanonical } from "../domain/creatorManifestCanonical.js";
+import { SANDBOX_GAME_POLICY } from "../domain/sandboxGames.js";
+import type { GameCanonicalDocument } from "../modules/game/domain/gameCanonicalDocument.js";
 import type { GameIdentity } from "../modules/game/domain/gameIdentity.js";
 import type { GameVersion } from "../modules/game/domain/gameVersion.js";
 import type { GameCanonicalRepository } from "../modules/game/ports/gameCanonicalRepository.js";
@@ -77,72 +70,9 @@ export interface OfficialGameUploadResult {
   readonly publishedAt: string;
 }
 
-function requiredString(value: unknown, maxLength: number): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 && trimmed.length <= maxLength ? trimmed : null;
-}
-
 async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function asOfficialCanonical(
-  manifest: NonNullable<ReturnType<typeof extractGameRegistrationManifest>>,
-  nowIso: string,
-): GameCanonicalDocument {
-  const slug = typeof manifest.slug === "string" ? manifest.slug.trim().toLowerCase() : "";
-  const title = requiredString(manifest.title, SANDBOX_GAME_POLICY.MAX_TITLE_LENGTH);
-  const shortDescription =
-    manifest.shortDescription === undefined
-      ? ""
-      : requiredString(manifest.shortDescription, SANDBOX_GAME_POLICY.MAX_SHORT_DESCRIPTION_LENGTH);
-  const description =
-    manifest.description === undefined
-      ? ""
-      : requiredString(manifest.description, SANDBOX_GAME_POLICY.MAX_DESCRIPTION_LENGTH);
-
-  if (
-    !isValidSandboxGameSlug(slug) ||
-    title === null ||
-    shortDescription === null ||
-    description === null
-  ) {
-    throw new OfficialGameUploadFailure("MANIFEST_INVALID");
-  }
-
-  let catalog: unknown = manifest.catalog;
-  if (catalog === undefined) {
-    const genre = requiredString(manifest.genre, 100);
-    if (genre === null || !isValidSandboxGameMode(manifest.mode)) {
-      throw new OfficialGameUploadFailure("MANIFEST_INVALID");
-    }
-    catalog = { type: "GENRE_MODE", genre, mode: manifest.mode };
-  }
-
-  const rawDocument = {
-    schemaVersion: GAME_CANONICAL_SCHEMA_VERSION,
-    slug,
-    title,
-    shortDescription,
-    description,
-    publisher: { official: true },
-    policy:
-      manifest.policy ??
-      ({ score: null, leaderboard: false, xpPerCompletion: 0, requiresAuth: false } as const),
-    ...(manifest.presentation !== undefined ? { presentation: manifest.presentation } : {}),
-    ...(manifest.difficulty !== undefined ? { difficulty: manifest.difficulty } : {}),
-    supportsReplay: manifest.supportsReplay === true,
-    catalog,
-    updatedAt: nowIso,
-  };
-
-  try {
-    return parseGameCanonicalDocument(JSON.stringify(rawDocument), slug);
-  } catch {
-    throw new OfficialGameUploadFailure("MANIFEST_INVALID");
-  }
 }
 
 /** Trusted admin publication path. Publisher authority is selected by the server route; archive
@@ -171,16 +101,20 @@ export class OfficialGameUploadUseCases {
       throw new OfficialGameUploadFailure("BUNDLE_INVALID");
     }
 
-    let manifest: ReturnType<typeof extractGameRegistrationManifest>;
+    let manifest: ReturnType<typeof extractCreatorManifest>;
     try {
-      manifest = extractGameRegistrationManifest(prepared.files);
+      manifest = extractCreatorManifest(prepared.files);
     } catch {
       throw new OfficialGameUploadFailure("MANIFEST_INVALID");
     }
     if (!manifest) throw new OfficialGameUploadFailure("MANIFEST_MISSING");
 
     const nowIso = new Date().toISOString();
-    const canonical = asOfficialCanonical(manifest, nowIso);
+    const canonical = mapCreatorManifestToCanonical({
+      manifest,
+      publisherOfficial: true,
+      updatedAt: nowIso,
+    });
     const logo = findGameLogoFile(prepared.files);
     if (!logo) throw new OfficialGameUploadFailure("LOGO_REQUIRED");
     if (logo.bytes.byteLength > SANDBOX_GAME_POLICY.MAX_LOGO_BYTES) {

@@ -257,7 +257,7 @@ function ManageGamesPanel({
   const [notice, setNotice] = useState<string | null>(null);
   const [registering, setRegistering] = useState(false);
 
-  // Drag-and-drop registration: a ZIP whose root contains owogg.game.json (slug/title/genre)
+  // Drag-and-drop registration: a ZIP whose root contains a valid owogg.json v1 manifest.
   // creates the game *and* its first version in one call — see devApi.uploadGameFromBundle. This
   // is now the only registration path (2026-08-18 — the manual slug/title/genre form was removed).
   const handleDropRegister = async (file: File) => {
@@ -347,7 +347,7 @@ function ManageGamesPanel({
 
       <GameBundleDropzone
         busy={registering}
-        title="owogg.game.json이 포함된 ZIP을 여기로 끌어다 놓으면 자동 등록됩니다"
+        title="owogg.json이 포함된 ZIP을 여기로 끌어다 놓으면 자동 등록됩니다"
         onFile={handleDropRegister}
       />
 

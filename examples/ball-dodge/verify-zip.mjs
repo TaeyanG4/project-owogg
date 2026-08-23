@@ -20,9 +20,9 @@ import {
   validateBundleEntryMetadata,
   prepareBundleEntries,
   normalizeBundleEntryPath,
-  extractGameRegistrationManifest,
   findGameLogoFile,
 } from "../../packages/core/src/domain/sandboxGameBundle.ts";
+import { extractCreatorManifest } from "../../packages/core/src/domain/creatorManifest.ts";
 import { SANDBOX_GAME_POLICY } from "../../packages/core/src/domain/sandboxGames.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -68,10 +68,12 @@ for (const f of prepared.files) {
 // The same manifest/logo extraction createGameFromBundle actually runs (see
 // SandboxGameUseCases.createGameFromBundle) — confirms this zip really does register through the
 // drag-and-drop auto-registration path, not just "is a valid zip".
-const manifest = extractGameRegistrationManifest(prepared.files);
-if (!manifest) throw new Error("FAIL: no owogg.game.json manifest found");
-console.log(`PASS: extractGameRegistrationManifest — ${JSON.stringify(manifest)}`);
-if (manifest.slug !== "ball-dodge") throw new Error(`FAIL: unexpected slug ${manifest.slug}`);
+const manifest = extractCreatorManifest(prepared.files);
+if (!manifest) throw new Error("FAIL: no owogg.json manifest found");
+console.log(`PASS: extractCreatorManifest — ${JSON.stringify(manifest)}`);
+if (manifest.game.slug !== "ball-dodge") {
+  throw new Error(`FAIL: unexpected slug ${manifest.game.slug}`);
+}
 
 const logoFile = findGameLogoFile(prepared.files);
 if (!logoFile) throw new Error("FAIL: no owogg.logo.* file found");
@@ -91,14 +93,10 @@ console.log("PASS: all entry paths normalize cleanly (no traversal/absolute/back
 // this bundle could otherwise have with no other check catching it (the pipeline validators above
 // don't know or care what a game's JS *does*).
 const mainJs = new TextDecoder().decode(decompressed["main.js"]);
-const bridgeClientJs = new TextDecoder().decode(decompressed["vendor/game-sdk-bridge/client.js"]);
-if (!mainJs.includes("connectGameBridge")) {
-  throw new Error("FAIL: main.js does not reference connectGameBridge");
+if (!mainJs.includes("OWOGG") || !mainJs.includes("complete")) {
+  throw new Error("FAIL: main.js does not use the OWOGG Browser API");
 }
-if (!bridgeClientJs.includes("GAME_READY") || !bridgeClientJs.includes("GAME_COMPLETE")) {
-  throw new Error("FAIL: vendored bridge client is missing expected message types");
-}
-console.log("PASS: Game Bridge (connectGameBridge + client) is present in the built bundle");
+console.log("PASS: window.OWOGG Browser API usage is present in the built bundle");
 
 console.log(
   "\nAll checks passed — ball-dodge.zip is a valid, Bridge-integrated sandbox game bundle.",

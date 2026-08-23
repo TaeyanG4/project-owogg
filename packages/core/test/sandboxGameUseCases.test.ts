@@ -17,7 +17,7 @@ import type {
 } from "../src/ports/sandboxGames.js";
 import { SANDBOX_GAME_POLICY } from "../src/domain/sandboxGames.js";
 import type { SandboxGameBundleManifest } from "../src/domain/sandboxGameBundle.js";
-import { GAME_REGISTRATION_MANIFEST_FILENAME } from "../src/domain/sandboxGameBundle.js";
+import { OWOGG_CREATOR_MANIFEST_FILENAME } from "../src/domain/creatorManifest.js";
 import type { GameCanonicalRepository } from "../src/modules/game/ports/gameCanonicalRepository.js";
 import {
   GAME_CANONICAL_SCHEMA_VERSION,
@@ -38,8 +38,29 @@ const MINIMAL_BUNDLE: Record<string, Uint8Array> = {
   "Build/game.wasm": bytes("\0asm fake"),
 };
 
+function creatorManifestBytes(game: Record<string, unknown>): Uint8Array {
+  return bytes(
+    JSON.stringify({
+      schemaVersion: 1,
+      game,
+      progression: { type: "none" },
+      result: { score: null },
+    }),
+  );
+}
+
+const VERSION_BUNDLE: Record<string, Uint8Array> = {
+  ...MINIMAL_BUNDLE,
+  [OWOGG_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
+    slug: "my-game",
+    title: "Game",
+    genre: "puzzle",
+    mode: "single",
+  }),
+};
+
 function createFakeArchiveReader(
-  entries: Record<string, Uint8Array> = MINIMAL_BUNDLE,
+  entries: Record<string, Uint8Array> = VERSION_BUNDLE,
 ): BundleArchiveReader & {
   entries: Record<string, Uint8Array>;
   malformed: boolean;
@@ -1451,9 +1472,10 @@ test("uploadVersion publishes each bundle file as its own versioned object and r
   const { useCases, storage, game, version } = await createGameWithLiveVersion();
 
   assert.equal(version.publishStatus, "READY");
-  assert.equal(version.fileCount, 2);
+  assert.equal(version.fileCount, 3);
   assert.ok(storage.putKeys.includes(`games/${game.id}/${version.id}/index.html`));
   assert.ok(storage.putKeys.includes(`games/${game.id}/${version.id}/Build/game.wasm`));
+  assert.ok(storage.putKeys.includes(`games/${game.id}/${version.id}/owogg.json`));
 });
 
 test("publishing writes a manifest listing every file with its size and content type", async () => {
@@ -1468,7 +1490,7 @@ test("publishing writes a manifest listing every file with its size and content 
   assert.equal(manifest.gameId, game.id);
   assert.equal(manifest.versionId, version.id);
   assert.equal(manifest.entry, "index.html");
-  assert.equal(manifest.fileCount, 2);
+  assert.equal(manifest.fileCount, 3);
   assert.equal(manifest.contentHash, version.contentHash);
   const wasm = manifest.files.find((f) => f.path === "Build/game.wasm");
   assert.equal(wasm?.contentType, "application/wasm");
@@ -1680,6 +1702,12 @@ test("a well-compressed but plausible entry (well under the ratio ceiling) is no
   const { useCases, archives } = createUseCases({
     "index.html": bytes("<h1>hi</h1>"),
     "texture.data": bytes("real bytes"),
+    [OWOGG_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
+      slug: "my-game",
+      title: "Game",
+      genre: "puzzle",
+      mode: "single",
+    }),
   });
   archives.compressedSizeOverride = { "texture.data": 1000 };
   archives.declaredSizeOverride = { "texture.data": 1000 * 500 }; // 500:1 — well under the 1200:1 ceiling
@@ -1858,6 +1886,12 @@ test("publishing unwraps a single top-level wrapping folder so index.html lands 
   const { game, version, storage } = await createGameWithLiveVersion({
     "MyGame/index.html": bytes("<h1>wrapped</h1>"),
     "MyGame/Build/game.wasm": bytes("\0asm"),
+    "MyGame/owogg.json": creatorManifestBytes({
+      slug: "my-game",
+      title: "Game",
+      genre: "puzzle",
+      mode: "single",
+    }),
   });
 
   assert.equal(version.publishStatus, "READY");
@@ -1870,6 +1904,12 @@ test("a publish that fails part-way leaves the version non-READY with a recorded
   const { useCases, storage, repo } = createUseCases({
     "index.html": bytes("<h1>hi</h1>"),
     "Build/game.wasm": bytes("\0asm"),
+    [OWOGG_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
+      slug: "my-game",
+      title: "Game",
+      genre: "puzzle",
+      mode: "single",
+    }),
   });
   const game = await useCases.createGame({
     slug: "my-game",
@@ -2292,10 +2332,11 @@ test("a third concurrent submission is rejected with SUBMISSION_LIMIT_REACHED", 
 });
 
 test("this is not a lifetime cap: a decided game frees its slot for an unlimited number of future submissions", async () => {
-  const { useCases } = createUseCases();
+  const { useCases, archives } = createUseCases();
   for (let i = 0; i < 5; i++) {
+    const slug = `game-${i}`;
     const game = await useCases.createGame({
-      slug: `game-${i}`,
+      slug,
       developerUserId: 1,
       title: "Game",
       shortDescription: null,
@@ -2303,6 +2344,15 @@ test("this is not a lifetime cap: a decided game frees its slot for an unlimited
       genre: "puzzle",
       mode: "single",
     });
+    archives.entries = {
+      ...MINIMAL_BUNDLE,
+      [OWOGG_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
+        slug,
+        title: "Game",
+        genre: "puzzle",
+        mode: "single",
+      }),
+    };
     const version = await useCases.uploadVersion({
       gameId: game.id,
       actingUserId: 1,
@@ -2322,11 +2372,12 @@ test("this is not a lifetime cap: a decided game frees its slot for an unlimited
 });
 
 test("this is not a cap on total approved games: multiple already-approved games coexist without occupying slots", async () => {
-  const { useCases, repo } = createUseCases();
+  const { useCases, repo, archives } = createUseCases();
   const approvedIds: number[] = [];
   for (let i = 0; i < 3; i++) {
+    const slug = `game-${i}`;
     const game = await useCases.createGame({
-      slug: `game-${i}`,
+      slug,
       developerUserId: 1,
       title: "Game",
       shortDescription: null,
@@ -2334,6 +2385,15 @@ test("this is not a cap on total approved games: multiple already-approved games
       genre: "puzzle",
       mode: "single",
     });
+    archives.entries = {
+      ...MINIMAL_BUNDLE,
+      [OWOGG_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
+        slug,
+        title: "Game",
+        genre: "puzzle",
+        mode: "single",
+      }),
+    };
     const version = await useCases.uploadVersion({
       gameId: game.id,
       actingUserId: 1,
@@ -2540,7 +2600,7 @@ function manifestEntries(
   const hasLogo = Object.keys(extra).some((path) => path.startsWith("owogg.logo."));
   return {
     ...extra,
-    [GAME_REGISTRATION_MANIFEST_FILENAME]: bytes(JSON.stringify({ mode: "single", ...manifest })),
+    [OWOGG_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({ mode: "single", ...manifest }),
     ...(hasLogo ? {} : { "owogg.logo.png": bytes("fake-logo-bytes") }),
   };
 }
@@ -2581,39 +2641,39 @@ test("createGameFromBundle rejects a bundle with no manifest as MANIFEST_MISSING
   );
 });
 
-test("createGameFromBundle rejects a manifest missing/invalid slug as INVALID_SLUG", async () => {
+test("createGameFromBundle rejects a manifest missing/invalid slug as MANIFEST_INVALID", async () => {
   const { useCases } = createUseCases(manifestEntries({ title: "공 피하기", genre: "action" }));
   await assert.rejects(
     () => useCases.createGameFromBundle({ developerUserId: 1, bytes: new ArrayBuffer(10) }),
-    (err: unknown) => err instanceof SandboxGameUseCaseFailure && err.code === "INVALID_SLUG",
+    (err: unknown) => err instanceof SandboxGameUseCaseFailure && err.code === "MANIFEST_INVALID",
   );
 });
 
-test("createGameFromBundle rejects a manifest missing/invalid title as INVALID_TITLE", async () => {
+test("createGameFromBundle rejects a manifest missing/invalid title as MANIFEST_INVALID", async () => {
   const { useCases } = createUseCases(manifestEntries({ slug: "ball-dodge", genre: "action" }));
   await assert.rejects(
     () => useCases.createGameFromBundle({ developerUserId: 1, bytes: new ArrayBuffer(10) }),
-    (err: unknown) => err instanceof SandboxGameUseCaseFailure && err.code === "INVALID_TITLE",
+    (err: unknown) => err instanceof SandboxGameUseCaseFailure && err.code === "MANIFEST_INVALID",
   );
 });
 
-test("createGameFromBundle rejects a manifest with a blank genre as INVALID_GENRE", async () => {
+test("createGameFromBundle rejects a manifest with a blank genre as MANIFEST_INVALID", async () => {
   const { useCases } = createUseCases(
     manifestEntries({ slug: "ball-dodge", title: "공 피하기", genre: "   " }),
   );
   await assert.rejects(
     () => useCases.createGameFromBundle({ developerUserId: 1, bytes: new ArrayBuffer(10) }),
-    (err: unknown) => err instanceof SandboxGameUseCaseFailure && err.code === "INVALID_GENRE",
+    (err: unknown) => err instanceof SandboxGameUseCaseFailure && err.code === "MANIFEST_INVALID",
   );
 });
 
-test("createGameFromBundle rejects a manifest with a non-string genre as INVALID_GENRE", async () => {
+test("createGameFromBundle rejects a manifest with a non-string genre as MANIFEST_INVALID", async () => {
   const { useCases } = createUseCases(
     manifestEntries({ slug: "ball-dodge", title: "공 피하기", genre: 5 }),
   );
   await assert.rejects(
     () => useCases.createGameFromBundle({ developerUserId: 1, bytes: new ArrayBuffer(10) }),
-    (err: unknown) => err instanceof SandboxGameUseCaseFailure && err.code === "INVALID_GENRE",
+    (err: unknown) => err instanceof SandboxGameUseCaseFailure && err.code === "MANIFEST_INVALID",
   );
 });
 
@@ -2637,14 +2697,14 @@ test("createGameFromBundle surfaces a slug collision as SLUG_TAKEN, same as the 
   );
 });
 
-test("createGameFromBundle rejects a malformed manifest as BUNDLE_MALFORMED, not silently ignored", async () => {
+test("createGameFromBundle rejects malformed JSON as MANIFEST_INVALID", async () => {
   const { useCases } = createUseCases({
     ...MINIMAL_BUNDLE,
-    [GAME_REGISTRATION_MANIFEST_FILENAME]: bytes("{ not json"),
+    [OWOGG_CREATOR_MANIFEST_FILENAME]: bytes("{ not json"),
   });
   await assert.rejects(
     () => useCases.createGameFromBundle({ developerUserId: 1, bytes: new ArrayBuffer(10) }),
-    (err: unknown) => err instanceof SandboxGameUseCaseFailure && err.code === "BUNDLE_MALFORMED",
+    (err: unknown) => err instanceof SandboxGameUseCaseFailure && err.code === "MANIFEST_INVALID",
   );
 });
 
@@ -2654,13 +2714,15 @@ test("createGameFromBundle rejects a missing mode as INVALID_MODE", async () => 
   const { useCases } = createUseCases({
     ...MINIMAL_BUNDLE,
     "owogg.logo.png": bytes("fake-logo-bytes"),
-    [GAME_REGISTRATION_MANIFEST_FILENAME]: bytes(
-      JSON.stringify({ slug: "ball-dodge", title: "공 피하기", genre: "action" }),
-    ),
+    [OWOGG_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
+      slug: "ball-dodge",
+      title: "공 피하기",
+      genre: "action",
+    }),
   });
   await assert.rejects(
     () => useCases.createGameFromBundle({ developerUserId: 1, bytes: new ArrayBuffer(10) }),
-    (err: unknown) => err instanceof SandboxGameUseCaseFailure && err.code === "INVALID_MODE",
+    (err: unknown) => err instanceof SandboxGameUseCaseFailure && err.code === "MANIFEST_INVALID",
   );
 });
 
@@ -2670,16 +2732,19 @@ test("createGameFromBundle rejects a mode outside single/multi as INVALID_MODE",
   );
   await assert.rejects(
     () => useCases.createGameFromBundle({ developerUserId: 1, bytes: new ArrayBuffer(10) }),
-    (err: unknown) => err instanceof SandboxGameUseCaseFailure && err.code === "INVALID_MODE",
+    (err: unknown) => err instanceof SandboxGameUseCaseFailure && err.code === "MANIFEST_INVALID",
   );
 });
 
 test("createGameFromBundle rejects a bundle with no logo file as LOGO_REQUIRED", async () => {
   const { useCases } = createUseCases({
     ...MINIMAL_BUNDLE,
-    [GAME_REGISTRATION_MANIFEST_FILENAME]: bytes(
-      JSON.stringify({ slug: "ball-dodge", title: "공 피하기", genre: "action", mode: "single" }),
-    ),
+    [OWOGG_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
+      slug: "ball-dodge",
+      title: "공 피하기",
+      genre: "action",
+      mode: "single",
+    }),
   });
   await assert.rejects(
     () => useCases.createGameFromBundle({ developerUserId: 1, bytes: new ArrayBuffer(10) }),
@@ -2692,14 +2757,12 @@ test("createGameFromBundle accepts any of the logo extensions (png/jpg/jpeg/webp
     const { useCases } = createUseCases({
       ...MINIMAL_BUNDLE,
       [`owogg.logo.${ext}`]: bytes("fake-logo-bytes"),
-      [GAME_REGISTRATION_MANIFEST_FILENAME]: bytes(
-        JSON.stringify({
-          slug: `ball-dodge-${ext}`,
-          title: "공 피하기",
-          genre: "action",
-          mode: "single",
-        }),
-      ),
+      [OWOGG_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
+        slug: `ball-dodge-${ext}`,
+        title: "공 피하기",
+        genre: "action",
+        mode: "single",
+      }),
     });
     const { game } = await useCases.createGameFromBundle({
       developerUserId: 1,

@@ -3,7 +3,9 @@ import {
   isJsonSafeValue,
   isWithinBridgePayloadLimit,
   type GameCompleteMessage,
+  type GameEventMessage,
 } from "./protocol.js";
+import type { OwoggCompletionPayload } from "../contracts/creatorManifest.js";
 
 /** The minimal subset of `Window` this file touches — lets a test supply a fake without a DOM.
  * Real callers never pass this; `connectGameBridge()` defaults to the real `window`. */
@@ -25,9 +27,10 @@ export interface GameBridgeClient {
   ready(): void;
   /** Call when the player actually starts a round (as opposed to e.g. sitting on a menu). */
   started(): void;
+  event(name: string, data?: unknown): void;
   /** Call exactly once per round, when it ends. A second call is ignored — see the module doc
    * comment on why this alone isn't the security boundary, only host-side convenience. */
-  complete(result: { score?: number; metadata?: Record<string, unknown> }): void;
+  complete(result: OwoggCompletionPayload & { metadata?: Record<string, unknown> }): void;
   /** Call if the player backs out without finishing a round. */
   cancel(): void;
   /** Call on an unrecoverable in-game error. `message` is optional and capped at 500 characters
@@ -89,6 +92,7 @@ function createClient(port: MessagePort, difficultyId?: string): GameBridgeClien
   function send(
     message:
       | GameCompleteMessage
+      | GameEventMessage
       | { type: "GAME_READY" | "GAME_STARTED" | "GAME_CANCEL" }
       | { type: "GAME_ERROR"; message?: string },
   ): void {
@@ -109,10 +113,20 @@ function createClient(port: MessagePort, difficultyId?: string): GameBridgeClien
     started() {
       send({ type: "GAME_STARTED" });
     },
+    event(name, data) {
+      send({ type: "GAME_EVENT", name, ...(data !== undefined ? { data } : {}) });
+    },
     complete(result) {
       if (completed) return;
       completed = true;
-      send({ type: "GAME_COMPLETE", ...result });
+      send({
+        type: "GAME_COMPLETE",
+        ...(result.outcome !== undefined ? { outcome: result.outcome } : {}),
+        ...(result.score !== undefined ? { score: result.score } : {}),
+        ...(result.progression !== undefined ? { progression: result.progression } : {}),
+        ...(result.metrics !== undefined ? { metrics: result.metrics } : {}),
+        ...(result.metadata !== undefined ? { metadata: result.metadata } : {}),
+      });
     },
     cancel() {
       send({ type: "GAME_CANCEL" });

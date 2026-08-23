@@ -43,8 +43,17 @@ export interface GameStartedMessage {
 
 export interface GameCompleteMessage {
   readonly type: "GAME_COMPLETE";
+  readonly outcome?: "neutral" | "success" | "failure" | "win" | "loss" | "draw";
   readonly score?: number;
+  readonly progression?: { readonly value: number };
+  readonly metrics?: Record<string, number>;
   readonly metadata?: Record<string, unknown>;
+}
+
+export interface GameEventMessage {
+  readonly type: "GAME_EVENT";
+  readonly name: string;
+  readonly data?: unknown;
 }
 
 export interface GameCancelMessage {
@@ -59,6 +68,7 @@ export interface GameErrorMessage {
 export type GameToHostMessage =
   | GameReadyMessage
   | GameStartedMessage
+  | GameEventMessage
   | GameCompleteMessage
   | GameCancelMessage
   | GameErrorMessage;
@@ -174,19 +184,70 @@ export function parseGameToHostMessage(data: unknown): GameToHostMessage | null 
       return keys.length === 1 ? ({ type: data.type } as GameToHostMessage) : null;
 
     case "GAME_COMPLETE": {
-      if (!keys.every((k) => k === "type" || k === "score" || k === "metadata")) return null;
+      if (
+        !keys.every((k) =>
+          ["type", "outcome", "score", "progression", "metrics", "metadata"].includes(k),
+        )
+      )
+        return null;
+      if ("outcome" in data && data.outcome !== undefined) {
+        if (
+          typeof data.outcome !== "string" ||
+          !["neutral", "success", "failure", "win", "loss", "draw"].includes(data.outcome)
+        )
+          return null;
+      }
       if ("score" in data && data.score !== undefined) {
         if (typeof data.score !== "number" || !Number.isFinite(data.score)) return null;
+      }
+      if ("progression" in data && data.progression !== undefined) {
+        if (
+          !isPlainObject(data.progression) ||
+          Object.keys(data.progression).some((key) => key !== "value") ||
+          typeof data.progression.value !== "number" ||
+          !Number.isFinite(data.progression.value)
+        )
+          return null;
+      }
+      if ("metrics" in data && data.metrics !== undefined) {
+        if (
+          !isPlainObject(data.metrics) ||
+          Object.values(data.metrics).some(
+            (value) => typeof value !== "number" || !Number.isFinite(value),
+          )
+        )
+          return null;
       }
       if ("metadata" in data && data.metadata !== undefined) {
         if (!isPlainObject(data.metadata) || !isJsonSafeValue(data.metadata)) return null;
       }
       return {
         type: "GAME_COMPLETE",
+        ...(data.outcome !== undefined
+          ? {
+              outcome: data.outcome as Exclude<GameCompleteMessage["outcome"], undefined>,
+            }
+          : {}),
         ...(data.score !== undefined ? { score: data.score as number } : {}),
+        ...(data.progression !== undefined
+          ? { progression: data.progression as { value: number } }
+          : {}),
+        ...(data.metrics !== undefined ? { metrics: data.metrics as Record<string, number> } : {}),
         ...(data.metadata !== undefined
           ? { metadata: data.metadata as Record<string, unknown> }
           : {}),
+      };
+    }
+
+    case "GAME_EVENT": {
+      if (!keys.every((key) => key === "type" || key === "name" || key === "data")) return null;
+      if (typeof data.name !== "string" || !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(data.name))
+        return null;
+      if ("data" in data && data.data !== undefined && !isJsonSafeValue(data.data)) return null;
+      return {
+        type: "GAME_EVENT",
+        name: data.name,
+        ...(data.data !== undefined ? { data: data.data } : {}),
       };
     }
 

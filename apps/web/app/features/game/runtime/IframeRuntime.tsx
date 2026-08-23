@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { GameFrame } from "../GameFrame";
 import { createGameBridgeHost, type GameBridgeHost } from "./gameBridgeHost";
+import type { OwoggCompletionPayload } from "@owogg/game-sdk/contracts";
 
 export interface IframeRuntimeProps {
   src: string;
@@ -24,7 +25,8 @@ export interface IframeRuntimeProps {
   difficultyId?: string;
   onReady?: () => void;
   onStarted?: () => void;
-  onComplete?: (result: { score?: number; metadata?: Record<string, unknown> }) => void;
+  onEvent?: (name: string, data?: unknown) => void;
+  onComplete?: (result: OwoggCompletionPayload & { metadata?: Record<string, unknown> }) => void;
   onCancel?: () => void;
   onError?: (message?: string) => void;
 }
@@ -45,6 +47,7 @@ export function IframeRuntime({
   difficultyId,
   onReady,
   onStarted,
+  onEvent,
   onComplete,
   onCancel,
   onError,
@@ -78,6 +81,7 @@ export function IframeRuntime({
         {
           ...(onReady ? { onReady } : {}),
           ...(onStarted ? { onStarted } : {}),
+          ...(onEvent ? { onEvent } : {}),
           ...(onComplete ? { onComplete } : {}),
           ...(onCancel ? { onCancel } : {}),
           ...(onError ? { onError } : {}),
@@ -85,7 +89,7 @@ export function IframeRuntime({
         difficultyId ? { difficultyId } : undefined,
       );
     },
-    [closeBridge, onReady, onStarted, onComplete, onCancel, onError, difficultyId],
+    [closeBridge, onReady, onStarted, onEvent, onComplete, onCancel, onError, difficultyId],
   );
 
   return (

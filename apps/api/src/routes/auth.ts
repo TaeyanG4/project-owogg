@@ -71,15 +71,15 @@ export type ApiEnv = {
      * wrangler.jsonc entry required, same reasoning as the B2_* values above. */
     GAME_ORIGIN?: string;
     /** HMAC secret for signing/verifying Game Session tokens (packages/core/src/domain/
-     * gameSession.ts) — the generic GameHost score flow depends on it
-     * (apps/web/app/features/game/gameScoreFlow.ts). Plain `wrangler secret put
+     * gameSession.ts) — the generic GameHost result flow depends on it
+     * (apps/web/app/features/game/gameResultFlow.ts). Plain `wrangler secret put
      * GAME_SESSION_SECRET`, not a Cloudflare binding — no wrangler.jsonc entry required, same
      * reasoning as the B2_* and GAME_ORIGIN values above. Optional here at the type level so a
      * local/preview environment without it still boots (POST /api/games/:slug/session fails
      * closed with 503 rather than signing with an empty/predictable secret) — but Production is
      * NOT allowed to run without it: .github/workflows/deploy.yml lists it as a required Worker
      * secret (`secrets:` on the Deploy API Worker step), which hard-fails the deploy rather than
-     * shipping a Production Worker that would 503 on every Creator score-submission attempt. See
+     * shipping a Production Worker that would 503 on every Creator result-submission attempt. See
      * docs/PRODUCTION_INTEGRATIONS.md §5 for the operator-facing setup steps. */
     GAME_SESSION_SECRET?: string;
     GOOGLE_CLIENT_ID?: string;

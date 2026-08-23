@@ -1,13 +1,7 @@
-# ball-dodge — Game Bridge 참고 통합
+# ball-dodge — OWOGG Browser API 참고 통합
 
-이 예제는 `GameHost` → `IframeRuntime` → Game Bridge(`@owogg/game-sdk/bridge`) 경로를 수동으로
-확인하기 위한 업로드 가능한 참고 bundle입니다. 현재 USER 게임과 OWOGG 게임은 동일한 generic
-runtime을 사용하며, USER 게임은 별도의 upload → review → publication 제어 흐름을 유지합니다.
-
-Not the same artifact as
-`apps/api/test/fixtures/game-deploy-smoke-test/ball-dodge/` — that fixture is a deliberately
-SDK-free pipeline smoke test (see its own doc comment). This one exists specifically to exercise
-the Bridge end to end.
+이 예제는 `owogg.json`과 자동 주입되는 `window.OWOGG` API를 사용하는 업로드 가능한 참고
+bundle입니다. 게임 안에는 SDK, 사용자 ID, 세션 토큰, API 주소를 넣지 않습니다.
 
 ## Build
 
@@ -15,10 +9,8 @@ the Bridge end to end.
 node examples/ball-dodge/build.mjs
 ```
 
-Vendors the current `packages/game-sdk/src/bridge/{protocol,client,index}.ts` into
-`vendor/game-sdk-bridge/` (copied fresh every run, never committed — see `.gitignore`), compiles
-`main.ts` + the vendored bridge together, copies the static assets, and zips the result into
-`ball-dodge.zip` — the exact file to upload.
+`main.ts`를 컴파일하고 `owogg.json`과 정적 자산을 복사한 뒤 실제 업로드 파일인
+`ball-dodge.zip`을 만듭니다.
 
 ## Verify (optional, before uploading)
 
@@ -28,7 +20,7 @@ npx tsx examples/ball-dodge/verify-zip.mjs
 
 Runs the actual production bundle validators
 (`packages/core/src/domain/sandboxGameBundle.ts`) against the built zip, plus a check that the
-Bridge really made it into the bundle.
+Creator Manifest v1과 Browser API 호출이 bundle에 들어갔는지 확인합니다.
 
 ## Manual E2E
 
@@ -40,10 +32,9 @@ Bridge really made it into the bundle.
    flow as any other Creator game).
 4. Web app에서 `/games/ball-dodge`를 엽니다. Generic public game API가 live version을 해석하고
    `GameHost`가 `IframeRuntime`과 Bridge를 통해 bundle을 실행합니다.
-5. Click 시작 — confirm `GAME_STARTED` fires (no visible signal by itself, but nothing errors).
-6. 공이 플레이어와 충돌하게 하고, 생존 시간이 score로 표시되며 `ballsSpawned` metadata가
-   `GAME_COMPLETE`를 통해 결과 UI에 도달하는지 확인합니다. Score acceptance는 signed session과
-   server-side canonical policy를 따릅니다.
+5. 시작을 눌러 `OWOGG.start()`가 호출되는지 확인합니다.
+6. 공이 플레이어와 충돌하게 하고, 생존 시간과 `ballsSpawned` metric이
+   `OWOGG.complete()`를 통해 결과 UI와 서버 결과 수락 경로에 도달하는지 확인합니다.
 7. Click 다시 시작 — confirm the iframe fully reloads (fresh bridge handshake) and the game is
    playable again.
 8. `/games/reaction-time` 또는 다른 OWOGG 게임을 열어 동일한 `GameHost` → `IframeRuntime` → Bridge

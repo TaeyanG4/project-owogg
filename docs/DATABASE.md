@@ -2,9 +2,9 @@
 
 상태: 기준 문서
 
-마지막 검증: 2026-08-22
+마지막 검증: 2026-08-24
 
-최신 마이그레이션: `0034_unified_game_control_plane.sql`
+최신 마이그레이션: `0035_creator_manifest_results.sql`
 
 기준 소스:
 
@@ -15,7 +15,7 @@
 - `.github/workflows/deploy.yml`
 
 Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 권한 원천입니다. 이 문서는
-현재 `0000_initial_schema.sql`부터 `0034_unified_game_control_plane.sql`까지의 역할을 설명합니다.
+현재 `0000_initial_schema.sql`부터 `0035_creator_manifest_results.sql`까지의 역할을 설명합니다.
 
 ## 마이그레이션 범위
 
@@ -33,6 +33,7 @@ Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 
 | `0032`        | generic score acceptance에 필요한 relational binding                     |
 | `0033`        | generic `game_assets`, USER logo convergence                             |
 | `0034`        | USER control/review 필드의 generic authority 전환과 구 Worker 호환 미러  |
+| `0035`        | Creator Manifest v1 결과 원장, score projection, 게임별 도전과제 해금    |
 
 기존 migration은 변경, squash, 삭제하지 않습니다. 프로덕션 배포는 API보다 먼저
 `pnpm d1:migrate:prod`를 실행합니다.
@@ -83,6 +84,15 @@ Publisher-neutral bundle identity와 publication 사실을 저장합니다.
 
 게임 단위 provider-neutral 자산 메타데이터입니다. 현재 `LOGO`가 사용되며 object bytes는 B2에
 있습니다. 자산은 game 단위이고 version bundle과 분리됩니다.
+
+### `game_results`와 `user_game_achievements`
+
+`0035`부터 `owogg.json` Creator Manifest v1 계약으로 보고된 완료 사실은 `game_results`에 먼저
+기록됩니다. 서버는 live canonical 계약을 기준으로 outcome, score, progression, metrics, events를
+검증하며, 범위 정책이 `clamp`인 값은 보정 사실과 사유를 함께 남기되 보상·랭킹 대상에서는
+제외합니다. 랭킹이 활성화된 유효 score만 기존 `scores` 테이블에 `result_id`로 연결된 projection을
+생성합니다. `user_game_achievements`는 이 결과 원장을 기반으로 게임별 manifest achievement를
+멱등 해금합니다.
 
 ## USER 제어 영역과 호환 테이블
 

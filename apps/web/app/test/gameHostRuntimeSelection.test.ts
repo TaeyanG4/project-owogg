@@ -79,8 +79,15 @@ test("buildGameResultFromBridgeComplete: forwards score and metadata unchanged, 
   assert.deepEqual(result.metadata, { rounds, tier: "lightning" });
 });
 
-test("buildGameResultFromBridgeComplete: a completion with no score is not forwarded (nothing for score submission/local-best to do)", () => {
-  assert.equal(buildGameResultFromBridgeComplete({}, { slug: "x", sessionId: "y" }), null);
+test("buildGameResultFromBridgeComplete forwards an unscored outcome completion", () => {
+  const result = buildGameResultFromBridgeComplete(
+    { outcome: "success", progression: { value: 2 }, metrics: { clears: 1 } },
+    { slug: "x", sessionId: "y" },
+  );
+  assert.equal(result.score, undefined);
+  assert.equal(result.outcome, "success");
+  assert.deepEqual(result.progression, { value: 2 });
+  assert.deepEqual(result.metrics, { clears: 1 });
 });
 
 test("buildGameResultFromBridgeComplete: metadata is omitted entirely (not set to undefined) when the bridge sent none", () => {

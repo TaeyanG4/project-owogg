@@ -113,7 +113,7 @@ test("GET /api/dev/me reports hasAccess=true for an ACTIVE game_creator_access r
   assert.equal(body.hasAccess, true);
 });
 
-test("POST /api/dev/games is rejected for a non-developer with FORBIDDEN, not a crash", async () => {
+test("removed manual POST /api/dev/games catalog endpoint stays unavailable", async () => {
   const { db } = createDb({ userId: 7, isDeveloper: false });
   const res = await app.request(
     "/api/dev/games",
@@ -128,7 +128,7 @@ test("POST /api/dev/games is rejected for a non-developer with FORBIDDEN, not a 
     },
     { DB: db, ADMIN_USER_IDS: "1", FRONTEND_URL: "http://localhost:5173" } as any,
   );
-  assert.equal(res.status, 403);
+  assert.equal(res.status, 404);
 });
 
 test("POST /api/dev/games/:id/versions returns 503 GAME_BUNDLES_NOT_CONFIGURED when B2 config is absent", async () => {
@@ -482,52 +482,7 @@ function createDevGamesDb(options: { existingGames?: Array<{ slug: string; revie
   };
 }
 
-test("POST /api/dev/games succeeds and reports the claimed review slot", async () => {
-  const { db } = createDevGamesDb({});
-  const res = await app.request(
-    "/api/dev/games",
-    {
-      method: "POST",
-      headers: {
-        Cookie: "owogg_session=valid_session",
-        "Content-Type": "application/json",
-        Origin: "http://localhost:5173",
-      },
-      body: JSON.stringify({ slug: "my-first-game", title: "My Game", genre: "puzzle" }),
-    },
-    { DB: db, ADMIN_USER_IDS: "1", FRONTEND_URL: "http://localhost:5173" } as any,
-  );
-  assert.equal(res.status, 201);
-  const body = (await res.json()) as { reviewSlot: number | null };
-  assert.equal(body.reviewSlot, 1);
-});
-
-test("POST /api/dev/games returns 409 SUBMISSION_LIMIT_REACHED once both review slots are held", async () => {
-  const { db } = createDevGamesDb({
-    existingGames: [
-      { slug: "existing-1", reviewSlot: 1 },
-      { slug: "existing-2", reviewSlot: 2 },
-    ],
-  });
-  const res = await app.request(
-    "/api/dev/games",
-    {
-      method: "POST",
-      headers: {
-        Cookie: "owogg_session=valid_session",
-        "Content-Type": "application/json",
-        Origin: "http://localhost:5173",
-      },
-      body: JSON.stringify({ slug: "one-too-many", title: "My Game", genre: "puzzle" }),
-    },
-    { DB: db, ADMIN_USER_IDS: "1", FRONTEND_URL: "http://localhost:5173" } as any,
-  );
-  assert.equal(res.status, 409);
-  const body = (await res.json()) as { error: { code: string } };
-  assert.equal(body.error.code, "SUBMISSION_LIMIT_REACHED");
-});
-
-test("POST /api/dev/games/:id/withdraw releases the slot so a new submission can succeed", async () => {
+test("POST /api/dev/games/:id/withdraw releases the held review slot", async () => {
   const { db } = createDevGamesDb({
     existingGames: [
       { slug: "existing-1", reviewSlot: 1 },
@@ -545,21 +500,6 @@ test("POST /api/dev/games/:id/withdraw releases the slot so a new submission can
   assert.equal(withdraw.status, 200);
   const withdrawnBody = (await withdraw.json()) as { reviewSlot: number | null };
   assert.equal(withdrawnBody.reviewSlot, null);
-
-  const res = await app.request(
-    "/api/dev/games",
-    {
-      method: "POST",
-      headers: {
-        Cookie: "owogg_session=valid_session",
-        "Content-Type": "application/json",
-        Origin: "http://localhost:5173",
-      },
-      body: JSON.stringify({ slug: "now-it-fits", title: "My Game", genre: "puzzle" }),
-    },
-    { DB: db, ADMIN_USER_IDS: "1", FRONTEND_URL: "http://localhost:5173" } as any,
-  );
-  assert.equal(res.status, 201);
 });
 
 test("DELETE /api/dev/games/:id returns 401 without a session", async () => {

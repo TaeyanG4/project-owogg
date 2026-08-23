@@ -1800,7 +1800,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         limitFiles: "파일 개수 300개 이하",
         flowHeading: "제출 → 심사 → 공개",
         flowStep1:
-          "업로드: 게임 크리에이터 센터에서 owogg.game.json이 포함된 ZIP을 끌어다 놓으면 게임 등록과 업로드가 한 번에 끝납니다. 업로드 직후는 본인에게만 보입니다.",
+          "업로드: 게임 크리에이터 센터에서 owogg.json이 포함된 ZIP을 끌어다 놓으면 게임 등록과 업로드가 한 번에 끝납니다. 업로드 직후는 본인에게만 보입니다.",
         flowStep2:
           "심사: 운영팀이 실제로 플레이해보고 콘텐츠를 확인합니다. 승인되어도 자동으로 공개되지 않습니다.",
         flowStep3:
@@ -3062,7 +3062,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         limitFiles: "파일 개수 300개 이하",
         flowHeading: "제출 → 심사 → 공개",
         flowStep1:
-          "업로드: 게임 크리에이터 센터에서 owogg.game.json이 포함된 ZIP을 끌어다 놓으면 게임 등록과 업로드가 한 번에 끝납니다. 업로드 직후는 본인에게만 보입니다.",
+          "업로드: 게임 크리에이터 센터에서 owogg.json이 포함된 ZIP을 끌어다 놓으면 게임 등록과 업로드가 한 번에 끝납니다. 업로드 직후는 본인에게만 보입니다.",
         flowStep2:
           "심사: 운영팀이 실제로 플레이해보고 콘텐츠를 확인합니다. 승인되어도 자동으로 공개되지 않습니다.",
         flowStep3:
@@ -4331,7 +4331,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         limitFiles: "파일 개수 300개 이하",
         flowHeading: "제출 → 심사 → 공개",
         flowStep1:
-          "업로드: 게임 크리에이터 센터에서 owogg.game.json이 포함된 ZIP을 끌어다 놓으면 게임 등록과 업로드가 한 번에 끝납니다. 업로드 직후는 본인에게만 보입니다.",
+          "업로드: 게임 크리에이터 센터에서 owogg.json이 포함된 ZIP을 끌어다 놓으면 게임 등록과 업로드가 한 번에 끝납니다. 업로드 직후는 본인에게만 보입니다.",
         flowStep2:
           "심사: 운영팀이 실제로 플레이해보고 콘텐츠를 확인합니다. 승인되어도 자동으로 공개되지 않습니다.",
         flowStep3:
@@ -5568,7 +5568,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         limitFiles: "파일 개수 300개 이하",
         flowHeading: "제출 → 심사 → 공개",
         flowStep1:
-          "업로드: 게임 크리에이터 센터에서 owogg.game.json이 포함된 ZIP을 끌어다 놓으면 게임 등록과 업로드가 한 번에 끝납니다. 업로드 직후는 본인에게만 보입니다.",
+          "업로드: 게임 크리에이터 센터에서 owogg.json이 포함된 ZIP을 끌어다 놓으면 게임 등록과 업로드가 한 번에 끝납니다. 업로드 직후는 본인에게만 보입니다.",
         flowStep2:
           "심사: 운영팀이 실제로 플레이해보고 콘텐츠를 확인합니다. 승인되어도 자동으로 공개되지 않습니다.",
         flowStep3:

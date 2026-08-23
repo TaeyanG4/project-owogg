@@ -128,6 +128,39 @@ export function patchUserGameCanonical(
     return { ok: false, reason: "CATALOG_SHAPE_NOT_EDITABLE" };
   }
 
+  const creatorManifest = existing.creatorManifest
+    ? {
+        ...existing.creatorManifest,
+        game: {
+          ...existing.creatorManifest.game,
+          ...(input.title !== undefined ? { title: updated.title } : {}),
+          ...(input.shortDescription !== undefined
+            ? { shortDescription: updated.shortDescription ?? "" }
+            : {}),
+          ...(input.description !== undefined ? { description: updated.description ?? "" } : {}),
+          ...(input.genre !== undefined ? { genre: updated.genre } : {}),
+        },
+        result: {
+          ...existing.creatorManifest.result,
+          score:
+            score.score === null
+              ? null
+              : {
+                  unit: score.score.unit,
+                  direction: score.score.direction,
+                  ...(score.score.precision !== undefined
+                    ? { precision: score.score.precision }
+                    : {}),
+                  range: {
+                    min: score.score.min,
+                    max: score.score.max,
+                    outOfRange: score.score.outOfRange ?? "reject",
+                  },
+                },
+        },
+      }
+    : undefined;
+
   return {
     ok: true,
     document: {
@@ -151,6 +184,7 @@ export function patchUserGameCanonical(
         input.genre !== undefined && existing.catalog.type === "GENRE_MODE"
           ? { ...existing.catalog, genre: updated.genre }
           : existing.catalog,
+      ...(creatorManifest !== undefined ? { creatorManifest } : {}),
       updatedAt: updated.updatedAt,
     },
   };

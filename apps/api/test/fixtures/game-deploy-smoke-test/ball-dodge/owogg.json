@@ -1,0 +1,23 @@
+{
+  "$schema": "https://owogg.com/schemas/manifest/v1.json",
+  "schemaVersion": 1,
+  "game": {
+    "slug": "ball-dodge",
+    "title": "공 피하기",
+    "genre": "arcade",
+    "mode": "single",
+    "shortDescription": "마우스로 캐릭터를 움직여 떨어지는 공을 피하는 최소 재현 게임"
+  },
+  "input": ["keyboard", "mouse", "touch"],
+  "progression": { "type": "endless" },
+  "result": {
+    "outcome": { "values": ["failure"] },
+    "score": {
+      "unit": "seconds",
+      "direction": "desc",
+      "precision": 1,
+      "range": { "min": 0, "max": 3600, "outOfRange": "clamp" }
+    }
+  },
+  "leaderboard": { "enabled": true }
+}

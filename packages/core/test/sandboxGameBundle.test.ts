@@ -12,10 +12,13 @@ import {
   prepareBundleEntries,
   validateBundleEntryMetadata,
   SandboxBundleRejectionError,
-  extractGameRegistrationManifest,
-  GAME_REGISTRATION_MANIFEST_FILENAME,
   type PreparedBundleFile,
 } from "../src/domain/sandboxGameBundle.js";
+import {
+  CreatorManifestValidationError,
+  extractCreatorManifest,
+  OWOGG_CREATOR_MANIFEST_FILENAME,
+} from "../src/domain/creatorManifest.js";
 import { SANDBOX_GAME_POLICY } from "../src/domain/sandboxGames.js";
 
 function bytes(text: string): Uint8Array {
@@ -306,7 +309,7 @@ test("validateBundleEntryMetadata's ratio guard ignores a zero compressed size c
   );
 });
 
-// ── registration manifest ────────────────────────────────────────────────────
+// ── Creator Manifest ─────────────────────────────────────────────────────────
 
 function preparedFile(path: string, contents: unknown): PreparedBundleFile {
   return {
@@ -316,44 +319,53 @@ function preparedFile(path: string, contents: unknown): PreparedBundleFile {
   };
 }
 
-test("extractGameRegistrationManifest returns null when the file is simply absent", () => {
+test("extractCreatorManifest returns null when the file is simply absent", () => {
+  assert.equal(extractCreatorManifest([preparedFile("index.html", "<html></html>")]), null);
+});
+
+test("extractCreatorManifest does not revive the removed owogg.game.json input", () => {
   assert.equal(
-    extractGameRegistrationManifest([preparedFile("index.html", "<html></html>")]),
+    extractCreatorManifest([
+      preparedFile("owogg.game.json", {
+        slug: "legacy-game",
+        title: "Legacy Game",
+        genre: "arcade",
+        mode: "single",
+      }),
+    ]),
     null,
   );
 });
 
-test("extractGameRegistrationManifest parses a present, well-formed manifest", () => {
-  const manifest = extractGameRegistrationManifest([
+test("extractCreatorManifest parses and normalizes a valid v1 manifest", () => {
+  const manifest = extractCreatorManifest([
     preparedFile("index.html", "<html></html>"),
-    preparedFile(GAME_REGISTRATION_MANIFEST_FILENAME, {
-      slug: "ball-dodge",
-      title: "Ball Dodge",
-      genre: "arcade",
+    preparedFile(OWOGG_CREATOR_MANIFEST_FILENAME, {
+      schemaVersion: 1,
+      game: { slug: "ball-dodge", title: "Ball Dodge", genre: "arcade", mode: "single" },
+      progression: { type: "none" },
+      result: { score: null },
     }),
   ]);
-  assert.deepEqual(manifest, { slug: "ball-dodge", title: "Ball Dodge", genre: "arcade" });
+  assert.equal(manifest?.game.slug, "ball-dodge");
+  assert.equal(manifest?.schemaVersion, 1);
 });
 
-test("extractGameRegistrationManifest rejects invalid JSON as BUNDLE_MALFORMED", () => {
+test("extractCreatorManifest rejects invalid JSON", () => {
   assert.throws(
-    () =>
-      extractGameRegistrationManifest([
-        preparedFile(GAME_REGISTRATION_MANIFEST_FILENAME, "{ not json"),
-      ]),
-    (err: unknown) => err instanceof SandboxBundleRejectionError && err.code === "BUNDLE_MALFORMED",
+    () => extractCreatorManifest([preparedFile(OWOGG_CREATOR_MANIFEST_FILENAME, "{ not json")]),
+    (err: unknown) => err instanceof CreatorManifestValidationError,
   );
 });
 
-test("extractGameRegistrationManifest rejects a JSON array or primitive as BUNDLE_MALFORMED", () => {
+test("extractCreatorManifest rejects a JSON array or primitive", () => {
   for (const bad of [[1, 2, 3], "just a string", 42, null] as unknown[]) {
     assert.throws(
       () =>
-        extractGameRegistrationManifest([
-          preparedFile(GAME_REGISTRATION_MANIFEST_FILENAME, JSON.stringify(bad)),
+        extractCreatorManifest([
+          preparedFile(OWOGG_CREATOR_MANIFEST_FILENAME, JSON.stringify(bad)),
         ]),
-      (err: unknown) =>
-        err instanceof SandboxBundleRejectionError && err.code === "BUNDLE_MALFORMED",
+      (err: unknown) => err instanceof CreatorManifestValidationError,
       `expected rejection for manifest body ${JSON.stringify(bad)}`,
     );
   }

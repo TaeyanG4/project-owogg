@@ -2,11 +2,13 @@
 
 상태: 가이드
 
-마지막 검증: 2026-08-21
+마지막 검증: 2026-08-24
 
 기준 소스:
 
 - `packages/core/src/domain/sandboxGameBundle.ts`
+- `packages/core/src/domain/creatorManifest.ts`
+- `packages/core/src/domain/creatorResult.ts`
 - `packages/core/src/domain/sandboxGames.ts`
 - `packages/core/src/application/gamePublicationService.ts`
 - `packages/core/src/application/sandboxGameUseCases.ts`
@@ -40,14 +42,25 @@ D1의 서버 관리 관계만 사용하며 canonical/manifest 입력으로 판�
   준비 과정에서 그 폴더를 벗겨냅니다.
 - 파일 참조는 bundle 내부의 상대 경로를 사용해야 합니다.
 - 서버 코드, filesystem 접근, 비밀값, OwOGG cookie 직접 접근을 기대하지 않습니다.
-- 게임 결과는 `@owogg/game-sdk/bridge` 계약으로 host에 전달합니다.
-- host가 전달한 difficulty/session context를 사용하고 임의의 publisher/runtime URL을 만들지
-  않습니다.
+- 게임 결과는 자동 주입되는 `window.OWOGG` API로 host에 전달합니다.
+- 게임은 difficulty 외의 사용자/session/token/API 정보를 받거나 직접 만들지 않습니다.
 
-Bridge는 일반 RPC가 아닙니다. `HOST_INIT`, `GAME_READY`, `GAME_STARTED`, `GAME_COMPLETE`,
-`GAME_CANCEL`, `HOST_RETRY`의 제한된 메시지와 크기/shape validation을 사용합니다. 게임은 raw
-score를 완료 메시지로 보낼 수 있지만, 최종 acceptance는 서버 canonical policy와 signed
-session이 결정합니다.
+게임이 사용하는 공개 API는 네 개뿐입니다.
+
+```js
+OWOGG.start();
+OWOGG.event("boss_defeated");
+OWOGG.complete({
+  outcome: "success",
+  score: 12500,
+  progression: { value: 7 },
+  metrics: { kills: 32 },
+});
+OWOGG.cancel();
+```
+
+내부 MessageChannel handshake, ready, session token, API 요청은 Host가 처리합니다. 게임이 보낸
+모든 fact는 server canonical manifest와 signed one-use session으로 다시 검증됩니다.
 
 ## 2. OWOGG 관리자 게임 게시
 
@@ -58,10 +71,9 @@ B2에 기록한 후 D1 live version을 활성화합니다. 같은 화면의 사�
 `sandbox_games.review` 권한을 별도로 검사합니다. 배포 workflow나 `games/*` source package를 사용하지
 않습니다.
 
-ZIP에는 `index.html`, `owogg.game.json`, `owogg.logo.*`가 필요합니다. 기본 manifest는 USER와 같으며,
-관리자 업로드에 한해 `policy`, `catalog`, `presentation`, `difficulty`, `supportsReplay`를 선택적으로
-추가할 수 있습니다. 누락한 policy는 score 없음, leaderboard 없음, XP 0, 로그인 불필요로 안전하게
-설정됩니다. archive가 publisher/official 값을 넣어도 권한에는 반영되지 않습니다.
+ZIP에는 `index.html`, `owogg.json`, `owogg.logo.*`가 필요합니다. 관리자와 USER 업로드는 완전히
+동일한 Creator Manifest v1 입력을 사용합니다. publisher와 official 표시는 manifest에 선언할 수
+없으며, 관리자 endpoint만 서버에서 `OWOGG` 권한을 부여합니다.
 
 ## 3. USER bundle 등록
 
@@ -71,36 +83,41 @@ Game Creator Center의 drag-and-drop 등록은 root에 다음 파일을 요구�
 
 ```text
 index.html
-owogg.game.json
+owogg.json
 owogg.logo.png | .jpg | .jpeg | .webp | .svg
 ...game assets
 ```
 
-`owogg.game.json`의 현재 등록 shape:
+`owogg.json` 최소 shape:
 
 ```json
 {
-  "slug": "my-game",
-  "title": "My Game",
-  "genre": "arcade",
-  "shortDescription": "Short catalog description",
-  "description": "Long description",
-  "mode": "single"
+  "$schema": "https://owogg.com/schemas/manifest/v1.json",
+  "schemaVersion": 1,
+  "game": {
+    "slug": "my-game",
+    "title": "My Game",
+    "genre": "arcade",
+    "mode": "single"
+  },
+  "progression": { "type": "none" },
+  "result": { "score": null }
 }
 ```
 
-`slug`, `title`, `genre`, `mode`는 현재 validation을 통과해야 합니다. `mode`는 `single` 또는
-`multi`입니다. 정확한 길이와 형식 제한은 `SANDBOX_GAME_POLICY`가 권한 원천입니다.
+공개 schema는 `https://owogg.com/schemas/manifest/v1.json`입니다. `game`, `input`,
+`presentation`, `difficulties`, `progression`, `result`, `leaderboard`, `events`, `achievements`만
+허용하며 알 수 없는 필드는 거부합니다. range는 `min < max`, `outOfRange` 기본값은 `clamp`입니다.
 
 새 등록 endpoint는 `multipart/form-data`의 `bundle` file을 받는
-`POST /api/dev/games/upload`입니다. 과거 호환용 `POST /api/dev/games`는 남아 있지만 현재 Web UI
-등록 흐름은 ZIP drag-and-drop입니다.
+`POST /api/dev/games/upload`입니다. catalog-only 수동 등록 경로는 없으며 ZIP drag-and-drop만
+지원합니다.
 
 ### 3.2 새 버전 ZIP
 
 기존 게임 소유자는 `POST /api/dev/games/:id/versions`에 같은 `bundle` field로 새 standalone
-ZIP을 올립니다. 등록 manifest와 logo는 **새 게임 등록**에 필요한 정보입니다. version upload가
-게임 단위 logo를 자동 교체하는 흐름은 아닙니다.
+ZIP을 올립니다. 모든 버전에도 유효한 `owogg.json`이 필요하고 `game.slug`는 기존 게임과 같아야
+합니다. 새 logo가 포함되면 교체하고, 없으면 기존 logo를 유지합니다.
 
 ### 3.3 현재 bundle 안전 제한
 
@@ -180,9 +197,9 @@ GET /play/:slug
 `/official-games/*`는 404가 의도된 제거 경로입니다.
 
 Web의 `GameHost`는 publisher를 보고 다른 host를 고르지 않습니다. public game/session을 가져오고
-`IframeRuntime`을 구성하며 Bridge 완료를 score submission과 결과 UI에 연결합니다.
+`IframeRuntime`을 구성하며 `window.OWOGG` fact를 result submission과 결과 UI에 연결합니다.
 
-## 6. 점수 승인
+## 6. 결과 승인
 
 게임 시작 전 API가 exact slug/live version/difficulty에 묶인 signed one-use session을 발급합니다.
 완료 후 server는 다음을 다시 검증합니다.
@@ -191,14 +208,16 @@ Web의 `GameHost`는 publisher를 보고 다른 host를 고르지 않습니다. 
 - game와 version binding
 - difficulty binding
 - 현재 live/READY/public/kill-switch 상태
-- B2 canonical score policy와 score shape/range
+- B2 canonical `owogg.json`의 outcome/score/progression/metric/event 선언과 range
 
-Bridge 결과나 client manifest만으로 랭킹 점수를 승인하지 않습니다.
+`outOfRange: "reject"` 값은 결과 전체를 거부합니다. `clamp` 값은 보정해 `game_results`에
+`adjusted=true`로 저장하지만 leaderboard, Creator achievement, XP/보상에서는 제외합니다.
+정상 score만 `scores`에 투영되며 leaderboard는 이 서버 승인 점수만 읽습니다.
 
 ## 7. 제출 전 점검
 
 - standalone build를 로컬 static server에서 열었을 때 `index.html`과 모든 상대 asset이 동작함
-- Bridge가 ready/start/complete/cancel을 계약에 맞게 보냄
+- `OWOGG.start/event/complete/cancel`을 선언된 fact와 일치하게 호출함
 - retry에서 상태가 정상 초기화됨
 - difficulty가 host 초기값과 일치함
 - ZIP root와 필수 등록 파일이 올바름

@@ -2,7 +2,7 @@
 
 상태: 기준 문서
 
-마지막 검증: 2026-08-23
+마지막 검증: 2026-08-24
 
 기준 소스:
 
@@ -18,6 +18,7 @@
 - `packages/db/migrations/0032_generic_score_acceptance.sql`
 - `packages/db/migrations/0033_generic_game_assets.sql`
 - `packages/db/migrations/0034_unified_game_control_plane.sql`
+- `packages/db/migrations/0035_creator_manifest_results.sql`
 
 이 문서는 현재 production의 게임 identity, publication, runtime, score 경계를 설명합니다. USER와
 OWOGG는 같은 runtime/storage 모델을 사용하지만 authorization과 publication control plane은 서로
@@ -38,7 +39,7 @@ OwOGG Game Platform
 ├─ RuntimeGameRegistry
 ├─ /play/:slug → /games/<gameId>/<versionId>/index.html
 ├─ GameHost → IframeRuntime → Bridge → game code
-└─ signed, one-use Game Session → generic score acceptance
+└─ signed, one-use Game Session → manifest 기반 generic result acceptance
 ```
 
 ## 공통 플랫폼
@@ -49,14 +50,16 @@ OwOGG Game Platform
   target은 불변 tuple `(gameId, versionId, contentHash)`입니다.
 - `game_assets`는 provider-neutral 게임 단위 asset metadata를 소유합니다. Bundle bytes는 B2에서
   불변이며 version 범위로 유지됩니다.
-- `GameCanonicalDocument` v2는 title, description, policy, presentation, difficulty, catalog와 public
-  `publisher.official` 표시 메타데이터를 소유합니다. 소유권/인가, live-version 상태, 환경 URL,
-  secret은 소유하지 않습니다. USER 경로는 항상 `official: false`, 인증·인가된 관리자 업로드만
-  `official: true`를 기록합니다.
+- `GameCanonicalDocument` v3는 root `owogg.json` Creator Manifest v1의 실행 계약과 title,
+  description, policy, presentation, difficulty, catalog, public `publisher.official` 표시 메타데이터를
+  소유합니다. 소유권/인가, live-version 상태, 환경 URL, secret은 소유하지 않습니다. USER 경로는
+  항상 `official: false`, 인증·인가된 관리자 업로드만 `official: true`를 기록합니다.
 - `GamePublicationService`는 유일한 file/manifest publication loop입니다. manifest를 마지막에 쓰고,
   검증한 동일 publication target에만 READY를 표시합니다.
-- `RuntimeGameRegistry`, `GameHost`, `IframeRuntime`, Bridge, signed Game Session, generic score
-  acceptance는 publisher-neutral production 경로입니다.
+- `RuntimeGameRegistry`, `GameHost`, `IframeRuntime`, `window.OWOGG` Bridge, signed Game Session,
+  generic result acceptance는 publisher-neutral production 경로입니다. 결과 원장은 score가 없는
+  outcome/progression/metrics 완료도 저장하고, leaderboard가 선언된 유효 score만 `scores` projection을
+  생성합니다.
 
 ## USER 제어 영역
 
@@ -78,7 +81,7 @@ B2 canonical/bundle을 만들고 READY version을 live로 활성화합니다. �
 재사용하며 archive는 OWOGG authority를 스스로 선언할 수 없습니다. Git deploy는 게임 bytes를 만들거나
 live pointer를 변경하지 않으므로 관리자 게시 결과가 다음 코드 배포에 되돌아가지 않습니다.
 
-Git 기반 game registry와 생성 metadata는 제거되었습니다. public catalog, serving, score acceptance,
+Git 기반 game registry와 생성 metadata는 제거되었습니다. public catalog, serving, result acceptance,
 official badge와 publisher name은 모두 환경별 D1/B2에서 해석합니다.
 
 ## 알려진 확장성 부채

@@ -271,7 +271,7 @@ test("legacy schema v1 normalizes fail-safe to non-official", () => {
   assert.deepEqual(parsed.publisher, { official: false });
 });
 
-test("schema v2 requires a strict publisher metadata object", () => {
+test("current schema requires a strict publisher metadata object", () => {
   const missing = JSON.parse(serializeGameCanonicalDocument(genreModeDoc()));
   delete missing.publisher;
   assert.throws(
@@ -283,6 +283,21 @@ test("schema v2 requires a strict publisher metadata object", () => {
   unknown.publisher.displayName = "OwOGG";
   assert.throws(
     () => parseGameCanonicalDocument(JSON.stringify(unknown), "my-game"),
+    (err: unknown) => err instanceof GameCanonicalDocumentError && err.code === "INVALID_DOCUMENT",
+  );
+});
+
+test("legacy canonical schemas cannot claim a Creator Manifest v1 contract", () => {
+  const raw = JSON.parse(serializeGameCanonicalDocument(genreModeDoc()));
+  raw.schemaVersion = 2;
+  raw.creatorManifest = {
+    schemaVersion: 1,
+    game: { slug: "my-game", title: "My Game", genre: "puzzle", mode: "single" },
+    progression: { type: "none" },
+    result: { score: null },
+  };
+  assert.throws(
+    () => parseGameCanonicalDocument(JSON.stringify(raw), "my-game"),
     (err: unknown) => err instanceof GameCanonicalDocumentError && err.code === "INVALID_DOCUMENT",
   );
 });

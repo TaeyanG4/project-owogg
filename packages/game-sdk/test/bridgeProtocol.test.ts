@@ -66,14 +66,40 @@ test("isHostInitMessage still rejects an unrelated extra field alongside a valid
   assert.equal(isHostInitMessage({ type: "HOST_INIT", difficultyId: "hard", sneaky: true }), false);
 });
 
-// ── parseGameToHostMessage: the five well-formed shapes ──────────────────────
+// ── parseGameToHostMessage: the well-formed shapes ───────────────────────────
 
-test("parseGameToHostMessage accepts each of the five game->host message types", () => {
+test("parseGameToHostMessage accepts each game->host message type", () => {
   assert.deepEqual(parseGameToHostMessage({ type: "GAME_READY" }), { type: "GAME_READY" });
   assert.deepEqual(parseGameToHostMessage({ type: "GAME_STARTED" }), { type: "GAME_STARTED" });
   assert.deepEqual(parseGameToHostMessage({ type: "GAME_CANCEL" }), { type: "GAME_CANCEL" });
   assert.deepEqual(parseGameToHostMessage({ type: "GAME_COMPLETE" }), { type: "GAME_COMPLETE" });
+  assert.deepEqual(parseGameToHostMessage({ type: "GAME_EVENT", name: "boss_defeated" }), {
+    type: "GAME_EVENT",
+    name: "boss_defeated",
+  });
   assert.deepEqual(parseGameToHostMessage({ type: "GAME_ERROR" }), { type: "GAME_ERROR" });
+});
+
+test("GAME_COMPLETE accepts Creator v1 outcome/progression/metrics facts", () => {
+  assert.deepEqual(
+    parseGameToHostMessage({
+      type: "GAME_COMPLETE",
+      outcome: "success",
+      progression: { value: 7 },
+      metrics: { kills: 3 },
+    }),
+    {
+      type: "GAME_COMPLETE",
+      outcome: "success",
+      progression: { value: 7 },
+      metrics: { kills: 3 },
+    },
+  );
+});
+
+test("GAME_EVENT rejects invalid fact names and non-JSON-safe data", () => {
+  assert.equal(parseGameToHostMessage({ type: "GAME_EVENT", name: "bad event" }), null);
+  assert.equal(parseGameToHostMessage({ type: "GAME_EVENT", name: "boss", data: new Map() }), null);
 });
 
 test("GAME_COMPLETE accepts optional score and metadata, exactly as declared", () => {

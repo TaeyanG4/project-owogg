@@ -5,7 +5,6 @@ import {
   GameCreatorMeResponseSchema,
   GameCreatorApplyRequestSchema,
   GameCreatorApplicationRecordSchema,
-  SandboxGameCreateRequestSchema,
   SandboxGameListResponseSchema,
   SandboxGameDetailResponseSchema,
   SandboxGameRecordSchema,
@@ -211,52 +210,8 @@ devGamesRouter.get("/games", async (c) => {
   );
 });
 
-// POST /api/dev/games — create a new catalog entry (no bundle yet). Dead from the UI's own
-// perspective since 2026-08-18 (the manual registration form was removed from the Game Creator
-// Center in favor of drag-and-drop — see docs/GAME_CREATION_GUIDE.md §3.6.2), kept only so this
-// endpoint doesn't hard-break for any external caller that already knows about it. Hardcodes
-// mode: "single" (no logo) since this path has no way to collect either from a caller.
-devGamesRouter.post("/games", async (c) => {
-  const session = await resolveDevSession(c);
-  if (!session) {
-    return c.json({ error: { code: "UNAUTHORIZED", message: "로그인이 필요합니다." } }, 401);
-  }
-  if (!session.hasGameCreatorAccess) {
-    return c.json(
-      { error: { code: "FORBIDDEN", message: "게임 크리에이터 권한이 있는 사용자만 가능합니다." } },
-      403,
-    );
-  }
-
-  const body = await c.req.json().catch(() => ({}));
-  const parsed = SandboxGameCreateRequestSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json(
-      { error: { code: "INVALID_REQUEST", message: "slug, title, genre가 필요합니다." } },
-      400,
-    );
-  }
-
-  try {
-    const { sandboxGameUseCases } = createContainer(c.env.DB);
-    const game = await sandboxGameUseCases.createGame({
-      slug: parsed.data.slug,
-      developerUserId: session.userId,
-      title: parsed.data.title,
-      shortDescription: parsed.data.shortDescription ?? null,
-      description: parsed.data.description ?? null,
-      genre: parsed.data.genre,
-      mode: "single",
-    });
-    return c.json(SandboxGameRecordSchema.parse(toSandboxGameRecordResponse(game)), 201);
-  } catch (err) {
-    const { body: errBody, status } = failureResponse(err);
-    return c.json(errBody, status);
-  }
-});
-
 // POST /api/dev/games/upload — drag-and-drop registration: a single ZIP whose root contains
-// owogg.game.json (slug/title/genre) creates the game *and* its first version in one call,
+// Creator Manifest v1 owogg.json creates the game and its first version in one call,
 // instead of the manual "fill in a form, then separately upload" two-step flow. Multipart, field
 // name "bundle" — same shape as /games/:id/versions. Rate limited on the same binding for the same
 // reason (real B2 writes + decompression CPU per call).

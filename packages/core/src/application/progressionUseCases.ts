@@ -31,11 +31,12 @@ export class ProgressionUseCases {
     /** Resolved from the generic canonical policy by the score acceptance caller. The default is
      * retained only for older internal callers/tests; generic runtime routes always provide it. */
     xpPerCompletion?: number;
+    sourceType?: "score" | "result";
   }): Promise<RecordCompletionResult> {
     const outcome = await this.repo.recordGameCompletion({
       userId: input.userId,
       gameId: input.gameId,
-      sourceType: "score",
+      sourceType: input.sourceType ?? "score",
       sourceId: input.sourceId,
       xpPerCompletion: input.xpPerCompletion ?? XP_PER_ACCEPTED_COMPLETION,
       dailyCapPerGame: XP_DAILY_CAP_COMPLETIONS_PER_GAME,

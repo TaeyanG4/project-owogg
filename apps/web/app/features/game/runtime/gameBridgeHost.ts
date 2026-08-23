@@ -1,4 +1,5 @@
 import { parseGameToHostMessage } from "@owogg/game-sdk/bridge";
+import type { OwoggCompletionPayload } from "@owogg/game-sdk/contracts";
 
 /** The minimal subset of the iframe's `contentWindow` this file touches — lets a test supply a
  * fake without a DOM/real iframe. Real callers pass `iframe.contentWindow` (a genuine `Window`,
@@ -13,7 +14,8 @@ export interface GameBridgeHostCallbacks {
   /** Fires at most once per bridge — a second GAME_COMPLETE is dropped before this is called
    * again. See createGameBridgeHost's doc comment for why that has to be enforced here, not just
    * trusted from the game side. */
-  onComplete?: (result: { score?: number; metadata?: Record<string, unknown> }) => void;
+  onEvent?: (name: string, data?: unknown) => void;
+  onComplete?: (result: OwoggCompletionPayload & { metadata?: Record<string, unknown> }) => void;
   onCancel?: () => void;
   onError?: (message?: string) => void;
 }
@@ -75,11 +77,17 @@ export function createGameBridgeHost(
       case "GAME_STARTED":
         callbacks.onStarted?.();
         return;
+      case "GAME_EVENT":
+        callbacks.onEvent?.(message.name, message.data);
+        return;
       case "GAME_COMPLETE":
         if (completed) return;
         completed = true;
         callbacks.onComplete?.({
+          ...(message.outcome !== undefined ? { outcome: message.outcome } : {}),
           ...(message.score !== undefined ? { score: message.score } : {}),
+          ...(message.progression !== undefined ? { progression: message.progression } : {}),
+          ...(message.metrics !== undefined ? { metrics: message.metrics } : {}),
           ...(message.metadata !== undefined ? { metadata: message.metadata } : {}),
         });
         return;

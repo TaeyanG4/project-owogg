@@ -6,7 +6,7 @@
 export const SANDBOX_GAME_VISIBILITIES = ["PRIVATE", "PUBLIC"] as const;
 export type SandboxGameVisibility = (typeof SANDBOX_GAME_VISIBILITIES)[number];
 
-/** Player-count shape declared by the creator in owogg.game.json's `mode` field. The generic
+/** Player-count shape declared by the creator in owogg.json's `game.mode` field. The generic
  * canonical `GENRE_MODE` catalog preserves this coarse `"single" | "multi"` source fact rather
  * than inventing the built-in taxonomy's richer `"local-multi" | "online-multi"` distinction. */
 export const SANDBOX_GAME_MODES = ["single", "multi"] as const;

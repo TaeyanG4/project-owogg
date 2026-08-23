@@ -35,6 +35,7 @@ export const SANDBOX_GAME_FAILURE_STATUS: Record<
   SUBMISSION_LIMIT_REACHED: 409,
   NOTHING_TO_WITHDRAW: 409,
   MANIFEST_MISSING: 422,
+  MANIFEST_INVALID: 422,
   INVALID_GENRE: 400,
   ALREADY_DELETED: 409,
   CANNOT_DELETE_APPROVED_GAME: 409,
@@ -79,7 +80,9 @@ export const SANDBOX_GAME_FAILURE_MESSAGE: Record<SandboxGameUseCaseFailure["cod
     "현재 심사 중인 게임이 2개입니다. 기존 게임의 심사가 완료되거나 제출을 철회한 뒤 다시 시도해주세요.",
   NOTHING_TO_WITHDRAW: "철회할 심사 중인 제출이 없습니다.",
   MANIFEST_MISSING:
-    "ZIP 최상위에 owogg.game.json이 없습니다. 자동 등록하려면 slug/title/genre가 담긴 이 파일을 포함하세요.",
+    "ZIP 최상위에 owogg.json이 없습니다. 모든 등록 및 버전 업로드에 Creator Manifest v1 파일을 포함하세요.",
+  MANIFEST_INVALID:
+    "owogg.json이 Creator Manifest v1 규격에 맞지 않거나 기존 게임의 slug와 일치하지 않습니다.",
   INVALID_GENRE: "genre는 비어 있지 않은 문자열이어야 합니다.",
   ALREADY_DELETED: "이미 삭제된 게임입니다.",
   CANNOT_DELETE_APPROVED_GAME:
@@ -87,7 +90,7 @@ export const SANDBOX_GAME_FAILURE_MESSAGE: Record<SandboxGameUseCaseFailure["cod
   CANNOT_PURGE_APPROVED_GAME:
     "승인 이력이 있는 게임은 과거 기록 보호를 위해 슬러그를 영구 보존해야 하므로 완전 삭제할 수 없습니다.",
   REVOKE_REQUIRES_APPROVED: "승인된 버전만 철회할 수 있습니다.",
-  INVALID_MODE: 'owogg.game.json의 mode는 "single" 또는 "multi"여야 합니다.',
+  INVALID_MODE: 'mode는 "single" 또는 "multi"여야 합니다.',
   LOGO_REQUIRED:
     "ZIP 최상위에 로고 이미지(owogg.logo.png/jpg/jpeg/webp/svg 중 하나)가 없습니다. 게임 등록에는 로고가 필요합니다.",
   LOGO_TOO_LARGE: "로고 이미지 용량이 최대 허용치를 초과했습니다.",

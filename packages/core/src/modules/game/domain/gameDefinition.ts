@@ -33,7 +33,7 @@ import type { SandboxGameMode } from "../../../domain/sandboxGames.js";
 /**
  * The half a game's author does NOT get to decide.
  *
- * A creator's `owogg.game.json` is a *submission manifest* — a request ("register me with this
+ * A creator's `owogg.json` is a validated public runtime contract — registration metadata and
  * title and genre"), not policy. Scoring bounds, leaderboard participation, XP and auth
  * requirements are operator decisions, because each of them is directly farmable: XP in particular
  * is capped per game (progression.ts's XP_DAILY_CAP_COMPLETIONS_PER_GAME), so a self-declared
