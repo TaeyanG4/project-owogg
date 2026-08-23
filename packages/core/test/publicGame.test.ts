@@ -75,7 +75,7 @@ test("the public official badge follows canonical metadata, never the D1 owner d
   assert.equal(toPublicGame(systemOwnedNonOfficialMetadata, null).publisherType, "USER");
 });
 
-test("a D1 logo asset overrides compatibility taxonomy artwork for every publisher", () => {
+test("a D1/B2 logo asset is the only public artwork source for every publisher", () => {
   const asset: GameAsset = {
     gameId: identity.id,
     kind: "LOGO",
@@ -83,35 +83,16 @@ test("a D1 logo asset overrides compatibility taxonomy artwork for every publish
     updatedAt: "2026-08-01T00:00:00.000Z",
   };
   assert.equal(
-    publicGameMediaUrl(runtime, asset, "https://api.example.test/media/logo"),
+    publicGameMediaUrl(asset, "https://api.example.test/media/logo"),
     "https://api.example.test/media/logo",
   );
 });
 
-test("a taxonomy game without a D1 logo keeps its canonical compatibility thumbnail", () => {
-  assert.equal(
-    publicGameMediaUrl(runtime, null, "https://api.example.test/media/logo"),
-    runtime.canonical.catalog.type === "TAXONOMY" ? runtime.canonical.catalog.thumbnail : null,
-  );
+test("a taxonomy game without a D1/B2 logo does not fall back to a removed Git path", () => {
+  assert.equal(publicGameMediaUrl(null, "https://api.example.test/media/logo"), null);
 });
 
 test("GENRE_MODE games use the provider-neutral media endpoint only when a logo asset exists", () => {
-  const genreRuntime: RuntimeGame = {
-    ...runtime,
-    identity: {
-      ...identity,
-      id: 10,
-      slug: "ball-dodge",
-      publisher: { type: "USER", userId: 7 },
-      liveVersionId: 5,
-    },
-    liveVersion: { ...liveVersion, id: 5, gameId: 10 },
-    canonical: {
-      ...runtime.canonical,
-      slug: "ball-dodge",
-      catalog: { type: "GENRE_MODE", genre: "arcade", mode: "single" },
-    },
-  };
   const asset: GameAsset = {
     gameId: 10,
     kind: "LOGO",
@@ -119,8 +100,8 @@ test("GENRE_MODE games use the provider-neutral media endpoint only when a logo 
     updatedAt: "2026-08-01T00:00:00.000Z",
   };
   assert.equal(
-    publicGameMediaUrl(genreRuntime, asset, "/api/games/ball-dodge/media/logo"),
+    publicGameMediaUrl(asset, "/api/games/ball-dodge/media/logo"),
     "/api/games/ball-dodge/media/logo",
   );
-  assert.equal(publicGameMediaUrl(genreRuntime, null, "/api/games/ball-dodge/media/logo"), null);
+  assert.equal(publicGameMediaUrl(null, "/api/games/ball-dodge/media/logo"), null);
 });

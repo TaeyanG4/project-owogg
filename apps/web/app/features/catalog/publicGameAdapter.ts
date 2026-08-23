@@ -27,7 +27,11 @@ export function publicGameToCard(game: PublicGame): PublicGameCard {
       shortDescription: game.shortDescription,
       description: game.description,
       modes: game.catalog.modes,
-      thumbnail: game.mediaUrl ?? game.catalog.thumbnail,
+      // `catalog.thumbnail` is retained only as canonical migration metadata. Runtime artwork
+      // comes exclusively from the public D1/B2 media projection; an empty value makes the shared
+      // thumbnail component render its deterministic text/accent fallback without a doomed HTTP
+      // request to the removed Git game directory.
+      thumbnail: game.mediaUrl ?? "",
       ...(game.catalog.accent !== undefined ? { accent: game.catalog.accent } : {}),
       categories: game.catalog.categories,
       tags: game.catalog.tags,

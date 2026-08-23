@@ -87,7 +87,7 @@ async function publicGameProjection(
       `/api/games/${encodeURIComponent(runtime.identity.slug)}/media/logo`,
       c.req.url,
     ).toString();
-    return toPublicGame(runtime, publicGameMediaUrl(runtime, asset, endpoint), publisherName);
+    return toPublicGame(runtime, publicGameMediaUrl(asset, endpoint), publisherName);
   } catch {
     return null;
   }

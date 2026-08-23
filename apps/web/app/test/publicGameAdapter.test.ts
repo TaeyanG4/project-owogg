@@ -38,7 +38,7 @@ test("TAXONOMY public games preserve canonical catalog metadata in the card view
   assert.deepEqual(card.categories, ["skill"]);
   assert.deepEqual(card.tags, ["fast"]);
   assert.deepEqual(card.modes, ["single"]);
-  assert.equal(card.thumbnail, "/reaction.svg");
+  assert.equal(card.thumbnail, "");
   assert.equal(card.catalogType, "TAXONOMY");
 });
 

@@ -46,13 +46,12 @@ export function toPublicGame(
   };
 }
 
-/** Resolve the public media projection without leaking a storage key. A D1 logo asset always wins;
- * older TAXONOMY compatibility metadata remains a fallback until an admin uploads a logo. */
-export function publicGameMediaUrl(
-  runtime: RuntimeGame,
-  asset: GameAsset | null,
-  mediaEndpoint: string,
-): string | null {
+/** Resolve the public media projection without leaking a storage key.
+ *
+ * Canonical TAXONOMY thumbnail paths came from the removed Git game packages and are descriptive
+ * migration metadata, not a runtime asset authority. Only a D1 asset row backed by B2 may produce
+ * a public media URL; otherwise callers render their neutral no-image fallback. */
+export function publicGameMediaUrl(asset: GameAsset | null, mediaEndpoint: string): string | null {
   if (asset?.kind === "LOGO") return mediaEndpoint;
-  return runtime.canonical.catalog.type === "TAXONOMY" ? runtime.canonical.catalog.thumbnail : null;
+  return null;
 }

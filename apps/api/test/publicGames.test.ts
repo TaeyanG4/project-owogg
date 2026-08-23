@@ -245,6 +245,7 @@ test("GET /api/games lists generic OWOGG and USER projections and preserves cata
   const user = body.games.find((game) => game.slug === USER.slug);
   assert.equal(official?.publisherType, "OWOGG");
   assert.equal(official?.publisherName, "OWOGG");
+  assert.equal(official?.mediaUrl, null);
   assert.equal(user?.publisherType, "USER");
   assert.equal(user?.publisherName, "Taeyang");
   assert.equal(official?.catalog.type, "TAXONOMY");
