@@ -5,9 +5,15 @@ import {
   ArrowRight,
   CheckCircle2,
   Clock3,
+  CloudCog,
+  Database,
   ExternalLink,
+  Github,
+  HardDrive,
+  KeyRound,
   Loader2,
   LogOut,
+  MessageCircleMore,
   Server,
   ShieldAlert,
   ShieldCheck,
@@ -27,6 +33,11 @@ import type { AdminMeResponse, AdminOverviewResponse, PermissionValue } from "@o
 import { ApiClientError } from "../lib/api/errors";
 import { useAuth } from "../features/auth";
 import { getVisibleAdminNavigation } from "../components/admin/adminNavigation";
+import {
+  ADMIN_RESOURCE_LINKS,
+  resolveAdminDataTargets,
+  type AdminResourceLink,
+} from "../features/adminResourceLinks";
 
 export function meta() {
   return [
@@ -696,6 +707,9 @@ function AdminDashboard({
     .filter((group) => group.id === "operations" || group.id === "people" || group.id === "system")
     .flatMap((group) => group.items)
     .filter((item) => item.id !== "security");
+  const dataTargets = resolveAdminDataTargets(
+    typeof window === "undefined" ? "" : window.location.hostname,
+  );
 
   const handleLogout = async () => {
     if (loggingOut) return;
@@ -765,6 +779,53 @@ function AdminDashboard({
               </Link>
             ))}
           </div>
+        </section>
+      )}
+
+      {can("system.monitor") && (
+        <section aria-labelledby="admin-resource-links">
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 id="admin-resource-links" className="text-sm font-black text-text-primary">
+                운영 리소스 바로가기
+              </h2>
+              <p className="mt-1 text-xs text-text-muted">
+                데이터 검색과 외부 서비스 운영 콘솔을 새 창에서 엽니다.
+              </p>
+            </div>
+            <span
+              className={`rounded-full border px-3 py-1.5 text-[10px] font-black ${
+                dataTargets.environment === "production"
+                  ? "border-accent-red/30 bg-accent-red/10 text-accent-red"
+                  : dataTargets.environment === "staging"
+                    ? "border-accent-yellow/30 bg-accent-yellow/10 text-accent-yellow"
+                    : "border-border bg-surface text-text-muted"
+              }`}
+            >
+              현재 환경 · {dataTargets.environmentLabel}
+            </span>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {ADMIN_RESOURCE_LINKS.map((item) => (
+              <AdminResourceCard
+                key={item.id}
+                item={item}
+                targetName={
+                  item.id === "d1"
+                    ? dataTargets.d1Database
+                    : item.id === "b2"
+                      ? dataTargets.b2Bucket
+                      : null
+                }
+              />
+            ))}
+          </div>
+          <p className="mt-3 text-[11px] leading-relaxed text-text-muted">
+            D1과 B2에서는 위 환경 이름과 일치하는 대상을 선택하세요. 외부 콘솔의 계정 권한이 최종
+            접근을 통제하며, 관리자 센터는 계정 ID·접근 키·비밀값을 전달하거나 노출하지 않습니다.
+            직접 수정·삭제하면 앱의 감사 기록과 D1/B2 일관성을 우회할 수 있으므로 콘솔은 조회·검색에
+            사용하고 운영 변경은 관리자 기능에서 처리하세요.
+          </p>
         </section>
       )}
 
@@ -954,6 +1015,54 @@ function AdminDashboard({
         </section>
       )}
     </div>
+  );
+}
+
+const ADMIN_RESOURCE_ICONS: Record<AdminResourceLink["id"], React.ReactNode> = {
+  d1: <Database className="h-5 w-5" />,
+  b2: <HardDrive className="h-5 w-5" />,
+  workers: <CloudCog className="h-5 w-5" />,
+  actions: <Github className="h-5 w-5" />,
+  access: <KeyRound className="h-5 w-5" />,
+  discord: <MessageCircleMore className="h-5 w-5" />,
+};
+
+function AdminResourceCard({
+  item,
+  targetName,
+}: {
+  item: AdminResourceLink;
+  targetName: string | null;
+}) {
+  return (
+    <a
+      href={item.href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="group flex min-h-36 flex-col justify-between rounded-2xl border border-border bg-surface-raised p-4 transition-colors hover:border-brand/60 hover:bg-brand/5 focus:outline-none focus:ring-2 focus:ring-brand"
+      aria-label={`${item.label} 새 창에서 열기`}
+    >
+      <span>
+        <span className="flex items-start justify-between gap-3">
+          <span className="inline-flex rounded-xl bg-brand/10 p-2.5 text-brand-light">
+            {ADMIN_RESOURCE_ICONS[item.id]}
+          </span>
+          <ExternalLink className="h-4 w-4 shrink-0 text-text-muted transition-colors group-hover:text-brand-light" />
+        </span>
+        <span className="mt-4 block text-[10px] font-black uppercase tracking-[0.12em] text-text-muted">
+          {item.provider}
+        </span>
+        <span className="mt-1 block text-sm font-black text-text-primary">{item.label}</span>
+        <span className="mt-1.5 block text-xs leading-relaxed text-text-muted">
+          {item.description}
+        </span>
+      </span>
+      {targetName && (
+        <span className="mt-3 block truncate rounded-lg bg-surface px-2.5 py-2 font-mono text-[10px] font-bold text-brand-light">
+          대상 · {targetName}
+        </span>
+      )}
+    </a>
   );
 }
 
