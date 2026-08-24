@@ -142,6 +142,16 @@ export function AdminWorkspace({
 
   const navigation = (
     <div className="flex h-full min-h-0 flex-col">
+      <div className="border-b border-border/80 p-3">
+        <Link
+          to="/"
+          onClick={onMobileClose}
+          className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-xs font-bold text-text-muted transition-colors hover:bg-surface-raised hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-brand"
+        >
+          <ArrowLeft className="h-4 w-4" /> 서비스로 돌아가기
+        </Link>
+      </div>
+
       <div className="border-b border-border/80 px-4 py-4">
         <Link
           to="/admin"
@@ -217,16 +227,6 @@ export function AdminWorkspace({
           </div>
         )}
       </nav>
-
-      <div className="border-t border-border/80 p-3">
-        <Link
-          to="/"
-          onClick={onMobileClose}
-          className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-xs font-bold text-text-muted transition-colors hover:bg-surface-raised hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-brand"
-        >
-          <ArrowLeft className="h-4 w-4" /> 서비스로 돌아가기
-        </Link>
-      </div>
     </div>
   );
 

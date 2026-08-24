@@ -73,3 +73,19 @@ test("admin routes keep the service sidebar and use a separate mobile admin draw
   assert.match(layout, /isMobileAdminSidebarOpen/);
   assert.match(workspace, /aria-label="관리자 메뉴 열기"/);
 });
+
+test("admin workspace places the service return link at the top of its navigation", () => {
+  const workspace = readFileSync(
+    fileURLToPath(new URL("../components/admin/AdminWorkspace.tsx", import.meta.url)),
+    "utf8",
+  );
+
+  const navigationIndex = workspace.indexOf("const navigation = (");
+  const returnLinkIndex = workspace.indexOf("서비스로 돌아가기", navigationIndex);
+  const workspaceHeaderIndex = workspace.indexOf("관리자 워크스페이스", navigationIndex);
+  const adminNavIndex = workspace.indexOf('aria-label="관리자 메뉴"', navigationIndex);
+
+  assert.ok(navigationIndex > -1);
+  assert.ok(returnLinkIndex > navigationIndex && returnLinkIndex < workspaceHeaderIndex);
+  assert.ok(workspaceHeaderIndex < adminNavIndex);
+});
