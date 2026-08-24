@@ -36,8 +36,12 @@ export class D1ScoreRepository implements ScoreRepository {
 
     await this.db
       .prepare(
-        `INSERT INTO scores (user_id, nickname, avatar_url, game_id, score, difficulty, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO scores
+           (user_id, nickname, avatar_url, game_id, score, difficulty, created_at,
+            leaderboard_generation)
+         VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((
+           SELECT leaderboard_generation FROM games WHERE slug = ? AND deleted_at IS NULL
+         ), 0))`,
       )
       .bind(
         data.userId,
@@ -47,6 +51,7 @@ export class D1ScoreRepository implements ScoreRepository {
         data.score,
         data.difficulty,
         createdAt,
+        data.gameId,
       )
       .run();
 
@@ -81,7 +86,12 @@ export class D1ScoreRepository implements ScoreRepository {
       // and difficulty doesn't apply either (mixes many games, each with its own tiers).
       const res = await this.db
         .prepare(
-          `SELECT * FROM scores WHERE user_id IS NOT NULL AND deleted_at IS NULL ORDER BY created_at DESC LIMIT ?`,
+          `SELECT s.* FROM scores s
+           JOIN games g ON g.slug = s.game_id
+             AND g.deleted_at IS NULL
+             AND g.leaderboard_generation = s.leaderboard_generation
+           WHERE s.user_id IS NOT NULL AND s.deleted_at IS NULL
+           ORDER BY s.created_at DESC LIMIT ?`,
         )
         .bind(limit)
         .all<Record<string, unknown>>();
@@ -98,12 +108,16 @@ export class D1ScoreRepository implements ScoreRepository {
     // comparable (see docs/GAME_CREATION_GUIDE.md §4) and must never rank against each other.
     const query = `
       WITH ranked AS (
-        SELECT *, ROW_NUMBER() OVER (
-          PARTITION BY user_id
-          ORDER BY score ${orderClause}, created_at ASC, id ASC
+        SELECT s.*, ROW_NUMBER() OVER (
+          PARTITION BY s.user_id
+          ORDER BY s.score ${orderClause}, s.created_at ASC, s.id ASC
         ) AS rn
-        FROM scores
-        WHERE user_id IS NOT NULL AND game_id = ? AND difficulty = ? AND deleted_at IS NULL
+        FROM scores s
+        JOIN games g ON g.slug = s.game_id
+          AND g.deleted_at IS NULL
+          AND g.leaderboard_generation = s.leaderboard_generation
+        WHERE s.user_id IS NOT NULL AND s.game_id = ? AND s.difficulty = ?
+          AND s.deleted_at IS NULL
       )
       SELECT * FROM ranked
       WHERE rn = 1
@@ -122,7 +136,13 @@ export class D1ScoreRepository implements ScoreRepository {
   async getUserPersonalBests(userId: number): Promise<UserPersonalBestAggregate[]> {
     const res = await this.db
       .prepare(
-        `SELECT game_id, MIN(score) as min_score, MAX(score) as max_score FROM scores WHERE user_id = ? AND deleted_at IS NULL GROUP BY game_id`,
+        `SELECT s.game_id, MIN(s.score) as min_score, MAX(s.score) as max_score
+         FROM scores s
+         JOIN games g ON g.slug = s.game_id
+           AND g.deleted_at IS NULL
+           AND g.leaderboard_generation = s.leaderboard_generation
+         WHERE s.user_id = ? AND s.deleted_at IS NULL
+         GROUP BY s.game_id`,
       )
       .bind(userId)
       .all<{ game_id: string; min_score: number; max_score: number }>();

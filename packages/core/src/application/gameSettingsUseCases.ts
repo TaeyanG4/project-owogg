@@ -5,6 +5,7 @@ import type { GameIdentityRepository } from "../modules/game/ports/gameIdentityR
 export interface GameAvailability {
   gameId: string;
   title: string;
+  publisherType: "OWOGG" | "USER";
   /** The registry's own static status (draft/beta/published/hidden) — for context only, the
    * live `enabled` flag below is what actually gates play/scoring/catalog visibility. */
   status: string;
@@ -55,6 +56,7 @@ export class GameSettingsUseCases {
       return {
         gameId: identity.slug,
         title: canonical?.title ?? identity.slug,
+        publisherType: identity.publisher.type,
         status: identity.visibility === "PUBLIC" ? "published" : "draft",
         enabled: override ? override.enabled : true,
         disabledReason: override?.disabledReason ?? null,

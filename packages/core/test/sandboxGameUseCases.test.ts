@@ -2281,6 +2281,9 @@ test("deletePublishedVersion removes exactly the objects the manifest lists, lea
     versionId: version.id,
     contentHash: version.contentHash,
     manifestKey: repo.versions.get(version.id)?.manifestKey ?? null,
+    sourceObjectKey: version.objectKey,
+    publishStatus: version.publishStatus,
+    publishError: version.publishError,
   });
 
   assert.ok(!storage.objects.has(`games/${game.id}/${version.id}/index.html`));
@@ -2290,6 +2293,38 @@ test("deletePublishedVersion removes exactly the objects the manifest lists, lea
 
   const after: SandboxGamePublishStatus | undefined = repo.versions.get(version.id)?.publishStatus;
   assert.equal(after, "FAILED");
+});
+
+test("deletePublishedVersion falls back to the source ZIP when an interrupted publish has no manifest", async () => {
+  const { publisher, storage, repo, game, version } = await createGameWithLiveVersion();
+  const manifestKey = repo.versions.get(version.id)?.manifestKey ?? null;
+  assert.ok(manifestKey);
+  storage.objects.delete(manifestKey);
+  await repo.setVersionPublishState(version.id, {
+    publishStatus: "FAILED",
+    publishError: "interrupted before manifest commit",
+    publishedAt: null,
+    manifestKey: null,
+    publishedSizeBytes: null,
+    fileCount: null,
+  });
+
+  await publisher.deletePublishedVersion({
+    gameId: version.gameId,
+    versionId: version.id,
+    contentHash: version.contentHash,
+    manifestKey: null,
+    sourceObjectKey: version.objectKey,
+    publishStatus: "FAILED",
+    publishError: "interrupted before manifest commit",
+  });
+
+  assert.ok(!storage.objects.has(`games/${game.id}/${version.id}/index.html`));
+  assert.ok(!storage.objects.has(`games/${game.id}/${version.id}/Build/game.wasm`));
+  assert.ok(
+    storage.objects.has(version.objectKey),
+    "GC primitive leaves source lifecycle to caller",
+  );
 });
 
 // ── review-slot quota ─────────────────────────────────────────────────────────

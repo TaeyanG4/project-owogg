@@ -26,6 +26,7 @@ import type { MyAccessResponse, StaffRoleValue } from "@owogg/contracts";
 
 interface HeaderProps {
   onToggleMobileSidebar: () => void;
+  isAdminWorkspace?: boolean;
 }
 
 /** Staff Role → profile-dropdown center entry. One entry at most, since `staffRole` is a single
@@ -43,7 +44,7 @@ const STAFF_CENTER_ENTRIES: Record<
   SYSTEM_DEVELOPER: { to: "/system-dev", label: "시스템 개발", Icon: ServerCog },
 };
 
-export function Header({ onToggleMobileSidebar }: HeaderProps) {
+export function Header({ onToggleMobileSidebar, isAdminWorkspace = false }: HeaderProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [myAccess, setMyAccess] = useState<MyAccessResponse | null>(null);
@@ -139,19 +140,27 @@ export function Header({ onToggleMobileSidebar }: HeaderProps) {
         </div>
 
         {/* Center: Search Bar */}
-        <form
-          onSubmit={handleSearchSubmit}
-          className="flex-1 max-w-md hidden sm:flex items-center relative"
-        >
-          <Search className="w-4 h-4 text-text-muted absolute left-3.5 pointer-events-none" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={dict.nav.searchPlaceholder}
-            className="w-full bg-surface-raised text-text-primary placeholder:text-text-muted text-sm rounded-full pl-10 pr-4 py-2 border border-border/80 focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-all shadow-inner"
-          />
-        </form>
+        {isAdminWorkspace ? (
+          <div className="hidden flex-1 items-center sm:flex">
+            <span className="inline-flex items-center gap-2 rounded-full border border-brand/25 bg-brand/10 px-3 py-1.5 text-xs font-black text-brand-light">
+              <ShieldCheck className="h-3.5 w-3.5" /> 관리자 워크스페이스
+            </span>
+          </div>
+        ) : (
+          <form
+            onSubmit={handleSearchSubmit}
+            className="flex-1 max-w-md hidden sm:flex items-center relative"
+          >
+            <Search className="w-4 h-4 text-text-muted absolute left-3.5 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={dict.nav.searchPlaceholder}
+              className="w-full bg-surface-raised text-text-primary placeholder:text-text-muted text-sm rounded-full pl-10 pr-4 py-2 border border-border/80 focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-all shadow-inner"
+            />
+          </form>
+        )}
 
         {/* Right: Quick Actions & Auth.
             Growth rule for this row: on narrow phones (<sm), the header only ever shows the
@@ -166,28 +175,32 @@ export function Header({ onToggleMobileSidebar }: HeaderProps) {
         <div className="flex items-center gap-2.5">
           {/* Search is a full input on sm+ (above); below that there's no room for it, so this
               icon links to /games where the search input lives instead of hiding search entirely. */}
-          <Link
-            to="/games"
-            className="sm:hidden p-2.5 rounded-full text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors cursor-pointer"
-            title={dict.nav.searchPlaceholder}
-            aria-label={dict.nav.searchPlaceholder}
-          >
-            <Search className="w-5 h-5" />
-          </Link>
-
-          <div className="hidden sm:flex items-center gap-2.5">
+          {!isAdminWorkspace && (
             <Link
-              to="/games?category=favorites"
-              className="p-2.5 rounded-full text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors relative cursor-pointer"
-              title={dict.nav.favorites}
+              to="/games"
+              className="sm:hidden p-2.5 rounded-full text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors cursor-pointer"
+              title={dict.nav.searchPlaceholder}
+              aria-label={dict.nav.searchPlaceholder}
             >
-              <Bookmark className="w-5 h-5" />
+              <Search className="w-5 h-5" />
             </Link>
+          )}
 
-            <RegisteredServersMenu />
+          {!isAdminWorkspace && (
+            <div className="hidden sm:flex items-center gap-2.5">
+              <Link
+                to="/games?category=favorites"
+                className="p-2.5 rounded-full text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors relative cursor-pointer"
+                title={dict.nav.favorites}
+              >
+                <Bookmark className="w-5 h-5" />
+              </Link>
 
-            <LanguageSelector />
-          </div>
+              <RegisteredServersMenu />
+
+              <LanguageSelector />
+            </div>
+          )}
 
           {isAuthenticated && user ? (
             <div className="relative" ref={userDropdownRef}>

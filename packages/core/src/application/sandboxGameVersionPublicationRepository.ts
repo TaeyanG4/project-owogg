@@ -48,6 +48,19 @@ export class SandboxGameVersionPublicationRepository implements GameVersionPubli
     assertTarget(updated, target);
   }
 
+  async markGarbageCollected(target: GamePublicationTarget, marker: string): Promise<void> {
+    await this.requireTarget(target);
+    const updated = await this.sandboxGames.setVersionPublishState(target.versionId, {
+      publishStatus: "FAILED",
+      publishError: marker,
+      publishedAt: null,
+      manifestKey: null,
+      publishedSizeBytes: null,
+      fileCount: null,
+    });
+    assertTarget(updated, target);
+  }
+
   private async requireTarget(target: GamePublicationTarget): Promise<void> {
     const version = await this.sandboxGames.findVersionById(target.versionId);
     if (!version) throw new Error(`Game publication version ${target.versionId} does not exist`);

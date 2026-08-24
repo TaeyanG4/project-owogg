@@ -150,3 +150,32 @@ test("pagination limit is applied to the deduplicated PB set, not raw rows", asy
   assert.equal(leaderboard.length, 3);
   assert.equal(new Set(leaderboard.map((r) => r.user_id)).size, 3);
 });
+
+test("a live-version generation change resets leaderboard and personal bests without deleting history", async () => {
+  const { db, raw } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);
+  const user = seedUser(raw, "player");
+  seedScore(raw, user, "versioned-game", 999);
+  raw.prepare("UPDATE games SET leaderboard_generation = 1 WHERE slug = 'versioned-game'").run();
+  raw
+    .prepare(
+      `INSERT INTO scores
+         (user_id, nickname, game_id, score, created_at, leaderboard_generation)
+       VALUES (?, 'p', 'versioned-game', 10, ?, 1)`,
+    )
+    .run(user, new Date().toISOString());
+
+  const repo = new D1ScoreRepository(db);
+  const leaderboard = await repo.getLeaderboard("versioned-game", 20, "desc");
+  assert.deepEqual(
+    leaderboard.map((row) => row.score),
+    [10],
+  );
+  const bests = await repo.getUserPersonalBests(user);
+  assert.deepEqual(bests, [{ game_id: "versioned-game", min_score: 10, max_score: 10 }]);
+  assert.equal(
+    raw.prepare("SELECT COUNT(*) AS count FROM scores WHERE game_id = 'versioned-game'").get()
+      ?.count,
+    2,
+    "the previous generation remains as immutable history",
+  );
+});

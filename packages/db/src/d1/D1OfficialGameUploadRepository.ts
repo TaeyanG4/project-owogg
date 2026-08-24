@@ -3,6 +3,8 @@ import {
   type GamePublicationFacts,
   type GamePublicationTarget,
   type GameVersion,
+  type OfficialGameDeletionPlan,
+  type OfficialGameLifecycleRepository,
   type OfficialGameUploadRepository,
 } from "@owogg/core";
 import { mapGameIdentityRow } from "./D1GameIdentityRepository.js";
@@ -129,6 +131,21 @@ export class D1OfficialGameUploadRepository implements OfficialGameUploadReposit
       .run();
   }
 
+  async markGarbageCollected(target: GamePublicationTarget, marker: string): Promise<void> {
+    const result = await this.db
+      .prepare(
+        `UPDATE game_versions
+         SET publish_status = 'FAILED', publish_error = ?, published_at = NULL,
+             manifest_key = NULL, published_size_bytes = NULL, file_count = NULL
+         WHERE id = ? AND game_id = ? AND content_hash = ?`,
+      )
+      .bind(marker, target.versionId, target.gameId, target.contentHash)
+      .run();
+    if ((result.meta?.changes ?? result.meta?.rows_written ?? 0) === 0) {
+      throw new Error(`OWOGG version ${target.versionId} could not be retired`);
+    }
+  }
+
   async upsertLogo(input: { gameId: number; objectKey: string; nowIso: string }): Promise<void> {
     const result = await this.db
       .prepare(
@@ -159,7 +176,9 @@ export class D1OfficialGameUploadRepository implements OfficialGameUploadReposit
     const result = await this.db
       .prepare(
         `UPDATE games
-         SET visibility = 'PUBLIC', live_version_id = ?, title = ?, short_description = ?,
+         SET leaderboard_generation = leaderboard_generation +
+               CASE WHEN live_version_id IS NOT ? THEN 1 ELSE 0 END,
+             visibility = 'PUBLIC', live_version_id = ?, title = ?, short_description = ?,
              description = ?, genre = ?, mode = ?, xp_per_completion = ?, score_unit = ?,
              score_direction = ?, score_min = ?, score_max = ?, score_display_prefix = ?,
              score_display_suffix = ?, updated_at = ?
@@ -170,6 +189,7 @@ export class D1OfficialGameUploadRepository implements OfficialGameUploadReposit
            )`,
       )
       .bind(
+        input.versionId,
         input.versionId,
         input.canonical.title,
         input.canonical.shortDescription,
@@ -190,6 +210,127 @@ export class D1OfficialGameUploadRepository implements OfficialGameUploadReposit
       .run();
     if ((result.meta?.changes ?? result.meta?.rows_written ?? 0) === 0) {
       throw new Error(`OWOGG game ${input.gameId} could not activate version ${input.versionId}`);
+    }
+  }
+}
+
+export interface OfficialGameDeletionAuditInput {
+  gameId: number;
+  slug: string;
+  actorAdminId: number;
+  versionCount: number;
+  objectCount: number;
+  nowIso: string;
+}
+
+/** The same OWOGG-scoped adapter also owns permanent lifecycle cleanup. Keeping the upload and
+ * deletion predicates together prevents either path from accidentally crossing into USER rows. */
+export class D1OfficialGameLifecycleRepository implements OfficialGameLifecycleRepository {
+  constructor(private readonly db: D1Database) {}
+
+  async prepareDeletion(input: {
+    slug: string;
+    nowIso: string;
+  }): Promise<OfficialGameDeletionPlan | null> {
+    const results = await this.db.batch([
+      this.db
+        .prepare(
+          `UPDATE games
+           SET visibility = 'PRIVATE', live_version_id = NULL,
+               deleted_at = COALESCE(deleted_at, ?), updated_at = ?
+           WHERE slug = ? AND publisher_type = 'OWOGG'`,
+        )
+        .bind(input.nowIso, input.nowIso, input.slug),
+      this.db
+        .prepare(`SELECT id, slug FROM games WHERE slug = ? AND publisher_type = 'OWOGG'`)
+        .bind(input.slug),
+      this.db
+        .prepare(
+          `SELECT ${VERSION_COLUMNS}
+           FROM game_versions
+           WHERE game_id = (
+             SELECT id FROM games WHERE slug = ? AND publisher_type = 'OWOGG'
+           )
+           ORDER BY id ASC`,
+        )
+        .bind(input.slug),
+      this.db
+        .prepare(
+          `SELECT object_key FROM game_assets
+           WHERE game_id = (
+             SELECT id FROM games WHERE slug = ? AND publisher_type = 'OWOGG'
+           )
+           ORDER BY kind ASC`,
+        )
+        .bind(input.slug),
+    ]);
+
+    const identityRow = results[1]?.results?.[0] as Record<string, unknown> | undefined;
+    if (!identityRow) return null;
+    const gameId = Number(identityRow.id);
+    const versions = ((results[2]?.results ?? []) as Record<string, unknown>[]).map(
+      mapGameVersionRow,
+    );
+    const assetObjectKeys = ((results[3]?.results ?? []) as Record<string, unknown>[]).map((row) =>
+      String(row.object_key),
+    );
+    return { gameId, slug: String(identityRow.slug), versions, assetObjectKeys };
+  }
+
+  async purgeDeletion(input: OfficialGameDeletionAuditInput): Promise<void> {
+    const ownsDeletion = `EXISTS (
+      SELECT 1 FROM games
+      WHERE id = ? AND slug = ? AND publisher_type = 'OWOGG' AND deleted_at IS NOT NULL
+    )`;
+    const results = await this.db.batch([
+      this.db
+        .prepare(
+          `INSERT INTO official_game_deletion_audit_log
+             (game_id, slug, actor_admin_id, version_count, object_count, deleted_at)
+           SELECT ?, ?, ?, ?, ?, ? WHERE ${ownsDeletion}`,
+        )
+        .bind(
+          input.gameId,
+          input.slug,
+          input.actorAdminId,
+          input.versionCount,
+          input.objectCount,
+          input.nowIso,
+          input.gameId,
+          input.slug,
+        ),
+      this.db
+        .prepare(`DELETE FROM scores WHERE game_id = ? AND ${ownsDeletion}`)
+        .bind(input.slug, input.gameId, input.slug),
+      this.db
+        .prepare(`DELETE FROM user_favorites WHERE game_id = ? AND ${ownsDeletion}`)
+        .bind(input.slug, input.gameId, input.slug),
+      this.db
+        .prepare(`DELETE FROM user_recent_plays WHERE game_id = ? AND ${ownsDeletion}`)
+        .bind(input.slug, input.gameId, input.slug),
+      this.db
+        .prepare(`DELETE FROM discord_play_contexts WHERE game_id = ? AND ${ownsDeletion}`)
+        .bind(input.slug, input.gameId, input.slug),
+      this.db
+        .prepare(`DELETE FROM game_settings WHERE game_id = ? AND ${ownsDeletion}`)
+        .bind(input.slug, input.gameId, input.slug),
+      this.db
+        .prepare(
+          `DELETE FROM game_slug_reservations
+           WHERE slug = ? AND source_game_id = ? AND ${ownsDeletion}`,
+        )
+        .bind(input.slug, input.gameId, input.gameId, input.slug),
+      this.db
+        .prepare(
+          `DELETE FROM games
+           WHERE id = ? AND slug = ? AND publisher_type = 'OWOGG' AND deleted_at IS NOT NULL`,
+        )
+        .bind(input.gameId, input.slug),
+    ]);
+
+    const gameDelete = results.at(-1);
+    if ((gameDelete?.meta?.changes ?? gameDelete?.meta?.rows_written ?? 0) === 0) {
+      throw new Error(`OWOGG game ${input.gameId}/${input.slug} is not prepared for deletion`);
     }
   }
 }

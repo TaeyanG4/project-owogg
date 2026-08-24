@@ -6,15 +6,11 @@ import {
   CheckCircle2,
   Clock3,
   ExternalLink,
-  Gamepad2,
   Loader2,
   LogOut,
   Server,
-  ServerCog,
-  Settings,
   ShieldAlert,
   ShieldCheck,
-  UserCog,
   Users,
 } from "lucide-react";
 import {
@@ -30,6 +26,7 @@ import { fetchMyAccess } from "../features/myAccess";
 import type { AdminMeResponse, AdminOverviewResponse, PermissionValue } from "@owogg/contracts";
 import { ApiClientError } from "../lib/api/errors";
 import { useAuth } from "../features/auth";
+import { getVisibleAdminNavigation } from "../components/admin/adminNavigation";
 
 export function meta() {
   return [
@@ -45,6 +42,7 @@ type Stage =
   | "not-eligible"
   | "step-up"
   | "must-change-password"
+  | "unavailable"
   | "dashboard";
 
 export default function AdminRoute() {
@@ -59,17 +57,26 @@ export default function AdminRoute() {
   const [googleStepDone, setGoogleStepDone] = useState(false);
 
   const refreshMe = useCallback(async () => {
+    setLoadingMe(true);
     try {
       const next = await fetchAdminMe();
       setMe(next);
       setError(null);
       if (next.adminAuthenticated && !next.mustChangePassword) {
-        // Permission-gated nav (docs/AUTHORIZATION.md "admin.center.access" section) — reached
-        // the dashboard doesn't mean every section is visible, only the ones this admin's Staff
-        // Role/individual grants actually cover.
-        const [nextOverview, myAccess] = await Promise.all([fetchAdminOverview(), fetchMyAccess()]);
-        setOverview(nextOverview);
+        const myAccess = await fetchMyAccess();
         setPermissions(myAccess.permissions);
+        // The overview endpoint is intentionally system.monitor-gated. A valid OPERATOR or
+        // MODERATOR without that permission must still reach their own tools instead of the
+        // whole dashboard failing because one optional summary request returned 403.
+        if (next.role === "ADMIN" || myAccess.permissions.includes("system.monitor")) {
+          try {
+            setOverview(await fetchAdminOverview());
+          } catch {
+            setOverview(null);
+          }
+        } else {
+          setOverview(null);
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "관리자 상태를 확인할 수 없습니다.");
@@ -84,8 +91,9 @@ export default function AdminRoute() {
   }, [authLoading, refreshMe]);
 
   let stage: Stage = "loading";
-  if (!authLoading && !loadingMe && me) {
-    if (!isAuthenticated || !me.authenticated) stage = "need-owogg-login";
+  if (!authLoading && !loadingMe) {
+    if (!me) stage = "unavailable";
+    else if (!isAuthenticated || !me.authenticated) stage = "need-owogg-login";
     else if (!me.eligible) stage = "not-eligible";
     else if (!me.adminAuthenticated) stage = "step-up";
     else if (me.mustChangePassword) stage = "must-change-password";
@@ -93,6 +101,23 @@ export default function AdminRoute() {
   }
 
   if (stage === "loading") return <PageMessage>관리자 권한을 확인하는 중...</PageMessage>;
+
+  if (stage === "unavailable") {
+    return (
+      <PageMessage>
+        <ShieldAlert className="mx-auto mb-4 h-10 w-10 text-accent-yellow" />
+        <h1 className="text-lg font-black text-text-primary">관리자 상태를 확인할 수 없습니다</h1>
+        <p className="mt-2 text-sm text-text-muted">{error || "잠시 후 다시 시도해주세요."}</p>
+        <button
+          type="button"
+          onClick={() => void refreshMe()}
+          className="mt-6 inline-flex items-center rounded-xl bg-brand px-4 py-2.5 text-xs font-bold text-white hover:bg-brand-light focus:outline-none focus:ring-2 focus:ring-brand cursor-pointer"
+        >
+          다시 시도
+        </button>
+      </PageMessage>
+    );
+  }
 
   if (stage === "need-owogg-login") {
     return (
@@ -146,8 +171,6 @@ export default function AdminRoute() {
   if (stage === "must-change-password") {
     return <ForcedPasswordChange onChanged={() => void refreshMe()} />;
   }
-
-  if (!overview) return <PageMessage>관리자 요약을 불러올 수 없습니다.</PageMessage>;
 
   return (
     <AdminDashboard
@@ -659,7 +682,7 @@ function AdminDashboard({
   permissions,
   onLoggedOut,
 }: {
-  overview: AdminOverviewResponse;
+  overview: AdminOverviewResponse | null;
   role: "ADMIN" | "OPERATOR" | "MODERATOR" | "SYSTEM_DEVELOPER" | null;
   permissions: PermissionValue[];
   onLoggedOut: () => void;
@@ -669,6 +692,10 @@ function AdminDashboard({
   // packages/core/src/domain/staffRoles.ts) — mirrored here so this nav doesn't need its own copy
   // of the full PERMISSIONS catalog just to special-case the top role.
   const can = (permission: PermissionValue) => role === "ADMIN" || permissions.includes(permission);
+  const quickItems = getVisibleAdminNavigation({ elevated: true, role, permissions })
+    .filter((group) => group.id === "operations" || group.id === "people" || group.id === "system")
+    .flatMap((group) => group.items)
+    .filter((item) => item.id !== "security");
 
   const handleLogout = async () => {
     if (loggingOut) return;
@@ -708,238 +735,224 @@ function AdminDashboard({
         </div>
       </header>
 
-      <nav className="flex flex-wrap gap-2" aria-label="관리자 메뉴">
-        {can("streamers.review") && (
-          <Link
-            to="/admin/creators"
-            className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface-raised px-3 py-2 text-xs font-bold text-text-primary hover:border-brand"
-          >
-            <Users className="h-3.5 w-3.5" /> Creator 심사
-          </Link>
-        )}
-        {(can("games.moderate") || can("sandbox_games.review")) && (
-          <Link
-            to="/admin/games"
-            className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface-raised px-3 py-2 text-xs font-bold text-text-primary hover:border-brand"
-          >
-            <Gamepad2 className="h-3.5 w-3.5" /> 게임 관리 및 심사
-          </Link>
-        )}
-        {can("system.monitor") && (
-          <Link
-            to="/admin/monitoring"
-            className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface-raised px-3 py-2 text-xs font-bold text-text-primary hover:border-brand"
-          >
-            <Activity className="h-3.5 w-3.5" /> 운영 모니터링
-          </Link>
-        )}
-        {can("users.view") && (
-          <Link
-            to="/admin/users"
-            className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface-raised px-3 py-2 text-xs font-bold text-text-primary hover:border-brand"
-          >
-            <Users className="h-3.5 w-3.5" /> 유저 관리
-          </Link>
-        )}
-        {can("game_creators.manage") && (
-          <Link
-            to="/admin/game-creators"
-            className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface-raised px-3 py-2 text-xs font-bold text-text-primary hover:border-brand"
-          >
-            <UserCog className="h-3.5 w-3.5" /> 게임 크리에이터 관리
-          </Link>
-        )}
-        {role === "ADMIN" && (
-          <Link
-            to="/admin/accounts"
-            className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface-raised px-3 py-2 text-xs font-bold text-text-primary hover:border-brand"
-          >
-            <UserCog className="h-3.5 w-3.5" /> 관리자 계정
-          </Link>
-        )}
-        {/* ADMIN implicitly holds every permission (§1.3, docs/AUTHORIZATION.md) — these three
-            quick links surface the OPERATOR/MODERATOR/SYSTEM_DEVELOPER-specific centers directly
-            from here so ADMIN never needs to know their URLs by heart. Each page's own route
-            guard (useAdminGate) already lets role === "ADMIN" through regardless of permission,
-            so these links were always reachable — they just weren't visible until now. */}
-        {role === "ADMIN" && (
-          <>
-            <Link
-              to="/ops"
-              className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface-raised px-3 py-2 text-xs font-bold text-text-primary hover:border-brand"
-            >
-              <ShieldCheck className="h-3.5 w-3.5" /> 운영 센터
-            </Link>
-            <Link
-              to="/mod"
-              className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface-raised px-3 py-2 text-xs font-bold text-text-primary hover:border-brand"
-            >
-              <ShieldCheck className="h-3.5 w-3.5" /> 모더레이션
-            </Link>
-            <Link
-              to="/system-dev"
-              className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface-raised px-3 py-2 text-xs font-bold text-text-primary hover:border-brand"
-            >
-              <ServerCog className="h-3.5 w-3.5" /> 시스템 개발
-            </Link>
-          </>
-        )}
-        <Link
-          to="/admin/settings/security"
-          className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface-raised px-3 py-2 text-xs font-bold text-text-primary hover:border-brand"
-        >
-          <Settings className="h-3.5 w-3.5" /> 보안 설정
-        </Link>
-      </nav>
-
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="핵심 운영 상태">
-        <MetricCard
-          icon={<Clock3 className="h-4 w-4" />}
-          label="대기 중 Creator 심사"
-          value={overview.pendingCreatorReviews.toLocaleString()}
-          tone="yellow"
-        />
-        <MetricCard
-          icon={<Server className="h-4 w-4" />}
-          label="등록된 활성 Discord 서버"
-          value={overview.discord.activeGuildCount.toLocaleString()}
-          tone="purple"
-        />
-        <MetricCard
-          icon={<Activity className="h-4 w-4" />}
-          label="Discord HTTP Interactions"
-          value={overview.discord.interactionsConfigured ? "준비됨" : "외부 설정 대기"}
-          tone={overview.discord.interactionsConfigured ? "green" : "red"}
-        />
-        <MetricCard
-          icon={<Users className="h-4 w-4" />}
-          label="최근 감사 기록"
-          value={overview.recentAudits.length.toLocaleString()}
-          tone="blue"
-        />
-      </section>
-
-      <section className="grid gap-5 lg:grid-cols-[1.25fr_0.75fr]">
-        <article className="rounded-2xl border border-border bg-surface-raised p-5 shadow-lg shadow-black/10">
-          <div className="flex items-start justify-between gap-4">
+      {quickItems.length > 0 && (
+        <section aria-labelledby="admin-quick-actions">
+          <div className="mb-3 flex items-end justify-between gap-3">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.15em] text-accent-yellow">
-                Creator
-              </p>
-              <h2 className="mt-1 text-xl font-black text-text-primary">Featured 수동 심사</h2>
-              <p className="mt-2 text-sm leading-relaxed text-text-muted">
-                공식 소유권과 자격 지표만 확인하고, 모든 결정은 append-only 감사 원장에 남깁니다.
+              <h2 id="admin-quick-actions" className="text-sm font-black text-text-primary">
+                내 작업 바로가기
+              </h2>
+              <p className="mt-1 text-xs text-text-muted">
+                현재 권한으로 사용할 수 있는 기능입니다.
               </p>
             </div>
-            <Clock3 className="h-6 w-6 shrink-0 text-accent-yellow" />
+            <span className="text-[10px] font-bold text-text-muted">
+              {quickItems.length}개 기능
+            </span>
           </div>
-          <div className="mt-5 flex flex-wrap items-center gap-3">
-            <Link
-              to="/admin/creators"
-              className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-xs font-bold text-white hover:bg-brand-light focus:outline-none focus:ring-2 focus:ring-brand"
-            >
-              심사 큐 열기 <ArrowRight className="h-4 w-4" />
-            </Link>
-            <span className="text-xs text-text-muted">대기 {overview.pendingCreatorReviews}건</span>
-          </div>
-        </article>
-
-        <article className="rounded-2xl border border-border bg-surface-raised p-5 shadow-lg shadow-black/10">
-          <h2 className="text-sm font-black text-text-primary">Creator Provider 준비 상태</h2>
-          <div className="mt-4 grid grid-cols-2 gap-2">
-            {Object.entries(overview.creatorProviders).map(([provider, configured]) => (
-              <div
-                key={provider}
-                className="flex items-center justify-between rounded-xl bg-surface px-3 py-2.5"
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {quickItems.map((item) => (
+              <Link
+                key={item.id}
+                to={item.path}
+                className="group flex items-center justify-between gap-4 rounded-2xl border border-border bg-surface-raised p-4 transition-colors hover:border-brand/60 hover:bg-brand/5 focus:outline-none focus:ring-2 focus:ring-brand"
               >
-                <span className="text-xs font-bold text-text-primary">{provider}</span>
-                <span
-                  className={`text-[10px] font-bold ${configured ? "text-accent-green" : "text-text-muted"}`}
-                >
-                  {configured ? "준비됨" : "미설정"}
+                <span className="min-w-0">
+                  <span className="block text-sm font-black text-text-primary">{item.label}</span>
+                  <span className="mt-1 block text-xs text-text-muted">{item.description}</span>
+                </span>
+                <ArrowRight className="h-4 w-4 shrink-0 text-text-muted transition-transform group-hover:translate-x-0.5 group-hover:text-brand-light" />
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {overview ? (
+        <>
+          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="핵심 운영 상태">
+            <MetricCard
+              icon={<Clock3 className="h-4 w-4" />}
+              label="대기 중 Creator 심사"
+              value={overview.pendingCreatorReviews.toLocaleString()}
+              tone="yellow"
+            />
+            <MetricCard
+              icon={<Server className="h-4 w-4" />}
+              label="등록된 활성 Discord 서버"
+              value={overview.discord.activeGuildCount.toLocaleString()}
+              tone="purple"
+            />
+            <MetricCard
+              icon={<Activity className="h-4 w-4" />}
+              label="Discord HTTP Interactions"
+              value={overview.discord.interactionsConfigured ? "준비됨" : "외부 설정 대기"}
+              tone={overview.discord.interactionsConfigured ? "green" : "red"}
+            />
+            <MetricCard
+              icon={<Users className="h-4 w-4" />}
+              label="최근 감사 기록"
+              value={overview.recentAudits.length.toLocaleString()}
+              tone="blue"
+            />
+          </section>
+
+          <section className="grid gap-5 lg:grid-cols-[1.25fr_0.75fr]">
+            <article className="rounded-2xl border border-border bg-surface-raised p-5 shadow-lg shadow-black/10">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.15em] text-accent-yellow">
+                    Creator
+                  </p>
+                  <h2 className="mt-1 text-xl font-black text-text-primary">Featured 수동 심사</h2>
+                  <p className="mt-2 text-sm leading-relaxed text-text-muted">
+                    공식 소유권과 자격 지표만 확인하고, 모든 결정은 append-only 감사 원장에
+                    남깁니다.
+                  </p>
+                </div>
+                <Clock3 className="h-6 w-6 shrink-0 text-accent-yellow" />
+              </div>
+              <div className="mt-5 flex flex-wrap items-center gap-3">
+                {can("streamers.review") ? (
+                  <Link
+                    to="/admin/creators"
+                    className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-xs font-bold text-white hover:bg-brand-light focus:outline-none focus:ring-2 focus:ring-brand"
+                  >
+                    심사 큐 열기 <ArrowRight className="h-4 w-4" />
+                  </Link>
+                ) : (
+                  <span className="rounded-full border border-border px-3 py-2 text-[10px] font-bold text-text-muted">
+                    읽기 전용 · 심사 권한 없음
+                  </span>
+                )}
+                <span className="text-xs text-text-muted">
+                  대기 {overview.pendingCreatorReviews}건
                 </span>
               </div>
-            ))}
-          </div>
-        </article>
-      </section>
+            </article>
 
-      <section className="rounded-2xl border border-border bg-surface-raised p-5 shadow-lg shadow-black/10">
-        <h2 className="text-sm font-black text-text-primary">Discord 통합 상태</h2>
-        <p className="mt-1 text-xs text-text-muted">
-          안전한 값만 표시합니다. Bot Token/Client Secret/Public Key 원문은 절대 노출하지 않습니다.
-        </p>
-        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          <DiscordStatusRow label="Discord OAuth" ok={overview.discord.oauthConfigured} />
-          <DiscordStatusRow
-            label="HTTP Interactions"
-            ok={overview.discord.interactionsConfigured}
-          />
-          <DiscordStatusRow
-            label="설치 링크(Install URL)"
-            ok={overview.discord.installUrlConfigured}
-          />
-          <DiscordStatusRow
-            label="명령어 자동 동기화"
-            ok={overview.discord.commandSyncEnabled}
-            okLabel="활성화됨"
-            offLabel="비활성화(수동 등록 필요)"
-          />
-          <div className="rounded-xl bg-surface px-3 py-2.5">
-            <p className="text-xs font-bold text-text-primary">등록된 활성 서버</p>
-            <p className="mt-1 text-xs text-text-muted">{overview.discord.activeGuildCount}개</p>
-          </div>
-          <div className="rounded-xl bg-surface px-3 py-2.5 sm:col-span-2 lg:col-span-1">
-            <p className="text-xs font-bold text-text-primary">Interactions Endpoint</p>
-            <p className="mt-1 truncate text-[10px] font-mono text-text-muted">
-              {overview.discord.expectedInteractionsEndpoint}
+            <article className="rounded-2xl border border-border bg-surface-raised p-5 shadow-lg shadow-black/10">
+              <h2 className="text-sm font-black text-text-primary">Creator Provider 준비 상태</h2>
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                {Object.entries(overview.creatorProviders).map(([provider, configured]) => (
+                  <div
+                    key={provider}
+                    className="flex items-center justify-between rounded-xl bg-surface px-3 py-2.5"
+                  >
+                    <span className="text-xs font-bold text-text-primary">{provider}</span>
+                    <span
+                      className={`text-[10px] font-bold ${configured ? "text-accent-green" : "text-text-muted"}`}
+                    >
+                      {configured ? "준비됨" : "미설정"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </article>
+          </section>
+
+          <section className="rounded-2xl border border-border bg-surface-raised p-5 shadow-lg shadow-black/10">
+            <h2 className="text-sm font-black text-text-primary">Discord 통합 상태</h2>
+            <p className="mt-1 text-xs text-text-muted">
+              안전한 값만 표시합니다. Bot Token/Client Secret/Public Key 원문은 절대 노출하지
+              않습니다.
             </p>
-          </div>
-        </div>
-        <div className="mt-3 rounded-xl bg-surface px-3 py-2.5">
-          <p className="text-xs font-bold text-text-primary">
-            로컬 /owogg 서브커맨드 ({overview.discord.localSubcommands.length}개)
-          </p>
-          <p className="mt-1 text-[11px] text-text-muted">
-            {overview.discord.localSubcommands.map((s) => `/owogg ${s}`).join(" · ")}
-          </p>
-        </div>
-        <p className="mt-3 text-[11px] text-text-muted">
-          실제 Discord에 등록된 명령어와의 드리프트(불일치) 여부는 Bot Token이 필요한 운영 CI 검증
-          대상입니다 (<code className="font-mono">pnpm discord:commands:check</code>).
-        </p>
-      </section>
-
-      <section className="rounded-2xl border border-border bg-surface-raised p-5 shadow-lg shadow-black/10">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-black text-text-primary">최근 심사·감사 내역</h2>
-            <p className="mt-1 text-xs text-text-muted">운영 결정의 요약만 표시합니다.</p>
-          </div>
-          <Link to="/admin/creators" className="text-xs font-bold text-brand-light hover:underline">
-            전체 심사 도구 <ExternalLink className="ml-1 inline h-3.5 w-3.5" />
-          </Link>
-        </div>
-        {overview.recentAudits.length === 0 ? (
-          <p className="mt-5 rounded-xl bg-surface p-4 text-xs text-text-muted">
-            아직 감사 기록이 없습니다.
-          </p>
-        ) : (
-          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-            {overview.recentAudits.map((audit, index) => (
-              <div key={`${audit.createdAt}-${index}`} className="rounded-xl bg-surface p-3">
-                <p className="text-[10px] font-bold text-text-muted">
-                  {audit.platform ?? "Creator"}
-                </p>
-                <p className="mt-1 text-xs font-bold text-text-primary">{audit.action}</p>
-                <p className="mt-1 text-[10px] text-text-muted">
-                  {audit.createdAt.replace("T", " ").slice(0, 16)}
+            <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              <DiscordStatusRow label="Discord OAuth" ok={overview.discord.oauthConfigured} />
+              <DiscordStatusRow
+                label="HTTP Interactions"
+                ok={overview.discord.interactionsConfigured}
+              />
+              <DiscordStatusRow
+                label="설치 링크(Install URL)"
+                ok={overview.discord.installUrlConfigured}
+              />
+              <DiscordStatusRow
+                label="명령어 자동 동기화"
+                ok={overview.discord.commandSyncEnabled}
+                okLabel="활성화됨"
+                offLabel="비활성화(수동 등록 필요)"
+              />
+              <div className="rounded-xl bg-surface px-3 py-2.5">
+                <p className="text-xs font-bold text-text-primary">등록된 활성 서버</p>
+                <p className="mt-1 text-xs text-text-muted">
+                  {overview.discord.activeGuildCount}개
                 </p>
               </div>
-            ))}
+              <div className="rounded-xl bg-surface px-3 py-2.5 sm:col-span-2 lg:col-span-1">
+                <p className="text-xs font-bold text-text-primary">Interactions Endpoint</p>
+                <p className="mt-1 truncate text-[10px] font-mono text-text-muted">
+                  {overview.discord.expectedInteractionsEndpoint}
+                </p>
+              </div>
+            </div>
+            <div className="mt-3 rounded-xl bg-surface px-3 py-2.5">
+              <p className="text-xs font-bold text-text-primary">
+                로컬 /owogg 서브커맨드 ({overview.discord.localSubcommands.length}개)
+              </p>
+              <p className="mt-1 text-[11px] text-text-muted">
+                {overview.discord.localSubcommands.map((s) => `/owogg ${s}`).join(" · ")}
+              </p>
+            </div>
+            <p className="mt-3 text-[11px] text-text-muted">
+              실제 Discord에 등록된 명령어와의 드리프트(불일치) 여부는 Bot Token이 필요한 운영 CI
+              검증 대상입니다 (<code className="font-mono">pnpm discord:commands:check</code>).
+            </p>
+          </section>
+
+          <section className="rounded-2xl border border-border bg-surface-raised p-5 shadow-lg shadow-black/10">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-black text-text-primary">최근 심사·감사 내역</h2>
+                <p className="mt-1 text-xs text-text-muted">운영 결정의 요약만 표시합니다.</p>
+              </div>
+              {can("streamers.review") && (
+                <Link
+                  to="/admin/creators"
+                  className="text-xs font-bold text-brand-light hover:underline"
+                >
+                  전체 심사 도구 <ExternalLink className="ml-1 inline h-3.5 w-3.5" />
+                </Link>
+              )}
+            </div>
+            {overview.recentAudits.length === 0 ? (
+              <p className="mt-5 rounded-xl bg-surface p-4 text-xs text-text-muted">
+                아직 감사 기록이 없습니다.
+              </p>
+            ) : (
+              <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                {overview.recentAudits.map((audit, index) => (
+                  <div key={`${audit.createdAt}-${index}`} className="rounded-xl bg-surface p-3">
+                    <p className="text-[10px] font-bold text-text-muted">
+                      {audit.platform ?? "Creator"}
+                    </p>
+                    <p className="mt-1 text-xs font-bold text-text-primary">{audit.action}</p>
+                    <p className="mt-1 text-[10px] text-text-muted">
+                      {audit.createdAt.replace("T", " ").slice(0, 16)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </>
+      ) : (
+        <section className="rounded-2xl border border-border bg-surface-raised p-6">
+          <div className="flex items-start gap-3">
+            <Activity className="mt-0.5 h-5 w-5 shrink-0 text-brand-light" />
+            <div>
+              <h2 className="text-sm font-black text-text-primary">
+                운영 요약 없이 계속할 수 있습니다
+              </h2>
+              <p className="mt-2 max-w-2xl text-xs leading-relaxed text-text-muted">
+                {can("system.monitor")
+                  ? "운영 요약을 현재 불러오지 못했습니다. 위 바로가기와 관리자 메뉴의 허용된 기능은 계속 사용할 수 있습니다."
+                  : "현재 역할에는 시스템 모니터링 권한이 없습니다. 위 바로가기와 관리자 메뉴에는 사용할 수 있는 기능만 표시됩니다."}
+              </p>
+            </div>
           </div>
-        )}
-      </section>
+        </section>
+      )}
     </div>
   );
 }

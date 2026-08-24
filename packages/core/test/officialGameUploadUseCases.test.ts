@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   GamePublicationService,
+  OfficialGameDeleteFailure,
+  OfficialGameLifecycleUseCases,
   OfficialGameUploadFailure,
   OfficialGameUploadUseCases,
   type BundleArchiveReader,
@@ -13,6 +15,8 @@ import {
   type GamePublicationTarget,
   type GameVersion,
   type OfficialGameUploadRepository,
+  type OfficialGameDeletionPlan,
+  type OfficialGameLifecycleRepository,
 } from "../src/index.js";
 
 const encoder = new TextEncoder();
@@ -40,6 +44,25 @@ class FakeCanonicals implements GameCanonicalRepository {
   }
   async save(document: GameCanonicalDocument): Promise<void> {
     this.document = document;
+  }
+  async delete(slug: string): Promise<void> {
+    if (this.document?.slug === slug) this.document = null;
+  }
+}
+
+class FakeOfficialLifecycleRepository implements OfficialGameLifecycleRepository {
+  purged = false;
+  failPurgeOnce = false;
+  constructor(public plan: OfficialGameDeletionPlan | null) {}
+  async prepareDeletion(): Promise<OfficialGameDeletionPlan | null> {
+    return this.plan;
+  }
+  async purgeDeletion(): Promise<void> {
+    if (this.failPurgeOnce) {
+      this.failPurgeOnce = false;
+      throw new Error("D1 purge failed");
+    }
+    this.purged = true;
   }
 }
 
@@ -107,6 +130,18 @@ class FakeOfficialRepository implements OfficialGameUploadRepository {
   }
   async markFailed(): Promise<void> {
     if (this.version) this.version = { ...this.version, publishStatus: "FAILED" };
+  }
+  async markGarbageCollected(_target: GamePublicationTarget, marker: string): Promise<void> {
+    if (!this.version) throw new Error("missing version");
+    this.version = {
+      ...this.version,
+      publishStatus: "FAILED",
+      publishError: marker,
+      publishedAt: null,
+      manifestKey: null,
+      publishedSizeBytes: null,
+      fileCount: null,
+    };
   }
   async upsertLogo(input: { objectKey: string }): Promise<void> {
     this.logoKey = input.objectKey;
@@ -195,4 +230,115 @@ test("admin upload distinguishes a real slug conflict from a D1 publication fail
       return true;
     },
   );
+});
+
+test("official deletion removes published files, source ZIP, logo and canonical before D1 purge", async () => {
+  const uploadRepository = new FakeOfficialRepository();
+  const storage = new FakeStorage();
+  const canonicals = new FakeCanonicals();
+  const publication = new GamePublicationService(uploadRepository, storage, archives);
+  const upload = new OfficialGameUploadUseCases(uploadRepository, storage, canonicals, publication);
+  await upload.upload({ bytes: new Uint8Array([1, 2, 3]).buffer });
+  assert.ok(uploadRepository.version);
+
+  const lifecycleRepository = new FakeOfficialLifecycleRepository({
+    gameId: uploadRepository.identity.id,
+    slug: uploadRepository.identity.slug,
+    versions: [uploadRepository.version],
+    assetObjectKeys: [uploadRepository.logoKey!],
+  });
+  const lifecycle = new OfficialGameLifecycleUseCases(
+    lifecycleRepository,
+    storage,
+    canonicals,
+    publication,
+  );
+  const result = await lifecycle.deleteGame({ slug: "admin-game", actorAdminId: 1 });
+
+  assert.equal(result.deletedVersionCount, 1);
+  assert.equal(lifecycleRepository.purged, true);
+  assert.equal(canonicals.document, null);
+  assert.deepEqual([...storage.objects.keys()], []);
+});
+
+test("official deletion leaves D1 quarantined and reports a retryable storage failure", async () => {
+  const lifecycleRepository = new FakeOfficialLifecycleRepository({
+    gameId: 7,
+    slug: "admin-game",
+    versions: [
+      {
+        id: 11,
+        gameId: 7,
+        objectKey: "uploads/7/missing.zip",
+        contentHash: "a".repeat(64),
+        bundleBytes: 1,
+        publishStatus: "READY",
+        publishError: null,
+        publishedAt: "2026-08-23T00:00:00.000Z",
+        manifestKey: "games/7/11/.owogg-manifest.json",
+        publishedSizeBytes: 1,
+        fileCount: 1,
+        uploadedAt: "2026-08-23T00:00:00.000Z",
+      },
+    ],
+    assetObjectKeys: [],
+  });
+  const publicationRepository = new FakeOfficialRepository();
+  const storage = new FakeStorage();
+  const lifecycle = new OfficialGameLifecycleUseCases(
+    lifecycleRepository,
+    storage,
+    new FakeCanonicals(),
+    new GamePublicationService(publicationRepository, storage, archives),
+  );
+
+  await assert.rejects(lifecycle.deleteGame({ slug: "admin-game", actorAdminId: 1 }), (error) => {
+    assert.ok(error instanceof OfficialGameDeleteFailure);
+    assert.equal(error.code, "STORAGE_DELETE_FAILED");
+    return true;
+  });
+  assert.equal(lifecycleRepository.purged, false);
+});
+
+test("official deletion can retry after B2 cleanup succeeded but the final D1 purge failed", async () => {
+  const uploadRepository = new FakeOfficialRepository();
+  const storage = new FakeStorage();
+  const canonicals = new FakeCanonicals();
+  const publication = new GamePublicationService(uploadRepository, storage, archives);
+  await new OfficialGameUploadUseCases(uploadRepository, storage, canonicals, publication).upload({
+    bytes: new Uint8Array([1, 2, 3]).buffer,
+  });
+  assert.ok(uploadRepository.version);
+
+  const lifecycleRepository = new FakeOfficialLifecycleRepository({
+    gameId: uploadRepository.identity.id,
+    slug: uploadRepository.identity.slug,
+    versions: [uploadRepository.version],
+    assetObjectKeys: [uploadRepository.logoKey!],
+  });
+  lifecycleRepository.failPurgeOnce = true;
+  const lifecycle = new OfficialGameLifecycleUseCases(
+    lifecycleRepository,
+    storage,
+    canonicals,
+    publication,
+  );
+
+  await assert.rejects(lifecycle.deleteGame({ slug: "admin-game", actorAdminId: 1 }), (error) => {
+    assert.ok(error instanceof OfficialGameDeleteFailure);
+    assert.equal(error.code, "DATABASE_DELETE_FAILED");
+    return true;
+  });
+  assert.equal(uploadRepository.version?.publishError, "published objects deleted");
+  assert.deepEqual([...storage.objects.keys()], []);
+
+  lifecycleRepository.plan = {
+    gameId: uploadRepository.identity.id,
+    slug: uploadRepository.identity.slug,
+    versions: [uploadRepository.version!],
+    assetObjectKeys: [uploadRepository.logoKey!],
+  };
+  const retried = await lifecycle.deleteGame({ slug: "admin-game", actorAdminId: 1 });
+  assert.equal(retried.deletedVersionCount, 1);
+  assert.equal(lifecycleRepository.purged, true);
 });

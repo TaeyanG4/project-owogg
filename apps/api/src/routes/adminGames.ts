@@ -2,9 +2,10 @@ import { Hono } from "hono";
 import {
   AdminGameListResponseSchema,
   AdminGameToggleRequestSchema,
+  AdminOfficialGameDeleteResponseSchema,
   AdminOfficialGameUploadResponseSchema,
 } from "@owogg/contracts";
-import { OfficialGameUploadFailure } from "@owogg/core";
+import { OfficialGameDeleteFailure, OfficialGameUploadFailure } from "@owogg/core";
 import { createContainer } from "../container.js";
 import { isTrustedAdminOrigin } from "../auth/admin.js";
 import {
@@ -105,6 +106,57 @@ adminGamesRouter.post(
     }
   },
 );
+
+// DELETE /api/admin/games/:gameId — permanently removes an OWOGG-owned identity and all of its
+// B2 bundle/canonical objects, then releases the slug for clean re-registration. Two permissions
+// are required because this is stronger than the ordinary game kill switch.
+adminGamesRouter.delete("/:gameId", async (c) => {
+  const admin = await requireElevatedAdmin(c);
+  if (isElevatedAdminResponse(admin)) return admin;
+  const moderateDenied = requirePermission(admin, "games.moderate");
+  if (moderateDenied) return moderateDenied;
+  const deleteDenied = requirePermission(admin, "sandbox_games.delete");
+  if (deleteDenied) return deleteDenied;
+
+  const container = createContainer(c.env.DB, readB2Config(c.env));
+  if (!container.gameBundlesConfigured) {
+    return c.json(
+      {
+        error: {
+          code: "GAME_BUNDLES_NOT_CONFIGURED",
+          message: "B2가 구성되지 않아 공식 게임 오브젝트를 안전하게 삭제할 수 없습니다.",
+        },
+      },
+      503,
+    );
+  }
+
+  try {
+    const result = await container.officialGameLifecycleUseCases.deleteGame({
+      slug: c.req.param("gameId"),
+      actorAdminId: admin.userId,
+    });
+    return c.json(AdminOfficialGameDeleteResponseSchema.parse(result), 200);
+  } catch (error) {
+    if (!(error instanceof OfficialGameDeleteFailure)) throw error;
+    if (error.code === "GAME_NOT_FOUND") {
+      return c.json(
+        {
+          error: {
+            code: error.code,
+            message: "삭제할 OWOGG 공식 게임을 찾을 수 없습니다.",
+          },
+        },
+        404,
+      );
+    }
+    const message =
+      error.code === "STORAGE_DELETE_FAILED"
+        ? "게임은 즉시 비공개 처리됐지만 B2 정리가 완료되지 않았습니다. 같은 삭제 작업을 다시 시도해 주세요."
+        : "B2 정리 후 D1 삭제를 완료하지 못했습니다. 같은 삭제 작업을 다시 시도해 주세요.";
+    return c.json({ error: { code: error.code, message } }, 500);
+  }
+});
 
 // POST /api/admin/games/:gameId/toggle — enable/disable a game without a deploy. Disabling also
 // rejects new score submissions for it (see scores.ts) — this is a real kill switch, not just a

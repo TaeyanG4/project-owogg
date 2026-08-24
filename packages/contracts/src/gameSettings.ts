@@ -8,6 +8,7 @@ import { z } from "zod";
 export const GameAvailabilityDtoSchema = z.object({
   gameId: z.string(),
   title: z.string(),
+  publisherType: z.enum(["OWOGG", "USER"]),
   status: z.string(),
   enabled: z.boolean(),
   disabledReason: z.string().nullable(),

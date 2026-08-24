@@ -32,9 +32,13 @@ export class D1GameScoreAcceptanceRepository implements GameScoreAcceptanceRepos
         .bind(input.attemptId, input.userId, input.gameId, input.versionId, input.nowIso),
       this.db
         .prepare(
-          `INSERT INTO scores (user_id, nickname, avatar_url, game_id, score, difficulty, created_at)
-           SELECT ?, ?, ?, ?, ?, ?, ?
-           WHERE changes() = 1`,
+          `INSERT INTO scores
+             (user_id, nickname, avatar_url, game_id, score, difficulty, created_at,
+              leaderboard_generation)
+           SELECT ?, ?, ?, ?, ?, ?, ?, g.leaderboard_generation
+           FROM games g
+           WHERE g.id = ? AND g.live_version_id = ? AND g.deleted_at IS NULL
+             AND changes() = 1`,
         )
         .bind(
           input.userId,
@@ -44,6 +48,8 @@ export class D1GameScoreAcceptanceRepository implements GameScoreAcceptanceRepos
           input.score,
           input.difficulty,
           input.nowIso,
+          input.gameId,
+          input.versionId,
         ),
       this.db.prepare(
         `SELECT id FROM scores

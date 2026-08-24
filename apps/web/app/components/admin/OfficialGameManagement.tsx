@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
-import { Gamepad2, Loader2, Power, ShieldCheck } from "lucide-react";
+import { Gamepad2, Loader2, Power, ShieldCheck, Trash2 } from "lucide-react";
 import type { AdminGameListResponse } from "@owogg/contracts";
-import { fetchAdminGames, postToggleAdminGame, uploadOfficialGame } from "../../features/adminApi";
+import {
+  deleteOfficialGame,
+  fetchAdminGames,
+  postToggleAdminGame,
+  uploadOfficialGame,
+} from "../../features/adminApi";
 import { ApiClientError } from "../../lib/api";
 import { GameBundleDropzone } from "../game/GameBundleDropzone";
 
@@ -63,6 +68,28 @@ export function OfficialGameManagement() {
       setError(err instanceof Error ? err.message : "공식 게임을 게시하지 못했습니다.");
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleOfficialDelete = async (gameId: string, title: string) => {
+    const confirmation = window.prompt(
+      `"${title}" 공식 게임을 B2와 DB에서 완전히 삭제합니다. 기존 리더보드와 즐겨찾기도 제거되며 되돌릴 수 없습니다. 계속하려면 slug "${gameId}"를 입력하세요.`,
+    );
+    if (confirmation !== gameId) return;
+
+    setBusyGameId(gameId);
+    setError(null);
+    setUploadMessage(null);
+    try {
+      const result = await deleteOfficialGame(gameId);
+      setUploadMessage(
+        `${result.slug} 공식 게임과 ${result.deletedVersionCount}개 버전을 완전히 삭제했습니다. 같은 slug로 다시 등록할 수 있습니다.`,
+      );
+      await loadGames();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "공식 게임을 완전히 삭제하지 못했습니다.");
+    } finally {
+      setBusyGameId(null);
     }
   };
 
@@ -148,6 +175,9 @@ export function OfficialGameManagement() {
                         <span className="rounded-full border border-border px-2 py-0.5 text-[10px] font-bold text-text-muted">
                           {game.gameId}
                         </span>
+                        <span className="rounded-full border border-border px-2 py-0.5 text-[10px] font-bold text-text-muted">
+                          {game.publisherType === "OWOGG" ? "공식" : "사용자"}
+                        </span>
                         <span
                           className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
                             game.enabled
@@ -197,6 +227,21 @@ export function OfficialGameManagement() {
                       )}
                       {game.enabled ? "비활성화" : "활성화"}
                     </button>
+                    {game.publisherType === "OWOGG" && (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void handleOfficialDelete(game.gameId, game.title)}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-accent-red/40 bg-accent-red/10 px-3 py-2 text-xs font-bold text-accent-red hover:bg-accent-red/20 disabled:opacity-50"
+                      >
+                        {busy ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3.5 w-3.5" />
+                        )}
+                        완전 삭제
+                      </button>
+                    )}
                   </div>
                 </div>
               );

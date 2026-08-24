@@ -105,6 +105,13 @@ CREATE TABLE users (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE games (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  slug TEXT NOT NULL UNIQUE,
+  deleted_at TEXT,
+  leaderboard_generation INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE scores (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER,
@@ -115,8 +122,16 @@ CREATE TABLE scores (
   difficulty TEXT NOT NULL DEFAULT 'normal',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   deleted_at TEXT,
-  deleted_by_admin_id INTEGER
+  deleted_by_admin_id INTEGER,
+  leaderboard_generation INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TRIGGER test_scores_ensure_game_identity
+AFTER INSERT ON scores
+FOR EACH ROW
+BEGIN
+  INSERT OR IGNORE INTO games (slug) VALUES (NEW.game_id);
+END;
 
 CREATE TABLE creator_profiles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -576,6 +591,7 @@ CREATE TABLE games (
   deleted_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
+  leaderboard_generation INTEGER NOT NULL DEFAULT 0,
   CHECK (publisher_type IN ('OWOGG', 'USER')),
   CHECK (
     (

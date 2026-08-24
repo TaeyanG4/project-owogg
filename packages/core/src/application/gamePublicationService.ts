@@ -100,30 +100,64 @@ export class GamePublicationService {
     }
   }
 
-  /** Generic GC primitive; source archive lifecycle remains a control-plane concern. */
+  /** Marker persisted after every published object for a version has been removed. A control
+   * plane may safely retry deletion after a later D1/source-object failure without needing the
+   * already-deleted manifest again. */
+  static readonly PUBLISHED_OBJECTS_DELETED = "published objects deleted";
+
+  /** Generic GC primitive; source archive lifecycle remains a control-plane concern. READY
+   * versions enumerate objects from the publication manifest. A failed/interrupted publication
+   * may not have committed that manifest, so the immutable source ZIP is the deterministic
+   * fallback for discovering every possible per-version object key without bucket listing. */
   async deletePublishedVersion(
     input: GamePublicationTarget & {
       manifestKey: string | null;
+      sourceObjectKey: string;
+      publishStatus: "UPLOADED" | "PUBLISHING" | "READY" | "FAILED";
+      publishError: string | null;
     },
-  ): Promise<void> {
+  ): Promise<number> {
     assertPublicationTarget(input);
-    const manifest = await this.readManifest(input.manifestKey);
-    if (manifest) {
-      if (
-        manifest.gameId !== input.gameId ||
-        manifest.versionId !== input.versionId ||
-        manifest.contentHash !== input.contentHash
-      ) {
-        throw new Error("Published manifest does not match deletion target");
-      }
-      for (const file of manifest.files) {
-        await this.storage.deleteObject(
-          publishedObjectKey(input.gameId, input.versionId, file.path),
-        );
-      }
+    if (
+      input.publishStatus === "FAILED" &&
+      input.publishError === GamePublicationService.PUBLISHED_OBJECTS_DELETED
+    ) {
+      return 0;
     }
-    if (input.manifestKey) await this.storage.deleteObject(input.manifestKey);
-    await this.versions.markFailed(input, "published objects deleted");
+
+    const manifest = await this.readManifest(input.manifestKey);
+    if (
+      manifest &&
+      (manifest.gameId !== input.gameId ||
+        manifest.versionId !== input.versionId ||
+        manifest.contentHash !== input.contentHash)
+    ) {
+      throw new Error("Published manifest does not match deletion target");
+    }
+
+    let paths = manifest?.files.map((file) => file.path) ?? null;
+    if (paths === null && input.publishStatus !== "UPLOADED") {
+      const source = await this.storage.getObject(input.sourceObjectKey);
+      if (!source) {
+        throw new Error("Cannot enumerate published objects without a manifest or source archive");
+      }
+      paths = this.prepare(source).files.map((file) => file.path);
+    }
+
+    let deletedObjectCount = 0;
+    for (const path of paths ?? []) {
+      await this.storage.deleteObject(publishedObjectKey(input.gameId, input.versionId, path));
+      deletedObjectCount++;
+    }
+    if (input.manifestKey) {
+      await this.storage.deleteObject(input.manifestKey);
+      deletedObjectCount++;
+    }
+    await this.versions.markGarbageCollected(
+      input,
+      GamePublicationService.PUBLISHED_OBJECTS_DELETED,
+    );
+    return deletedObjectCount;
   }
 }
 
