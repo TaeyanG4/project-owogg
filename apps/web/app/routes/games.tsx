@@ -5,11 +5,13 @@ import { usePublicGames } from "../features/publicGamesApi";
 import { publicGameToCard } from "../features/catalog/publicGameAdapter";
 import { GameGrid } from "../components/ui/GameGrid";
 import { GridColumnSwitcher } from "../components/ui/GridColumnSwitcher";
+import { GameSortSelect } from "../components/ui/GameSortSelect";
 import { CategoryChips } from "../components/ui/CategoryChips";
 import { usePersonalization, useGridColumns } from "../features/personalization";
 import { useAuth } from "../features/auth";
 import { useI18n } from "../features/i18n/I18nContext";
 import { getLocalizedGameContent } from "../features/catalog/localizedGameContent";
+import { isGameSortKey, sortPublicGameCards, type GameSortKey } from "../features/catalog/gameSort";
 
 export function meta() {
   return [
@@ -22,9 +24,13 @@ export default function Games() {
   const [searchParams] = useSearchParams();
   const initialSearch = searchParams.get("search") || "";
   const initialCategory = searchParams.get("category") || "all";
+  const requestedSort = searchParams.get("sort");
 
   const [searchQuery, setSearchQuery] = useState(initialSearch);
   const [selectedCategory, setSelectedCategory] = useState(initialCategory);
+  const [sortKey, setSortKey] = useState<GameSortKey>(
+    isGameSortKey(requestedSort) ? requestedSort : "popular",
+  );
   const { mobileColumns, setMobileColumns, desktopColumns, setDesktopColumns } = useGridColumns();
   const { dict } = useI18n();
   const { games: publicGames } = usePublicGames();
@@ -45,7 +51,7 @@ export default function Games() {
   };
 
   const filteredGames = useMemo(() => {
-    return gameManifests.filter((game) => {
+    const matchingGames = gameManifests.filter((game) => {
       const { title, shortDescription } = getLocalizedGameContent(dict, game);
       const matchesSearch =
         !searchQuery ||
@@ -62,8 +68,9 @@ export default function Games() {
 
       return matchesSearch && matchesCategory;
     });
+    return sortPublicGameCards(matchingGames, sortKey);
     // gameManifests changes whenever the generic public API refreshes.
-  }, [gameManifests, searchQuery, selectedCategory, favoriteGameIds, dict]);
+  }, [gameManifests, searchQuery, selectedCategory, favoriteGameIds, dict, sortKey]);
 
   return (
     <div className="flex flex-col w-full px-4 md:px-8 py-8 gap-8 max-w-7xl mx-auto flex-1">
@@ -96,12 +103,20 @@ export default function Games() {
           selectedCategory={selectedCategory}
           onSelectCategory={handleSelectCategory}
         />
-        <GridColumnSwitcher
-          mobileColumns={mobileColumns}
-          onMobileChange={setMobileColumns}
-          desktopColumns={desktopColumns}
-          onDesktopChange={setDesktopColumns}
-        />
+        <div className="flex items-center gap-2.5 self-stretch sm:self-auto">
+          <GameSortSelect
+            value={sortKey}
+            onChange={setSortKey}
+            label={dict.games.sortLabel}
+            options={dict.games.sortOptions}
+          />
+          <GridColumnSwitcher
+            mobileColumns={mobileColumns}
+            onMobileChange={setMobileColumns}
+            desktopColumns={desktopColumns}
+            onDesktopChange={setDesktopColumns}
+          />
+        </div>
       </div>
 
       {/* Grid */}

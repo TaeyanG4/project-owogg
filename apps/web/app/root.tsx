@@ -6,6 +6,7 @@ import { AuthProvider } from "./features/auth";
 import { PersonalizationProvider } from "./features/personalization";
 import { I18nProvider } from "./features/i18n/I18nContext";
 import { LoginModal } from "./components/ui/LoginModal";
+import { API_URL, GAME_ORIGIN } from "./lib/api/config";
 
 export default function App() {
   return (
@@ -20,6 +21,12 @@ export default function App() {
         <link rel="icon" href="/favicon.ico" sizes="any" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         <link rel="manifest" href="/site.webmanifest" />
+        {/* First catalog/leaderboard and game start use separate origins. Establishing DNS/TLS
+            while the SPA bundle loads removes that handshake from the user's first interaction. */}
+        <link rel="preconnect" href={API_URL} crossOrigin="anonymous" />
+        {GAME_ORIGIN !== API_URL && (
+          <link rel="preconnect" href={GAME_ORIGIN} crossOrigin="anonymous" />
+        )}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link

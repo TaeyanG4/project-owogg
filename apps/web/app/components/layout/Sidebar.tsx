@@ -95,9 +95,12 @@ function MobileNavLink({
 interface SidebarProps {
   isMobileOpen: boolean;
   onMobileClose: () => void;
+  /** Gameplay uses an on-demand overlay drawer at every breakpoint, leaving the player flush with
+   * the content edge. Every other service route keeps the compact hover-expanding desktop rail. */
+  overlayOnly?: boolean;
 }
 
-export function Sidebar({ isMobileOpen, onMobileClose }: SidebarProps) {
+export function Sidebar({ isMobileOpen, onMobileClose, overlayOnly = false }: SidebarProps) {
   const location = useLocation();
   const currentPath = location.pathname;
   const { dict, locale, setLocale } = useI18n();
@@ -110,7 +113,7 @@ export function Sidebar({ isMobileOpen, onMobileClose }: SidebarProps) {
   const gameNavItems = [
     { label: dict.sidebar.home, path: "/", icon: Home, badge: "HOT" },
     { label: dict.sidebar.allGames, path: "/games", icon: Gamepad2 },
-    { label: dict.sidebar.popularGames, path: "/games?category=popular", icon: Flame },
+    { label: dict.sidebar.popularGames, path: "/games?sort=popular", icon: Flame },
     {
       label: dict.games.categories.reaction,
       path: "/games?category=reaction",
@@ -152,32 +155,39 @@ export function Sidebar({ isMobileOpen, onMobileClose }: SidebarProps) {
           yet. Moving overflow-hidden one level in keeps the same visual clipping (still needed
           so the w-16→w-56 hover-expand doesn't spill icon-row content past the collapsed
           rail) without it also hijacking the sticky calculation. */}
-      <aside className="hidden lg:block w-16 hover:w-56 transition-all duration-300 ease-in-out bg-surface-sidebar border-r border-border z-30 group shadow-2xl shrink-0 select-none">
-        <div className="sticky top-16 flex flex-col h-[calc(100vh-4rem)] overflow-hidden p-2">
-          {/* Main Nav — no heading above it (used to be a "탐색 메뉴" label here, which just
+      {!overlayOnly && (
+        <aside className="hidden lg:block w-16 hover:w-56 transition-all duration-300 ease-in-out bg-surface-sidebar border-r border-border z-30 group shadow-2xl shrink-0 select-none">
+          <div className="sticky top-16 flex flex-col h-[calc(100vh-4rem)] overflow-hidden p-2">
+            {/* Main Nav — no heading above it (used to be a "탐색 메뉴" label here, which just
               pushed Home down by its own height even while collapsed) so the first item sits
               right at the top. Games first, then a divider, then everything else — see
               gameNavItems/otherNavItems above for why they're split. */}
-          <div className="flex flex-col gap-1.5">
-            {gameNavItems.map((item) => (
-              <DesktopNavLink key={item.label} item={item} currentPath={currentPath} />
-            ))}
-          </div>
+            <div className="flex flex-col gap-1.5">
+              {gameNavItems.map((item) => (
+                <DesktopNavLink key={item.label} item={item} currentPath={currentPath} />
+              ))}
+            </div>
 
-          <div className="mt-3 border-t border-border/60 pt-3 flex flex-col gap-1.5">
-            <p className="px-3.5 text-[10px] font-bold text-text-muted uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap">
-              {dict.sidebar.otherHeading}
-            </p>
-            {otherNavItems.map((item) => (
-              <DesktopNavLink key={item.label} item={item} currentPath={currentPath} />
-            ))}
+            <div className="mt-3 border-t border-border/60 pt-3 flex flex-col gap-1.5">
+              <p className="px-3.5 text-[10px] font-bold text-text-muted uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap">
+                {dict.sidebar.otherHeading}
+              </p>
+              {otherNavItems.map((item) => (
+                <DesktopNavLink key={item.label} item={item} currentPath={currentPath} />
+              ))}
+            </div>
           </div>
-        </div>
-      </aside>
+        </aside>
+      )}
 
       {/* Mobile Drawer Overlay */}
       {isMobileOpen && (
-        <div className="lg:hidden fixed inset-0 z-50 flex">
+        <div
+          className={`${overlayOnly ? "" : "lg:hidden"} fixed inset-0 z-50 flex`}
+          role="dialog"
+          aria-modal="true"
+          aria-label={dict.sidebar.mobileMenuTitle}
+        >
           <div className="fixed inset-0 bg-black/70 backdrop-blur-sm" onClick={onMobileClose} />
 
           <div className="relative flex flex-col w-72 max-w-[80vw] bg-surface-sidebar border-r border-border h-full p-4 z-10 shadow-2xl animate-in slide-in-from-left duration-200 overflow-y-auto">

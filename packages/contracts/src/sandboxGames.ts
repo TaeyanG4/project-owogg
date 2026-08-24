@@ -164,6 +164,29 @@ export const SandboxGameReviewQueueResponseSchema = z.object({
 });
 export type SandboxGameReviewQueueResponse = z.infer<typeof SandboxGameReviewQueueResponseSchema>;
 
+export const AdminSandboxGameListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce
+    .number()
+    .refine((value): value is 10 | 20 | 30 => value === 10 || value === 20 || value === 30)
+    .default(10),
+});
+
+export const AdminSandboxGameListEntrySchema = z.object({
+  game: SandboxGameRecordSchema,
+  latestUploadedAt: z.string().nullable(),
+});
+export type AdminSandboxGameListEntry = z.infer<typeof AdminSandboxGameListEntrySchema>;
+
+export const AdminSandboxGameListResponseSchema = z.object({
+  entries: z.array(AdminSandboxGameListEntrySchema),
+  total: z.number().int().nonnegative(),
+  page: z.number().int().positive(),
+  pageSize: z.union([z.literal(10), z.literal(20), z.literal(30)]),
+  totalPages: z.number().int().positive(),
+});
+export type AdminSandboxGameListResponse = z.infer<typeof AdminSandboxGameListResponseSchema>;
+
 export const SandboxGameVersionDecisionRequestSchema = z.object({
   reason: z.string().trim().max(1000).nullable().optional(),
 });
@@ -176,6 +199,7 @@ export const SandboxGameMetadataUpdateRequestSchema = z.object({
   shortDescription: z.string().trim().max(200).nullable().optional(),
   description: z.string().trim().max(4000).nullable().optional(),
   genre: z.string().trim().min(1).max(40).optional(),
+  mode: SandboxGameModeSchema.optional(),
   xpPerCompletion: z.number().int().min(0).max(100_000).optional(),
   scoreUnit: z.string().trim().max(20).nullable().optional(),
   scoreDirection: z.enum(["asc", "desc"]).nullable().optional(),
@@ -187,6 +211,29 @@ export const SandboxGameMetadataUpdateRequestSchema = z.object({
 export type SandboxGameMetadataUpdateRequest = z.infer<
   typeof SandboxGameMetadataUpdateRequestSchema
 >;
+
+/** Safe, creator-editable `owogg.json.game` subset. Saving this creates a new immutable version;
+ * slug is intentionally absent because it is the game's permanent D1 identity. */
+export const SandboxGameBasicMetadataUpdateRequestSchema = z
+  .object({
+    title: z.string().trim().min(1).max(60).optional(),
+    shortDescription: z.string().trim().max(200).nullable().optional(),
+    description: z.string().trim().max(4000).nullable().optional(),
+    genre: z.string().trim().min(1).max(40).optional(),
+    mode: SandboxGameModeSchema.optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, { message: "변경할 속성이 필요합니다." });
+export type SandboxGameBasicMetadataUpdateRequest = z.infer<
+  typeof SandboxGameBasicMetadataUpdateRequestSchema
+>;
+
+export const GameLogoUpdateResponseSchema = z.object({
+  gameId: z.number().int().positive(),
+  slug: z.string(),
+  hasLogo: z.literal(true),
+  updatedAt: z.string(),
+});
+export type GameLogoUpdateResponse = z.infer<typeof GameLogoUpdateResponseSchema>;
 
 export const SandboxGameVisibilityUpdateRequestSchema = z.object({
   visibility: SandboxGameVisibilitySchema,

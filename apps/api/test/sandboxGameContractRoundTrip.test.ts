@@ -8,6 +8,12 @@ import {
   SandboxGameReviewQueueResponseSchema,
   SandboxGameVersionRecordSchema,
   toSandboxGameRecordResponse,
+  SandboxGameBasicMetadataUpdateRequestSchema,
+  GameLogoUpdateResponseSchema,
+  AdminSandboxGameListResponseSchema,
+  AdminSandboxGameListQuerySchema,
+  AdminGameListResponseSchema,
+  AdminGameListQuerySchema,
 } from "@owogg/contracts";
 
 /** Regression guard for the 2026-08-18 outage: SandboxGameRecordSchema was a `.transform()` whose
@@ -162,4 +168,79 @@ test("a raw core record fails to parse — forgetting the mapper is loud, not si
   // The whole point of the symmetric schema: if a route skips toSandboxGameRecordResponse, it
   // breaks immediately and visibly instead of quietly shipping logoKey to a client.
   assert.throws(() => SandboxGameRecordSchema.parse(coreGameRecord));
+});
+
+test("creator basic metadata accepts only the safe non-identity subset", () => {
+  const parsed = SandboxGameBasicMetadataUpdateRequestSchema.parse({
+    title: "수정된 제목",
+    genre: "arcade",
+    mode: "multi",
+    shortDescription: null,
+  });
+  assert.equal(parsed.mode, "multi");
+  assert.throws(() =>
+    SandboxGameBasicMetadataUpdateRequestSchema.parse({ title: "", slug: "changed" }),
+  );
+  assert.throws(() => SandboxGameBasicMetadataUpdateRequestSchema.parse({}));
+});
+
+test("logo replacement response exposes revision facts without a B2 object key", () => {
+  const response = GameLogoUpdateResponseSchema.parse({
+    gameId: 5,
+    slug: "ball-dodge",
+    hasLogo: true,
+    updatedAt: "2026-08-25T00:00:00.000Z",
+  });
+  assert.equal("objectKey" in response, false);
+});
+
+test("admin USER game page round-trips server upload timestamps", () => {
+  assertRoundTrips(AdminSandboxGameListResponseSchema, {
+    entries: [
+      {
+        game: toSandboxGameRecordResponse(coreGameRecord),
+        latestUploadedAt: "2026-08-25T09:30:00.000Z",
+      },
+    ],
+    total: 31,
+    page: 2,
+    pageSize: 20,
+    totalPages: 2,
+  });
+});
+
+test("admin OWOGG game page carries server pagination and latest upload time", () => {
+  const parsed = AdminGameListResponseSchema.parse({
+    games: [
+      {
+        gameId: "official-game",
+        title: "Official Game",
+        shortDescription: null,
+        description: null,
+        genre: "arcade",
+        mode: "single",
+        latestUploadedAt: "2026-08-25T09:30:00.000Z",
+        publisherType: "OWOGG",
+        status: "published",
+        enabled: true,
+        disabledReason: null,
+        updatedByAdminId: null,
+        updatedAt: null,
+      },
+    ],
+    total: 1,
+    page: 1,
+    pageSize: 10,
+    totalPages: 1,
+  });
+  assert.equal(parsed.games[0]?.latestUploadedAt, "2026-08-25T09:30:00.000Z");
+});
+
+test("admin game page size is limited to the 10, 20, and 30 presets", () => {
+  for (const pageSize of [10, 20, 30]) {
+    assert.equal(AdminGameListQuerySchema.parse({ pageSize }).pageSize, pageSize);
+    assert.equal(AdminSandboxGameListQuerySchema.parse({ pageSize }).pageSize, pageSize);
+  }
+  assert.throws(() => AdminGameListQuerySchema.parse({ pageSize: 50 }));
+  assert.throws(() => AdminSandboxGameListQuerySchema.parse({ pageSize: 50 }));
 });

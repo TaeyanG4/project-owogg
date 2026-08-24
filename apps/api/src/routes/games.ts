@@ -13,6 +13,7 @@ import {
 } from "@owogg/contracts";
 import {
   GAME_SESSION_POLICY,
+  emptyPublicGameStats,
   publicGameMediaUrl,
   resolveBundleContentType,
   toPublicGame,
@@ -22,6 +23,7 @@ import {
   type GameResultAcceptError,
   type GameSessionPayload,
   type RuntimeGame,
+  type PublicGameStats,
 } from "@owogg/core";
 import { createContainer, evaluateAchievementsForUser, type AppContainer } from "../container.js";
 import { edgeCache } from "../middleware/edgeCache.js";
@@ -74,6 +76,7 @@ async function publicGameProjection(
   c: Context<ApiEnv>,
   container: AppContainer,
   runtime: RuntimeGame | null,
+  stats: PublicGameStats = emptyPublicGameStats(),
 ): Promise<ReturnType<typeof toPublicGame> | null> {
   if (!runtime) return null;
   try {
@@ -90,7 +93,7 @@ async function publicGameProjection(
       `/api/games/${encodeURIComponent(runtime.identity.slug)}/media/logo`,
       c.req.url,
     ).toString();
-    return toPublicGame(runtime, publicGameMediaUrl(asset, endpoint), publisherName);
+    return toPublicGame(runtime, publicGameMediaUrl(asset, endpoint), publisherName, stats);
   } catch {
     return null;
   }
@@ -103,9 +106,17 @@ gamesRouter.get("/", edgeCache({ ttlSeconds: 60, browserTtlSeconds: 0 }), async 
 
   const container = createContainer(c.env.DB, readB2Config(c.env));
   const runtimes = await container.publicGameCatalog.list();
+  const statsBySlug = await container.publicGameMetricsUseCases
+    .getBySlugs(runtimes.map((runtime) => runtime.identity.slug))
+    .catch(() => new Map<string, PublicGameStats>());
   const games = await Promise.all(
     runtimes.map(async (runtime) => {
-      const projection = await publicGameProjection(c, container, runtime);
+      const projection = await publicGameProjection(
+        c,
+        container,
+        runtime,
+        statsBySlug.get(runtime.identity.slug),
+      );
       return projection ? PublicGameSchema.parse(projection) : null;
     }),
   );
@@ -124,15 +135,19 @@ interface PublicLogoCache {
 }
 
 // Generic public logo bytes. Availability and the exact D1 asset revision are checked BEFORE the
-// B2 byte cache on every request. A conventional edgeCache middleware would return its hit before
-// these checks and could keep a deleted/disabled game's logo public for an hour.
+// B2 byte cache on every request. The logo gate is deliberately D1-only: loading a public image
+// never needs catalog/policy canonical metadata, and fetching that B2 JSON before an already-cached
+// logo added ~1.4s to every first-page image. A conventional edgeCache middleware would return its
+// hit before these checks and could keep a deleted/disabled game's logo public for an hour.
 gamesRouter.get("/:slug/media/logo", async (c) => {
   if (!c.env?.DB) return c.text("Not Found", 404);
   const container = createContainer(c.env.DB, readB2Config(c.env));
-  const runtime = await container.publicGameCatalog.findBySlug(c.req.param("slug"));
   try {
-    if (!runtime) return c.text("Not Found", 404);
-    const asset = await container.gameAssetRepo.findByGameId(runtime.identity.id, "LOGO");
+    const identity = await container.gameIdentityRepo.findBySlug(c.req.param("slug"));
+    if (!identity || !(await container.runtimeGameAvailability.isIdentityServable(identity))) {
+      return c.text("Not Found", 404);
+    }
+    const asset = await container.gameAssetRepo.findByGameId(identity.id, "LOGO");
     if (!asset) return c.text("Not Found", 404);
     if (c.req.query("v") !== asset.updatedAt) return c.text("Not Found", 404);
 
@@ -191,7 +206,13 @@ gamesRouter.get("/:slug", edgeCache({ ttlSeconds: 60, browserTtlSeconds: 0 }), a
 
   const container = createContainer(c.env.DB, readB2Config(c.env));
   const runtime = await container.publicGameCatalog.findBySlug(c.req.param("slug"));
-  const game = await publicGameProjection(c, container, runtime);
+  const stats = runtime
+    ? await container.publicGameMetricsUseCases
+        .getBySlugs([runtime.identity.slug])
+        .then((metrics) => metrics.get(runtime.identity.slug))
+        .catch(() => undefined)
+    : undefined;
+  const game = await publicGameProjection(c, container, runtime, stats);
   if (!game) return c.text("Not Found", 404);
   return c.json(PublicGameSchema.parse(game), 200);
 });

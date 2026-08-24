@@ -5,10 +5,12 @@ import { usePublicGames } from "../features/publicGamesApi";
 import { publicGameToCard } from "../features/catalog/publicGameAdapter";
 import { GameGrid } from "../components/ui/GameGrid";
 import { GridColumnSwitcher } from "../components/ui/GridColumnSwitcher";
+import { GameSortSelect } from "../components/ui/GameSortSelect";
 import { CategoryChips } from "../components/ui/CategoryChips";
 import { usePersonalization, useGridColumns } from "../features/personalization";
 import { useAuth } from "../features/auth";
 import { useI18n } from "../features/i18n/I18nContext";
+import { isGameSortKey, sortPublicGameCards, type GameSortKey } from "../features/catalog/gameSort";
 
 export function meta() {
   return [
@@ -20,7 +22,11 @@ export function meta() {
 export default function Home() {
   const [searchParams] = useSearchParams();
   const initialCategory = searchParams.get("category") || "all";
+  const requestedSort = searchParams.get("sort");
   const [selectedCategory, setSelectedCategory] = useState(initialCategory);
+  const [sortKey, setSortKey] = useState<GameSortKey>(
+    isGameSortKey(requestedSort) ? requestedSort : "popular",
+  );
   const { mobileColumns, setMobileColumns, desktopColumns, setDesktopColumns } = useGridColumns();
   const { dict } = useI18n();
   const { games: publicGames } = usePublicGames();
@@ -48,16 +54,23 @@ export default function Home() {
   // they already declared, not re-checked against what changed once gameManifests itself became
   // a value that updates after mount).
   const filteredGames = useMemo(() => {
-    if (selectedCategory === "all") return gameManifests;
+    if (selectedCategory === "all") return sortPublicGameCards(gameManifests, sortKey);
     if (selectedCategory === "favorites") {
-      return gameManifests.filter((game) => favoriteGameIds.includes(game.slug));
+      return sortPublicGameCards(
+        gameManifests.filter((game) => favoriteGameIds.includes(game.slug)),
+        sortKey,
+      );
     }
-    return gameManifests.filter((game) => game.categories.includes(selectedCategory));
-  }, [gameManifests, selectedCategory, favoriteGameIds]);
+    return sortPublicGameCards(
+      gameManifests.filter((game) => game.categories.includes(selectedCategory)),
+      sortKey,
+    );
+  }, [gameManifests, selectedCategory, favoriteGameIds, sortKey]);
 
-  const popularGames = useMemo(() => {
-    return gameManifests.filter((game) => game.categories.includes("popular"));
-  }, [gameManifests]);
+  const featuredGames = useMemo(
+    () => sortPublicGameCards(gameManifests, sortKey),
+    [gameManifests, sortKey],
+  );
 
   const recentGames = useMemo(() => {
     return recentPlays
@@ -75,20 +88,23 @@ export default function Home() {
 
   return (
     <div className="flex flex-col w-full px-4 md:px-8 py-6 gap-10 max-w-7xl mx-auto flex-1">
-      {/* Popular Games — leads the page instead of a single per-day featured banner, so it scales
-          naturally as more games get the "popular" tag rather than needing curation of one pick. */}
-      {popularGames.length > 0 && (
+      {/* Metric-ranked discovery row. The same selection also orders the complete lineup below. */}
+      {featuredGames.length > 0 && (
         <section className="flex flex-col gap-4 w-full">
           <div className="flex items-center gap-2 border-b border-border/40 pb-3">
-            <TrendingUp className="w-5 h-5 text-brand" />
-            <h3 className="text-xl font-black text-text-primary tracking-tight">
-              {dict.home.popularTitle}
-            </h3>
+            <TrendingUp className="h-5 w-5 text-brand" />
+            <GameSortSelect
+              value={sortKey}
+              onChange={setSortKey}
+              label={dict.games.sortLabel}
+              options={dict.games.sortOptions}
+            />
           </div>
           <GameGrid
-            games={popularGames}
+            games={featuredGames}
             mobileColumns={mobileColumns}
             desktopColumns={desktopColumns}
+            maxRows={1}
           />
         </section>
       )}

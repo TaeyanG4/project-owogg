@@ -21,6 +21,9 @@ import { usePersonalization } from "../personalization";
 import { useI18n } from "../i18n/I18nContext";
 import { localizedDifficultyLabel } from "../catalog/difficultyLabels";
 import { GameThumbnail } from "../../components/ui/GameThumbnail";
+import { GamePlayActionBar } from "../../components/game/GamePlayActionBar";
+import { GamePlayAdSlot } from "../../components/game/GamePlayAdSlot";
+import { GameRecommendations } from "../../components/game/GameRecommendations";
 import { XIcon } from "../../components/ui/XIcon";
 import { IframeRuntime } from "./runtime/IframeRuntime";
 import { fetchGameSession } from "./gameSessionApi";
@@ -35,7 +38,9 @@ import {
 import { gamePlayUrl } from "../../lib/api/config";
 import type { Dictionary } from "../i18n/dictionary";
 import type { LeaderRecord, PublicGame } from "@owogg/contracts";
-import { fetchPublicGame } from "../publicGamesApi";
+import { fetchPublicGame, usePublicGames } from "../publicGamesApi";
+import { publicGameToCard } from "../catalog/publicGameAdapter";
+import { selectRecommendedGameCards } from "./gameRecommendations";
 import {
   ArrowLeft,
   AlertCircle,
@@ -44,9 +49,12 @@ import {
   UserCheck,
   Copy,
   Trophy,
-  Maximize2,
-  Minimize2,
   RotateCcw,
+  Bookmark,
+  CalendarDays,
+  Smartphone,
+  Users,
+  X,
 } from "lucide-react";
 
 export type SubmissionState = "idle" | "guest" | "submitting" | "success" | "error";
@@ -359,6 +367,15 @@ function publicGameAccent(game: PublicGame | null): string | undefined {
   return game?.catalog.type === "TAXONOMY" ? game.catalog.accent : undefined;
 }
 
+export function formatPublishedDate(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  const year = parsed.getUTCFullYear();
+  const month = String(parsed.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getUTCDate()).padStart(2, "0");
+  return `${year}.${month}.${day}`;
+}
+
 /** Wire schemas permit explicit `undefined` on optional properties; the SDK domain types use
  * exact-optional properties. Normalize at this boundary instead of weakening either contract. */
 function toGamePresentation(input: PublicGame["presentation"]): GamePresentation | undefined {
@@ -428,10 +445,16 @@ export function GameHost({ slug }: GameHostProps) {
   const navigate = useNavigate();
   const { user, isAuthenticated, isLoading: authLoading, openLoginModal } = useAuth();
   const { dict } = useI18n();
+  const { recordRecentPlay, isFavorite, toggleFavorite } = usePersonalization();
+  const { games: publicGames } = usePublicGames();
 
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [result, setResult] = useState<GameResult | null>(null);
+  const [isTheaterMode, setIsTheaterMode] = useState(false);
+  const [isMobilePlayOpen, setIsMobilePlayOpen] = useState(false);
+  const [gameShareState, setGameShareState] = useState<"idle" | "shared">("idle");
+  const [mobileLinkCopied, setMobileLinkCopied] = useState(false);
   // Reaction-time games may provide a display badge through metadata.tier.
   // Other games don't set this metadata key, so this stays undefined for them.
   const resultTier = useMemo(() => {
@@ -451,6 +474,17 @@ export function GameHost({ slug }: GameHostProps) {
 
   const [game, setGame] = useState<PublicGame | null>(null);
   const localizedTitle = game?.title;
+  const catalogCards = useMemo(() => publicGames.map(publicGameToCard), [publicGames]);
+  const currentGameCard = useMemo(
+    () =>
+      catalogCards.find((candidate) => candidate.slug === slug) ??
+      (game ? publicGameToCard(game) : undefined),
+    [catalogCards, game, slug],
+  );
+  const recommendedGames = useMemo(
+    () => selectRecommendedGameCards(catalogCards, currentGameCard, 7),
+    [catalogCards, currentGameCard],
+  );
   const presentation = useMemo(() => toGamePresentation(game?.presentation), [game?.presentation]);
   const scoreConfig = useMemo(
     () => toScoreConfig(game?.policy.score ?? null),
@@ -460,14 +494,22 @@ export function GameHost({ slug }: GameHostProps) {
 
   // Presentation layout — see presentationLayoutResolver.ts's own doc comment for the math, and
   // useElementSize's/useViewportHeight's for why width and height each come from the source they
-  // do. `iframeAreaRef` goes on the innermost box that actually bounds the iframe (the
-  // `p-6`-padded wrapper below), not some outer container: that's the one measurement that needs
-  // no hardcoded knowledge of the max-w-6xl/rounded-card chrome around it — and it is only ever
+  // do. `iframeAreaRef` goes on the edge-to-edge player viewport that actually bounds the iframe,
+  // not some outer container: that's the one measurement that needs no hardcoded knowledge of
+  // the recommendation rail or player chrome around it — and it is only ever
   // used for *width*, never height (see useViewportHeight's doc comment for the feedback loop
   // that would create).
   const [iframeAreaRef, measuredArea] = useElementSize();
   const viewportHeight = useViewportHeight();
-  const platformHeight = viewportHeight !== null ? computePlatformHeight(viewportHeight) : null;
+  const gameSurfaceRef = useRef<HTMLDivElement>(null);
+  const { isFullscreen, isFullscreenApiAvailable, toggleFullscreen } =
+    useFullscreen(gameSurfaceRef);
+  const platformHeight =
+    viewportHeight !== null
+      ? isFullscreen
+        ? Math.max(240, viewportHeight - 72)
+        : computePlatformHeight(viewportHeight)
+      : null;
 
   // `available` is `null` until both an independent width and height measurement exist —
   // resolvePresentationLayout's own fail-safe additionally treats a 0/negative value the same
@@ -508,23 +550,15 @@ export function GameHost({ slug }: GameHostProps) {
 
   // Fullscreen — see useFullscreen's own doc comment. `gameSurfaceRef` is the fullscreen target —
   // never the iframe/GameFrame itself, and never anything inside it, so requestFullscreen always
-  // targets Host-owned chrome, not a cross-origin document. It's attached to GameHost's own outer
-  // return element (below), NOT the innermost game-surface card: the fullscreen toggle button
-  // lives in the header, a SIBLING of that inner card, and the Fullscreen API renders only the
-  // target element's own subtree while active — a sibling exit button would become inaccessible
-  // (visually covered, no longer reachable) the moment fullscreen started if the target were
-  // scoped any narrower than "the header and the game area together". presentation === undefined
+  // targets Host-owned chrome, not a cross-origin document. It is attached to the complete player
+  // shell (viewport plus the action footer), so the exit button remains inside the fullscreen
+  // subtree and accessible after entry. presentation === undefined
   // (every shipped game today) always resolves showFullscreenControl to false, via
   // shouldShowFullscreenControl's own doc comment.
-  const gameSurfaceRef = useRef<HTMLDivElement>(null);
-  const { isFullscreen, isFullscreenApiAvailable, toggleFullscreen } =
-    useFullscreen(gameSurfaceRef);
   const showFullscreenControl = shouldShowFullscreenControl(presentation, isFullscreenApiAvailable);
-  // A hint only (button prominence / a small badge) — never automatic requestFullscreen. See
-  // GamePresentationFullscreen's own doc comment on why there is deliberately no "required" field
-  // for this to escalate into.
-  const fullscreenRecommended = presentation?.fullscreen.recommended === true;
-
+  const renderedIframeFrameClassName = isFullscreen
+    ? "h-[calc(100vh-4.5rem)] w-full"
+    : iframeFrameClassName;
   // Mobile/orientation advisories — see presentationAdvisory.ts's own doc comment. Both resolvers
   // return "no advisory" outright whenever isMobileLikeEnvironment is false, so nothing here ever
   // shows on desktop regardless of what a game's presentation.mobile declares.
@@ -538,7 +572,7 @@ export function GameHost({ slug }: GameHostProps) {
   );
   const presentationAdvisoryBanner =
     mobileAdvisory !== "none" || orientationAdvisory.kind !== "none" ? (
-      <div className="flex w-full max-w-6xl flex-col gap-1.5">
+      <div className="flex w-full flex-col gap-1.5">
         {mobileAdvisory === "unsupported" && (
           <div
             data-testid="mobile-advisory-unsupported"
@@ -626,6 +660,8 @@ export function GameHost({ slug }: GameHostProps) {
     setGame(null);
     setError(null);
     setResult(null);
+    setIsTheaterMode(false);
+    setIsMobilePlayOpen(false);
     fetchPublicGame(slug)
       .then((resolved) => {
         if (!cancelled) setGame(resolved);
@@ -801,7 +837,55 @@ export function GameHost({ slug }: GameHostProps) {
     }
   }, [captureScreenshotBlob, buildShareText, slug]);
 
-  const { recordRecentPlay } = usePersonalization();
+  const currentGameUrl = useCallback(
+    () => `${window.location.origin}/games/${encodeURIComponent(slug)}`,
+    [slug],
+  );
+
+  const markGameShareComplete = useCallback(() => {
+    setGameShareState("shared");
+    window.setTimeout(() => setGameShareState("idle"), 2500);
+  }, []);
+
+  const handleShareGame = useCallback(async () => {
+    const url = currentGameUrl();
+    try {
+      if (typeof navigator.share === "function") {
+        await navigator.share({ title: localizedTitle ?? slug, url });
+      } else {
+        await navigator.clipboard.writeText(url);
+      }
+      markGameShareComplete();
+    } catch (shareError) {
+      if (shareError instanceof DOMException && shareError.name === "AbortError") return;
+      try {
+        await navigator.clipboard.writeText(url);
+        markGameShareComplete();
+      } catch {
+        // The URL remains visible in the mobile-play dialog even when browser clipboard policy
+        // blocks programmatic writes, so this action fails without disrupting the game.
+      }
+    }
+  }, [currentGameUrl, localizedTitle, markGameShareComplete, slug]);
+
+  const handleCopyMobileLink = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(currentGameUrl());
+      setMobileLinkCopied(true);
+      window.setTimeout(() => setMobileLinkCopied(false), 2500);
+    } catch {
+      setMobileLinkCopied(false);
+    }
+  }, [currentGameUrl]);
+
+  useEffect(() => {
+    if (!isMobilePlayOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsMobilePlayOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [isMobilePlayOpen]);
 
   // Game Runtime Context
   const runtime = useMemo<GameRuntimeContext>(
@@ -1156,164 +1240,341 @@ export function GameHost({ slug }: GameHostProps) {
 
   // Auth Protection Enforcer
   const isAuthBlocked = game?.policy.requiresAuth && !isAuthenticated;
+  const gameTags = currentGameCard
+    ? Array.from(
+        new Set([
+          ...(currentGameCard.genre ? [currentGameCard.genre] : []),
+          ...currentGameCard.categories,
+          ...currentGameCard.tags,
+          ...currentGameCard.modes,
+        ]),
+      )
+    : [];
+  const playerCount = currentGameCard?.playerCount ?? game?.stats.playerCount ?? 0;
+  const bookmarkCount = currentGameCard?.bookmarkCount ?? game?.stats.bookmarkCount ?? 0;
+  const feedbackHref = `/contact?topic=game-feedback&game=${encodeURIComponent(slug)}`;
 
   return (
-    <div ref={gameSurfaceRef} className="flex flex-col flex-1 bg-[#09090b] select-none">
-      {/* Game Header */}
-      <div className="h-14 border-b border-border bg-surface flex items-center px-4 justify-between shrink-0">
-        <div className="flex items-center gap-4">
-          <button
-            type="button"
-            onClick={() => void navigate("/games")}
-            className="p-2 -ml-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors cursor-pointer flex items-center gap-2"
-          >
-            <ArrowLeft className="w-5 h-5" />
-            <span className="text-sm font-medium hidden sm:inline">{dict.gamePlay.back}</span>
-          </button>
+    <div className="min-h-[calc(100vh-4rem)] flex-1 bg-[#09090b] select-none">
+      <div className="mx-auto w-full max-w-[1800px] px-2 pb-10 pt-2 sm:px-4 sm:pt-4 lg:px-5">
+        <div
+          className={`grid min-w-0 items-start gap-5 ${
+            isTheaterMode ? "grid-cols-1" : "grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px]"
+          }`}
+        >
+          <main className="flex min-w-0 flex-col gap-5">
+            {presentationAdvisoryBanner}
 
-          <div className="h-4 w-px bg-border hidden sm:block" />
-
-          <div className="flex items-center gap-3">
-            <GameThumbnail
-              thumbnail={game?.mediaUrl ?? ""}
-              title={localizedTitle ?? ""}
-              accent={publicGameAccent(game)}
-              className="h-6 w-6"
-              rounded="rounded-md"
-            />
-            <div className="min-w-0">
-              <div className="truncate font-bold">
-                {localizedTitle ?? dict.gamePlay.loadingTitle}
+            <section
+              ref={gameSurfaceRef}
+              aria-label={localizedTitle ?? dict.gamePlay.loadingTitle}
+              className="min-w-0 overflow-hidden rounded-2xl border border-border/70 bg-surface shadow-2xl shadow-black/30 [&:fullscreen]:h-screen [&:fullscreen]:w-screen [&:fullscreen]:rounded-none [&:fullscreen]:border-0"
+            >
+              <div className="relative flex w-full items-center justify-center overflow-hidden bg-black">
+                {resultOverlay}
+                {isLoading ? (
+                  <div className="flex h-[70vh] min-h-[480px] max-h-[720px] w-full flex-col items-center justify-center gap-4">
+                    <div className="h-10 w-10 animate-spin rounded-full border-4 border-brand/30 border-t-brand" />
+                    <p className="font-medium text-text-secondary animate-pulse">
+                      {dict.gamePlay.loadingBody}
+                    </p>
+                  </div>
+                ) : isAuthBlocked ? (
+                  <div className="flex h-[70vh] min-h-[480px] max-h-[720px] w-full items-center justify-center p-6">
+                    <div className="flex w-full max-w-md flex-col items-center gap-4 rounded-3xl border border-border bg-surface-raised p-8 text-center shadow-2xl">
+                      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-brand/10 text-brand">
+                        <UserCheck className="h-7 w-7" />
+                      </div>
+                      <h3 className="text-2xl font-black text-text-primary">
+                        {dict.gamePlay.authRequiredTitle}
+                      </h3>
+                      <p className="text-sm text-text-secondary">
+                        {dict.gamePlay.authRequiredBody}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={openLoginModal}
+                        className="mt-2 w-full cursor-pointer rounded-2xl bg-brand py-3 font-extrabold text-white shadow-lg shadow-brand/30 transition-all hover:scale-[1.02]"
+                      >
+                        {dict.gamePlay.authRequiredCta}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    className="flex w-full items-center justify-center overflow-hidden"
+                    ref={iframeAreaRef}
+                  >
+                    <IframeRuntime
+                      src={resolveGameRuntimeUrl(slug)}
+                      title={localizedTitle ?? slug}
+                      attemptKey={attemptKey}
+                      frameClassName={renderedIframeFrameClassName}
+                      frameStyle={iframeFrameStyle}
+                      iframeStyle={iframeElementStyle}
+                      {...(game?.difficulty ? { difficultyId: selectedDifficultyId } : {})}
+                      onStarted={handleIframeStarted}
+                      onEvent={handleIframeEvent}
+                      onComplete={handleIframeComplete}
+                      onCancel={runtime.cancel}
+                      onError={handleIframeError}
+                    />
+                  </div>
+                )}
               </div>
-              {game && (
-                <div className="truncate text-[10px] font-semibold text-text-muted">
-                  제작자 {game.publisherName}
+
+              <div className="flex min-w-0 flex-col gap-3 border-t border-border/80 bg-surface px-3 py-2.5 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => void navigate("/games")}
+                    title={dict.gamePlay.backToList}
+                    aria-label={dict.gamePlay.backToList}
+                    className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-full text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-primary"
+                  >
+                    <ArrowLeft className="h-5 w-5" />
+                  </button>
+                  <GameThumbnail
+                    thumbnail={game?.mediaUrl ?? ""}
+                    title={localizedTitle ?? ""}
+                    accent={publicGameAccent(game)}
+                    className="h-9 w-9 shrink-0"
+                    rounded="rounded-xl"
+                  />
+                  <div className="min-w-0">
+                    <h1 className="truncate text-sm font-black text-text-primary sm:text-base">
+                      {localizedTitle ?? dict.gamePlay.loadingTitle}
+                    </h1>
+                    {game && (
+                      <p className="truncate text-[10px] font-semibold text-text-muted sm:text-[11px]">
+                        {dict.gamePlay.publisherLabel} {game.publisherName}
+                      </p>
+                    )}
+                  </div>
+
+                  {game?.difficulty && (
+                    <div className="ml-1 hidden shrink-0 items-center gap-1 rounded-full border border-border/80 bg-surface-raised p-1 sm:flex">
+                      {game.difficulty.levels.map((level) => {
+                        const isSelected = level.id === selectedDifficultyId;
+                        return (
+                          <button
+                            key={level.id}
+                            type="button"
+                            onClick={() => setSelectedDifficultyId(level.id)}
+                            aria-pressed={isSelected}
+                            className={`cursor-pointer rounded-full px-2.5 py-1 text-[11px] font-bold transition-all ${
+                              isSelected
+                                ? "bg-brand text-white shadow-sm"
+                                : "text-text-secondary hover:bg-surface-overlay hover:text-text-primary"
+                            }`}
+                          >
+                            {localizedDifficultyLabel(level.id, level.label, dict.gamePlay)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <GamePlayActionBar
+                  labels={{
+                    bookmark: dict.gamePlay.bookmarkCta,
+                    bookmarked: dict.gamePlay.bookmarkedCta,
+                    share:
+                      gameShareState === "shared"
+                        ? dict.gamePlay.shareGameCopied
+                        : dict.gamePlay.shareGameCta,
+                    feedback: dict.gamePlay.feedbackCta,
+                    mobile: dict.gamePlay.mobilePlayCta,
+                    theaterEnter: dict.gamePlay.theaterModeEnterCta,
+                    theaterExit: dict.gamePlay.theaterModeExitCta,
+                    fullscreenEnter: dict.gamePlay.fullscreenEnterCta,
+                    fullscreenExit: dict.gamePlay.fullscreenExitCta,
+                  }}
+                  feedbackHref={feedbackHref}
+                  isFavorite={isFavorite(slug)}
+                  isShareComplete={gameShareState === "shared"}
+                  isTheater={isTheaterMode}
+                  isFullscreen={isFullscreen}
+                  canFullscreen={showFullscreenControl}
+                  onToggleFavorite={() => void toggleFavorite(slug)}
+                  onShare={() => void handleShareGame()}
+                  onMobilePlay={() => setIsMobilePlayOpen(true)}
+                  onToggleTheater={() => setIsTheaterMode((current) => !current)}
+                  onToggleFullscreen={toggleFullscreen}
+                />
+              </div>
+
+              {game?.difficulty && (
+                <div className="flex items-center gap-1 border-t border-border/60 bg-surface px-3 py-2 sm:hidden">
+                  {game.difficulty.levels.map((level) => {
+                    const isSelected = level.id === selectedDifficultyId;
+                    return (
+                      <button
+                        key={level.id}
+                        type="button"
+                        onClick={() => setSelectedDifficultyId(level.id)}
+                        aria-pressed={isSelected}
+                        className={`cursor-pointer rounded-full px-3 py-1.5 text-xs font-bold ${
+                          isSelected
+                            ? "bg-brand text-white"
+                            : "bg-surface-raised text-text-secondary"
+                        }`}
+                      >
+                        {localizedDifficultyLabel(level.id, level.label, dict.gamePlay)}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
-            </div>
-          </div>
+            </section>
+
+            {game && (
+              <section
+                aria-labelledby="game-information-title"
+                className="rounded-2xl border border-border/70 bg-surface-raised/70 p-5 sm:p-6"
+              >
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                      <h2
+                        id="game-information-title"
+                        className="text-xl font-black text-text-primary"
+                      >
+                        {dict.gamePlay.gameInfoTitle}
+                      </h2>
+                      <span className="rounded-full border border-brand/25 bg-brand/10 px-2.5 py-1 text-[10px] font-black text-brand-light">
+                        {game.publisherType === "OWOGG"
+                          ? dict.gamePlay.officialGameBadge
+                          : dict.gamePlay.userGameBadge}
+                      </span>
+                    </div>
+                    <p className="text-sm font-semibold leading-relaxed text-text-secondary">
+                      {game.shortDescription}
+                    </p>
+                  </div>
+
+                  {game.policy.leaderboard && (
+                    <Link
+                      to={`/games/${slug}/ranking`}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-2 text-xs font-extrabold text-text-secondary transition-colors hover:border-brand/40 hover:text-text-primary"
+                    >
+                      <Trophy className="h-4 w-4 text-accent-yellow" />
+                      {dict.gameRanking.eyebrow}
+                    </Link>
+                  )}
+                </div>
+
+                <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 border-y border-border/60 py-3 text-xs font-bold text-text-muted">
+                  <span className="inline-flex items-center gap-1.5">
+                    <Users className="h-3.5 w-3.5" />
+                    {dict.gamePlay.playerStatsLabel} {playerCount.toLocaleString()}
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <Bookmark className="h-3.5 w-3.5" />
+                    {dict.gamePlay.bookmarkStatsLabel} {bookmarkCount.toLocaleString()}
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <CalendarDays className="h-3.5 w-3.5" />
+                    {dict.gamePlay.publishedLabel} {formatPublishedDate(game.publishedAt)}
+                  </span>
+                </div>
+
+                {game.description && (
+                  <p className="mt-4 whitespace-pre-line text-sm leading-7 text-text-secondary">
+                    {game.description}
+                  </p>
+                )}
+
+                {gameTags.length > 0 && (
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    {gameTags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="rounded-lg border border-border/70 bg-surface px-3 py-1.5 text-xs font-bold text-text-secondary"
+                      >
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+
+            <GamePlayAdSlot
+              label={dict.gamePlay.adLabel}
+              body={dict.gamePlay.adPlaceholder}
+              variant="banner"
+            />
+          </main>
+
+          <aside
+            aria-label={dict.gamePlay.recommendedGamesTitle}
+            className={`min-w-0 space-y-5 ${
+              isTheaterMode
+                ? "grid gap-5 space-y-0 md:grid-cols-[minmax(260px,360px)_minmax(0,1fr)]"
+                : "xl:sticky xl:top-20"
+            }`}
+          >
+            <GamePlayAdSlot
+              label={dict.gamePlay.adLabel}
+              body={dict.gamePlay.adPlaceholder}
+              variant="rectangle"
+            />
+            <GameRecommendations
+              title={dict.gamePlay.recommendedGamesTitle}
+              emptyLabel={dict.gamePlay.recommendedGamesEmpty}
+              games={recommendedGames}
+            />
+          </aside>
         </div>
+      </div>
 
-        <div className="flex items-center gap-2">
-          {game?.difficulty && (
-            <div className="flex items-center gap-1 rounded-xl border border-border/80 bg-surface-raised p-1">
-              {game.difficulty.levels.map((level) => {
-                const isSelected = level.id === selectedDifficultyId;
-                return (
-                  <button
-                    key={level.id}
-                    type="button"
-                    onClick={() => setSelectedDifficultyId(level.id)}
-                    aria-pressed={isSelected}
-                    className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-all cursor-pointer ${
-                      isSelected
-                        ? "bg-brand text-white shadow-sm"
-                        : "text-text-secondary hover:text-text-primary hover:bg-surface-overlay"
-                    }`}
-                  >
-                    {localizedDifficultyLabel(level.id, level.label, dict.gamePlay)}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {game?.policy.leaderboard && (
-            <Link
-              to={`/games/${slug}/ranking`}
-              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-bold text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-primary"
-            >
-              <Trophy className="h-4 w-4 text-accent-yellow" />
-              <span className="hidden sm:inline">{dict.gameRanking.eyebrow}</span>
-            </Link>
-          )}
-
-          {/* Host chrome, not iframe-internal UI — see useFullscreen's own doc comment on why
-              gameSurfaceRef (not the iframe) is the requestFullscreen target. Hidden entirely
-              (not disabled) whenever presentation.fullscreen.supported is false or the browser
-              has no Fullscreen API — never shown for presentation === undefined, which is every
-              shipped game today. */}
-          {showFullscreenControl && (
+      {isMobilePlayOpen && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+          <button
+            type="button"
+            aria-label={dict.gamePlay.closeDialogCta}
+            className="absolute inset-0 cursor-default bg-black/75 backdrop-blur-sm"
+            onClick={() => setIsMobilePlayOpen(false)}
+          />
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mobile-play-title"
+            className="relative z-10 w-full max-w-md rounded-3xl border border-border bg-surface-raised p-6 shadow-2xl"
+          >
             <button
               type="button"
-              onClick={toggleFullscreen}
-              // Locale-independent E2E hook (see e2e/tests/fullscreen.spec.ts) — the visible
-              // label/title text is localized, so a test can't rely on it staying stable.
-              data-testid="fullscreen-toggle"
-              title={
-                isFullscreen ? dict.gamePlay.fullscreenExitCta : dict.gamePlay.fullscreenEnterCta
-              }
-              aria-label={
-                isFullscreen ? dict.gamePlay.fullscreenExitCta : dict.gamePlay.fullscreenEnterCta
-              }
-              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-bold transition-colors cursor-pointer ${
-                fullscreenRecommended && !isFullscreen
-                  ? "bg-brand/10 text-brand hover:bg-brand/20"
-                  : "text-text-secondary hover:bg-surface-raised hover:text-text-primary"
-              }`}
+              onClick={() => setIsMobilePlayOpen(false)}
+              title={dict.gamePlay.closeDialogCta}
+              aria-label={dict.gamePlay.closeDialogCta}
+              className="absolute right-4 top-4 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-text-muted hover:bg-surface-overlay hover:text-text-primary"
             >
-              {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-              <span className="hidden sm:inline">
-                {isFullscreen ? dict.gamePlay.fullscreenExitCta : dict.gamePlay.fullscreenEnterCta}
-              </span>
-              {fullscreenRecommended && !isFullscreen && (
-                <span className="hidden md:inline text-[10px] font-black uppercase tracking-wider opacity-70">
-                  {dict.gamePlay.fullscreenRecommendedHint}
-                </span>
-              )}
+              <X className="h-5 w-5" />
             </button>
-          )}
-        </div>
-      </div>
-
-      {/* Game Area Container */}
-      <div className="flex-1 relative flex flex-col items-center justify-center gap-3 overflow-hidden p-4">
-        {presentationAdvisoryBanner}
-        {isLoading ? (
-          <div className="flex flex-col items-center gap-4">
-            <div className="w-10 h-10 border-4 border-brand/30 border-t-brand rounded-full animate-spin" />
-            <p className="text-text-secondary font-medium animate-pulse">
-              {dict.gamePlay.loadingBody}
+            <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand/10 text-brand-light">
+              <Smartphone className="h-7 w-7" />
+            </div>
+            <h2 id="mobile-play-title" className="pr-10 text-2xl font-black text-text-primary">
+              {dict.gamePlay.mobilePlayTitle}
+            </h2>
+            <p className="mt-2 text-sm leading-relaxed text-text-secondary">
+              {dict.gamePlay.mobilePlayBody}
             </p>
-          </div>
-        ) : isAuthBlocked ? (
-          <div className="w-full max-w-md bg-surface-raised rounded-3xl border border-border p-8 text-center shadow-2xl flex flex-col items-center gap-4">
-            <div className="w-14 h-14 rounded-full bg-brand/10 text-brand flex items-center justify-center">
-              <UserCheck className="w-7 h-7" />
+            <div className="mt-5 rounded-2xl border border-border bg-surface p-3 text-xs font-semibold text-text-muted break-all">
+              {currentGameUrl()}
             </div>
-            <h3 className="text-2xl font-black text-text-primary">
-              {dict.gamePlay.authRequiredTitle}
-            </h3>
-            <p className="text-sm text-text-secondary">{dict.gamePlay.authRequiredBody}</p>
             <button
-              onClick={openLoginModal}
-              className="w-full py-3 bg-brand text-white font-extrabold rounded-2xl shadow-lg shadow-brand/30 hover:scale-105 transition-all cursor-pointer mt-2"
+              type="button"
+              onClick={() => void handleCopyMobileLink()}
+              className="mt-3 w-full cursor-pointer rounded-2xl bg-brand px-4 py-3 text-sm font-black text-white transition-colors hover:bg-brand-light"
             >
-              {dict.gamePlay.authRequiredCta}
+              {mobileLinkCopied ? dict.gamePlay.gameLinkCopied : dict.gamePlay.copyGameLinkCta}
             </button>
-          </div>
-        ) : (
-          <div className="w-full max-w-6xl bg-surface-raised rounded-xl shadow-2xl overflow-hidden relative border border-border/50">
-            {resultOverlay}
-            <div className="p-6" ref={iframeAreaRef}>
-              <IframeRuntime
-                src={resolveGameRuntimeUrl(slug)}
-                title={localizedTitle ?? slug}
-                attemptKey={attemptKey}
-                frameClassName={iframeFrameClassName}
-                frameStyle={iframeFrameStyle}
-                iframeStyle={iframeElementStyle}
-                {...(game?.difficulty ? { difficultyId: selectedDifficultyId } : {})}
-                onStarted={handleIframeStarted}
-                onEvent={handleIframeEvent}
-                onComplete={handleIframeComplete}
-                onCancel={runtime.cancel}
-                onError={handleIframeError}
-              />
-            </div>
-          </div>
-        )}
-      </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

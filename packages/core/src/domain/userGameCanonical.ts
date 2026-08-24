@@ -118,7 +118,13 @@ export function patchUserGameCanonical(
   existing: GameCanonicalDocument,
   updated: Pick<
     SandboxGameRecord,
-    "title" | "shortDescription" | "description" | "genre" | "xpPerCompletion" | "updatedAt"
+    | "title"
+    | "shortDescription"
+    | "description"
+    | "genre"
+    | "mode"
+    | "xpPerCompletion"
+    | "updatedAt"
   >,
   input: SandboxGameMetadataInput,
 ): UserCanonicalPatchResult {
@@ -139,6 +145,7 @@ export function patchUserGameCanonical(
             : {}),
           ...(input.description !== undefined ? { description: updated.description ?? "" } : {}),
           ...(input.genre !== undefined ? { genre: updated.genre } : {}),
+          ...(input.mode !== undefined ? { mode: updated.mode } : {}),
         },
         result: {
           ...existing.creatorManifest.result,
@@ -181,8 +188,13 @@ export function patchUserGameCanonical(
             : existing.policy.xpPerCompletion,
       },
       catalog:
-        input.genre !== undefined && existing.catalog.type === "GENRE_MODE"
-          ? { ...existing.catalog, genre: updated.genre }
+        (input.genre !== undefined || input.mode !== undefined) &&
+        existing.catalog.type === "GENRE_MODE"
+          ? {
+              ...existing.catalog,
+              ...(input.genre !== undefined ? { genre: updated.genre } : {}),
+              ...(input.mode !== undefined ? { mode: updated.mode } : {}),
+            }
           : existing.catalog,
       ...(creatorManifest !== undefined ? { creatorManifest } : {}),
       updatedAt: updated.updatedAt,

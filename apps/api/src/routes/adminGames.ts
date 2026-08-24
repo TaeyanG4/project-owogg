@@ -1,9 +1,12 @@
 import { Hono } from "hono";
 import {
   AdminGameListResponseSchema,
+  AdminGameListQuerySchema,
   AdminGameToggleRequestSchema,
   AdminOfficialGameDeleteResponseSchema,
   AdminOfficialGameUploadResponseSchema,
+  SandboxGameBasicMetadataUpdateRequestSchema,
+  GameLogoUpdateResponseSchema,
 } from "@owogg/contracts";
 import { OfficialGameDeleteFailure, OfficialGameUploadFailure } from "@owogg/core";
 import { createContainer } from "../container.js";
@@ -19,6 +22,33 @@ import { rateLimit } from "../middleware/rateLimit.js";
 import { purgePublicGameReadCache } from "./publicGameCache.js";
 
 export const adminGamesRouter = new Hono<ApiEnv>();
+
+function officialUpdateFailure(error: unknown) {
+  if (!(error instanceof OfficialGameUploadFailure)) throw error;
+  const status =
+    error.code === "GAME_NOT_FOUND" || error.code === "VERSION_NOT_FOUND"
+      ? 404
+      : error.code === "SLUG_CONFLICT"
+        ? 409
+        : error.code === "PUBLISH_FAILED"
+          ? 500
+          : 422;
+  const message =
+    error.code === "GAME_NOT_FOUND"
+      ? "존재하는 OWOGG 공식 게임을 찾을 수 없습니다."
+      : error.code === "VERSION_NOT_FOUND"
+        ? "부분 수정의 기준이 될 공식 게임 버전을 찾을 수 없습니다."
+        : error.code === "SLUG_CONFLICT"
+          ? "동일한 slug가 사용자 게임 또는 삭제된 게임에 이미 사용되고 있습니다."
+          : error.code === "PUBLISH_FAILED"
+            ? "OWOGG 게임 변경사항을 D1/B2에 게시하지 못했습니다."
+            : error.code === "LOGO_INVALID"
+              ? "png, jpg, jpeg, webp, svg 형식의 로고 파일이 필요합니다."
+              : error.code === "LOGO_TOO_LARGE"
+                ? "로고 이미지 용량이 최대 허용치를 초과했습니다."
+                : "게임 ZIP 또는 owogg.json Game Creator Manifest v1이 올바르지 않습니다.";
+  return { body: { error: { code: error.code, message } }, status } as const;
+}
 
 adminGamesRouter.use("*", async (c, next) => {
   c.header("Cache-Control", "no-store");
@@ -40,10 +70,21 @@ adminGamesRouter.get("/", async (c) => {
   const denied = requirePermission(admin, "games.moderate");
   if (denied) return denied;
 
-  const { gameSettingsUseCases } = createContainer(c.env.DB);
-  const games = await gameSettingsUseCases.listAll();
+  const parsed = AdminGameListQuerySchema.safeParse({
+    page: c.req.query("page"),
+    pageSize: c.req.query("pageSize"),
+  });
+  if (!parsed.success) {
+    return c.json({ error: { code: "INVALID_REQUEST", message: "잘못된 목록 조건입니다." } }, 400);
+  }
 
-  return c.json(AdminGameListResponseSchema.parse({ games }), 200);
+  const { gameSettingsUseCases } = createContainer(c.env.DB, readB2Config(c.env));
+  const result = await gameSettingsUseCases.listPage({
+    publisherType: "OWOGG",
+    ...parsed.data,
+  });
+
+  return c.json(AdminGameListResponseSchema.parse(result), 200);
 });
 
 // POST /api/admin/games/upload — publishes a ZIP as an official OWOGG game. Authority comes only
@@ -92,20 +133,186 @@ adminGamesRouter.post(
         bytes: await bundle.arrayBuffer(),
         contentType: bundle.type || undefined,
       });
-      await purgePublicGameReadCache(c.req.url, [result.slug]);
+      await purgePublicGameReadCache(c.req.url, [result.slug], c.env.GAME_ORIGIN);
       c.header("Clear-Site-Data", '"cache"');
       return c.json(AdminOfficialGameUploadResponseSchema.parse(result), 201);
     } catch (error) {
-      if (!(error instanceof OfficialGameUploadFailure)) throw error;
-      const status =
-        error.code === "SLUG_CONFLICT" ? 409 : error.code === "PUBLISH_FAILED" ? 500 : 400;
-      const message =
-        error.code === "SLUG_CONFLICT"
-          ? "동일한 slug가 사용자 게임 또는 삭제된 게임에 이미 사용되고 있습니다."
-          : error.code === "PUBLISH_FAILED"
-            ? "OWOGG 게임을 D1/B2에 게시하지 못했습니다."
-            : "게임 ZIP 또는 owogg.json Game Creator Manifest v1이 올바르지 않습니다.";
-      return c.json({ error: { code: error.code, message } }, status);
+      const failure = officialUpdateFailure(error);
+      return c.json(failure.body, failure.status);
+    }
+  },
+);
+
+adminGamesRouter.post(
+  "/:gameId/bundle",
+  rateLimit({ name: "game-upload", binding: "GAME_UPLOAD_RATE_LIMITER" }),
+  async (c) => {
+    const admin = await requireElevatedAdmin(c);
+    if (isElevatedAdminResponse(admin)) return admin;
+    const denied = requirePermission(admin, "games.moderate");
+    if (denied) return denied;
+    const container = createContainer(c.env.DB, readB2Config(c.env));
+    if (!container.gameBundlesConfigured) {
+      return c.json(
+        {
+          error: {
+            code: "GAME_BUNDLES_NOT_CONFIGURED",
+            message: "번들 저장소(Backblaze B2)가 아직 이 환경에 구성되지 않았습니다.",
+          },
+        },
+        503,
+      );
+    }
+    const body = await c.req.parseBody().catch(() => null);
+    const bundle = body?.bundle;
+    if (!(bundle instanceof File)) {
+      return c.json(
+        { error: { code: "INVALID_REQUEST", message: "bundle ZIP 파일이 필요합니다." } },
+        400,
+      );
+    }
+    try {
+      const result = await container.officialGameUploadUseCases.replaceBundle({
+        slug: c.req.param("gameId"),
+        bytes: await bundle.arrayBuffer(),
+        contentType: bundle.type || undefined,
+      });
+      await purgePublicGameReadCache(c.req.url, [result.slug], c.env.GAME_ORIGIN);
+      c.header("Clear-Site-Data", '"cache"');
+      return c.json(AdminOfficialGameUploadResponseSchema.parse(result), 201);
+    } catch (error) {
+      const failure = officialUpdateFailure(error);
+      return c.json(failure.body, failure.status);
+    }
+  },
+);
+
+adminGamesRouter.post(
+  "/:gameId/manifest",
+  rateLimit({ name: "game-upload", binding: "GAME_UPLOAD_RATE_LIMITER" }),
+  async (c) => {
+    const admin = await requireElevatedAdmin(c);
+    if (isElevatedAdminResponse(admin)) return admin;
+    const denied = requirePermission(admin, "games.moderate");
+    if (denied) return denied;
+    const container = createContainer(c.env.DB, readB2Config(c.env));
+    if (!container.gameBundlesConfigured) {
+      return c.json(
+        {
+          error: {
+            code: "GAME_BUNDLES_NOT_CONFIGURED",
+            message: "번들 저장소(Backblaze B2)가 아직 이 환경에 구성되지 않았습니다.",
+          },
+        },
+        503,
+      );
+    }
+    const body = await c.req.parseBody().catch(() => null);
+    const manifest = body?.manifest;
+    if (!(manifest instanceof File)) {
+      return c.json(
+        { error: { code: "INVALID_REQUEST", message: "manifest 파일 필드가 필요합니다." } },
+        400,
+      );
+    }
+    try {
+      const result = await container.officialGameUploadUseCases.replaceManifest({
+        slug: c.req.param("gameId"),
+        bytes: await manifest.arrayBuffer(),
+      });
+      await purgePublicGameReadCache(c.req.url, [result.slug], c.env.GAME_ORIGIN);
+      c.header("Clear-Site-Data", '"cache"');
+      return c.json(AdminOfficialGameUploadResponseSchema.parse(result), 201);
+    } catch (error) {
+      const failure = officialUpdateFailure(error);
+      return c.json(failure.body, failure.status);
+    }
+  },
+);
+
+adminGamesRouter.patch(
+  "/:gameId/basic-metadata",
+  rateLimit({ name: "game-upload", binding: "GAME_UPLOAD_RATE_LIMITER" }),
+  async (c) => {
+    const admin = await requireElevatedAdmin(c);
+    if (isElevatedAdminResponse(admin)) return admin;
+    const denied = requirePermission(admin, "games.moderate");
+    if (denied) return denied;
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = SandboxGameBasicMetadataUpdateRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        { error: { code: "INVALID_REQUEST", message: "수정할 게임 속성이 올바르지 않습니다." } },
+        400,
+      );
+    }
+    const container = createContainer(c.env.DB, readB2Config(c.env));
+    if (!container.gameBundlesConfigured) {
+      return c.json(
+        {
+          error: {
+            code: "GAME_BUNDLES_NOT_CONFIGURED",
+            message: "번들 저장소(Backblaze B2)가 아직 이 환경에 구성되지 않았습니다.",
+          },
+        },
+        503,
+      );
+    }
+    try {
+      const result = await container.officialGameUploadUseCases.updateBasicMetadata({
+        slug: c.req.param("gameId"),
+        metadata: parsed.data,
+      });
+      await purgePublicGameReadCache(c.req.url, [result.slug], c.env.GAME_ORIGIN);
+      c.header("Clear-Site-Data", '"cache"');
+      return c.json(AdminOfficialGameUploadResponseSchema.parse(result), 201);
+    } catch (error) {
+      const failure = officialUpdateFailure(error);
+      return c.json(failure.body, failure.status);
+    }
+  },
+);
+
+adminGamesRouter.post(
+  "/:gameId/logo",
+  rateLimit({ name: "game-upload", binding: "GAME_UPLOAD_RATE_LIMITER" }),
+  async (c) => {
+    const admin = await requireElevatedAdmin(c);
+    if (isElevatedAdminResponse(admin)) return admin;
+    const denied = requirePermission(admin, "games.moderate");
+    if (denied) return denied;
+    const container = createContainer(c.env.DB, readB2Config(c.env));
+    if (!container.gameBundlesConfigured) {
+      return c.json(
+        {
+          error: {
+            code: "GAME_BUNDLES_NOT_CONFIGURED",
+            message: "번들 저장소(Backblaze B2)가 아직 이 환경에 구성되지 않았습니다.",
+          },
+        },
+        503,
+      );
+    }
+    const body = await c.req.parseBody().catch(() => null);
+    const logo = body?.logo;
+    if (!(logo instanceof File)) {
+      return c.json(
+        { error: { code: "INVALID_REQUEST", message: "logo 파일 필드가 필요합니다." } },
+        400,
+      );
+    }
+    try {
+      const result = await container.officialGameUploadUseCases.replaceLogo({
+        slug: c.req.param("gameId"),
+        fileName: logo.name,
+        bytes: await logo.arrayBuffer(),
+      });
+      await purgePublicGameReadCache(c.req.url, [result.slug], c.env.GAME_ORIGIN);
+      c.header("Clear-Site-Data", '"cache"');
+      return c.json(GameLogoUpdateResponseSchema.parse(result), 200);
+    } catch (error) {
+      const failure = officialUpdateFailure(error);
+      return c.json(failure.body, failure.status);
     }
   },
 );
@@ -139,7 +346,7 @@ adminGamesRouter.delete("/:gameId", async (c) => {
       slug: c.req.param("gameId"),
       actorAdminId: admin.userId,
     });
-    await purgePublicGameReadCache(c.req.url, [result.slug]);
+    await purgePublicGameReadCache(c.req.url, [result.slug], c.env.GAME_ORIGIN);
     c.header("Clear-Site-Data", '"cache"');
     return c.json(AdminOfficialGameDeleteResponseSchema.parse(result), 200);
   } catch (error) {
@@ -158,7 +365,7 @@ adminGamesRouter.delete("/:gameId", async (c) => {
     // prepareDeletion quarantines the identity before touching B2. Even when later cleanup fails,
     // evict public reads so the already-private game disappears immediately while an operator
     // retries the idempotent deletion.
-    await purgePublicGameReadCache(c.req.url, [c.req.param("gameId")]);
+    await purgePublicGameReadCache(c.req.url, [c.req.param("gameId")], c.env.GAME_ORIGIN);
     c.header("Clear-Site-Data", '"cache"');
     const message =
       error.code === "STORAGE_DELETE_FAILED"
@@ -205,7 +412,7 @@ adminGamesRouter.post("/:gameId/toggle", async (c) => {
     return c.json({ error: { code: result.code, message: "존재하지 않는 게임입니다." } }, 404);
   }
 
-  await purgePublicGameReadCache(c.req.url, [gameId]);
+  await purgePublicGameReadCache(c.req.url, [gameId], c.env.GAME_ORIGIN);
   c.header("Clear-Site-Data", '"cache"');
 
   return c.json(

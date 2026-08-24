@@ -2,9 +2,9 @@
 
 상태: 기준 문서
 
-마지막 검증: 2026-08-24
+마지막 검증: 2026-08-25
 
-최신 마이그레이션: `0039_streamer_terminology.sql`
+최신 마이그레이션: `0040_public_game_engagement.sql`
 
 스키마 요약: 물리 테이블 `44`, 롤링 배포 호환 뷰 `4`
 
@@ -15,7 +15,7 @@
 - `apps/api/src/container.ts`
 - [데이터베이스 기준 문서](DATABASE.md)
 
-이 문서는 `0000_initial_schema.sql`부터 `0039_streamer_terminology.sql`까지를 빈 SQLite에
+이 문서는 `0000_initial_schema.sql`부터 `0040_public_game_engagement.sql`까지를 빈 SQLite에
 순서대로 적용한 **최종 D1 schema**를 기준으로 합니다. migration SQL이 유일한 schema 권한
 원천이며, 이 문서는 관계 탐색과 운영 이해를 위한 투영입니다.
 
@@ -291,6 +291,9 @@ erDiagram
 `xp_events`가 XP 원장이며 `user_progress`는 빠른 조회를 위한 집계입니다. `source_type + source_id`는
 score/result 등 여러 원천을 가리키는 polymorphic idempotency key라 단일 FK로 표현하지 않습니다.
 favorites와 recent plays의 game key 역시 기존 TEXT slug 계약을 유지합니다.
+두 테이블의 `(user_id, game_id)` PK 때문에 game별 행 수는 각각 고유 플레이 사용자 수와 현재
+북마크 사용자 수입니다. `0040`은 공개 카탈로그 집계가 user-first PK 전체를 훑지 않도록 두 테이블에
+`(game_id, user_id)` covering index를 추가하며 새 물리 테이블은 만들지 않습니다.
 
 ## 4. Discord 길드와 XP 귀속
 

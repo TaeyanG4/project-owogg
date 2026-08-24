@@ -15,6 +15,10 @@ export interface PublicGameCard {
   readonly catalogType: PublicGame["catalog"]["type"];
   readonly genre?: string | undefined;
   readonly scoreUnit?: string | undefined;
+  readonly publishedAt: string;
+  readonly playerCount: number;
+  readonly bookmarkCount: number;
+  readonly popularityScore: number;
 }
 
 /** Web-only view model. It preserves GENRE_MODE as a real shape: no fake taxonomy categories,
@@ -38,6 +42,10 @@ export function publicGameToCard(game: PublicGame): PublicGameCard {
       publisherType: game.publisherType,
       publisherName: game.publisherName,
       catalogType: game.catalog.type,
+      publishedAt: game.publishedAt,
+      playerCount: game.stats.playerCount,
+      bookmarkCount: game.stats.bookmarkCount,
+      popularityScore: game.stats.popularityScore,
       ...(game.policy.score ? { scoreUnit: game.policy.score.unit } : {}),
     };
   }
@@ -56,6 +64,10 @@ export function publicGameToCard(game: PublicGame): PublicGameCard {
     publisherType: game.publisherType,
     publisherName: game.publisherName,
     catalogType: game.catalog.type,
+    publishedAt: game.publishedAt,
+    playerCount: game.stats.playerCount,
+    bookmarkCount: game.stats.bookmarkCount,
+    popularityScore: game.stats.popularityScore,
     genre: game.catalog.genre,
     ...(game.policy.score ? { scoreUnit: game.policy.score.unit } : {}),
   };

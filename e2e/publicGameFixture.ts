@@ -13,6 +13,8 @@ export const E2E_PUBLIC_GAMES: readonly PublicGame[] = [
     title: "Platform E2E fixture (e2e-responsive)",
     shortDescription: "Synthetic platform fixture.",
     description: "Synthetic platform-only fixture for browser E2E presentation and security tests.",
+    publishedAt: "2026-01-01T00:00:00.000Z",
+    stats: { playerCount: 12, bookmarkCount: 3, popularityScore: 21 },
     catalog: { type: "GENRE_MODE", genre: "platform-e2e", mode: "single" },
     policy: { requiresAuth: false, leaderboard: false, score: null, xpPerCompletion: 0 },
     presentation: {
@@ -30,6 +32,8 @@ export const E2E_PUBLIC_GAMES: readonly PublicGame[] = [
     title: "Platform E2E fixture (e2e-fixed)",
     shortDescription: "Synthetic platform fixture.",
     description: "Synthetic platform-only fixture for browser E2E presentation and security tests.",
+    publishedAt: "2026-01-02T00:00:00.000Z",
+    stats: { playerCount: 8, bookmarkCount: 5, popularityScore: 23 },
     catalog: { type: "GENRE_MODE", genre: "platform-e2e", mode: "single" },
     policy: { requiresAuth: false, leaderboard: false, score: null, xpPerCompletion: 0 },
     presentation: {
@@ -47,6 +51,8 @@ export const E2E_PUBLIC_GAMES: readonly PublicGame[] = [
     title: "Platform E2E fixture (e2e-mobile-experimental)",
     shortDescription: "Synthetic platform fixture.",
     description: "Synthetic platform-only fixture for browser E2E presentation and security tests.",
+    publishedAt: "2026-01-03T00:00:00.000Z",
+    stats: { playerCount: 4, bookmarkCount: 1, popularityScore: 7 },
     catalog: { type: "GENRE_MODE", genre: "platform-e2e", mode: "single" },
     policy: { requiresAuth: false, leaderboard: false, score: null, xpPerCompletion: 0 },
     presentation: {

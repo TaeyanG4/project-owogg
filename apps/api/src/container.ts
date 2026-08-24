@@ -25,6 +25,8 @@ import {
   D1GameAssetRepository,
   D1OfficialGameUploadRepository,
   D1OfficialGameLifecycleRepository,
+  D1AdminGameCatalogRepository,
+  D1PublicGameMetricsRepository,
   BackblazeB2GameBundleRepository,
   UnconfiguredGameBundleRepository,
   B2GameCanonicalRepository,
@@ -59,6 +61,7 @@ import {
   SandboxGameVersionPublicationRepository,
   ComposedRuntimeGameRegistry,
   AvailableRuntimeGameCatalog,
+  PublicGameMetricsUseCases,
   RuntimeGameAvailability,
   type UserRepository,
   type SessionRepository,
@@ -131,6 +134,7 @@ export interface AppContainer {
   runtimeGameRegistry: RuntimeGameRegistry;
   runtimeGameAvailability: RuntimeGameAvailability;
   publicGameCatalog: PublicGameCatalog;
+  publicGameMetricsUseCases: PublicGameMetricsUseCases;
   scoreReadUseCases: GenericScoreReadUseCases;
   personalizationUseCases: PersonalizationUseCases;
   identityUseCases: IdentityUseCases;
@@ -185,6 +189,8 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
   const adminAuthRepo = new D1AdminAuthRepository(db);
   const adminAccountRepo = new D1AdminAccountRepository(db);
   const gameSettingsRepo = new D1GameSettingsRepository(db);
+  const adminGameCatalogRepo = new D1AdminGameCatalogRepository(db);
+  const publicGameMetricsRepo = new D1PublicGameMetricsRepository(db);
   const adminMonitoringRepo = new D1AdminMonitoringRepository(db);
   const userModerationRepo = new D1UserModerationRepository(db);
   const gameCreatorRepo = new D1GameCreatorRepository(db);
@@ -218,6 +224,7 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     runtimeGameRegistry,
     runtimeGameAvailability,
   );
+  const publicGameMetricsUseCases = new PublicGameMetricsUseCases(publicGameMetricsRepo);
 
   const scoreReadUseCases = new GenericScoreReadUseCases(scoreRepo, runtimeGameRegistry);
   const personalizationUseCases = new PersonalizationUseCases(
@@ -253,6 +260,7 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     gameSettingsRepo,
     gameIdentityRepo,
     gameCanonicalRepo,
+    adminGameCatalogRepo,
   );
   const userModerationUseCases = new UserModerationUseCases(
     userModerationRepo,
@@ -260,27 +268,30 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     userRepo,
   );
   const gameCreatorUseCases = new GameCreatorUseCases(gameCreatorRepo, userRepo, gameCreatorRepo);
+  const gameBundleArchiveCodec = new FflateBundleArchiveReader();
   const gamePublicationService = new GamePublicationService(
     new SandboxGameVersionPublicationRepository(sandboxGameRepo),
     gameBundleStorageRepo,
-    new FflateBundleArchiveReader(),
+    gameBundleArchiveCodec,
   );
   const sandboxGameUseCases = new SandboxGameUseCases(
     sandboxGameRepo,
     gameBundleStorageRepo,
     gamePublicationService,
     gameCanonicalRepo,
+    gameBundleArchiveCodec,
   );
   const officialGamePublicationService = new GamePublicationService(
     officialGameUploadRepo,
     gameBundleStorageRepo,
-    new FflateBundleArchiveReader(),
+    gameBundleArchiveCodec,
   );
   const officialGameUploadUseCases = new OfficialGameUploadUseCases(
     officialGameUploadRepo,
     gameBundleStorageRepo,
     gameCanonicalRepo,
     officialGamePublicationService,
+    gameBundleArchiveCodec,
   );
   const officialGameLifecycleUseCases = new OfficialGameLifecycleUseCases(
     officialGameLifecycleRepo,
@@ -332,6 +343,7 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     runtimeGameRegistry,
     runtimeGameAvailability,
     publicGameCatalog,
+    publicGameMetricsUseCases,
     scoreReadUseCases,
     personalizationUseCases,
     identityUseCases,

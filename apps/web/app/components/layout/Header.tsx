@@ -26,9 +26,14 @@ import type { MyAccessResponse } from "@owogg/contracts";
 interface HeaderProps {
   onToggleMobileSidebar: () => void;
   isAdminWorkspace?: boolean;
+  isGamePlayWorkspace?: boolean;
 }
 
-export function Header({ onToggleMobileSidebar, isAdminWorkspace = false }: HeaderProps) {
+export function Header({
+  onToggleMobileSidebar,
+  isAdminWorkspace = false,
+  isGamePlayWorkspace = false,
+}: HeaderProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [myAccess, setMyAccess] = useState<MyAccessResponse | null>(null);
@@ -109,7 +114,7 @@ export function Header({ onToggleMobileSidebar, isAdminWorkspace = false }: Head
         {/* Left: Mobile Toggle & Brand Logo */}
         <div className="flex items-center gap-3">
           <button
-            className="lg:hidden p-2 rounded-xl text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors cursor-pointer"
+            className={`${isGamePlayWorkspace ? "" : "lg:hidden"} p-2 rounded-xl text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors cursor-pointer`}
             onClick={onToggleMobileSidebar}
             aria-label={dict.sidebar.openMenuAria}
           >

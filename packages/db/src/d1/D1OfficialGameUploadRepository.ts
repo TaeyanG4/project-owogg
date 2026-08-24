@@ -45,6 +45,34 @@ export class D1OfficialGameUploadRepository implements OfficialGameUploadReposit
     return identity;
   }
 
+  async findOwoggIdentity(slug: string) {
+    const row = await this.db
+      .prepare(
+        `SELECT ${IDENTITY_COLUMNS}
+         FROM games
+         WHERE slug = ? AND publisher_type = 'OWOGG' AND deleted_at IS NULL`,
+      )
+      .bind(slug)
+      .first<Record<string, unknown>>();
+    return row ? mapGameIdentityRow(row) : null;
+  }
+
+  async findVersionById(gameId: number, versionId: number): Promise<GameVersion | null> {
+    const row = await this.db
+      .prepare(`SELECT ${VERSION_COLUMNS} FROM game_versions WHERE id = ? AND game_id = ?`)
+      .bind(versionId, gameId)
+      .first<Record<string, unknown>>();
+    return row ? mapGameVersionRow(row) : null;
+  }
+
+  async findLogoObjectKey(gameId: number): Promise<string | null> {
+    const row = await this.db
+      .prepare(`SELECT object_key FROM game_assets WHERE game_id = ? AND kind = 'LOGO'`)
+      .bind(gameId)
+      .first<{ object_key: string }>();
+    return row?.object_key ?? null;
+  }
+
   async findVersionByContentHash(gameId: number, contentHash: string): Promise<GameVersion | null> {
     const row = await this.db
       .prepare(

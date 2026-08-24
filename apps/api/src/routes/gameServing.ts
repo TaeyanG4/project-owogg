@@ -9,7 +9,6 @@ import {
 } from "@owogg/core";
 import { OWOGG_BROWSER_API_SOURCE } from "@owogg/game-sdk/bridge";
 import { createContainer } from "../container.js";
-import { edgeCache } from "../middleware/edgeCache.js";
 import { readB2Config } from "./devGames.js";
 import { isLocalhost } from "./auth.js";
 import type { ApiEnv } from "./auth.js";
@@ -126,12 +125,45 @@ publishedGameAssetsRouter.get(BROWSER_API_PATH, (c) =>
 // See middleware/edgeCache.ts's safety note: caching is sound on both routers because responses
 // depend only on the URL — no cookies are read, and nothing varies per viewer.
 //
-// Only the /:slug redirect uses the shared, generic edgeCache — its response is a plain 302 with
-// no CORS/CSP concerns, so replaying a cached response verbatim (that middleware's normal
-// behavior) is fine here. The actual asset-serving route below (/:slug/:rest) uses
-// gameAssetEdgeCache instead — see that function's doc comment for why a served game asset needs
-// different handling on a cache HIT.
-gameServingRouter.use("/:slug", edgeCache({ ttlSeconds: LIVE_RESOLVER_MAX_AGE_SECONDS }));
+// The actual asset-serving route below (/:slug/:rest) uses gameAssetEdgeCache — see that
+// function's doc comment for why a served game asset needs different handling on a cache HIT.
+// The mutable /play/:slug redirect needs its own narrow 302 cache: the shared edgeCache defaults
+// to 200-only, so the old registration never cached the resolver despite comments saying it did.
+const liveResolverEdgeCache: MiddlewareHandler<ApiEnv> = async (c, next) => {
+  if (c.req.method !== "GET" || typeof caches === "undefined") {
+    await next();
+    return;
+  }
+
+  const cache = (caches as unknown as { default: CloudflareCache }).default;
+  const key = new Request(c.req.url, { method: "GET" });
+  const cached = await cache.match(key);
+  if (cached?.status === 302) {
+    const headers = new Headers(cached.headers);
+    headers.set("Cache-Control", `public, max-age=${LIVE_RESOLVER_MAX_AGE_SECONDS}`);
+    headers.set("X-Cache", "HIT");
+    return new Response(cached.body, { status: 302, headers });
+  }
+
+  await next();
+  if (!c.res || c.res.status !== 302) return;
+
+  const body = await c.res.clone().arrayBuffer();
+  const headers = new Headers(c.res.headers);
+  headers.set(
+    "Cache-Control",
+    `public, max-age=${LIVE_RESOLVER_MAX_AGE_SECONDS}, s-maxage=${LIVE_RESOLVER_MAX_AGE_SECONDS}`,
+  );
+  const stored = new Response(body, { status: 302, headers });
+  try {
+    c.executionCtx.waitUntil(cache.put(key, stored));
+  } catch {
+    // Plain-Node tests have no execution context. The fresh redirect remains valid.
+  }
+  c.res.headers.set("X-Cache", "MISS");
+};
+
+gameServingRouter.use("/:slug", liveResolverEdgeCache);
 
 /**
  * Gate registered BEFORE the byte cache below — order matters. `caches.default` returns a HIT
@@ -440,32 +472,25 @@ function notFound(c: Context<ApiEnv>): Response {
  */
 gameServingRouter.get("/:slug", async (c) => {
   if (!c.env?.DB) return notFound(c);
-  const { runtimeGameRegistry, runtimeGameAvailability } = createContainer(
+  const { gameIdentityRepo, runtimeGameAvailability } = createContainer(
     c.env.DB,
     readB2Config(c.env),
   );
-  const resolved = await runtimeGameRegistry.findBySlug(c.req.param("slug"));
-  if (!resolved) return notFound(c);
   try {
-    if (
-      !(await runtimeGameAvailability.isVersionServable(
-        resolved.identity.id,
-        resolved.liveVersion.id,
-      ))
-    ) {
+    const identity = await gameIdentityRepo.findBySlug(c.req.param("slug"));
+    if (!identity || identity.liveVersionId === null) return notFound(c);
+    if (!(await runtimeGameAvailability.isIdentityServable(identity))) {
       return notFound(c);
     }
+
+    const target = `/${publishedVersionPrefix(identity.id, identity.liveVersionId)}${BUNDLE_ENTRY_PATH}`;
+    // Explicit and short. Without a header, a 302 is subject to heuristic browser caching, which
+    // could pin a player to a version an admin has already rolled back.
+    c.header("Cache-Control", `public, max-age=${LIVE_RESOLVER_MAX_AGE_SECONDS}`);
+    return c.redirect(target, 302);
   } catch {
     return notFound(c);
   }
-
-  const target = `/${publishedVersionPrefix(resolved.identity.id, resolved.liveVersion.id)}${BUNDLE_ENTRY_PATH}`;
-  // Explicit and short. Without a header, a 302 is subject to heuristic browser caching, which
-  // could pin a player to a version an admin has already rolled back. The edge cache above only
-  // stores 200s, so this redirect always re-resolves at the origin once the browser's minute is up —
-  // one D1 read per game *start*, not per asset.
-  c.header("Cache-Control", `public, max-age=${LIVE_RESOLVER_MAX_AGE_SECONDS}`);
-  return c.redirect(target, 302);
 });
 
 // ── /games/:gameId/:versionId/* — immutable published assets ─────────────────

@@ -213,6 +213,46 @@ test("missing, malformed, or storage-failed canonical state is unavailable with 
   assert.equal(await malformedRegistry.findBySlug(game.slug), null);
 });
 
+test("public catalog resolves independent live versions and canonicals concurrently", async () => {
+  const first = identity(1, "first", { type: "OWOGG" });
+  const second = identity(2, "second", { type: "OWOGG" });
+  const started: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const canonicals: GameCanonicalRepository = {
+    async findBySlug(slug) {
+      started.push(slug);
+      await gate;
+      return canonical(slug, { type: "GENRE_MODE", genre: "arcade", mode: "single" });
+    },
+    async save() {},
+    async delete() {},
+  };
+  const registry = new ComposedRuntimeGameRegistry(
+    new IdentityRepo([first, second]),
+    new VersionRepo([version(first.id), version(second.id)]),
+    canonicals,
+  );
+
+  const pending = registry.listPublic();
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(
+      started,
+      ["first", "second"],
+      "a slow first B2 object must not block every later canonical read",
+    );
+  } finally {
+    release();
+  }
+  assert.deepEqual(
+    (await pending).map((runtime) => runtime.identity.slug),
+    ["first", "second"],
+  );
+});
+
 test("exact-version availability is D1-only and denies non-live, wrong-owner, non-READY, and disabled versions", async () => {
   const official = identity(1, "official", { type: "OWOGG" });
   const user = identity(2, "user", { type: "USER", userId: 7 });
@@ -241,4 +281,77 @@ test("exact-version availability is D1-only and denies non-live, wrong-owner, no
   versionRows[0] = version(official.id);
   disabled.add(official.slug);
   assert.equal(await availability.isVersionServable(official.id, officialVersionId), false);
+});
+
+test("resolved catalog availability reads the kill switch once without repeating identity/version queries", async () => {
+  const official = identity(1, "official", { type: "OWOGG" });
+  const user = identity(2, "user", { type: "USER", userId: 7 });
+  let identityReads = 0;
+  let versionReads = 0;
+  let settingsReads = 0;
+  const availability = new RuntimeGameAvailability(
+    {
+      async findById() {
+        identityReads += 1;
+        return null;
+      },
+      async findBySlug() {
+        identityReads += 1;
+        return null;
+      },
+      async listAll() {
+        identityReads += 1;
+        return [];
+      },
+    },
+    {
+      async findById() {
+        versionReads += 1;
+        return null;
+      },
+      async listByGameId() {
+        versionReads += 1;
+        return [];
+      },
+      async findForGame() {
+        versionReads += 1;
+        return null;
+      },
+    },
+    {
+      async getDisabledGameIds() {
+        settingsReads += 1;
+        return [user.slug];
+      },
+    },
+  );
+  const resolved = [
+    {
+      identity: official,
+      liveVersion: version(official.id),
+      canonical: canonical(official.slug, {
+        type: "GENRE_MODE",
+        genre: "arcade",
+        mode: "single",
+      }),
+    },
+    {
+      identity: user,
+      liveVersion: version(user.id),
+      canonical: canonical(user.slug, {
+        type: "GENRE_MODE",
+        genre: "arcade",
+        mode: "single",
+      }),
+    },
+  ];
+
+  const available = await availability.filterResolvedRuntimes(resolved);
+  assert.deepEqual(
+    available.map((runtime) => runtime.identity.slug),
+    [official.slug],
+  );
+  assert.equal(settingsReads, 1);
+  assert.equal(identityReads, 0);
+  assert.equal(versionReads, 0);
 });

@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import { Header } from "./Header";
 import { Sidebar } from "./Sidebar";
@@ -9,12 +9,19 @@ interface LayoutProps {
   children: ReactNode;
 }
 
+/** Only the live game route gets the distraction-free overlay navigation. Catalog and ranking
+ * routes keep the persistent desktop rail, even though they share the `/games` prefix. */
+export function isGamePlayPath(pathname: string): boolean {
+  return /^\/games\/[^/]+\/?$/.test(pathname);
+}
+
 export function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isMobileAdminSidebarOpen, setIsMobileAdminSidebarOpen] = useState(false);
   const isAdminWorkspace =
     location.pathname === "/admin" || location.pathname.startsWith("/admin/");
+  const isGamePlayWorkspace = isGamePlayPath(location.pathname);
   const closeMobileSidebar = useCallback(() => setIsMobileSidebarOpen(false), []);
   const closeMobileAdminSidebar = useCallback(() => setIsMobileAdminSidebarOpen(false), []);
   const toggleMobileSidebar = useCallback(() => {
@@ -26,12 +33,24 @@ export function Layout({ children }: LayoutProps) {
     setIsMobileAdminSidebarOpen(true);
   }, []);
 
+  useEffect(() => {
+    setIsMobileSidebarOpen(false);
+  }, [location.pathname]);
+
   return (
     <div className="min-h-screen flex flex-col w-full selection:bg-brand/30 selection:text-text-primary bg-surface text-text-primary">
-      <Header onToggleMobileSidebar={toggleMobileSidebar} isAdminWorkspace={isAdminWorkspace} />
+      <Header
+        onToggleMobileSidebar={toggleMobileSidebar}
+        isAdminWorkspace={isAdminWorkspace}
+        isGamePlayWorkspace={isGamePlayWorkspace}
+      />
 
       <div className="flex-1 flex w-full">
-        <Sidebar isMobileOpen={isMobileSidebarOpen} onMobileClose={closeMobileSidebar} />
+        <Sidebar
+          isMobileOpen={isMobileSidebarOpen}
+          onMobileClose={closeMobileSidebar}
+          overlayOnly={isGamePlayWorkspace}
+        />
         {isAdminWorkspace ? (
           <AdminWorkspace
             isMobileOpen={isMobileAdminSidebarOpen}
@@ -45,7 +64,7 @@ export function Layout({ children }: LayoutProps) {
         )}
       </div>
 
-      {!isAdminWorkspace && <Footer />}
+      {!isAdminWorkspace && !isGamePlayWorkspace && <Footer />}
     </div>
   );
 }

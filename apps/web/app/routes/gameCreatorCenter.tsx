@@ -10,6 +10,9 @@ import {
   Send,
   Clock3,
   ShieldAlert,
+  FileJson,
+  Image,
+  Pencil,
 } from "lucide-react";
 import { useAuth } from "../features/auth";
 import {
@@ -22,6 +25,9 @@ import {
   applyForGameCreator,
   withdrawGameCreatorApplication,
   countActiveSubmissions,
+  replaceDevGameManifest,
+  replaceDevGameLogo,
+  patchDevGameBasicMetadata,
 } from "../features/devApi";
 import type { GameCreatorMeResponse, SandboxGameRecord } from "@owogg/contracts";
 import { GameBundleDropzone } from "../components/game/GameBundleDropzone";
@@ -256,6 +262,8 @@ function ManageGamesPanel({
   const [deletingGameId, setDeletingGameId] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [registering, setRegistering] = useState(false);
+  const [partBusy, setPartBusy] = useState<string | null>(null);
+  const [editingGameId, setEditingGameId] = useState<number | null>(null);
 
   // Drag-and-drop registration: a ZIP whose root contains a valid owogg.json v1 manifest.
   // creates the game *and* its first version in one call — see devApi.uploadGameFromBundle. This
@@ -286,6 +294,32 @@ function ManageGamesPanel({
       onError(err instanceof Error ? err.message : "업로드에 실패했습니다.");
     } finally {
       setUploadingGameId(null);
+    }
+  };
+
+  const handleReplaceManifest = async (gameId: number, file: File) => {
+    setPartBusy(`${gameId}:manifest`);
+    try {
+      await replaceDevGameManifest(gameId, file);
+      setNotice("owogg.json 교체본을 새 버전으로 만들었습니다. 관리자 심사를 기다려주세요.");
+      onChanged();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "owogg.json 재업로드에 실패했습니다.");
+    } finally {
+      setPartBusy(null);
+    }
+  };
+
+  const handleReplaceLogo = async (gameId: number, file: File) => {
+    setPartBusy(`${gameId}:logo`);
+    try {
+      await replaceDevGameLogo(gameId, file);
+      setNotice("게임 로고를 교체했습니다.");
+      onChanged();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "로고 재업로드에 실패했습니다.");
+    } finally {
+      setPartBusy(null);
     }
   };
 
@@ -400,7 +434,7 @@ function ManageGamesPanel({
                   here previously let a Game Creator "버전 업로드" or re-register the same slug and hit
                   an error with no explanation (2026-08-18). */}
               {!g.deletedAt && (
-                <div className="flex shrink-0 items-center gap-2">
+                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                   {g.reviewSlot !== null && (
                     <button
                       type="button"
@@ -422,7 +456,7 @@ function ManageGamesPanel({
                     ) : (
                       <Upload className="h-3.5 w-3.5" />
                     )}
-                    버전 업로드
+                    전체 ZIP
                     <input
                       type="file"
                       accept=".zip"
@@ -435,6 +469,51 @@ function ManageGamesPanel({
                       }}
                     />
                   </label>
+                  <label className="flex cursor-pointer items-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-xs font-bold text-text-primary hover:border-brand">
+                    {partBusy === `${g.id}:manifest` ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <FileJson className="h-3.5 w-3.5" />
+                    )}
+                    owogg.json
+                    <input
+                      type="file"
+                      accept=".json,application/json"
+                      className="hidden"
+                      disabled={partBusy !== null}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = "";
+                        if (file) void handleReplaceManifest(g.id, file);
+                      }}
+                    />
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-xs font-bold text-text-primary hover:border-brand">
+                    {partBusy === `${g.id}:logo` ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Image className="h-3.5 w-3.5" />
+                    )}
+                    로고
+                    <input
+                      type="file"
+                      accept=".png,.jpg,.jpeg,.webp,.svg,image/png,image/jpeg,image/webp,image/svg+xml"
+                      className="hidden"
+                      disabled={partBusy !== null}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = "";
+                        if (file) void handleReplaceLogo(g.id, file);
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setEditingGameId((current) => (current === g.id ? null : g.id))}
+                    className="flex items-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-xs font-bold text-text-primary hover:border-brand"
+                  >
+                    <Pencil className="h-3.5 w-3.5" /> 속성 편집
+                  </button>
                   {g.liveVersionId === null && (
                     <button
                       type="button"
@@ -457,7 +536,120 @@ function ManageGamesPanel({
           ))
         )}
       </div>
+
+      {editingGameId !== null &&
+        (() => {
+          const game = (myGames ?? []).find((entry) => entry.id === editingGameId);
+          return game ? (
+            <CreatorGameMetadataEditor
+              key={game.id}
+              game={game}
+              onSaved={() => {
+                setNotice("수정한 속성으로 새 버전을 만들었습니다. 관리자 심사를 기다려주세요.");
+                setEditingGameId(null);
+                onChanged();
+              }}
+              onError={onError}
+            />
+          ) : null;
+        })()}
     </div>
+  );
+}
+
+function CreatorGameMetadataEditor({
+  game,
+  onSaved,
+  onError,
+}: {
+  game: SandboxGameRecord;
+  onSaved: () => void;
+  onError: (message: string) => void;
+}) {
+  const [title, setTitle] = useState(game.title);
+  const [shortDescription, setShortDescription] = useState(game.shortDescription ?? "");
+  const [description, setDescription] = useState(game.description ?? "");
+  const [genre, setGenre] = useState(game.genre);
+  const [mode, setMode] = useState<"single" | "multi">(game.mode);
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <div className="space-y-4 rounded-2xl border border-brand/30 bg-surface p-4">
+      <div>
+        <h3 className="text-sm font-black text-text-primary">{game.title} 핵심 속성 편집</h3>
+        <p className="mt-1 text-[11px] leading-relaxed text-text-muted">
+          slug는 게임 ID이므로 변경할 수 없습니다. 저장하면 원본 ZIP을 훼손하지 않고 수정된
+          owogg.json을 포함한 새 버전이 생성되어 다시 심사됩니다.
+        </p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="제목">
+          <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={60} />
+        </Field>
+        <Field label="장르">
+          <input value={genre} onChange={(e) => setGenre(e.target.value)} maxLength={40} />
+        </Field>
+        <Field label="모드">
+          <select value={mode} onChange={(e) => setMode(e.target.value as "single" | "multi")}>
+            <option value="single">single</option>
+            <option value="multi">multi</option>
+          </select>
+        </Field>
+        <Field label="짧은 설명">
+          <input
+            value={shortDescription}
+            onChange={(e) => setShortDescription(e.target.value)}
+            maxLength={200}
+          />
+        </Field>
+      </div>
+      <Field label="상세 설명">
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          maxLength={4000}
+          rows={4}
+        />
+      </Field>
+      <button
+        type="button"
+        disabled={busy || !title.trim() || !genre.trim()}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await patchDevGameBasicMetadata(game.id, {
+              title: title.trim(),
+              shortDescription: shortDescription.trim() || null,
+              description: description.trim() || null,
+              genre: genre.trim(),
+              mode,
+            });
+            onSaved();
+          } catch (err) {
+            onError(err instanceof Error ? err.message : "속성 수정에 실패했습니다.");
+          } finally {
+            setBusy(false);
+          }
+        }}
+        className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2.5 text-xs font-bold text-white hover:bg-brand-light disabled:opacity-50"
+      >
+        {busy ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Pencil className="h-3.5 w-3.5" />
+        )}
+        새 버전으로 저장
+      </button>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="flex flex-col gap-1 text-[11px] font-bold text-text-muted [&_input]:rounded-xl [&_input]:border [&_input]:border-border [&_input]:bg-surface-raised [&_input]:px-3 [&_input]:py-2 [&_input]:text-sm [&_input]:text-text-primary [&_select]:rounded-xl [&_select]:border [&_select]:border-border [&_select]:bg-surface-raised [&_select]:px-3 [&_select]:py-2 [&_select]:text-sm [&_select]:text-text-primary [&_textarea]:rounded-xl [&_textarea]:border [&_textarea]:border-border [&_textarea]:bg-surface-raised [&_textarea]:px-3 [&_textarea]:py-2 [&_textarea]:text-sm [&_textarea]:text-text-primary">
+      {label}
+      {children}
+    </label>
   );
 }
 

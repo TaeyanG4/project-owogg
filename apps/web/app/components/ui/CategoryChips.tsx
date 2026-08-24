@@ -1,4 +1,4 @@
-import { Flame, Sparkles, Zap, Brain, Target, Keyboard, Bookmark } from "lucide-react";
+import { Flame, Zap, Brain, Target, Keyboard, Bookmark } from "lucide-react";
 import { useI18n } from "../../features/i18n/I18nContext";
 import type { Dictionary } from "../../features/i18n/dictionary";
 
@@ -13,7 +13,6 @@ export interface CategoryOption {
 function buildCategories(t: Dictionary["games"]["categories"]): CategoryOption[] {
   return [
     { id: "all", label: t.all, icon: Flame },
-    { id: "popular", label: t.popular, icon: Sparkles },
     { id: "reaction", label: t.reaction, icon: Zap },
     { id: "brain", label: t.brain, icon: Brain },
     { id: "aim", label: t.aim, icon: Target },

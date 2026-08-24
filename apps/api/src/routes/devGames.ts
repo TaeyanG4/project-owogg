@@ -11,6 +11,8 @@ import {
   toSandboxGameRecordResponse,
   SandboxGameVersionRecordSchema,
   SandboxGameUploadResponseSchema,
+  SandboxGameBasicMetadataUpdateRequestSchema,
+  GameLogoUpdateResponseSchema,
 } from "@owogg/contracts";
 import {
   SandboxGameUseCaseFailure,
@@ -27,6 +29,7 @@ import { SANDBOX_GAME_FAILURE_STATUS, SANDBOX_GAME_FAILURE_MESSAGE } from "./san
 import type { SandboxGameFailureStatus } from "./sandboxGameErrors.js";
 import { GAME_CREATOR_FAILURE_STATUS, GAME_CREATOR_FAILURE_MESSAGE } from "./gameCreatorErrors.js";
 import type { ApiEnv } from "./auth.js";
+import { purgePublicGameReadCache } from "./publicGameCache.js";
 
 /** All five B2 values must be present or the upload path is treated as unconfigured — a partial
  * config (e.g. endpoint set but key missing) is far more likely to be a broken deploy than an
@@ -273,6 +276,151 @@ devGamesRouter.post(
       return c.json(
         SandboxGameUploadResponseSchema.parse({ game: toSandboxGameRecordResponse(game), version }),
         201,
+      );
+    } catch (err) {
+      const { body: errBody, status } = failureResponse(err);
+      return c.json(errBody, status);
+    }
+  },
+);
+
+// POST /api/dev/games/:id/manifest — replaces only owogg.json by rebuilding a new immutable ZIP
+// version from the latest valid source. The new USER version follows normal review rules.
+devGamesRouter.post(
+  "/games/:id/manifest",
+  rateLimit({ name: "game-upload", binding: "GAME_UPLOAD_RATE_LIMITER" }),
+  async (c) => {
+    const session = await resolveDevSession(c);
+    if (!session) {
+      return c.json({ error: { code: "UNAUTHORIZED", message: "로그인이 필요합니다." } }, 401);
+    }
+    const container = createContainer(c.env.DB, readB2Config(c.env));
+    if (!container.gameBundlesConfigured) {
+      return c.json(
+        {
+          error: {
+            code: "GAME_BUNDLES_NOT_CONFIGURED",
+            message: "번들 저장소(Backblaze B2)가 아직 이 환경에 구성되지 않았습니다.",
+          },
+        },
+        503,
+      );
+    }
+    const body = await c.req.parseBody().catch(() => null);
+    const manifest = body?.manifest;
+    if (!(manifest instanceof File)) {
+      return c.json(
+        { error: { code: "INVALID_REQUEST", message: "manifest 파일 필드가 필요합니다." } },
+        400,
+      );
+    }
+    try {
+      const version = await container.sandboxGameUseCases.replaceManifest({
+        gameId: Number(c.req.param("id")),
+        actingUserId: session.userId,
+        isAdmin: session.isAdmin,
+        bytes: await manifest.arrayBuffer(),
+      });
+      return c.json(SandboxGameVersionRecordSchema.parse(version), 201);
+    } catch (err) {
+      const { body: errBody, status } = failureResponse(err);
+      return c.json(errBody, status);
+    }
+  },
+);
+
+// PATCH /api/dev/games/:id/basic-metadata — edits the safe owogg.json.game subset and creates the
+// same kind of reviewable immutable version as a standalone manifest replacement.
+devGamesRouter.patch(
+  "/games/:id/basic-metadata",
+  rateLimit({ name: "game-upload", binding: "GAME_UPLOAD_RATE_LIMITER" }),
+  async (c) => {
+    const session = await resolveDevSession(c);
+    if (!session) {
+      return c.json({ error: { code: "UNAUTHORIZED", message: "로그인이 필요합니다." } }, 401);
+    }
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = SandboxGameBasicMetadataUpdateRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        { error: { code: "INVALID_REQUEST", message: "수정할 게임 속성이 올바르지 않습니다." } },
+        400,
+      );
+    }
+    const container = createContainer(c.env.DB, readB2Config(c.env));
+    if (!container.gameBundlesConfigured) {
+      return c.json(
+        {
+          error: {
+            code: "GAME_BUNDLES_NOT_CONFIGURED",
+            message: "번들 저장소(Backblaze B2)가 아직 이 환경에 구성되지 않았습니다.",
+          },
+        },
+        503,
+      );
+    }
+    try {
+      const version = await container.sandboxGameUseCases.updateBasicMetadataAsVersion({
+        gameId: Number(c.req.param("id")),
+        actingUserId: session.userId,
+        isAdmin: session.isAdmin,
+        metadata: parsed.data,
+      });
+      return c.json(SandboxGameVersionRecordSchema.parse(version), 201);
+    } catch (err) {
+      const { body: errBody, status } = failureResponse(err);
+      return c.json(errBody, status);
+    }
+  },
+);
+
+// POST /api/dev/games/:id/logo — game-level artwork replacement, independent of a code version.
+devGamesRouter.post(
+  "/games/:id/logo",
+  rateLimit({ name: "game-upload", binding: "GAME_UPLOAD_RATE_LIMITER" }),
+  async (c) => {
+    const session = await resolveDevSession(c);
+    if (!session) {
+      return c.json({ error: { code: "UNAUTHORIZED", message: "로그인이 필요합니다." } }, 401);
+    }
+    const container = createContainer(c.env.DB, readB2Config(c.env));
+    if (!container.gameBundlesConfigured) {
+      return c.json(
+        {
+          error: {
+            code: "GAME_BUNDLES_NOT_CONFIGURED",
+            message: "번들 저장소(Backblaze B2)가 아직 이 환경에 구성되지 않았습니다.",
+          },
+        },
+        503,
+      );
+    }
+    const body = await c.req.parseBody().catch(() => null);
+    const logo = body?.logo;
+    if (!(logo instanceof File)) {
+      return c.json(
+        { error: { code: "INVALID_REQUEST", message: "logo 파일 필드가 필요합니다." } },
+        400,
+      );
+    }
+    try {
+      const game = await container.sandboxGameUseCases.replaceLogo({
+        gameId: Number(c.req.param("id")),
+        actingUserId: session.userId,
+        isAdmin: session.isAdmin,
+        fileName: logo.name,
+        bytes: await logo.arrayBuffer(),
+      });
+      await purgePublicGameReadCache(c.req.url, [game.slug], c.env.GAME_ORIGIN);
+      c.header("Clear-Site-Data", '"cache"');
+      return c.json(
+        GameLogoUpdateResponseSchema.parse({
+          gameId: game.id,
+          slug: game.slug,
+          hasLogo: true,
+          updatedAt: game.updatedAt,
+        }),
+        200,
       );
     } catch (err) {
       const { body: errBody, status } = failureResponse(err);

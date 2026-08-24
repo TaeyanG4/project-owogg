@@ -29,6 +29,8 @@ export * from "./ports/sandboxGames.js";
 export * from "./ports/gameScoreAcceptance.js";
 export * from "./ports/gameResultAcceptance.js";
 export * from "./ports/gameAchievements.js";
+export * from "./ports/adminGameCatalog.js";
+export * from "./ports/publicGameMetrics.js";
 
 // Unified Game Platform foundation. sandbox* exports above remain the control-plane path for
 // registration, review, and publishing; runtime reads use RuntimeGameRegistry below.
@@ -73,11 +75,13 @@ export * from "./application/userModerationUseCases.js";
 export * from "./application/gameCreatorUseCases.js";
 export * from "./application/sandboxGameUseCases.js";
 export * from "./application/gamePublicationService.js";
+export * from "./application/gameBundleRevision.js";
 export * from "./application/officialGameUploadUseCases.js";
 export * from "./application/sandboxGameVersionPublicationRepository.js";
 export * from "./application/jsonDeepEqual.js";
 export * from "./application/runtimeGameAvailability.js";
 export * from "./application/publicGameCatalog.js";
+export * from "./application/publicGameMetricsUseCases.js";
 export * from "./application/gameScoreAcceptanceUseCases.js";
 export * from "./application/gameResultAcceptanceUseCases.js";
 export * from "./application/gameAchievementUseCases.js";

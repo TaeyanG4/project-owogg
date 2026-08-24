@@ -44,6 +44,7 @@ export const SANDBOX_GAME_FAILURE_STATUS: Record<
   INVALID_MODE: 400,
   LOGO_REQUIRED: 422,
   LOGO_TOO_LARGE: 422,
+  LOGO_INVALID: 422,
   NOT_YET_DELETED: 409,
   // Stage C-2 (B2 canonical write-through): a rejected metadata mutation, not a server fault.
   SCORE_POLICY_WOULD_BECOME_INCOMPLETE: 400,
@@ -94,6 +95,7 @@ export const SANDBOX_GAME_FAILURE_MESSAGE: Record<SandboxGameUseCaseFailure["cod
   LOGO_REQUIRED:
     "ZIP 최상위에 로고 이미지(owogg.logo.png/jpg/jpeg/webp/svg 중 하나)가 없습니다. 게임 등록에는 로고가 필요합니다.",
   LOGO_TOO_LARGE: "로고 이미지 용량이 최대 허용치를 초과했습니다.",
+  LOGO_INVALID: "png, jpg, jpeg, webp, svg 형식의 비어 있지 않은 로고 파일이 필요합니다.",
   NOT_YET_DELETED: "먼저 삭제(비공개 전환)된 게임만 완전 삭제할 수 있습니다.",
   SCORE_POLICY_WOULD_BECOME_INCOMPLETE:
     "이미 점수가 설정된 게임의 필수 점수 항목(단위/방향/최소/최대값)을 비울 수 없습니다.",

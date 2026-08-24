@@ -4,8 +4,10 @@ import type {
   SandboxGameVersionRecord,
   SandboxGameReviewAuditEntry,
   SandboxGameMetadataInput,
+  SandboxGameBasicMetadataInput,
   SandboxGamePendingVersionsPage,
   GameBundleStorageRepository,
+  BundleArchiveWriter,
 } from "../ports/sandboxGames.js";
 import type { GameCanonicalRepository } from "../modules/game/ports/gameCanonicalRepository.js";
 import type { GameCanonicalDocument } from "../modules/game/domain/gameCanonicalDocument.js";
@@ -20,6 +22,9 @@ import {
   sourceArchiveObjectKey,
   findGameLogoFile,
   sandboxGameLogoObjectKey,
+  revisedGameLogoObjectKey,
+  standaloneGameLogoPath,
+  resolveBundleContentType,
   SANDBOX_BUNDLE_REJECTIONS,
   SandboxBundleRejectionError,
   type SandboxBundleRejection,
@@ -29,6 +34,7 @@ import {
 import {
   GameCreatorManifestValidationError,
   extractGameCreatorManifest,
+  parseGameCreatorManifestBytes,
 } from "../domain/gameCreatorManifest.js";
 import { mapGameCreatorManifestToCanonical } from "../domain/gameCreatorManifestCanonical.js";
 import { sha256Hex } from "../domain/contentHash.js";
@@ -39,6 +45,11 @@ import {
 } from "../domain/userGameCanonical.js";
 import { jsonDeepEqual } from "./jsonDeepEqual.js";
 import type { GamePublicationService } from "./gamePublicationService.js";
+import {
+  patchGameCreatorManifestBasicMetadata,
+  rebuildGameBundleArchive,
+  serializeGameCreatorManifest,
+} from "./gameBundleRevision.js";
 
 export type SandboxGameUseCaseError =
   | "GAME_NOT_FOUND"
@@ -79,6 +90,8 @@ export type SandboxGameUseCaseError =
   /** createGameFromBundle: the logo file exists but exceeds SANDBOX_GAME_POLICY.MAX_LOGO_BYTES
    * once decompressed. */
   | "LOGO_TOO_LARGE"
+  /** A standalone logo upload has no supported png/jpg/jpeg/webp/svg extension or is empty. */
+  | "LOGO_INVALID"
   /** deleteGame was called on a game that's already soft-deleted — idempotent-failure rather than
    * a silent no-op, so a double-click doesn't look like it succeeded twice. */
   | "ALREADY_DELETED"
@@ -166,6 +179,7 @@ export class SandboxGameUseCases {
     private publisher: GamePublicationService,
     /** The sole canonical control-plane authority for USER metadata. */
     private gameCanonicalRepo: GameCanonicalRepository,
+    private archiveWriter?: BundleArchiveWriter,
   ) {}
 
   async getById(id: number): Promise<SandboxGameRecord | null> {
@@ -187,6 +201,10 @@ export class SandboxGameUseCases {
    * second guard against reviving a deleted game's visibility from a stray request). */
   async listAll(): Promise<SandboxGameRecord[]> {
     return this.repo.listAll();
+  }
+
+  async listAllPage(limit: number, offset: number) {
+    return this.repo.listAllPage(limit, offset);
   }
 
   async listVersions(gameId: number): Promise<SandboxGameVersionRecord[]> {
@@ -311,6 +329,170 @@ export class SandboxGameUseCases {
       prepared: publishablePrepared,
       ...(logoFile ? { logoFile } : {}),
     });
+  }
+
+  private async revisionBase(game: SandboxGameRecord): Promise<{
+    prepared: PreparedBundle;
+    manifest: NonNullable<ReturnType<typeof extractGameCreatorManifest>>;
+  }> {
+    const versions = (await this.repo.listVersionsByGame(game.id)).sort(
+      (left, right) => right.uploadedAt.localeCompare(left.uploadedAt) || right.id - left.id,
+    );
+    for (const version of versions) {
+      const source = await this.storage.getObject(version.objectKey);
+      if (!source) continue;
+      try {
+        const prepared = this.publisher.prepare(source);
+        const manifest = extractGameCreatorManifest(prepared.files);
+        if (manifest?.game.slug === game.slug) return { prepared, manifest };
+      } catch {
+        // Try an older source archive. A single missing/corrupt draft must not make an otherwise
+        // healthy game impossible to repair through the partial-update flow.
+      }
+    }
+    throw new SandboxGameUseCaseFailure("VERSION_NOT_FOUND");
+  }
+
+  private async assertRevisionAccess(input: {
+    gameId: number;
+    actingUserId: number;
+    isAdmin: boolean;
+  }): Promise<SandboxGameRecord> {
+    const game = await this.repo.findById(input.gameId);
+    if (!game) throw new SandboxGameUseCaseFailure("GAME_NOT_FOUND");
+    if (game.deletedAt !== null) throw new SandboxGameUseCaseFailure("ALREADY_DELETED");
+    if (!input.isAdmin && game.developerUserId !== input.actingUserId) {
+      throw new SandboxGameUseCaseFailure("NOT_OWNER");
+    }
+    return game;
+  }
+
+  /** Replaces only `owogg.json` by rebuilding the selected source ZIP and submitting the result as
+   * a normal new version. Existing immutable objects are never overwritten; USER versions retain
+   * the normal PENDING_REVIEW lifecycle. */
+  async replaceManifest(input: {
+    gameId: number;
+    actingUserId: number;
+    isAdmin: boolean;
+    bytes: ArrayBuffer;
+  }): Promise<SandboxGameVersionRecord> {
+    if (!this.archiveWriter) throw new SandboxGameUseCaseFailure("PUBLISH_FAILED");
+    if (
+      input.bytes.byteLength === 0 ||
+      input.bytes.byteLength > SANDBOX_GAME_POLICY.MAX_MANIFEST_BYTES
+    ) {
+      throw new SandboxGameUseCaseFailure("MANIFEST_INVALID");
+    }
+    const game = await this.assertRevisionAccess(input);
+    let manifest: ReturnType<typeof parseGameCreatorManifestBytes>;
+    try {
+      manifest = parseGameCreatorManifestBytes(input.bytes);
+    } catch (error) {
+      return manifestFailure(error);
+    }
+    if (manifest.game.slug !== game.slug) {
+      throw new SandboxGameUseCaseFailure("MANIFEST_INVALID");
+    }
+    const base = await this.revisionBase(game);
+    const archive = rebuildGameBundleArchive({
+      prepared: base.prepared,
+      writer: this.archiveWriter,
+      manifestBytes: serializeGameCreatorManifest(manifest),
+      // A logo is game-level state. Omitting it from this synthetic version keeps the currently
+      // selected logo untouched and prevents an old source ZIP from resurrecting stale artwork.
+      currentLogo: null,
+    });
+    return this.uploadVersion({ ...input, bytes: archive, contentType: "application/zip" });
+  }
+
+  /** Turns a small form edit into the same immutable manifest-revision flow as replaceManifest. */
+  async updateBasicMetadataAsVersion(input: {
+    gameId: number;
+    actingUserId: number;
+    isAdmin: boolean;
+    metadata: SandboxGameBasicMetadataInput;
+  }): Promise<SandboxGameVersionRecord> {
+    const game = await this.assertRevisionAccess(input);
+    const base = await this.revisionBase(game);
+    let manifest = base.manifest;
+    try {
+      const canonical = await this.gameCanonicalRepo.findBySlug(game.slug);
+      if (canonical?.creatorManifest) manifest = canonical.creatorManifest;
+      manifest = patchGameCreatorManifestBasicMetadata(manifest, input.metadata);
+    } catch (error) {
+      return manifestFailure(error);
+    }
+    return this.replaceManifest({
+      gameId: game.id,
+      actingUserId: input.actingUserId,
+      isAdmin: input.isAdmin,
+      bytes: serializeGameCreatorManifest(manifest).buffer as ArrayBuffer,
+    });
+  }
+
+  /** Replaces only the game-level logo. A content-addressed object is written before D1 switches
+   * to it; the previous object is then removed best-effort, so a failed D1 write cannot destroy the
+   * currently visible logo. */
+  async replaceLogo(input: {
+    gameId: number;
+    actingUserId: number;
+    isAdmin: boolean;
+    fileName: string;
+    bytes: ArrayBuffer;
+  }): Promise<SandboxGameRecord> {
+    const game = await this.assertRevisionAccess(input);
+    const logoPath = standaloneGameLogoPath(input.fileName);
+    if (
+      !logoPath ||
+      input.bytes.byteLength === 0 ||
+      input.bytes.byteLength > SANDBOX_GAME_POLICY.MAX_LOGO_BYTES
+    ) {
+      throw new SandboxGameUseCaseFailure(
+        input.bytes.byteLength > SANDBOX_GAME_POLICY.MAX_LOGO_BYTES
+          ? "LOGO_TOO_LARGE"
+          : "LOGO_INVALID",
+      );
+    }
+    const contentHash = await sha256Hex(input.bytes);
+    const nextKey = revisedGameLogoObjectKey(game.id, logoPath, contentHash);
+    const { contentType } = resolveBundleContentType(logoPath);
+    const nowIso = new Date().toISOString();
+    try {
+      await this.storage.putObject({ key: nextKey, bytes: input.bytes, contentType });
+    } catch {
+      throw new SandboxGameUseCaseFailure("PUBLISH_FAILED");
+    }
+
+    let updated: SandboxGameRecord;
+    try {
+      updated = await this.repo.setLogo(game.id, nextKey, nowIso);
+    } catch {
+      // An identical re-upload resolves to the existing content-addressed key. If D1 fails in
+      // that case, deleting `nextKey` would delete the still-live logo rather than roll back a
+      // newly-created object.
+      if (nextKey !== game.logoKey) await this.storage.deleteObject(nextKey).catch(() => {});
+      throw new SandboxGameUseCaseFailure("PUBLISH_FAILED");
+    }
+
+    try {
+      await this.repo.appendReviewAudit({
+        gameId: game.id,
+        versionId: null,
+        actorAdminId: input.actingUserId,
+        action: "LOGO_CHANGED",
+        reason: null,
+        metadata: { contentHash },
+        nowIso,
+      });
+    } catch {
+      // The durable logo pointer has already switched. Do not delete the newly-live object just
+      // because the append-only support audit failed in a later D1 statement.
+      console.error(`logo audit append failed for gameId=${game.id}`);
+    }
+    if (game.logoKey && game.logoKey !== nextKey) {
+      await this.storage.deleteObject(game.logoKey).catch(() => {});
+    }
+    return updated;
   }
 
   /**
@@ -894,7 +1076,10 @@ export class SandboxGameUseCases {
       if (!scoreCheck.ok) {
         throw new SandboxGameUseCaseFailure(scoreCheck.reason);
       }
-      if (input.genre !== undefined && existingCanonical.catalog.type !== "GENRE_MODE") {
+      if (
+        (input.genre !== undefined || input.mode !== undefined) &&
+        existingCanonical.catalog.type !== "GENRE_MODE"
+      ) {
         throw new SandboxGameUseCaseFailure("CANONICAL_SYNC_FAILED");
       }
     }

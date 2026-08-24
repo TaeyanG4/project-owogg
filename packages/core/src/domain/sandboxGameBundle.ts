@@ -82,6 +82,28 @@ export function sandboxGameLogoObjectKey(gameId: number, logoPath: string): stri
   return `games/${gameId}/logo.${ext}`;
 }
 
+/** Normalizes a standalone logo upload to the same reserved bundle filename contract. The caller's
+ * original basename is irrelevant; only a supported extension is retained. */
+export function standaloneGameLogoPath(fileName: string): string | null {
+  const dot = fileName.lastIndexOf(".");
+  if (dot < 0) return null;
+  const ext = fileName.slice(dot + 1).toLowerCase();
+  if (!(LOGO_EXTENSIONS as readonly string[]).includes(ext)) return null;
+  return `${LOGO_BASENAME}.${ext}`;
+}
+
+/** Content-addressed logo key used by standalone replacements. Writing a new object before the D1
+ * pointer changes keeps the update atomic across B2/D1 and gives the public media URL a fresh
+ * revision even when the file extension stays the same. */
+export function revisedGameLogoObjectKey(
+  gameId: number,
+  logoPath: string,
+  contentHash: string,
+): string {
+  const ext = logoPath.slice(logoPath.lastIndexOf(".") + 1);
+  return `games/${gameId}/logos/${contentHash}.${ext}`;
+}
+
 // ── MIME ─────────────────────────────────────────────────────────────────────
 
 const MIME_TYPES: Record<string, string> = {

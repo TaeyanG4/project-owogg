@@ -14,6 +14,9 @@ import {
   ShieldAlert,
   Trash2,
   X,
+  FileArchive,
+  FileJson,
+  Image,
 } from "lucide-react";
 import { useAuth } from "../features/auth";
 import {
@@ -27,14 +30,23 @@ import {
   patchSandboxGameVisibility,
   deleteSandboxGame,
   purgeSandboxGame,
+  uploadAdminSandboxGameVersion,
+  replaceAdminSandboxGameManifest,
+  replaceAdminSandboxGameLogo,
 } from "../features/adminApi";
 import type {
   SandboxGameReviewQueueResponse,
   SandboxGameDetailResponse,
   SandboxGameRecord,
+  AdminSandboxGameListResponse,
 } from "@owogg/contracts";
 import { ApiClientError } from "../lib/api";
 import { OfficialGameManagement } from "../components/admin/OfficialGameManagement";
+import {
+  AdminGamePagination,
+  formatServerUploadDate,
+  type AdminGamePageSize,
+} from "../components/admin/AdminGamePagination";
 
 export function meta() {
   return [
@@ -46,8 +58,11 @@ export function meta() {
 
 export default function AdminSandboxGamesRoute() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const [activeSection, setActiveSection] = useState<"OWOGG" | "USER">("OWOGG");
   const [queue, setQueue] = useState<SandboxGameReviewQueueResponse | null>(null);
-  const [allGames, setAllGames] = useState<SandboxGameRecord[] | null>(null);
+  const [allGames, setAllGames] = useState<AdminSandboxGameListResponse | null>(null);
+  const [userPage, setUserPage] = useState(1);
+  const [userPageSize, setUserPageSize] = useState<AdminGamePageSize>(10);
   const [togglingGameId, setTogglingGameId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reviewAccessDenied, setReviewAccessDenied] = useState(false);
@@ -58,15 +73,19 @@ export default function AdminSandboxGamesRoute() {
   const [detail, setDetail] = useState<SandboxGameDetailResponse | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
-  const loadQueue = async () => {
+  const loadQueue = async (targetPage: number, targetPageSize: AdminGamePageSize) => {
     setError(null);
     try {
       const [queueRes, gamesRes] = await Promise.all([
         fetchSandboxReviewQueue(),
-        fetchAllSandboxGames(),
+        fetchAllSandboxGames(targetPage, targetPageSize),
       ]);
       setQueue(queueRes);
-      setAllGames(gamesRes.games);
+      if (targetPage > gamesRes.totalPages) {
+        setUserPage(gamesRes.totalPages);
+        return;
+      }
+      setAllGames(gamesRes);
       setReviewAccessDenied(false);
     } catch (err) {
       if (err instanceof ApiClientError && (err.status === 401 || err.status === 403)) {
@@ -78,8 +97,10 @@ export default function AdminSandboxGamesRoute() {
   };
 
   useEffect(() => {
-    if (!authLoading && isAuthenticated) void loadQueue();
-  }, [authLoading, isAuthenticated]);
+    if (!authLoading && isAuthenticated && activeSection === "USER") {
+      void loadQueue(userPage, userPageSize);
+    }
+  }, [authLoading, isAuthenticated, activeSection, userPage, userPageSize]);
 
   // Inline activate/deactivate from the game list — same action as GameDetailPanel's visibility
   // toggle, just without opening the detail panel first.
@@ -92,7 +113,16 @@ export default function AdminSandboxGamesRoute() {
         gameRecord.id,
         gameRecord.visibility === "PUBLIC" ? "PRIVATE" : "PUBLIC",
       );
-      setAllGames((prev) => prev?.map((g) => (g.id === updated.id ? updated : g)) ?? prev);
+      setAllGames((prev) =>
+        prev
+          ? {
+              ...prev,
+              entries: prev.entries.map((entry) =>
+                entry.game.id === updated.id ? { ...entry, game: updated } : entry,
+              ),
+            }
+          : prev,
+      );
       if (detail?.game.id === updated.id) setDetail({ ...detail, game: updated });
     } catch (err) {
       setError(err instanceof Error ? err.message : "공개 상태 변경에 실패했습니다.");
@@ -105,8 +135,8 @@ export default function AdminSandboxGamesRoute() {
   // no updated record to fold back in. Drop it from the list and close the detail panel if it was
   // showing this game.
   const handlePurged = (gameId: number) => {
-    setAllGames((prev) => prev?.filter((g) => g.id !== gameId) ?? prev);
     setDetail((prev) => (prev?.game.id === gameId ? null : prev));
+    void loadQueue(userPage, userPageSize);
   };
 
   const handleOpenGame = async (id: number) => {
@@ -127,7 +157,7 @@ export default function AdminSandboxGamesRoute() {
     setError(null);
     try {
       await postApproveSandboxVersion(versionId);
-      await loadQueue();
+      await loadQueue(userPage, userPageSize);
     } catch (err) {
       setError(err instanceof Error ? err.message : "승인에 실패했습니다.");
     } finally {
@@ -148,7 +178,7 @@ export default function AdminSandboxGamesRoute() {
       setRejectReasons((prev) =>
         Object.fromEntries(Object.entries(prev).filter(([id]) => Number(id) !== versionId)),
       );
-      await loadQueue();
+      await loadQueue(userPage, userPageSize);
     } catch (err) {
       setError(err instanceof Error ? err.message : "반려에 실패했습니다.");
     } finally {
@@ -198,15 +228,48 @@ export default function AdminSandboxGamesRoute() {
         </p>
       </header>
 
+      <div
+        role="tablist"
+        aria-label="게임 관리 구분"
+        className="grid gap-2 rounded-2xl border border-border bg-surface-raised p-2 sm:grid-cols-2"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSection === "OWOGG"}
+          onClick={() => setActiveSection("OWOGG")}
+          className={`flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black transition-colors ${
+            activeSection === "OWOGG"
+              ? "bg-brand text-white shadow-lg"
+              : "text-text-muted hover:bg-surface-overlay hover:text-text-primary"
+          }`}
+        >
+          <ShieldAlert className="h-4 w-4" /> 공식 게임
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSection === "USER"}
+          onClick={() => setActiveSection("USER")}
+          className={`flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black transition-colors ${
+            activeSection === "USER"
+              ? "bg-brand text-white shadow-lg"
+              : "text-text-muted hover:bg-surface-overlay hover:text-text-primary"
+          }`}
+        >
+          <Gamepad2 className="h-4 w-4" /> 사용자 제작 게임
+        </button>
+      </div>
+
       {error && (
         <div className="rounded-2xl border border-accent-red/30 bg-accent-red/10 p-4 text-xs text-accent-red">
           {error}
         </div>
       )}
 
-      <OfficialGameManagement />
-
-      {reviewAccessDenied ? (
+      {activeSection === "OWOGG" ? (
+        <OfficialGameManagement />
+      ) : reviewAccessDenied ? (
         <section className="rounded-2xl border border-border bg-surface-raised p-5">
           <h2 className="text-sm font-black text-text-primary">사용자 제작 게임 심사</h2>
           <p className="mt-2 text-xs text-text-muted">
@@ -306,18 +369,21 @@ export default function AdminSandboxGamesRoute() {
 
           <section className="space-y-3 border-t border-border pt-6">
             <h2 className="flex items-center gap-1.5 text-sm font-bold text-text-primary">
-              <ListChecks className="h-4 w-4" /> 사용자 제작 게임 관리 ({allGames?.length ?? 0})
+              <ListChecks className="h-4 w-4" /> 사용자 제작 게임 관리 ({allGames?.total ?? 0})
             </h2>
             {!allGames ? (
               <PageMessage small>불러오는 중...</PageMessage>
-            ) : allGames.length === 0 ? (
+            ) : allGames.entries.length === 0 ? (
               <p className="rounded-2xl border border-border bg-surface-raised p-6 text-center text-xs text-text-muted">
                 등록된 게임이 없습니다.
               </p>
             ) : (
               <div className="flex flex-col divide-y divide-border/60 rounded-2xl border border-border bg-surface-raised px-4">
-                {allGames.map((g) => (
-                  <div key={g.id} className="flex items-center justify-between gap-3 py-3">
+                {allGames.entries.map(({ game: g, latestUploadedAt }) => (
+                  <div
+                    key={g.id}
+                    className="flex flex-col justify-between gap-3 py-3 sm:flex-row sm:items-center"
+                  >
                     <div className="min-w-0">
                       <p className="truncate text-sm font-bold text-text-primary">
                         {g.title}{" "}
@@ -340,6 +406,9 @@ export default function AdminSandboxGamesRoute() {
                         )}
                         <span>제작자 #{g.developerUserId}</span>
                         <span>{g.slug}</span>
+                      </p>
+                      <p className="mt-1 text-[10px] text-text-muted">
+                        서버 업로드 (KST) {formatServerUploadDate(latestUploadedAt)}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
@@ -384,6 +453,19 @@ export default function AdminSandboxGamesRoute() {
                   </div>
                 ))}
               </div>
+            )}
+            {allGames && (
+              <AdminGamePagination
+                page={allGames.page}
+                pageSize={userPageSize}
+                total={allGames.total}
+                totalPages={allGames.totalPages}
+                onPageChange={setUserPage}
+                onPageSizeChange={(nextPageSize) => {
+                  setUserPageSize(nextPageSize);
+                  setUserPage(1);
+                }}
+              />
             )}
           </section>
 
@@ -446,6 +528,7 @@ function GameDetailPanel({
   const [shortDescription, setShortDescription] = useState(game.shortDescription ?? "");
   const [description, setDescription] = useState(game.description ?? "");
   const [genre, setGenre] = useState(game.genre);
+  const [mode, setMode] = useState<"single" | "multi">(game.mode);
   const [xp, setXp] = useState(String(game.xpPerCompletion));
   const [scoreUnit, setScoreUnit] = useState(game.scoreUnit ?? "");
   const [scoreDirection, setScoreDirection] = useState(game.scoreDirection ?? "");
@@ -456,6 +539,7 @@ function GameDetailPanel({
   const [deleting, setDeleting] = useState(false);
   const [purging, setPurging] = useState(false);
   const [revokingVersionId, setRevokingVersionId] = useState<number | null>(null);
+  const [uploadingPart, setUploadingPart] = useState<"bundle" | "manifest" | "logo" | null>(null);
 
   const handleSaveMetadata = async () => {
     setSaving(true);
@@ -466,6 +550,7 @@ function GameDetailPanel({
         shortDescription: shortDescription || null,
         description: description || null,
         genre,
+        mode,
         xpPerCompletion: Number(xp) || 0,
         scoreUnit: scoreUnit || null,
         scoreDirection: (scoreDirection || null) as "asc" | "desc" | null,
@@ -477,6 +562,21 @@ function GameDetailPanel({
       onError(err instanceof Error ? err.message : "메타데이터 저장에 실패했습니다.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSupportUpload = async (kind: "bundle" | "manifest" | "logo", file: File) => {
+    setUploadingPart(kind);
+    onError("");
+    try {
+      if (kind === "bundle") await uploadAdminSandboxGameVersion(game.id, file);
+      if (kind === "manifest") await replaceAdminSandboxGameManifest(game.id, file);
+      if (kind === "logo") await replaceAdminSandboxGameLogo(game.id, file);
+      onChanged(await fetchAdminSandboxGameDetail(game.id));
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "게임 파일을 재업로드하지 못했습니다.");
+    } finally {
+      setUploadingPart(null);
     }
   };
 
@@ -650,6 +750,42 @@ function GameDetailPanel({
         </p>
       )}
 
+      {game.deletedAt === null && (
+        <div className="rounded-xl border border-border bg-surface p-4">
+          <h4 className="text-xs font-black text-text-primary">제작자 지원 재업로드</h4>
+          <p className="mt-1 text-[11px] text-text-muted">
+            전체 ZIP 또는 owogg.json은 새 심사 버전이 되며, 로고는 게임 공통 이미지로 즉시
+            교체됩니다.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <SupportUploadLabel
+              label="전체 ZIP"
+              accept=".zip"
+              busy={uploadingPart === "bundle"}
+              disabled={uploadingPart !== null}
+              icon={<FileArchive className="h-3.5 w-3.5" />}
+              onFile={(file) => void handleSupportUpload("bundle", file)}
+            />
+            <SupportUploadLabel
+              label="owogg.json"
+              accept=".json,application/json"
+              busy={uploadingPart === "manifest"}
+              disabled={uploadingPart !== null}
+              icon={<FileJson className="h-3.5 w-3.5" />}
+              onFile={(file) => void handleSupportUpload("manifest", file)}
+            />
+            <SupportUploadLabel
+              label="로고"
+              accept=".png,.jpg,.jpeg,.webp,.svg,image/png,image/jpeg,image/webp,image/svg+xml"
+              busy={uploadingPart === "logo"}
+              disabled={uploadingPart !== null}
+              icon={<Image className="h-3.5 w-3.5" />}
+              onFile={(file) => void handleSupportUpload("logo", file)}
+            />
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <LabeledField label="제목">
           <input
@@ -665,6 +801,16 @@ function GameDetailPanel({
             placeholder="예: 슈터, 퍼즐, 캐주얼"
             className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-primary outline-none focus:ring-2 focus:ring-brand"
           />
+        </LabeledField>
+        <LabeledField label="모드">
+          <select
+            value={mode}
+            onChange={(e) => setMode(e.target.value as "single" | "multi")}
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-primary"
+          >
+            <option value="single">single</option>
+            <option value="multi">multi</option>
+          </select>
         </LabeledField>
         <LabeledField label="짧은 설명">
           <input
@@ -803,6 +949,40 @@ function GameDetailPanel({
         </div>
       )}
     </div>
+  );
+}
+
+function SupportUploadLabel({
+  label,
+  accept,
+  busy,
+  disabled,
+  icon,
+  onFile,
+}: {
+  label: string;
+  accept: string;
+  busy: boolean;
+  disabled: boolean;
+  icon: ReactNode;
+  onFile: (file: File) => void;
+}) {
+  return (
+    <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-border bg-surface-raised px-3 py-2 text-xs font-bold text-text-primary hover:border-brand">
+      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : icon}
+      {label}
+      <input
+        type="file"
+        accept={accept}
+        disabled={disabled}
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) onFile(file);
+        }}
+      />
+    </label>
   );
 }
 

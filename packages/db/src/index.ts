@@ -23,6 +23,8 @@ export * from "./d1/D1GameIdentityRepository.js";
 export * from "./d1/D1GameVersionRepository.js";
 export * from "./d1/D1GameAssetRepository.js";
 export * from "./d1/D1OfficialGameUploadRepository.js";
+export * from "./d1/D1AdminGameCatalogRepository.js";
+export * from "./d1/D1PublicGameMetricsRepository.js";
 export * from "./storage/BackblazeB2GameBundleRepository.js";
 
 export * from "./storage/UnconfiguredGameBundleRepository.js";

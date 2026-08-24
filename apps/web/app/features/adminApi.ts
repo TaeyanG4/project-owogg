@@ -16,6 +16,7 @@ import {
   AdminGameToggleResponseSchema,
   AdminOfficialGameDeleteResponseSchema,
   AdminOfficialGameUploadResponseSchema,
+  GameLogoUpdateResponseSchema,
   AdminUserSearchResponseSchema,
   AdminUserDetailResponseSchema,
   UserModerationRecordSchema,
@@ -34,13 +35,14 @@ import {
   SandboxGameVersionRecordSchema,
   SandboxGameRecordSchema,
   SandboxGameDetailResponseSchema,
-  SandboxGameListResponseSchema,
+  AdminSandboxGameListResponseSchema,
   type AdminAccountRoleValue,
   type AdminAccountStatusValue,
   type AdminUserPeriod,
   type AdminUserSort,
   type UserSuspensionDurationDays,
   type SandboxGameMetadataUpdateRequest,
+  type SandboxGameBasicMetadataUpdateRequest,
   type SandboxGameVisibility,
 } from "@owogg/contracts";
 import { apiFetch } from "../lib/api/client";
@@ -229,8 +231,11 @@ export function putAdminRolePermissions(
   });
 }
 
-export function fetchAdminGames() {
-  return apiFetch("/api/admin/games", AdminGameListResponseSchema);
+export function fetchAdminGames(page = 1, pageSize: 10 | 20 | 30 = 10) {
+  return apiFetch(
+    `/api/admin/games?page=${page}&pageSize=${pageSize}`,
+    AdminGameListResponseSchema,
+  );
 }
 
 export function postToggleAdminGame(gameId: string, enabled: boolean, reason: string | null) {
@@ -268,6 +273,83 @@ export async function uploadOfficialGame(file: File) {
   const result = AdminOfficialGameUploadResponseSchema.parse(await res.json());
   notifyPublicGameCatalogChanged();
   return result;
+}
+
+async function uploadAdminGameFile<T>(input: {
+  url: string;
+  field: "bundle" | "manifest" | "logo";
+  file: File;
+  parse: (value: unknown) => T;
+}): Promise<T> {
+  const form = new FormData();
+  form.append(input.field, input.file);
+  const res = await fetch(`${API_URL}${input.url}`, {
+    method: "POST",
+    credentials: "include",
+    body: form,
+  });
+  if (!res.ok) {
+    let detail: string | undefined;
+    let code: string | undefined;
+    try {
+      const body = (await res.json()) as { error?: { code?: string; message?: string } };
+      detail = body.error?.message;
+      code = body.error?.code;
+    } catch {
+      // Keep the HTTP fallback below.
+    }
+    throw new ApiClientError(
+      "HttpError",
+      detail || `재업로드에 실패했습니다. (HTTP ${res.status})`,
+      {
+        status: res.status,
+        ...(code ? { code } : {}),
+      },
+    );
+  }
+  const result = input.parse(await res.json());
+  notifyPublicGameCatalogChanged();
+  return result;
+}
+
+export function replaceOfficialGameManifest(slug: string, file: File) {
+  return uploadAdminGameFile({
+    url: `/api/admin/games/${encodeURIComponent(slug)}/manifest`,
+    field: "manifest",
+    file,
+    parse: (value) => AdminOfficialGameUploadResponseSchema.parse(value),
+  });
+}
+
+export function replaceOfficialGameBundle(slug: string, file: File) {
+  return uploadAdminGameFile({
+    url: `/api/admin/games/${encodeURIComponent(slug)}/bundle`,
+    field: "bundle",
+    file,
+    parse: (value) => AdminOfficialGameUploadResponseSchema.parse(value),
+  });
+}
+
+export function replaceOfficialGameLogo(slug: string, file: File) {
+  return uploadAdminGameFile({
+    url: `/api/admin/games/${encodeURIComponent(slug)}/logo`,
+    field: "logo",
+    file,
+    parse: (value) => GameLogoUpdateResponseSchema.parse(value),
+  });
+}
+
+export function patchOfficialGameBasicMetadata(
+  slug: string,
+  input: SandboxGameBasicMetadataUpdateRequest,
+) {
+  return refreshCatalogAfter(
+    apiFetch(
+      `/api/admin/games/${encodeURIComponent(slug)}/basic-metadata`,
+      AdminOfficialGameUploadResponseSchema,
+      { method: "PATCH", body: JSON.stringify(input) },
+    ),
+  );
 }
 
 export function deleteOfficialGame(gameId: string) {
@@ -400,12 +482,42 @@ export function fetchSandboxReviewQueue(page = 1, pageSize = 20) {
 
 /** Every non-deleted game, regardless of developer/visibility — powers the admin "게임 관리" list
  * (activate/deactivate without needing to already know a game's id). */
-export function fetchAllSandboxGames() {
-  return apiFetch("/api/admin/sandbox-games", SandboxGameListResponseSchema);
+export function fetchAllSandboxGames(page = 1, pageSize: 10 | 20 | 30 = 10) {
+  return apiFetch(
+    `/api/admin/sandbox-games?page=${page}&pageSize=${pageSize}`,
+    AdminSandboxGameListResponseSchema,
+  );
 }
 
 export function fetchAdminSandboxGameDetail(id: number) {
   return apiFetch(`/api/admin/sandbox-games/${id}`, SandboxGameDetailResponseSchema);
+}
+
+export function uploadAdminSandboxGameVersion(id: number, file: File) {
+  return uploadAdminGameFile({
+    url: `/api/admin/sandbox-games/${id}/versions`,
+    field: "bundle",
+    file,
+    parse: (value) => SandboxGameVersionRecordSchema.parse(value),
+  });
+}
+
+export function replaceAdminSandboxGameManifest(id: number, file: File) {
+  return uploadAdminGameFile({
+    url: `/api/admin/sandbox-games/${id}/manifest`,
+    field: "manifest",
+    file,
+    parse: (value) => SandboxGameVersionRecordSchema.parse(value),
+  });
+}
+
+export function replaceAdminSandboxGameLogo(id: number, file: File) {
+  return uploadAdminGameFile({
+    url: `/api/admin/sandbox-games/${id}/logo`,
+    field: "logo",
+    file,
+    parse: (value) => GameLogoUpdateResponseSchema.parse(value),
+  });
 }
 
 export function postApproveSandboxVersion(versionId: number) {

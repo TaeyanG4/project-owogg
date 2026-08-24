@@ -8,6 +8,11 @@ import { z } from "zod";
 export const GameAvailabilityDtoSchema = z.object({
   gameId: z.string(),
   title: z.string(),
+  shortDescription: z.string().nullable(),
+  description: z.string().nullable(),
+  genre: z.string().nullable(),
+  mode: z.enum(["single", "multi"]).nullable(),
+  latestUploadedAt: z.string().nullable(),
   publisherType: z.enum(["OWOGG", "USER"]),
   status: z.string(),
   enabled: z.boolean(),
@@ -19,8 +24,20 @@ export type GameAvailabilityDto = z.infer<typeof GameAvailabilityDtoSchema>;
 
 export const AdminGameListResponseSchema = z.object({
   games: z.array(GameAvailabilityDtoSchema),
+  total: z.number().int().nonnegative(),
+  page: z.number().int().positive(),
+  pageSize: z.union([z.literal(10), z.literal(20), z.literal(30)]),
+  totalPages: z.number().int().positive(),
 });
 export type AdminGameListResponse = z.infer<typeof AdminGameListResponseSchema>;
+
+export const AdminGameListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce
+    .number()
+    .refine((value): value is 10 | 20 | 30 => value === 10 || value === 20 || value === 30)
+    .default(10),
+});
 
 export const AdminGameToggleRequestSchema = z.object({
   enabled: z.boolean(),

@@ -4,6 +4,7 @@ import { GameSettingsUseCases } from "../src/application/gameSettingsUseCases.js
 import type { GameSettingsRepository, GameSettingRecord } from "../src/ports/repositories.js";
 import type { GameIdentityRepository } from "../src/modules/game/ports/gameIdentityRepository.js";
 import type { GameCanonicalRepository } from "../src/modules/game/ports/gameCanonicalRepository.js";
+import type { AdminGameCatalogRepository } from "../src/ports/adminGameCatalog.js";
 import { canonicalFixture, TEST_GAME_SLUGS } from "./runtimeGameFixture.js";
 
 const TEST_GAMES = TEST_GAME_SLUGS.map((slug) => canonicalFixture(slug, `${slug} title`));
@@ -221,4 +222,47 @@ test("a broken canonical source cannot block the D1-only kill switch", async () 
   const result = await useCases.setEnabled(knownSlug, false, "maintenance", 9);
   assert.equal(result.ok, true);
   assert.deepEqual(await useCases.getDisabledGameIds(), [knownSlug]);
+});
+
+test("listPage preserves server upload timestamps and pagination metadata", async () => {
+  const repo = new FakeGameSettingsRepository();
+  const sources = genericSources(TEST_GAMES.slice(0, 2));
+  const identities = await sources.identities.listAll();
+  const calls: Array<{ publisherType: "OWOGG" | "USER"; limit: number; offset: number }> = [];
+  const adminCatalog: AdminGameCatalogRepository = {
+    async listPage(input) {
+      calls.push(input);
+      return {
+        items: [
+          {
+            identity: identities[1]!,
+            latestUploadedAt: "2026-08-25T09:30:00.000Z",
+            setting: null,
+          },
+        ],
+        total: 21,
+      };
+    },
+  };
+  const useCases = new GameSettingsUseCases(
+    repo,
+    sources.identities,
+    sources.canonicals,
+    adminCatalog,
+  );
+
+  const result = await useCases.listPage({ publisherType: "OWOGG", page: 2, pageSize: 10 });
+
+  assert.deepEqual(calls, [{ publisherType: "OWOGG", limit: 10, offset: 10 }]);
+  assert.equal(result.games[0]?.latestUploadedAt, "2026-08-25T09:30:00.000Z");
+  assert.equal(result.games[0]?.title, TEST_GAMES[1]?.title);
+  assert.deepEqual(
+    {
+      total: result.total,
+      page: result.page,
+      pageSize: result.pageSize,
+      totalPages: result.totalPages,
+    },
+    { total: 21, page: 2, pageSize: 10, totalPages: 3 },
+  );
 });

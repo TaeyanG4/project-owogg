@@ -1,14 +1,33 @@
 import { useEffect, useState } from "react";
-import { Gamepad2, Loader2, Power, ShieldCheck, Trash2 } from "lucide-react";
-import type { AdminGameListResponse } from "@owogg/contracts";
+import {
+  FileArchive,
+  FileJson,
+  Gamepad2,
+  Image,
+  Loader2,
+  Pencil,
+  Power,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
+import type { AdminGameListResponse, GameAvailabilityDto } from "@owogg/contracts";
 import {
   deleteOfficialGame,
   fetchAdminGames,
   postToggleAdminGame,
   uploadOfficialGame,
+  replaceOfficialGameBundle,
+  replaceOfficialGameManifest,
+  replaceOfficialGameLogo,
+  patchOfficialGameBasicMetadata,
 } from "../../features/adminApi";
 import { ApiClientError } from "../../lib/api";
 import { GameBundleDropzone } from "../game/GameBundleDropzone";
+import {
+  AdminGamePagination,
+  formatServerUploadDate,
+  type AdminGamePageSize,
+} from "./AdminGamePagination";
 
 /** `games.moderate` portion of the combined admin game workspace.
  *
@@ -23,11 +42,20 @@ export function OfficialGameManagement() {
   const [busyGameId, setBusyGameId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+  const [partBusy, setPartBusy] = useState<string | null>(null);
+  const [editingSlug, setEditingSlug] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<AdminGamePageSize>(10);
 
-  const loadGames = async () => {
+  const loadGames = async (targetPage: number, targetPageSize: AdminGamePageSize) => {
     setError(null);
     try {
-      setData(await fetchAdminGames());
+      const result = await fetchAdminGames(targetPage, targetPageSize);
+      if (targetPage > result.totalPages) {
+        setPage(result.totalPages);
+        return;
+      }
+      setData(result);
       setAccessDenied(false);
     } catch (err) {
       if (err instanceof ApiClientError && (err.status === 401 || err.status === 403)) {
@@ -39,8 +67,8 @@ export function OfficialGameManagement() {
   };
 
   useEffect(() => {
-    void loadGames();
-  }, []);
+    void loadGames(page, pageSize);
+  }, [page, pageSize]);
 
   const handleToggle = async (gameId: string, nextEnabled: boolean) => {
     const reason = nextEnabled ? null : (reasons[gameId]?.trim() ?? "") || null;
@@ -48,7 +76,7 @@ export function OfficialGameManagement() {
     setError(null);
     try {
       await postToggleAdminGame(gameId, nextEnabled, reason);
-      await loadGames();
+      await loadGames(page, pageSize);
     } catch (err) {
       setError(err instanceof Error ? err.message : "게임 상태를 변경하지 못했습니다.");
     } finally {
@@ -63,7 +91,7 @@ export function OfficialGameManagement() {
     try {
       const result = await uploadOfficialGame(file);
       setUploadMessage(`${result.title} (${result.slug})을 OWOGG 공식 게임으로 게시했습니다.`);
-      await loadGames();
+      await loadGames(page, pageSize);
     } catch (err) {
       setError(err instanceof Error ? err.message : "공식 게임을 게시하지 못했습니다.");
     } finally {
@@ -85,13 +113,41 @@ export function OfficialGameManagement() {
       setUploadMessage(
         `${result.slug} 공식 게임과 ${result.deletedVersionCount}개 버전을 완전히 삭제했습니다. 같은 slug로 다시 등록할 수 있습니다.`,
       );
-      await loadGames();
+      await loadGames(page, pageSize);
     } catch (err) {
       setError(err instanceof Error ? err.message : "공식 게임을 완전히 삭제하지 못했습니다.");
     } finally {
       setBusyGameId(null);
     }
   };
+
+  const handlePartUpload = async (
+    gameId: string,
+    kind: "bundle" | "manifest" | "logo",
+    file: File,
+  ) => {
+    setPartBusy(`${gameId}:${kind}`);
+    setError(null);
+    try {
+      if (kind === "bundle") await replaceOfficialGameBundle(gameId, file);
+      if (kind === "manifest") await replaceOfficialGameManifest(gameId, file);
+      if (kind === "logo") await replaceOfficialGameLogo(gameId, file);
+      setUploadMessage(
+        kind === "logo"
+          ? `${gameId} 로고를 교체했습니다.`
+          : `${gameId} ${kind === "bundle" ? "전체 ZIP" : "owogg.json"}을 새 공식 버전으로 게시했습니다.`,
+      );
+      await loadGames(page, pageSize);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "게임 파일을 재업로드하지 못했습니다.");
+    } finally {
+      setPartBusy(null);
+    }
+  };
+
+  const editingGame = editingSlug
+    ? data?.games.find((game) => game.gameId === editingSlug)
+    : undefined;
 
   if (accessDenied) {
     return (
@@ -147,7 +203,7 @@ export function OfficialGameManagement() {
           </div>
           <button
             type="button"
-            onClick={() => void loadGames()}
+            onClick={() => void loadGames(page, pageSize)}
             className="rounded-xl border border-border bg-surface-raised px-3 py-2 text-xs font-bold text-text-primary hover:border-brand"
           >
             새로고침
@@ -193,9 +249,51 @@ export function OfficialGameManagement() {
                           사유: {game.disabledReason}
                         </p>
                       )}
+                      <p className="mt-1 text-[11px] text-text-muted">
+                        서버 업로드 (KST) {formatServerUploadDate(game.latestUploadedAt)}
+                      </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    {game.publisherType === "OWOGG" && (
+                      <>
+                        <PartUploadLabel
+                          busy={partBusy === `${game.gameId}:bundle`}
+                          icon={<FileArchive className="h-3.5 w-3.5" />}
+                          label="전체 ZIP"
+                          accept=".zip"
+                          disabled={partBusy !== null}
+                          onFile={(file) => void handlePartUpload(game.gameId, "bundle", file)}
+                        />
+                        <PartUploadLabel
+                          busy={partBusy === `${game.gameId}:manifest`}
+                          icon={<FileJson className="h-3.5 w-3.5" />}
+                          label="owogg.json"
+                          accept=".json,application/json"
+                          disabled={partBusy !== null}
+                          onFile={(file) => void handlePartUpload(game.gameId, "manifest", file)}
+                        />
+                        <PartUploadLabel
+                          busy={partBusy === `${game.gameId}:logo`}
+                          icon={<Image className="h-3.5 w-3.5" />}
+                          label="로고"
+                          accept=".png,.jpg,.jpeg,.webp,.svg,image/png,image/jpeg,image/webp,image/svg+xml"
+                          disabled={partBusy !== null}
+                          onFile={(file) => void handlePartUpload(game.gameId, "logo", file)}
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEditingSlug((current) =>
+                              current === game.gameId ? null : game.gameId,
+                            )
+                          }
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-xs font-bold text-text-primary hover:border-brand"
+                        >
+                          <Pencil className="h-3.5 w-3.5" /> 속성
+                        </button>
+                      </>
+                    )}
                     {game.enabled && (
                       <input
                         type="text"
@@ -248,7 +346,161 @@ export function OfficialGameManagement() {
             })}
           </div>
         )}
+        {data && (
+          <AdminGamePagination
+            page={data.page}
+            pageSize={pageSize}
+            total={data.total}
+            totalPages={data.totalPages}
+            onPageChange={setPage}
+            onPageSizeChange={(nextPageSize) => {
+              setPageSize(nextPageSize);
+              setPage(1);
+            }}
+          />
+        )}
+        {editingSlug && editingGame && (
+          <OfficialMetadataEditor
+            key={editingSlug}
+            game={editingGame}
+            onSaved={async (message) => {
+              setUploadMessage(message);
+              setEditingSlug(null);
+              await loadGames(page, pageSize);
+            }}
+            onError={setError}
+          />
+        )}
       </div>
     </section>
+  );
+}
+
+function PartUploadLabel({
+  busy,
+  icon,
+  label,
+  accept,
+  disabled,
+  onFile,
+}: {
+  busy: boolean;
+  icon: React.ReactNode;
+  label: string;
+  accept: string;
+  disabled: boolean;
+  onFile: (file: File) => void;
+}) {
+  return (
+    <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-xs font-bold text-text-primary hover:border-brand">
+      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : icon}
+      {label}
+      <input
+        type="file"
+        accept={accept}
+        disabled={disabled}
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) onFile(file);
+        }}
+      />
+    </label>
+  );
+}
+
+function OfficialMetadataEditor({
+  game,
+  onSaved,
+  onError,
+}: {
+  game: GameAvailabilityDto;
+  onSaved: (message: string) => Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const [title, setTitle] = useState(game.title);
+  const [shortDescription, setShortDescription] = useState(game.shortDescription ?? "");
+  const [description, setDescription] = useState(game.description ?? "");
+  const [genre, setGenre] = useState(game.genre ?? "");
+  const [mode, setMode] = useState<"single" | "multi">(game.mode ?? "single");
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <div className="mt-4 space-y-3 rounded-2xl border border-brand/30 bg-surface p-4">
+      <div>
+        <h4 className="text-sm font-black text-text-primary">{game.gameId} 핵심 속성</h4>
+        <p className="mt-1 text-[11px] text-text-muted">
+          slug는 변경되지 않습니다. 저장하면 수정된 owogg.json을 포함한 새 공식 버전이 게시됩니다.
+        </p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <AdminField label="제목">
+          <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={60} />
+        </AdminField>
+        <AdminField label="장르">
+          <input value={genre} onChange={(e) => setGenre(e.target.value)} maxLength={40} />
+        </AdminField>
+        <AdminField label="모드">
+          <select value={mode} onChange={(e) => setMode(e.target.value as "single" | "multi")}>
+            <option value="single">single</option>
+            <option value="multi">multi</option>
+          </select>
+        </AdminField>
+        <AdminField label="짧은 설명">
+          <input
+            value={shortDescription}
+            onChange={(e) => setShortDescription(e.target.value)}
+            maxLength={200}
+          />
+        </AdminField>
+      </div>
+      <AdminField label="상세 설명">
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          maxLength={4000}
+          rows={4}
+        />
+      </AdminField>
+      <button
+        type="button"
+        disabled={busy || !title.trim() || !genre.trim()}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            const result = await patchOfficialGameBasicMetadata(game.gameId, {
+              title: title.trim(),
+              shortDescription: shortDescription.trim() || null,
+              description: description.trim() || null,
+              genre: genre.trim(),
+              mode,
+            });
+            await onSaved(`${result.slug} 핵심 속성을 새 공식 버전으로 게시했습니다.`);
+          } catch (err) {
+            onError(err instanceof Error ? err.message : "속성을 수정하지 못했습니다.");
+          } finally {
+            setBusy(false);
+          }
+        }}
+        className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2.5 text-xs font-bold text-white hover:bg-brand-light disabled:opacity-50"
+      >
+        {busy ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Pencil className="h-3.5 w-3.5" />
+        )}
+        새 버전으로 저장
+      </button>
+    </div>
+  );
+}
+
+function AdminField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="flex flex-col gap-1 text-[11px] font-bold text-text-muted [&_input]:rounded-xl [&_input]:border [&_input]:border-border [&_input]:bg-surface-raised [&_input]:px-3 [&_input]:py-2 [&_input]:text-sm [&_input]:text-text-primary [&_select]:rounded-xl [&_select]:border [&_select]:border-border [&_select]:bg-surface-raised [&_select]:px-3 [&_select]:py-2 [&_select]:text-sm [&_select]:text-text-primary [&_textarea]:rounded-xl [&_textarea]:border [&_textarea]:border-border [&_textarea]:bg-surface-raised [&_textarea]:px-3 [&_textarea]:py-2 [&_textarea]:text-sm [&_textarea]:text-text-primary">
+      {label}
+      {children}
+    </label>
   );
 }

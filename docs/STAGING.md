@@ -9,6 +9,13 @@ Google OAuth 앱, Discord 앱, Discord 전역 명령을 공유하지 않습니�
 > GitHub `staging` Environment, Cloudflare Access는 운영자가 이미 생성했습니다. 새로 만들지 않습니다.
 > 세 custom domain은 첫 `custom_domain=true` Worker deploy가 연결하며 DNS를 수동 생성하지 않습니다.
 
+> **Access 자동화 상태(2026-08-25)**: 이번에 발급된 Service Token은 Git에서 무시되는 로컬
+> `.env.staging.local`에만 보관하며 GitHub secret에는 등록하지 않습니다. 헤더 검증 결과 현재
+> Access application이 `service_token_status:false`로 로그인 화면에 redirect하므로, 운영자가 해당
+> application에 `Service Auth → Include → Service Token` 정책을 연결하기 전까지 로컬 자동 Web smoke는
+> 통과하지 않습니다. 브라우저 로그인으로 우회하지 않으며 CI가 별도 승인된 token을 가지고 있지 않다면
+> `STAGING_WEB_SMOKE_ENABLED`를 활성화하지 않습니다.
+
 ## 0. 기본 개발 및 Production 승격 정책
 
 OwOGG의 모든 일반 기능 개발, 버그 수정, DB migration, 인프라 변경은 Staging-first로 진행합니다.

@@ -2,7 +2,7 @@
 
 상태: 가이드
 
-마지막 검증: 2026-08-24
+마지막 검증: 2026-08-25
 
 기준 소스:
 
@@ -134,18 +134,41 @@ owogg.logo.png | .jpg | .jpeg | .webp | .svg
 ZIP을 올립니다. 모든 버전에도 유효한 `owogg.json`이 필요하고 `game.slug`는 기존 게임과 같아야
 합니다. 새 logo가 포함되면 교체하고, 없으면 기존 logo를 유지합니다.
 
-### 3.3 현재 bundle 안전 제한
+### 3.3 부분 재업로드와 핵심 속성 편집
+
+Game Creator Center와 관리자 게임 관리 화면은 게임별로 다음 작업을 제공합니다.
+
+| 작업                    | USER 게임                                              | OWOGG 공식 게임                                  |
+| ----------------------- | ------------------------------------------------------ | ------------------------------------------------ |
+| 전체 ZIP                | 새 `PENDING_REVIEW` numeric version                    | 대상 slug 검증 후 새 READY/live version          |
+| `owogg.json`만 재업로드 | 현재 source ZIP을 재구성한 새 `PENDING_REVIEW` version | 현재 source ZIP을 재구성한 새 READY/live version |
+| 로고만 재업로드         | game-level asset 즉시 교체                             | game-level asset 즉시 교체                       |
+| 핵심 속성 폼            | 수정한 manifest로 새 `PENDING_REVIEW` version          | 수정한 manifest로 새 READY/live version          |
+
+핵심 속성 폼은 `game.title`, `shortDescription`, `description`, `genre`, `mode`만 다룹니다.
+`slug`는 D1의 영구 identity이므로 수정할 수 없습니다. 매니페스트/폼 수정은 이미 게시된 version prefix의
+`owogg.json`을 덮어쓰지 않고 현재 source archive를 서버에서 재구성하여 새 버전을 만듭니다. 이 규칙으로
+source ZIP, published files, B2 canonical이 서로 다른 내용을 가리키는 상태와 1년 immutable 캐시 오염을
+막습니다.
+
+로고는 version 파일이 아닌 game-level asset입니다. 교체 시 content-addressed B2 객체를 먼저 기록하고
+D1 `game_assets` 포인터를 전환한 뒤 이전 객체를 정리합니다. 따라서 로고 교체만으로 live version이나
+leaderboard generation은 바뀌지 않습니다. 반대로 공식 전체 ZIP/manifest/핵심 속성 변경은 새 live
+version을 만들므로 기존 version 변경 규칙에 따라 leaderboard generation도 전환됩니다.
+
+### 3.4 현재 bundle 안전 제한
 
 `SANDBOX_GAME_POLICY`가 현재 다음 제한을 강제합니다.
 
-| 항목                                 |   제한 |
-| ------------------------------------ | -----: |
-| compressed upload                    | 20 MiB |
-| extracted bytes                      | 50 MiB |
-| file count                           |    300 |
-| path depth                           |     16 |
-| new-game logo                        |  2 MiB |
-| Game Creator concurrent review slots |      2 |
+| 항목                                 |    제한 |
+| ------------------------------------ | ------: |
+| compressed upload                    |  20 MiB |
+| extracted bytes                      |  50 MiB |
+| file count                           |     300 |
+| path depth                           |      16 |
+| new-game logo                        |   2 MiB |
+| standalone `owogg.json`              | 256 KiB |
+| Game Creator concurrent review slots |       2 |
 
 절대 경로, drive path, `..`, 비정상 압축 비율, 누락된 `index.html`은 거부됩니다. publication은
 request-time unzip serving을 하지 않고 검증된 파일을 version prefix에 개별 객체로 기록합니다.

@@ -22,6 +22,8 @@ interface FakeGame {
   canonical: GameCanonicalDocument;
   assetKey?: string;
   disabled?: boolean;
+  playerCount?: number;
+  bookmarkCount?: number;
 }
 
 interface PublicGameJson {
@@ -30,6 +32,8 @@ interface PublicGameJson {
   publisherName: string;
   catalog: { type: string };
   mediaUrl: string | null;
+  publishedAt: string;
+  stats: { playerCount: number; bookmarkCount: number; popularityScore: number };
   [key: string]: unknown;
 }
 
@@ -111,6 +115,18 @@ function createDb(games: readonly FakeGame[]) {
         return null;
       },
       async all<T>() {
+        if (query.includes("WITH requested(slug)")) {
+          return {
+            results: values.map((slug) => {
+              const game = games.find((candidate) => candidate.slug === slug);
+              return {
+                slug,
+                player_count: game?.playerCount ?? 0,
+                bookmark_count: game?.bookmarkCount ?? 0,
+              };
+            }),
+          } as { results: T[] };
+        }
         if (query.includes("FROM games WHERE deleted_at IS NULL")) {
           return { results: games.filter((game) => game.visibility !== "PRIVATE").map(rowFor) } as {
             results: T[];
@@ -170,6 +186,8 @@ const OFFICIAL: FakeGame = {
   publisher_user_id: null,
   visibility: "PUBLIC",
   live_version_id: 901,
+  playerCount: 10,
+  bookmarkCount: 4,
   canonical: {
     schemaVersion: 2,
     slug: "reaction-time",
@@ -206,6 +224,8 @@ const USER: FakeGame = {
   visibility: "PUBLIC",
   live_version_id: 801,
   assetKey: "uploads/8/logo.svg",
+  playerCount: 7,
+  bookmarkCount: 2,
   canonical: {
     schemaVersion: 1,
     slug: "ball-dodge",
@@ -250,6 +270,12 @@ test("GET /api/games lists generic OWOGG and USER projections and preserves cata
   assert.equal(user?.publisherName, "Taeyang");
   assert.equal(official?.catalog.type, "TAXONOMY");
   assert.equal(user?.catalog.type, "GENRE_MODE");
+  assert.deepEqual(official?.stats, {
+    playerCount: 10,
+    bookmarkCount: 4,
+    popularityScore: 22,
+  });
+  assert.equal(official?.publishedAt, "2026-08-01T00:00:00.000Z");
   assert.equal(
     user?.mediaUrl,
     "https://api.example.test/api/games/ball-dodge/media/logo?v=2026-08-01T00%3A00%3A00.000Z",

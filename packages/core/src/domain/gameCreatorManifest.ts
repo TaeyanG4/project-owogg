@@ -568,9 +568,16 @@ export function extractGameCreatorManifest(
 ): OwoggGameCreatorManifest | null {
   const file = files.find((candidate) => candidate.path === OWOGG_GAME_CREATOR_MANIFEST_FILENAME);
   if (!file) return null;
+  return parseGameCreatorManifestBytes(file.bytes);
+}
+
+/** Parses the standalone `owogg.json` upload used by partial game updates. */
+export function parseGameCreatorManifestBytes(
+  bytes: ArrayBuffer | Uint8Array,
+): OwoggGameCreatorManifest {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(new TextDecoder().decode(file.bytes));
+    parsed = JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     invalid(`${OWOGG_GAME_CREATOR_MANIFEST_FILENAME} is not valid JSON`);
   }

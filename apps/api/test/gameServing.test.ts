@@ -602,12 +602,14 @@ test("published-asset serving fails safe to 404 when B2 is not configured", asyn
   assert.equal(res.status, 404);
 });
 
-test("/play/:slug also fails safe to 404 when B2 is not configured", async () => {
+test("/play/:slug resolves from D1 without paying a canonical B2 read", async () => {
   const { db } = createDb({ game: LIVE_GAME, version: LIVE_VERSION });
-  // Runtime resolution includes the strict generic canonical read. Missing B2 configuration must
-  // therefore look exactly like any other unavailable runtime state, with no metadata fallback.
+  // The host already resolved the strict public canonical before exposing PLAY. This redirect only
+  // maps a validated D1 live version to immutable bytes; the byte route still fails closed below
+  // when object storage itself is unavailable.
   const res = await app.request("/play/live-game", {}, { DB: db } as any);
-  assert.equal(res.status, 404);
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get("Location"), "/games/1/17/index.html");
 });
 
 test("removed slug-relative and official asset routes stay unavailable", async () => {
@@ -670,6 +672,48 @@ function withFakeCaches<T>(run: () => Promise<T>): Promise<T> {
     (globalThis as { caches?: unknown }).caches = original;
   });
 }
+
+test("the live resolver caches its 302 so a second game start does not repeat D1 reads", async () => {
+  let dbReads = 0;
+  const { db: rawDb } = createDb({ game: LIVE_GAME, version: LIVE_VERSION });
+  const db = {
+    ...rawDb,
+    prepare(query: string) {
+      if (
+        query.includes("FROM games") ||
+        query.includes("FROM game_versions") ||
+        query.includes("FROM game_settings")
+      ) {
+        dbReads += 1;
+      }
+      return rawDb.prepare(query);
+    },
+  };
+
+  await withFakeCaches(async () => {
+    const first = await app.request(
+      "/play/live-game",
+      {},
+      { DB: db } as any,
+      fakeExecutionCtx as any,
+    );
+    const readsAfterFirst = dbReads;
+    assert.equal(first.status, 302);
+    assert.equal(first.headers.get("X-Cache"), "MISS");
+    assert.ok(readsAfterFirst > 0);
+
+    const second = await app.request(
+      "/play/live-game",
+      {},
+      { DB: db } as any,
+      fakeExecutionCtx as any,
+    );
+    assert.equal(second.status, 302);
+    assert.equal(second.headers.get("Location"), "/games/1/17/index.html");
+    assert.equal(second.headers.get("X-Cache"), "HIT");
+    assert.equal(dbReads, readsAfterFirst);
+  });
+});
 
 test("a PUBLIC→PRIVATE takedown is enforced even though the byte cache would otherwise still have the answer", async () => {
   // A mutable copy — flipped mid-test to simulate an admin's takedown between two requests to the

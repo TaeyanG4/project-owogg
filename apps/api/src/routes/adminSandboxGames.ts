@@ -10,7 +10,9 @@ import {
   SandboxGameRecordSchema,
   toSandboxGameRecordResponse,
   SandboxGameDetailResponseSchema,
-  SandboxGameListResponseSchema,
+  AdminSandboxGameListQuerySchema,
+  AdminSandboxGameListResponseSchema,
+  GameLogoUpdateResponseSchema,
 } from "@owogg/contracts";
 import { SandboxGameUseCaseFailure } from "@owogg/core";
 import { createContainer } from "../container.js";
@@ -25,6 +27,7 @@ import type { SandboxGameFailureStatus } from "./sandboxGameErrors.js";
 import { readB2Config } from "./devGames.js";
 import type { ApiEnv } from "./auth.js";
 import { purgePublicGameReadCache } from "./publicGameCache.js";
+import { rateLimit } from "../middleware/rateLimit.js";
 
 /** Admin-only review/publish surface for sandbox games — approve/reject an uploaded version,
  * adjust the generalized metadata (title/description/genre/XP/score config), and flip
@@ -52,7 +55,8 @@ function failureResponse(err: unknown): { body: unknown; status: SandboxGameFail
   };
 }
 
-// GET /api/admin/sandbox-games — every non-deleted game, admin-facing "browse everything" list
+// GET /api/admin/sandbox-games — every game (including soft-deleted rows), admin-facing
+// "browse everything" list
 // (regardless of visibility/developer) so an operator can find and toggle a game without already
 // knowing its id. Registered before "/:id" is irrelevant here since this path has no id segment,
 // but kept up top for readability alongside the other list endpoint.
@@ -62,10 +66,28 @@ adminSandboxGamesRouter.get("/", async (c) => {
   const denied = requirePermission(admin, "sandbox_games.review");
   if (denied) return denied;
 
+  const parsed = AdminSandboxGameListQuerySchema.safeParse({
+    page: c.req.query("page"),
+    pageSize: c.req.query("pageSize"),
+  });
+  if (!parsed.success) {
+    return c.json({ error: { code: "INVALID_REQUEST", message: "잘못된 목록 조건입니다." } }, 400);
+  }
+  const { page, pageSize } = parsed.data;
+
   const { sandboxGameUseCases } = createContainer(c.env.DB);
-  const games = await sandboxGameUseCases.listAll();
+  const result = await sandboxGameUseCases.listAllPage(pageSize, (page - 1) * pageSize);
   return c.json(
-    SandboxGameListResponseSchema.parse({ games: games.map(toSandboxGameRecordResponse) }),
+    AdminSandboxGameListResponseSchema.parse({
+      entries: result.entries.map((entry) => ({
+        game: toSandboxGameRecordResponse(entry.game),
+        latestUploadedAt: entry.latestUploadedAt,
+      })),
+      total: result.total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(result.total / pageSize)),
+    }),
     200,
   );
 });
@@ -225,7 +247,7 @@ adminSandboxGamesRouter.post("/versions/:versionId/revoke", async (c) => {
     });
     const game = await sandboxGameUseCases.getById(version.gameId);
     if (game) {
-      await purgePublicGameReadCache(c.req.url, [game.slug]);
+      await purgePublicGameReadCache(c.req.url, [game.slug], c.env.GAME_ORIGIN);
       c.header("Clear-Site-Data", '"cache"');
     }
     return c.json(SandboxGameVersionRecordSchema.parse(version), 200);
@@ -275,7 +297,7 @@ adminSandboxGamesRouter.patch("/:id/live-version", async (c) => {
   try {
     const { sandboxGameUseCases } = createContainer(c.env.DB);
     const game = await sandboxGameUseCases.setLiveVersion(id, admin.userId, parsed.data.versionId);
-    await purgePublicGameReadCache(c.req.url, [game.slug]);
+    await purgePublicGameReadCache(c.req.url, [game.slug], c.env.GAME_ORIGIN);
     c.header("Clear-Site-Data", '"cache"');
     return c.json(SandboxGameRecordSchema.parse(toSandboxGameRecordResponse(game)), 200);
   } catch (err) {
@@ -320,7 +342,7 @@ adminSandboxGamesRouter.patch("/:id/metadata", async (c) => {
 
   try {
     const game = await container.sandboxGameUseCases.updateMetadata(id, admin.userId, parsed.data);
-    await purgePublicGameReadCache(c.req.url, [game.slug]);
+    await purgePublicGameReadCache(c.req.url, [game.slug], c.env.GAME_ORIGIN);
     c.header("Clear-Site-Data", '"cache"');
     return c.json(SandboxGameRecordSchema.parse(toSandboxGameRecordResponse(game)), 200);
   } catch (err) {
@@ -328,6 +350,134 @@ adminSandboxGamesRouter.patch("/:id/metadata", async (c) => {
     return c.json(errBody, status);
   }
 });
+
+// Admin support uploads use the same core version/manifest/logo operations as the Game Creator
+// Center. Publisher ownership remains USER; elevated access only acts on the owner's behalf.
+adminSandboxGamesRouter.post(
+  "/:id/versions",
+  rateLimit({ name: "game-upload", binding: "GAME_UPLOAD_RATE_LIMITER" }),
+  async (c) => {
+    const admin = await requireElevatedAdmin(c);
+    if (isElevatedAdminResponse(admin)) return admin;
+    const denied = requirePermission(admin, "sandbox_games.review");
+    if (denied) return denied;
+    const container = createContainer(c.env.DB, readB2Config(c.env));
+    if (!container.gameBundlesConfigured) {
+      return c.json(
+        { error: { code: "GAME_BUNDLES_NOT_CONFIGURED", message: "B2가 구성되지 않았습니다." } },
+        503,
+      );
+    }
+    const body = await c.req.parseBody().catch(() => null);
+    const bundle = body?.bundle;
+    if (!(bundle instanceof File)) {
+      return c.json(
+        { error: { code: "INVALID_REQUEST", message: "bundle ZIP 파일이 필요합니다." } },
+        400,
+      );
+    }
+    try {
+      const version = await container.sandboxGameUseCases.uploadVersion({
+        gameId: Number(c.req.param("id")),
+        actingUserId: admin.userId,
+        isAdmin: true,
+        bytes: await bundle.arrayBuffer(),
+        contentType: bundle.type || undefined,
+      });
+      return c.json(SandboxGameVersionRecordSchema.parse(version), 201);
+    } catch (err) {
+      const { body: errBody, status } = failureResponse(err);
+      return c.json(errBody, status);
+    }
+  },
+);
+
+adminSandboxGamesRouter.post(
+  "/:id/manifest",
+  rateLimit({ name: "game-upload", binding: "GAME_UPLOAD_RATE_LIMITER" }),
+  async (c) => {
+    const admin = await requireElevatedAdmin(c);
+    if (isElevatedAdminResponse(admin)) return admin;
+    const denied = requirePermission(admin, "sandbox_games.review");
+    if (denied) return denied;
+    const container = createContainer(c.env.DB, readB2Config(c.env));
+    if (!container.gameBundlesConfigured) {
+      return c.json(
+        { error: { code: "GAME_BUNDLES_NOT_CONFIGURED", message: "B2가 구성되지 않았습니다." } },
+        503,
+      );
+    }
+    const body = await c.req.parseBody().catch(() => null);
+    const manifest = body?.manifest;
+    if (!(manifest instanceof File)) {
+      return c.json(
+        { error: { code: "INVALID_REQUEST", message: "manifest 파일이 필요합니다." } },
+        400,
+      );
+    }
+    try {
+      const version = await container.sandboxGameUseCases.replaceManifest({
+        gameId: Number(c.req.param("id")),
+        actingUserId: admin.userId,
+        isAdmin: true,
+        bytes: await manifest.arrayBuffer(),
+      });
+      return c.json(SandboxGameVersionRecordSchema.parse(version), 201);
+    } catch (err) {
+      const { body: errBody, status } = failureResponse(err);
+      return c.json(errBody, status);
+    }
+  },
+);
+
+adminSandboxGamesRouter.post(
+  "/:id/logo",
+  rateLimit({ name: "game-upload", binding: "GAME_UPLOAD_RATE_LIMITER" }),
+  async (c) => {
+    const admin = await requireElevatedAdmin(c);
+    if (isElevatedAdminResponse(admin)) return admin;
+    const denied = requirePermission(admin, "sandbox_games.review");
+    if (denied) return denied;
+    const container = createContainer(c.env.DB, readB2Config(c.env));
+    if (!container.gameBundlesConfigured) {
+      return c.json(
+        { error: { code: "GAME_BUNDLES_NOT_CONFIGURED", message: "B2가 구성되지 않았습니다." } },
+        503,
+      );
+    }
+    const body = await c.req.parseBody().catch(() => null);
+    const logo = body?.logo;
+    if (!(logo instanceof File)) {
+      return c.json(
+        { error: { code: "INVALID_REQUEST", message: "logo 파일이 필요합니다." } },
+        400,
+      );
+    }
+    try {
+      const game = await container.sandboxGameUseCases.replaceLogo({
+        gameId: Number(c.req.param("id")),
+        actingUserId: admin.userId,
+        isAdmin: true,
+        fileName: logo.name,
+        bytes: await logo.arrayBuffer(),
+      });
+      await purgePublicGameReadCache(c.req.url, [game.slug], c.env.GAME_ORIGIN);
+      c.header("Clear-Site-Data", '"cache"');
+      return c.json(
+        GameLogoUpdateResponseSchema.parse({
+          gameId: game.id,
+          slug: game.slug,
+          hasLogo: true,
+          updatedAt: game.updatedAt,
+        }),
+        200,
+      );
+    } catch (err) {
+      const { body: errBody, status } = failureResponse(err);
+      return c.json(errBody, status);
+    }
+  },
+);
 
 // PATCH /api/admin/sandbox-games/:id/visibility { visibility } — the actual "go live" switch.
 adminSandboxGamesRouter.patch("/:id/visibility", async (c) => {
@@ -346,7 +496,7 @@ adminSandboxGamesRouter.patch("/:id/visibility", async (c) => {
   try {
     const { sandboxGameUseCases } = createContainer(c.env.DB);
     const game = await sandboxGameUseCases.setVisibility(id, admin.userId, parsed.data.visibility);
-    await purgePublicGameReadCache(c.req.url, [game.slug]);
+    await purgePublicGameReadCache(c.req.url, [game.slug], c.env.GAME_ORIGIN);
     c.header("Clear-Site-Data", '"cache"');
     return c.json(SandboxGameRecordSchema.parse(toSandboxGameRecordResponse(game)), 200);
   } catch (err) {
@@ -368,7 +518,7 @@ adminSandboxGamesRouter.delete("/:id", async (c) => {
   try {
     const { sandboxGameUseCases } = createContainer(c.env.DB);
     const game = await sandboxGameUseCases.deleteGame({ gameId: id, actorAdminId: admin.userId });
-    await purgePublicGameReadCache(c.req.url, [game.slug]);
+    await purgePublicGameReadCache(c.req.url, [game.slug], c.env.GAME_ORIGIN);
     c.header("Clear-Site-Data", '"cache"');
     return c.json(SandboxGameRecordSchema.parse(toSandboxGameRecordResponse(game)), 200);
   } catch (err) {
@@ -391,7 +541,7 @@ adminSandboxGamesRouter.delete("/:id/purge", async (c) => {
     const { sandboxGameUseCases } = createContainer(c.env.DB);
     const existing = await sandboxGameUseCases.getById(id);
     await sandboxGameUseCases.purgeGame({ gameId: id, actorAdminId: admin.userId });
-    await purgePublicGameReadCache(c.req.url, existing ? [existing.slug] : []);
+    await purgePublicGameReadCache(c.req.url, existing ? [existing.slug] : [], c.env.GAME_ORIGIN);
     c.header("Clear-Site-Data", '"cache"');
     return c.json({ purged: true }, 200);
   } catch (err) {

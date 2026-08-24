@@ -23,7 +23,7 @@ test.describe("Iframe security invariants (synthetic platform fixture)", () => {
     // GameFrame lazy-mounts the iframe only once the player presses PLAY (see GameFrame.tsx's own
     // doc comment on why) — this is the one interaction every test in this suite needs, to reach
     // the iframe at all.
-    await page.getByRole("button", { name: "PLAY" }).click();
+    await page.getByRole("button", { name: "PLAY", exact: true }).click();
 
     const iframe = page.locator("iframe");
     await expect(iframe).toHaveCount(1);

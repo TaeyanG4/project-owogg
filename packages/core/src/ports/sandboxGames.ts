@@ -94,6 +94,7 @@ export interface SandboxGameMetadataInput {
   shortDescription?: string | null | undefined;
   description?: string | null | undefined;
   genre?: string | undefined;
+  mode?: SandboxGameMode | undefined;
   xpPerCompletion?: number | undefined;
   scoreUnit?: string | null | undefined;
   scoreDirection?: "asc" | "desc" | null | undefined;
@@ -103,8 +104,26 @@ export interface SandboxGameMetadataInput {
   scoreDisplaySuffix?: string | null | undefined;
 }
 
+/** Creator-editable subset of `owogg.json.game`. Applying it rebuilds a new bundle version rather
+ * than mutating an already-published immutable version in place. */
+export type SandboxGameBasicMetadataInput = Pick<
+  SandboxGameMetadataInput,
+  "title" | "shortDescription" | "description" | "genre" | "mode"
+>;
+
 export interface SandboxGamePendingVersionsPage {
   versions: SandboxGameVersionRecord[];
+  total: number;
+}
+
+export interface SandboxGameAdminListEntry {
+  game: SandboxGameRecord;
+  /** Latest server-side archive receipt time, never derived from owogg.json. */
+  latestUploadedAt: string | null;
+}
+
+export interface SandboxGameAdminListPage {
+  entries: SandboxGameAdminListEntry[];
   total: number;
 }
 
@@ -127,6 +146,7 @@ export interface SandboxGameRepository {
    * admin-facing "browse everything" surface (see SandboxGameUseCases.listAll's doc comment for
    * why deleted games are deliberately included here). */
   listAll(): Promise<SandboxGameRecord[]>;
+  listAllPage(limit: number, offset: number): Promise<SandboxGameAdminListPage>;
 
   /**
    * Creates a game AND atomically claims one of the developer's `MAX_CONCURRENT_REVIEW_SLOTS`
@@ -320,4 +340,11 @@ export interface BundleArchiveReader {
    * see GamePublicationService.prepare. Throws on a malformed/unreadable archive; the publisher
    * converts that into BUNDLE_MALFORMED. */
   read(archive: ArrayBuffer): Record<string, Uint8Array>;
+}
+
+/** Rebuilds a validated, root-relative file set as a ZIP archive. Partial-update flows use this
+ * port to replace only `owogg.json` while preserving the current playable files. The concrete ZIP
+ * codec remains outside core for the same reason as {@link BundleArchiveReader}. */
+export interface BundleArchiveWriter {
+  write(entries: Readonly<Record<string, Uint8Array>>): ArrayBuffer;
 }

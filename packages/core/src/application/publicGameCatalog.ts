@@ -19,22 +19,12 @@ export class AvailableRuntimeGameCatalog implements PublicGameCatalog {
   async findBySlug(slug: string): Promise<RuntimeGame | null> {
     const runtime = await this.registry.findBySlug(slug);
     if (!runtime) return null;
-    return (await this.availability.isVersionServable(runtime.identity.id, runtime.liveVersion.id))
-      ? runtime
-      : null;
+    const available = await this.availability.filterResolvedRuntimes([runtime]);
+    return available[0] ?? null;
   }
 
   async list(): Promise<readonly RuntimeGame[]> {
     const runtimes = await this.registry.listPublic();
-    const checked = await Promise.all(
-      runtimes.map(async (runtime) => ({
-        runtime,
-        available: await this.availability.isVersionServable(
-          runtime.identity.id,
-          runtime.liveVersion.id,
-        ),
-      })),
-    );
-    return checked.filter((entry) => entry.available).map((entry) => entry.runtime);
+    return this.availability.filterResolvedRuntimes(runtimes);
   }
 }

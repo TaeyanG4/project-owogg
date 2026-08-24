@@ -60,6 +60,7 @@ export const SANDBOX_GAME_REVIEW_ACTIONS = [
   "METADATA_CHANGED",
   "LIVE_VERSION_CHANGED",
   "SUBMISSION_WITHDRAWN",
+  "LOGO_CHANGED",
 ] as const;
 export type SandboxGameReviewAction = (typeof SANDBOX_GAME_REVIEW_ACTIONS)[number];
 
@@ -104,6 +105,10 @@ export const SANDBOX_GAME_POLICY = {
    * to, MAX_EXTRACTED_BUNDLE_BYTES — a logo this size is a rounding error against that cap, this
    * exists purely so one oversized image can't dominate an otherwise-tiny bundle's declared size. */
   MAX_LOGO_BYTES: 2 * 1024 * 1024,
+  /** Standalone `owogg.json` replacement limit. A valid manifest is normally only a few KiB; this
+   * leaves ample room for achievements while preventing a JSON-only endpoint from becoming a
+   * second arbitrary large-upload path. */
+  MAX_MANIFEST_BYTES: 256 * 1024,
 } as const;
 
 export function isValidSandboxGameSlug(slug: string): boolean {

@@ -40,6 +40,37 @@ test("create + findBySlug/findById round-trip, visibility defaults to PRIVATE", 
   assert.equal(byId?.slug, "test-game");
 });
 
+test("listAllPage returns total and latest server upload time in upload order", async () => {
+  const { db, raw } = createSqliteD1(SANDBOX_GAMES_TEST_SCHEMA);
+  seedUser(raw, 1, "Dev One");
+  seedUser(raw, 2, "Dev Two");
+  const repo = new D1SandboxGameRepository(db);
+  const firstGame = await seedGame(repo, "first-game", 1);
+  const secondGame = await seedGame(repo, "second-game", 2);
+  await repo.createVersion({
+    gameId: firstGame.id,
+    objectKey: "uploads/first.zip",
+    contentHash: "first",
+    bundleBytes: 10,
+    nowIso: "2026-08-25T09:00:00.000Z",
+  });
+  await repo.createVersion({
+    gameId: secondGame.id,
+    objectKey: "uploads/second.zip",
+    contentHash: "second",
+    bundleBytes: 10,
+    nowIso: "2026-08-24T09:00:00.000Z",
+  });
+
+  const firstPage = await repo.listAllPage(1, 0);
+  const secondPage = await repo.listAllPage(1, 1);
+
+  assert.equal(firstPage.total, 2);
+  assert.equal(firstPage.entries[0]?.game.slug, "first-game");
+  assert.equal(firstPage.entries[0]?.latestUploadedAt, "2026-08-25T09:00:00.000Z");
+  assert.equal(secondPage.entries[0]?.game.slug, "second-game");
+});
+
 test("the DB CHECK constraint rejects PUBLIC visibility with no live_version_id", async () => {
   const { db, raw } = createSqliteD1(SANDBOX_GAMES_TEST_SCHEMA);
   seedUser(raw, 1, "Dev");

@@ -2,9 +2,9 @@
 
 상태: 기준 문서
 
-마지막 검증: 2026-08-24
+마지막 검증: 2026-08-25
 
-최신 마이그레이션: `0039_streamer_terminology.sql`
+최신 마이그레이션: `0040_public_game_engagement.sql`
 
 기준 소스:
 
@@ -16,7 +16,7 @@
 - [`ERD.md`](ERD.md) — 도메인별 관계도와 전체 물리 테이블·호환 뷰 사전
 
 Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 권한 원천입니다. 이 문서는
-현재 `0000_initial_schema.sql`부터 `0039_streamer_terminology.sql`까지의 역할을 설명합니다.
+현재 `0000_initial_schema.sql`부터 `0040_public_game_engagement.sql`까지의 역할을 설명합니다.
 
 ## 마이그레이션 범위
 
@@ -39,6 +39,7 @@ Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 
 | `0037`        | OAuth provider별 avatar 후보와 사용자 avatar 선택                          |
 | `0038`        | 관리자 역할별 기능 권한 정책과 통합 관리자 센터 접근                       |
 | `0039`        | 방송 채널 도메인의 `streamer_*` 명명 전환과 롤링 배포 호환 계층            |
+| `0040`        | 공개 게임별 고유 플레이·현재 북마크 집계를 위한 game-first covering index  |
 
 기존 migration은 변경, squash, 삭제하지 않습니다. 프로덕션 배포는 API보다 먼저
 `pnpm d1:migrate:prod`를 실행합니다.
@@ -186,6 +187,10 @@ D1 migration이 새 Worker보다 먼저 실행되는 동안 이전 Worker가 깨
 - **Score/progression**: score rows, difficulty, attempt consumption, XP ledger, achievements,
   streak
 - **Personalization**: favorites, recently played, settings/profile visibility
+- 공개 카탈로그의 `playerCount`는 `user_recent_plays`의 game slug별 행 수로, 한 인증 사용자가 같은
+  게임을 여러 번 열어도 1명으로 집계합니다. `bookmarkCount`는 현재 `user_favorites` 행 수입니다.
+  별도 가변 aggregate row를 두지 않아 원장과 통계가 어긋나지 않으며, `0040`의 `(game_id, user_id)`
+  인덱스로 공개 조회를 지원합니다. 인기 점수는 Core 정책인 `playerCount + bookmarkCount × 3`입니다.
 - **Discord**: link challenges, guild registration/manager, play context, guild XP attribution
 - **Streamer**: streamer profile, platform account, metrics, verification/review
 - **Operations**: game kill switch, moderation, monitoring indexes, staff/program entitlement

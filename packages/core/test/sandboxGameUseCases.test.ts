@@ -14,6 +14,7 @@ import type {
   SandboxGamePublishStatus,
   GameBundleStorageRepository,
   BundleArchiveReader,
+  BundleArchiveWriter,
 } from "../src/ports/sandboxGames.js";
 import { SANDBOX_GAME_POLICY } from "../src/domain/sandboxGames.js";
 import type { SandboxGameBundleManifest } from "../src/domain/sandboxGameBundle.js";
@@ -133,6 +134,12 @@ function createFakeRepo(): SandboxGameRepository & {
     },
     async listAll() {
       return [...games.values()];
+    },
+    async listAllPage(limit, offset) {
+      const entries = [...games.values()]
+        .slice(offset, offset + limit)
+        .map((game) => ({ game, latestUploadedAt: null }));
+      return { entries, total: games.size };
     },
     async create(input) {
       // Mirrors D1SandboxGameRepository.create's contract: atomically pick the lowest slot (1 or
@@ -421,7 +428,13 @@ function createUseCases(
     storage,
     archives,
   );
-  const useCases = new SandboxGameUseCases(repo, storage, publisher, canonicalRepo);
+  const archiveWriter: BundleArchiveWriter = {
+    write(nextEntries) {
+      archives.entries = { ...nextEntries };
+      return bytes("rebuilt-archive").buffer as ArrayBuffer;
+    },
+  };
+  const useCases = new SandboxGameUseCases(repo, storage, publisher, canonicalRepo, archiveWriter);
   return {
     useCases,
     repo,
@@ -2710,6 +2723,120 @@ test("createGameFromBundle rejects a manifest with a non-string genre as MANIFES
     () => useCases.createGameFromBundle({ developerUserId: 1, bytes: new ArrayBuffer(10) }),
     (err: unknown) => err instanceof SandboxGameUseCaseFailure && err.code === "MANIFEST_INVALID",
   );
+});
+
+test("replaceManifest rebuilds a new review version without mutating the existing version", async () => {
+  const { useCases, repo, storage } = createUseCases();
+  const game = await useCases.createGame({
+    slug: "my-game",
+    developerUserId: 1,
+    title: "Game",
+    shortDescription: null,
+    description: null,
+    genre: "puzzle",
+    mode: "single",
+  });
+  const original = await useCases.uploadVersion({
+    gameId: game.id,
+    actingUserId: 1,
+    isAdmin: false,
+    bytes: bytes("original").buffer as ArrayBuffer,
+  });
+  const replacement = creatorManifestBytes({
+    slug: "my-game",
+    title: "Corrected title",
+    genre: "arcade",
+    mode: "multi",
+  });
+
+  const revised = await useCases.replaceManifest({
+    gameId: game.id,
+    actingUserId: 1,
+    isAdmin: false,
+    bytes: replacement.buffer as ArrayBuffer,
+  });
+
+  assert.notEqual(revised.id, original.id);
+  assert.equal(revised.status, "PENDING_REVIEW");
+  assert.equal(repo.versions.get(original.id)?.contentHash, original.contentHash);
+  const published = storage.objects.get(`games/${game.id}/${revised.id}/owogg.json`);
+  assert.ok(published);
+  const manifest = JSON.parse(new TextDecoder().decode(published.bytes)) as {
+    game: { title: string; mode: string };
+  };
+  assert.equal(manifest.game.title, "Corrected title");
+  assert.equal(manifest.game.mode, "multi");
+});
+
+test("replaceLogo switches to a content-addressed object and removes the previous logo", async () => {
+  const { useCases, repo, storage } = createUseCases();
+  const game = await useCases.createGame({
+    slug: "my-game",
+    developerUserId: 1,
+    title: "Game",
+    shortDescription: null,
+    description: null,
+    genre: "puzzle",
+    mode: "single",
+  });
+  const oldKey = `games/${game.id}/logo.png`;
+  await storage.putObject({ key: oldKey, bytes: bytes("old"), contentType: "image/png" });
+  await repo.setLogo(game.id, oldKey, new Date().toISOString());
+
+  const updated = await useCases.replaceLogo({
+    gameId: game.id,
+    actingUserId: 1,
+    isAdmin: false,
+    fileName: "new-logo.webp",
+    bytes: bytes("new-logo").buffer as ArrayBuffer,
+  });
+
+  assert.match(updated.logoKey ?? "", new RegExp(`^games/${game.id}/logos/[a-f0-9]{64}\\.webp$`));
+  assert.equal(storage.objects.has(oldKey), false);
+  assert.ok(updated.logoKey && storage.objects.has(updated.logoKey));
+  assert.ok(repo.auditActions.includes("LOGO_CHANGED"));
+});
+
+test("replaceLogo keeps the live object when an identical re-upload cannot update D1", async () => {
+  const { useCases, repo, storage } = createUseCases();
+  const game = await useCases.createGame({
+    slug: "my-game",
+    developerUserId: 1,
+    title: "Game",
+    shortDescription: null,
+    description: null,
+    genre: "puzzle",
+    mode: "single",
+  });
+  const logoBytes = bytes("stable-logo").buffer as ArrayBuffer;
+  const first = await useCases.replaceLogo({
+    gameId: game.id,
+    actingUserId: 1,
+    isAdmin: false,
+    fileName: "logo.png",
+    bytes: logoBytes,
+  });
+  const liveKey = first.logoKey;
+  assert.ok(liveKey && storage.objects.has(liveKey));
+
+  repo.setLogo = async () => {
+    throw new Error("simulated D1 failure");
+  };
+  await assert.rejects(
+    useCases.replaceLogo({
+      gameId: game.id,
+      actingUserId: 1,
+      isAdmin: false,
+      fileName: "same-content.png",
+      bytes: logoBytes,
+    }),
+    (error: unknown) =>
+      error instanceof SandboxGameUseCaseFailure && error.code === "PUBLISH_FAILED",
+  );
+
+  assert.equal(repo.games.get(game.id)?.logoKey, liveKey);
+  assert.ok(liveKey && storage.objects.has(liveKey));
+  assert.equal(storage.deletedKeys.includes(liveKey ?? ""), false);
 });
 
 test("createGameFromBundle surfaces a slug collision as SLUG_TAKEN, same as the manual form", async () => {

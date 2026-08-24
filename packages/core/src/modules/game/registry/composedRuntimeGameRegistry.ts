@@ -68,40 +68,45 @@ export class ComposedRuntimeGameRegistry implements RuntimeGameRegistry {
       // catalog. Return no candidates rather than falling back to a legacy registry.
       return [];
     }
-    const runtimes: RuntimeGame[] = [];
+    const candidates = identities.filter(
+      (identity) =>
+        identity.deletedAt === null &&
+        identity.visibility === "PUBLIC" &&
+        identity.liveVersionId !== null,
+    );
 
-    for (const identity of identities) {
-      if (
-        identity.deletedAt !== null ||
-        identity.visibility !== "PUBLIC" ||
-        identity.liveVersionId === null
-      ) {
-        continue;
-      }
+    // B2 canonical reads are independent per game. Awaiting them in a loop made a cold catalog's
+    // latency grow linearly with the number of games (four ~1s reads became a ~4s first page).
+    // Promise.all preserves candidate order while making total latency approach the slowest one.
+    const resolved = await Promise.all(
+      candidates.map(async (identity): Promise<RuntimeGame | null> => {
+        try {
+          const liveVersionId = identity.liveVersionId;
+          if (liveVersionId === null) return null;
+          const liveVersion = await this.versions.findById(liveVersionId);
+          if (
+            liveVersion === null ||
+            liveVersion.gameId !== identity.id ||
+            liveVersion.publishStatus !== "READY"
+          ) {
+            return null;
+          }
 
-      try {
-        const liveVersion = await this.versions.findById(identity.liveVersionId);
-        if (
-          liveVersion === null ||
-          liveVersion.gameId !== identity.id ||
-          liveVersion.publishStatus !== "READY"
-        ) {
-          continue;
+          const storedCanonical = await this.canonicals.findBySlug(identity.slug);
+          if (storedCanonical === null) return null;
+          const canonical = parseGameCanonicalDocument(
+            serializeGameCanonicalDocument(storedCanonical),
+            identity.slug,
+          );
+          return { identity, liveVersion, canonical };
+        } catch {
+          // A malformed/incomplete entry must not make the rest of the public catalog appear
+          // unavailable, and must never fall back to legacy publisher-specific metadata.
+          return null;
         }
+      }),
+    );
 
-        const storedCanonical = await this.canonicals.findBySlug(identity.slug);
-        if (storedCanonical === null) continue;
-        const canonical = parseGameCanonicalDocument(
-          serializeGameCanonicalDocument(storedCanonical),
-          identity.slug,
-        );
-        runtimes.push({ identity, liveVersion, canonical });
-      } catch {
-        // A malformed/incomplete entry must not make the rest of the public catalog appear
-        // available, and must never fall back to legacy publisher-specific metadata.
-      }
-    }
-
-    return runtimes;
+    return resolved.filter((runtime): runtime is RuntimeGame => runtime !== null);
   }
 }

@@ -28,7 +28,7 @@ test.describe("Mobile support advisory (mobile-like context)", () => {
     await expect(page.getByTestId("mobile-advisory-experimental")).toHaveCount(0);
     await expect(page.getByTestId("mobile-advisory-unsupported")).toHaveCount(0);
     // PLAY stays reachable either way — this PR never blocks it.
-    await expect(page.getByRole("button", { name: "PLAY" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "PLAY", exact: true })).toBeVisible();
     await context.close();
   });
 
@@ -41,7 +41,7 @@ test.describe("Mobile support advisory (mobile-like context)", () => {
     await page.goto("/games/e2e-mobile-experimental");
     await expect(page.getByTestId("mobile-advisory-experimental")).toHaveCount(1);
     await expect(page.getByTestId("mobile-advisory-unsupported")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "PLAY" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "PLAY", exact: true })).toBeVisible();
     await context.close();
   });
 
@@ -53,9 +53,9 @@ test.describe("Mobile support advisory (mobile-like context)", () => {
     // e2e-fixed declares mobile.support: "unsupported".
     await page.goto("/games/e2e-fixed");
     await expect(page.getByTestId("mobile-advisory-unsupported")).toHaveCount(1);
-    await expect(page.getByRole("button", { name: "PLAY" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "PLAY", exact: true })).toBeVisible();
     // Confirms it's genuinely not blocked: PLAY still actually mounts the iframe.
-    await page.getByRole("button", { name: "PLAY" }).click();
+    await page.getByRole("button", { name: "PLAY", exact: true }).click();
     await expect(page.locator("iframe")).toHaveCount(1);
     await context.close();
   });

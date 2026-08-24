@@ -85,6 +85,12 @@ const PublicGameSchemaBase = {
   presentation: GamePresentationSchema.optional(),
   difficulty: DifficultyConfigSchema.optional(),
   supportsReplay: z.boolean(),
+  publishedAt: z.string().min(1),
+  stats: z.object({
+    playerCount: z.number().int().nonnegative(),
+    bookmarkCount: z.number().int().nonnegative(),
+    popularityScore: z.number().int().nonnegative(),
+  }),
   mediaUrl: z.union([z.string().url(), z.string().startsWith("/")]).nullable(),
 };
 

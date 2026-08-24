@@ -1,10 +1,16 @@
 import {
   findGameLogoFile,
+  revisedGameLogoObjectKey,
+  standaloneGameLogoPath,
+  resolveBundleContentType,
   sandboxGameLogoObjectKey,
   sourceArchiveObjectKey,
   type PreparedBundle,
 } from "../domain/sandboxGameBundle.js";
-import { extractGameCreatorManifest } from "../domain/gameCreatorManifest.js";
+import {
+  extractGameCreatorManifest,
+  parseGameCreatorManifestBytes,
+} from "../domain/gameCreatorManifest.js";
 import { mapGameCreatorManifestToCanonical } from "../domain/gameCreatorManifestCanonical.js";
 import { SANDBOX_GAME_POLICY } from "../domain/sandboxGames.js";
 import type { GameCanonicalDocument } from "../modules/game/domain/gameCanonicalDocument.js";
@@ -16,8 +22,17 @@ import type {
   GamePublicationTarget,
   GameVersionPublicationRepository,
 } from "../modules/game/ports/gameVersionPublicationRepository.js";
-import type { GameBundleStorageRepository } from "../ports/sandboxGames.js";
+import type {
+  BundleArchiveWriter,
+  GameBundleStorageRepository,
+  SandboxGameBasicMetadataInput,
+} from "../ports/sandboxGames.js";
 import { GamePublicationService } from "./gamePublicationService.js";
+import {
+  patchGameCreatorManifestBasicMetadata,
+  rebuildGameBundleArchive,
+  serializeGameCreatorManifest,
+} from "./gameBundleRevision.js";
 
 export const OFFICIAL_GAME_UPLOAD_FAILURES = [
   "BUNDLE_EMPTY",
@@ -28,6 +43,9 @@ export const OFFICIAL_GAME_UPLOAD_FAILURES = [
   "LOGO_REQUIRED",
   "LOGO_TOO_LARGE",
   "SLUG_CONFLICT",
+  "GAME_NOT_FOUND",
+  "VERSION_NOT_FOUND",
+  "LOGO_INVALID",
   "PUBLISH_FAILED",
 ] as const;
 export type OfficialGameUploadFailureCode = (typeof OFFICIAL_GAME_UPLOAD_FAILURES)[number];
@@ -43,6 +61,9 @@ export interface OfficialGameUploadRepository extends GameVersionPublicationRepo
   /** Returns null only when the slug already belongs to USER or a deleted identity. Infrastructure
    * failures must throw so callers do not misreport an outage as a user-correctable conflict. */
   ensureOwoggIdentity(input: { slug: string; nowIso: string }): Promise<GameIdentity | null>;
+  findOwoggIdentity(slug: string): Promise<GameIdentity | null>;
+  findVersionById(gameId: number, versionId: number): Promise<GameVersion | null>;
+  findLogoObjectKey(gameId: number): Promise<string | null>;
   findVersionByContentHash(gameId: number, contentHash: string): Promise<GameVersion | null>;
   createVersion(input: {
     gameId: number;
@@ -94,6 +115,13 @@ export interface OfficialGameUploadResult {
   readonly publishedAt: string;
 }
 
+export interface OfficialGameLogoUpdateResult {
+  readonly gameId: number;
+  readonly slug: string;
+  readonly hasLogo: true;
+  readonly updatedAt: string;
+}
+
 export const OFFICIAL_GAME_DELETE_FAILURES = [
   "GAME_NOT_FOUND",
   "STORAGE_DELETE_FAILED",
@@ -128,6 +156,7 @@ export class OfficialGameUploadUseCases {
     private readonly storage: GameBundleStorageRepository,
     private readonly canonicals: GameCanonicalRepository,
     private readonly publication: GamePublicationService,
+    private readonly archiveWriter?: BundleArchiveWriter,
   ) {}
 
   async upload(input: {
@@ -245,6 +274,164 @@ export class OfficialGameUploadUseCases {
       reusedReadyVersion,
       publishedAt: nowIso,
     };
+  }
+
+  /** Targeted full-bundle replacement for an existing official game. The route slug is checked
+   * before any identity/version/storage mutation, preventing a file chosen on one row from
+   * accidentally registering or updating a different official game. */
+  async replaceBundle(input: {
+    slug: string;
+    bytes: ArrayBuffer;
+    contentType?: string | undefined;
+  }): Promise<OfficialGameUploadResult> {
+    let prepared: PreparedBundle;
+    let manifest: ReturnType<typeof extractGameCreatorManifest>;
+    try {
+      prepared = this.publication.prepare(input.bytes);
+      manifest = extractGameCreatorManifest(prepared.files);
+    } catch {
+      throw new OfficialGameUploadFailure("BUNDLE_INVALID");
+    }
+    if (!manifest || manifest.game.slug !== input.slug) {
+      throw new OfficialGameUploadFailure("MANIFEST_INVALID");
+    }
+    if (!(await this.repository.findOwoggIdentity(input.slug))) {
+      throw new OfficialGameUploadFailure("GAME_NOT_FOUND");
+    }
+    return this.upload({ bytes: input.bytes, contentType: input.contentType });
+  }
+
+  private async revisionBase(slug: string): Promise<{
+    identity: GameIdentity;
+    prepared: PreparedBundle;
+    manifest: NonNullable<ReturnType<typeof extractGameCreatorManifest>>;
+    currentLogo: NonNullable<ReturnType<typeof findGameLogoFile>>;
+  }> {
+    if (!this.archiveWriter) throw new OfficialGameUploadFailure("PUBLISH_FAILED");
+    const identity = await this.repository.findOwoggIdentity(slug);
+    if (!identity) throw new OfficialGameUploadFailure("GAME_NOT_FOUND");
+    if (!identity.liveVersionId) throw new OfficialGameUploadFailure("VERSION_NOT_FOUND");
+    const version = await this.repository.findVersionById(identity.id, identity.liveVersionId);
+    if (!version) throw new OfficialGameUploadFailure("VERSION_NOT_FOUND");
+    const source = await this.storage.getObject(version.objectKey);
+    if (!source) throw new OfficialGameUploadFailure("VERSION_NOT_FOUND");
+
+    let prepared: PreparedBundle;
+    let manifest: ReturnType<typeof extractGameCreatorManifest>;
+    try {
+      prepared = this.publication.prepare(source);
+      manifest = extractGameCreatorManifest(prepared.files);
+    } catch {
+      throw new OfficialGameUploadFailure("BUNDLE_INVALID");
+    }
+    if (!manifest || manifest.game.slug !== slug) {
+      throw new OfficialGameUploadFailure("MANIFEST_INVALID");
+    }
+
+    const currentLogoKey = await this.repository.findLogoObjectKey(identity.id);
+    if (!currentLogoKey) throw new OfficialGameUploadFailure("LOGO_REQUIRED");
+    const logoBytes = await this.storage.getObject(currentLogoKey);
+    const logoPath = standaloneGameLogoPath(currentLogoKey);
+    if (!logoBytes || !logoPath) throw new OfficialGameUploadFailure("LOGO_REQUIRED");
+    const { contentType, contentEncoding } = resolveBundleContentType(logoPath);
+    return {
+      identity,
+      prepared,
+      manifest,
+      currentLogo: {
+        path: logoPath,
+        bytes: new Uint8Array(logoBytes),
+        contentType,
+        contentEncoding,
+      },
+    };
+  }
+
+  /** Replaces only `owogg.json`, but publishes the result through the normal official version path
+   * so source ZIP, immutable files, canonical metadata and leaderboard generation stay aligned. */
+  async replaceManifest(input: {
+    slug: string;
+    bytes: ArrayBuffer;
+  }): Promise<OfficialGameUploadResult> {
+    if (
+      input.bytes.byteLength === 0 ||
+      input.bytes.byteLength > SANDBOX_GAME_POLICY.MAX_MANIFEST_BYTES
+    ) {
+      throw new OfficialGameUploadFailure("MANIFEST_INVALID");
+    }
+    let manifest: ReturnType<typeof parseGameCreatorManifestBytes>;
+    try {
+      manifest = parseGameCreatorManifestBytes(input.bytes);
+    } catch {
+      throw new OfficialGameUploadFailure("MANIFEST_INVALID");
+    }
+    if (manifest.game.slug !== input.slug) {
+      throw new OfficialGameUploadFailure("MANIFEST_INVALID");
+    }
+    const base = await this.revisionBase(input.slug);
+    const archive = rebuildGameBundleArchive({
+      prepared: base.prepared,
+      writer: this.archiveWriter as BundleArchiveWriter,
+      manifestBytes: serializeGameCreatorManifest(manifest),
+      currentLogo: base.currentLogo,
+    });
+    return this.upload({ bytes: archive, contentType: "application/zip" });
+  }
+
+  async updateBasicMetadata(input: {
+    slug: string;
+    metadata: SandboxGameBasicMetadataInput;
+  }): Promise<OfficialGameUploadResult> {
+    const base = await this.revisionBase(input.slug);
+    let manifest = base.manifest;
+    try {
+      const canonical = await this.canonicals.findBySlug(input.slug);
+      if (canonical?.creatorManifest) manifest = canonical.creatorManifest;
+      manifest = patchGameCreatorManifestBasicMetadata(manifest, input.metadata);
+    } catch {
+      throw new OfficialGameUploadFailure("MANIFEST_INVALID");
+    }
+    return this.replaceManifest({
+      slug: input.slug,
+      bytes: serializeGameCreatorManifest(manifest).buffer as ArrayBuffer,
+    });
+  }
+
+  async replaceLogo(input: {
+    slug: string;
+    fileName: string;
+    bytes: ArrayBuffer;
+  }): Promise<OfficialGameLogoUpdateResult> {
+    const identity = await this.repository.findOwoggIdentity(input.slug);
+    if (!identity) throw new OfficialGameUploadFailure("GAME_NOT_FOUND");
+    const logoPath = standaloneGameLogoPath(input.fileName);
+    if (
+      !logoPath ||
+      input.bytes.byteLength === 0 ||
+      input.bytes.byteLength > SANDBOX_GAME_POLICY.MAX_LOGO_BYTES
+    ) {
+      throw new OfficialGameUploadFailure(
+        input.bytes.byteLength > SANDBOX_GAME_POLICY.MAX_LOGO_BYTES
+          ? "LOGO_TOO_LARGE"
+          : "LOGO_INVALID",
+      );
+    }
+    const oldKey = await this.repository.findLogoObjectKey(identity.id);
+    const hash = await sha256Hex(input.bytes);
+    const objectKey = revisedGameLogoObjectKey(identity.id, logoPath, hash);
+    const { contentType } = resolveBundleContentType(logoPath);
+    const nowIso = new Date().toISOString();
+    try {
+      await this.storage.putObject({ key: objectKey, bytes: input.bytes, contentType });
+      await this.repository.upsertLogo({ gameId: identity.id, objectKey, nowIso });
+    } catch {
+      // An identical re-upload reuses the live content-addressed key. Only a genuinely new
+      // object may be removed as rollback when the D1 pointer update fails.
+      if (objectKey !== oldKey) await this.storage.deleteObject(objectKey).catch(() => {});
+      throw new OfficialGameUploadFailure("PUBLISH_FAILED");
+    }
+    if (oldKey && oldKey !== objectKey) await this.storage.deleteObject(oldKey).catch(() => {});
+    return { gameId: identity.id, slug: identity.slug, hasLogo: true, updatedAt: nowIso };
   }
 }
 

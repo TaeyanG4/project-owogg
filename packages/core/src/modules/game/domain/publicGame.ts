@@ -1,6 +1,37 @@
 import type { GameAsset } from "./gameAsset.js";
 import type { RuntimeGame } from "./runtimeGame.js";
 
+/** A bookmark is a stronger, deliberate signal than opening a game once. The weight is public
+ * product policy so every catalog surface ranks games identically. */
+export const PUBLIC_GAME_BOOKMARK_POPULARITY_WEIGHT = 3;
+
+export interface PublicGameStats {
+  readonly playerCount: number;
+  readonly bookmarkCount: number;
+  readonly popularityScore: number;
+}
+
+function normalizedMetricCount(value: number): number {
+  return Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
+}
+
+export function toPublicGameStats(input: {
+  readonly playerCount: number;
+  readonly bookmarkCount: number;
+}): PublicGameStats {
+  const playerCount = normalizedMetricCount(input.playerCount);
+  const bookmarkCount = normalizedMetricCount(input.bookmarkCount);
+  return {
+    playerCount,
+    bookmarkCount,
+    popularityScore: playerCount + bookmarkCount * PUBLIC_GAME_BOOKMARK_POPULARITY_WEIGHT,
+  };
+}
+
+export function emptyPublicGameStats(): PublicGameStats {
+  return toPublicGameStats({ playerCount: 0, bookmarkCount: 0 });
+}
+
 /** Provider-neutral public projection. Publisher authority is reduced to a safe discriminant;
  * user ids, review state, storage keys, and live numeric ids never cross this boundary. */
 export interface PublicGame {
@@ -15,6 +46,10 @@ export interface PublicGame {
   readonly presentation?: RuntimeGame["canonical"]["presentation"];
   readonly difficulty?: RuntimeGame["canonical"]["difficulty"];
   readonly supportsReplay: boolean;
+  /** Server-side game registration time. Version updates do not make an existing title a new
+   * game again, so newest sorting uses identity.createdAt rather than the live version upload. */
+  readonly publishedAt: string;
+  readonly stats: PublicGameStats;
   /** Public URL/path only; the D1 object key is intentionally never exposed. */
   readonly mediaUrl: string | null;
 }
@@ -23,6 +58,7 @@ export function toPublicGame(
   runtime: RuntimeGame,
   mediaUrl: string | null,
   publisherName = runtime.canonical.publisher.official ? "OWOGG" : "USER",
+  stats: PublicGameStats = emptyPublicGameStats(),
 ): PublicGame {
   return {
     // Public official presentation comes from canonical metadata. D1 publisher identity remains
@@ -42,6 +78,8 @@ export function toPublicGame(
       ? { difficulty: runtime.canonical.difficulty }
       : {}),
     supportsReplay: runtime.canonical.supportsReplay,
+    publishedAt: runtime.identity.createdAt,
+    stats,
     mediaUrl,
   };
 }

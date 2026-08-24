@@ -67,7 +67,7 @@ class FakeOfficialLifecycleRepository implements OfficialGameLifecycleRepository
 }
 
 class FakeOfficialRepository implements OfficialGameUploadRepository {
-  readonly identity: GameIdentity = {
+  identity: GameIdentity = {
     id: 7,
     slug: "admin-game",
     publisher: { type: "OWOGG" },
@@ -86,6 +86,15 @@ class FakeOfficialRepository implements OfficialGameUploadRepository {
     if (this.ensureFailure === "conflict" || input.slug !== this.identity.slug) return null;
     if (this.ensureFailure === "outage") throw new Error("D1 unavailable");
     return this.identity;
+  }
+  async findOwoggIdentity(slug: string): Promise<GameIdentity | null> {
+    return slug === this.identity.slug && this.identity.deletedAt === null ? this.identity : null;
+  }
+  async findVersionById(gameId: number, versionId: number): Promise<GameVersion | null> {
+    return this.version?.gameId === gameId && this.version.id === versionId ? this.version : null;
+  }
+  async findLogoObjectKey(gameId: number): Promise<string | null> {
+    return gameId === this.identity.id ? this.logoKey : null;
   }
   async findVersionByContentHash(): Promise<GameVersion | null> {
     return this.version;
@@ -148,6 +157,7 @@ class FakeOfficialRepository implements OfficialGameUploadRepository {
   }
   async activate(input: { versionId: number; canonical: GameCanonicalDocument }): Promise<void> {
     this.activated = { versionId: input.versionId, canonical: input.canonical };
+    this.identity = { ...this.identity, visibility: "PUBLIC", liveVersionId: input.versionId };
   }
 }
 
@@ -230,6 +240,58 @@ test("admin upload distinguishes a real slug conflict from a D1 publication fail
       return true;
     },
   );
+});
+
+test("official logo-only replacement switches the D1 asset pointer without creating a version", async () => {
+  const repository = new FakeOfficialRepository();
+  const storage = new FakeStorage();
+  const canonicals = new FakeCanonicals();
+  const publication = new GamePublicationService(repository, storage, archives);
+  const useCases = new OfficialGameUploadUseCases(repository, storage, canonicals, publication);
+  await useCases.upload({ bytes: new Uint8Array([1, 2, 3]).buffer });
+  const originalVersionId = repository.version?.id;
+  const originalLogoKey = repository.logoKey;
+
+  const result = await useCases.replaceLogo({
+    slug: "admin-game",
+    fileName: "replacement.webp",
+    bytes: encoder.encode("new-logo").buffer as ArrayBuffer,
+  });
+
+  assert.equal(result.slug, "admin-game");
+  assert.equal(repository.version?.id, originalVersionId);
+  assert.match(repository.logoKey ?? "", /^games\/7\/logos\/[a-f0-9]{64}\.webp$/);
+  assert.equal(originalLogoKey ? storage.objects.has(originalLogoKey) : true, false);
+  assert.ok(repository.logoKey && storage.objects.has(repository.logoKey));
+});
+
+test("official identical-logo retry preserves the live B2 object when D1 fails", async () => {
+  const repository = new FakeOfficialRepository();
+  const storage = new FakeStorage();
+  const canonicals = new FakeCanonicals();
+  const publication = new GamePublicationService(repository, storage, archives);
+  const useCases = new OfficialGameUploadUseCases(repository, storage, canonicals, publication);
+  await useCases.upload({ bytes: new Uint8Array([1, 2, 3]).buffer });
+  const logoBytes = encoder.encode("stable-logo").buffer as ArrayBuffer;
+  await useCases.replaceLogo({ slug: "admin-game", fileName: "logo.png", bytes: logoBytes });
+  const liveKey = repository.logoKey;
+  assert.ok(liveKey && storage.objects.has(liveKey));
+
+  repository.upsertLogo = async () => {
+    throw new Error("simulated D1 failure");
+  };
+  await assert.rejects(
+    useCases.replaceLogo({
+      slug: "admin-game",
+      fileName: "same-content.png",
+      bytes: logoBytes,
+    }),
+    (error: unknown) =>
+      error instanceof OfficialGameUploadFailure && error.code === "PUBLISH_FAILED",
+  );
+
+  assert.equal(repository.logoKey, liveKey);
+  assert.ok(liveKey && storage.objects.has(liveKey));
 });
 
 test("official deletion removes published files, source ZIP, logo and canonical before D1 purge", async () => {

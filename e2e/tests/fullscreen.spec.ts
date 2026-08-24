@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * GameHost's fullscreen control — Host chrome, gated purely on
+ * GameHost's fullscreen control — always discoverable in the action row, with activation gated on
  * presentation.fullscreen.supported (see presentationAdvisory.ts's shouldShowFullscreenControl
  * and GameHost.tsx's useFullscreen). e2e-responsive declares `fullscreen.supported: false`;
  * e2e-fixed declares `{ supported: true, recommended: true }` (see
@@ -18,9 +18,11 @@ import { test, expect } from "@playwright/test";
  */
 
 test.describe("Fullscreen control", () => {
-  test("hidden entirely when presentation.fullscreen.supported is false", async ({ page }) => {
+  test("visible but disabled when presentation.fullscreen.supported is false", async ({ page }) => {
     await page.goto("/games/e2e-responsive");
-    await expect(page.getByTestId("fullscreen-toggle")).toHaveCount(0);
+    const toggle = page.getByTestId("fullscreen-toggle");
+    await expect(toggle).toHaveCount(1);
+    await expect(toggle).toBeDisabled();
   });
 
   test("shown when presentation.fullscreen.supported is true, and toggles real document.fullscreenElement on click", async ({
@@ -29,7 +31,7 @@ test.describe("Fullscreen control", () => {
     await page.goto("/games/e2e-fixed");
     // GameFrame lazy-mounts the iframe only once PLAY is pressed — needed here so the "wraps the
     // iframe" check below has an actual iframe in the DOM to find.
-    await page.getByRole("button", { name: "PLAY" }).click();
+    await page.getByRole("button", { name: "PLAY", exact: true }).click();
 
     const toggle = page.getByTestId("fullscreen-toggle");
     await expect(toggle).toHaveCount(1);

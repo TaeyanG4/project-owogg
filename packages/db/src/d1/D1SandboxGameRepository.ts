@@ -132,6 +132,7 @@ function buildMetadataAssignments(input: SandboxGameMetadataInput): {
   if (input.shortDescription !== undefined) push("short_description", input.shortDescription);
   if (input.description !== undefined) push("description", input.description);
   if (input.genre !== undefined) push("genre", input.genre.trim());
+  if (input.mode !== undefined) push("mode", input.mode);
   if (input.xpPerCompletion !== undefined) push("xp_per_completion", input.xpPerCompletion);
   if (input.scoreUnit !== undefined) push("score_unit", input.scoreUnit);
   if (input.scoreDirection !== undefined) push("score_direction", input.scoreDirection);
@@ -205,6 +206,33 @@ export class D1SandboxGameRepository implements SandboxGameRepository {
       .prepare(`${USER_GAME_SELECT} WHERE g.publisher_type = 'USER' ORDER BY g.created_at DESC`)
       .all<Record<string, unknown>>();
     return (res.results || []).map(mapGameRow);
+  }
+
+  async listAllPage(limit: number, offset: number) {
+    const [rows, count] = await Promise.all([
+      this.db
+        .prepare(
+          `SELECT page_game.*,
+             (SELECT MAX(latest_gv.uploaded_at)
+              FROM game_versions latest_gv
+              WHERE latest_gv.game_id = page_game.id) AS latest_uploaded_at
+           FROM (${USER_GAME_SELECT} WHERE g.publisher_type = 'USER') page_game
+           ORDER BY COALESCE(latest_uploaded_at, page_game.created_at) DESC, page_game.id DESC
+           LIMIT ? OFFSET ?`,
+        )
+        .bind(limit, offset)
+        .all<Record<string, unknown>>(),
+      this.db
+        .prepare(`SELECT COUNT(*) AS total FROM games WHERE publisher_type = 'USER'`)
+        .first<{ total: number }>(),
+    ]);
+    return {
+      entries: (rows.results || []).map((row) => ({
+        game: mapGameRow(row),
+        latestUploadedAt: row.latest_uploaded_at ? String(row.latest_uploaded_at) : null,
+      })),
+      total: Number(count?.total ?? 0),
+    };
   }
 
   async softDelete(

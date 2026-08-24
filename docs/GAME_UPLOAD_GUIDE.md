@@ -2,7 +2,7 @@
 
 상태: 가이드
 
-마지막 검증: 2026-08-24
+마지막 검증: 2026-08-25
 
 기준 소스:
 
@@ -86,6 +86,17 @@ owogg.logo.<png|jpg|jpeg|webp|svg>
 - 승인 또는 live-version 전환 시 해당 source archive의 manifest가 canonical로 동기화됩니다.
 - 심사 중인 게임 slot은 사용자별 최대 2개입니다. slot이 모두 사용 중이면 기존 submission을
   승인/반려/withdraw 처리한 뒤 다시 시도해야 합니다.
+
+### 4.1 부분 재업로드
+
+게임별 관리 메뉴에서 전체 ZIP 외에 `owogg.json` 또는 로고만 다시 올릴 수 있습니다. 제목, 장르,
+single/multi 모드와 설명은 핵심 속성 폼에서 직접 고칠 수도 있습니다.
+
+- `owogg.json`과 핵심 속성 저장은 기존 게시 파일을 덮어쓰지 않고 현재 source ZIP을 재구성해 새
+  `PENDING_REVIEW` version을 만듭니다. 수정본은 다시 승인되어야 live로 전환할 수 있습니다.
+- 로고는 game-level asset이므로 새 version을 만들지 않고 즉시 교체합니다.
+- `slug`는 게임의 영구 identity라서 부분 편집으로 바꿀 수 없습니다.
+- standalone `owogg.json`은 256 KiB, 로고는 2 MiB를 초과할 수 없습니다.
 
 ## 5. 상태 읽기
 

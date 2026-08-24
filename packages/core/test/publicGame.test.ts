@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   publicGameMediaUrl,
   toPublicGame,
+  toPublicGameStats,
   type GameAsset,
   type GameIdentity,
   type GameVersion,
@@ -46,7 +47,12 @@ const runtime: RuntimeGame = {
 };
 
 test("toPublicGame exposes the provider-neutral canonical projection only", () => {
-  const publicGame = toPublicGame(runtime, "https://api.example.test/logo");
+  const publicGame = toPublicGame(
+    runtime,
+    "https://api.example.test/logo",
+    "OWOGG",
+    toPublicGameStats({ playerCount: 12, bookmarkCount: 4 }),
+  );
   assert.equal(publicGame.publisherType, "OWOGG");
   assert.equal(publicGame.publisherName, "OWOGG");
   assert.equal(publicGame.slug, "reaction-time");
@@ -54,6 +60,12 @@ test("toPublicGame exposes the provider-neutral canonical projection only", () =
   assert.deepEqual(publicGame.policy, runtime.canonical.policy);
   assert.deepEqual(publicGame.catalog, runtime.canonical.catalog);
   assert.equal(publicGame.mediaUrl, "https://api.example.test/logo");
+  assert.equal(publicGame.publishedAt, identity.createdAt);
+  assert.deepEqual(publicGame.stats, {
+    playerCount: 12,
+    bookmarkCount: 4,
+    popularityScore: 24,
+  });
 
   const raw = publicGame as unknown as Record<string, unknown>;
   for (const forbidden of ["id", "publisher_user_id", "publisherUserId", "liveVersionId"]) {

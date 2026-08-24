@@ -28,6 +28,8 @@ function baseGame(overrides: Partial<PublicGame> = {}): PublicGame {
       requiresAuth: false,
     },
     supportsReplay: false,
+    publishedAt: "2026-08-01T00:00:00.000Z",
+    stats: { playerCount: 12, bookmarkCount: 4, popularityScore: 24 },
     mediaUrl: null,
     ...overrides,
   } as PublicGame;
@@ -40,6 +42,10 @@ test("TAXONOMY public games preserve canonical catalog metadata in the card view
   assert.deepEqual(card.modes, ["single"]);
   assert.equal(card.thumbnail, "");
   assert.equal(card.catalogType, "TAXONOMY");
+  assert.equal(card.publishedAt, "2026-08-01T00:00:00.000Z");
+  assert.equal(card.playerCount, 12);
+  assert.equal(card.bookmarkCount, 4);
+  assert.equal(card.popularityScore, 24);
 });
 
 test("GENRE_MODE USER games do not receive invented taxonomy metadata", () => {

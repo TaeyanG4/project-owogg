@@ -6,6 +6,7 @@ import { purgeEdgeCacheUrls } from "../middleware/edgeCache.js";
 export function publicGameReadCacheUrls(
   requestUrl: string,
   slugs: readonly string[] = [],
+  gameOrigin?: string,
 ): string[] {
   const urls = [new URL("/api/games", requestUrl), new URL("/api/games/availability", requestUrl)];
 
@@ -15,11 +16,16 @@ export function publicGameReadCacheUrls(
     // The current logo URL is revisioned, but evicting the unversioned compatibility key also
     // prevents an older catalog response from keeping a stale logo response alive in this colo.
     urls.push(new URL(`/api/games/${encodedSlug}/media/logo`, requestUrl));
+    if (gameOrigin) urls.push(new URL(`/play/${encodedSlug}`, gameOrigin));
   }
 
   return urls.map((url) => url.toString());
 }
 
-export async function purgePublicGameReadCache(requestUrl: string, slugs: readonly string[] = []) {
-  await purgeEdgeCacheUrls(publicGameReadCacheUrls(requestUrl, slugs));
+export async function purgePublicGameReadCache(
+  requestUrl: string,
+  slugs: readonly string[] = [],
+  gameOrigin?: string,
+) {
+  await purgeEdgeCacheUrls(publicGameReadCacheUrls(requestUrl, slugs, gameOrigin));
 }

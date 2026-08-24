@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import { Play, Sparkles, Bookmark } from "lucide-react";
+import { Play, Sparkles, Bookmark, Users } from "lucide-react";
 import { usePersonalization } from "../../features/personalization";
 import { useI18n } from "../../features/i18n/I18nContext";
 import { GameThumbnail } from "./GameThumbnail";
@@ -7,8 +7,26 @@ import type { PublicGameCard } from "../../features/catalog/publicGameAdapter";
 
 export type GameCardProps = Pick<
   PublicGameCard,
-  "slug" | "title" | "shortDescription" | "modes" | "thumbnail" | "accent" | "publisherName"
+  | "slug"
+  | "title"
+  | "shortDescription"
+  | "modes"
+  | "thumbnail"
+  | "accent"
+  | "publisherName"
+  | "playerCount"
+  | "bookmarkCount"
 >;
+
+function compactCount(value: number): string {
+  if (value < 1_000) return String(value);
+  if (value < 1_000_000) {
+    const thousands = value / 1_000;
+    return `${thousands >= 10 ? Math.floor(thousands) : thousands.toFixed(1).replace(/\.0$/, "")}K`;
+  }
+  const millions = value / 1_000_000;
+  return `${millions >= 10 ? Math.floor(millions) : millions.toFixed(1).replace(/\.0$/, "")}M`;
+}
 
 /** Every provider-neutral public game card enters the same generic GameHost route. */
 export function gameCardHref(slug: string): string {
@@ -22,6 +40,8 @@ export function GameCard({
   modes,
   thumbnail,
   publisherName,
+  playerCount,
+  bookmarkCount,
   accent = "#6366f1",
 }: GameCardProps) {
   const { isFavorite, toggleFavorite } = usePersonalization();
@@ -105,9 +125,27 @@ export function GameCard({
           <p className="break-keep text-[10px] sm:text-xs text-text-secondary line-clamp-2 leading-relaxed flex-1">
             {shortDescription}
           </p>
-          <p className="truncate text-[9px] font-semibold text-text-muted sm:text-[10px]">
-            제작자 {publisherName}
-          </p>
+          <div className="flex min-w-0 items-center justify-between gap-2 text-[9px] font-semibold text-text-muted sm:text-[10px]">
+            <p className="min-w-0 flex-1 truncate">제작자 {publisherName}</p>
+            <div className="flex shrink-0 items-center gap-2 tabular-nums">
+              <span
+                className="inline-flex items-center gap-0.5"
+                title={`${dict.games.playerCountLabel}: ${playerCount.toLocaleString()}`}
+                aria-label={`${dict.games.playerCountLabel}: ${playerCount.toLocaleString()}`}
+              >
+                <Users aria-hidden="true" className="h-3 w-3" />
+                {compactCount(playerCount)}
+              </span>
+              <span
+                className="inline-flex items-center gap-0.5"
+                title={`${dict.games.bookmarkCountLabel}: ${bookmarkCount.toLocaleString()}`}
+                aria-label={`${dict.games.bookmarkCountLabel}: ${bookmarkCount.toLocaleString()}`}
+              >
+                <Bookmark aria-hidden="true" className="h-3 w-3" />
+                {compactCount(bookmarkCount)}
+              </span>
+            </div>
+          </div>
         </div>
       </Link>
     </div>

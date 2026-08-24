@@ -101,6 +101,15 @@ export interface Dictionary {
     searchPlaceholder: string;
     emptyFavorites: string;
     emptySearch: string;
+    sortLabel: string;
+    sortOptions: {
+      popular: string;
+      newest: string;
+      players: string;
+      bookmarks: string;
+    };
+    playerCountLabel: string;
+    bookmarkCountLabel: string;
     categories: {
       all: string;
       popular: string;
@@ -1050,6 +1059,30 @@ export interface Dictionary {
      * device's actual current orientation — a hint, never a lock/forced rotation. */
     orientationPortraitHint: string;
     orientationLandscapeHint: string;
+    bookmarkCta: string;
+    bookmarkedCta: string;
+    shareGameCta: string;
+    shareGameCopied: string;
+    feedbackCta: string;
+    mobilePlayCta: string;
+    theaterModeEnterCta: string;
+    theaterModeExitCta: string;
+    adLabel: string;
+    adPlaceholder: string;
+    recommendedGamesTitle: string;
+    recommendedGamesEmpty: string;
+    gameInfoTitle: string;
+    publisherLabel: string;
+    publishedLabel: string;
+    playerStatsLabel: string;
+    bookmarkStatsLabel: string;
+    officialGameBadge: string;
+    userGameBadge: string;
+    mobilePlayTitle: string;
+    mobilePlayBody: string;
+    copyGameLinkCta: string;
+    closeDialogCta: string;
+    gameLinkCopied: string;
   };
   /** /games/:slug/ranking — a dedicated per-game leaderboard page (osu!-style: ranking recorded
    * per map/game, not just one combined table). Table column headers are shared with dict.ranking
@@ -1222,6 +1255,15 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       searchPlaceholder: "게임 검색...",
       emptyFavorites: "아직 즐겨찾기한 게임이 없습니다.",
       emptySearch: "검색 결과와 일치하는 게임이 없습니다.",
+      sortLabel: "게임 정렬",
+      sortOptions: {
+        popular: "인기 게임",
+        newest: "새로운 게임",
+        players: "조회수",
+        bookmarks: "북마크",
+      },
+      playerCountLabel: "플레이한 유저",
+      bookmarkCountLabel: "북마크한 유저",
       categories: {
         all: "전체",
         popular: "인기",
@@ -2319,6 +2361,30 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       mobileUnsupportedNotice: "이 게임은 모바일 환경을 지원하지 않을 수 있습니다.",
       orientationPortraitHint: "이 게임은 세로 화면에 최적화되어 있습니다.",
       orientationLandscapeHint: "이 게임은 가로 화면에 최적화되어 있습니다.",
+      bookmarkCta: "북마크",
+      bookmarkedCta: "북마크됨",
+      shareGameCta: "공유",
+      shareGameCopied: "링크 복사됨",
+      feedbackCta: "피드백",
+      mobilePlayCta: "모바일에서 플레이",
+      theaterModeEnterCta: "영화관 모드",
+      theaterModeExitCta: "기본 화면",
+      adLabel: "광고",
+      adPlaceholder: "광고 영역 · 콘텐츠 크기를 안정적으로 유지하는 예약 슬롯입니다.",
+      recommendedGamesTitle: "다음 게임 플레이",
+      recommendedGamesEmpty: "추천할 다른 공개 게임이 아직 없습니다.",
+      gameInfoTitle: "게임 정보",
+      publisherLabel: "제작자",
+      publishedLabel: "업로드",
+      playerStatsLabel: "플레이어",
+      bookmarkStatsLabel: "북마크",
+      officialGameBadge: "공식 게임",
+      userGameBadge: "사용자 제작",
+      mobilePlayTitle: "휴대폰에서 이어서 플레이",
+      mobilePlayBody: "아래 링크를 복사하거나 공유해 휴대폰 브라우저에서 같은 게임을 여세요.",
+      copyGameLinkCta: "게임 링크 복사",
+      closeDialogCta: "닫기",
+      gameLinkCopied: "게임 링크를 복사했습니다.",
     },
     gameRanking: {
       eyebrow: "게임별 순위",
@@ -2481,6 +2547,15 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       searchPlaceholder: "Search games...",
       emptyFavorites: "You haven't favorited any games yet.",
       emptySearch: "No games match your search.",
+      sortLabel: "Sort games",
+      sortOptions: {
+        popular: "Popular games",
+        newest: "New games",
+        players: "Most played",
+        bookmarks: "Most bookmarked",
+      },
+      playerCountLabel: "Players",
+      bookmarkCountLabel: "Bookmarks",
       categories: {
         all: "All",
         popular: "Popular",
@@ -3599,6 +3674,31 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       mobileUnsupportedNotice: "This game may not support mobile devices.",
       orientationPortraitHint: "This game is optimized for portrait orientation.",
       orientationLandscapeHint: "This game is optimized for landscape orientation.",
+      bookmarkCta: "Bookmark",
+      bookmarkedCta: "Bookmarked",
+      shareGameCta: "Share",
+      shareGameCopied: "Link copied",
+      feedbackCta: "Feedback",
+      mobilePlayCta: "Play on mobile",
+      theaterModeEnterCta: "Theater mode",
+      theaterModeExitCta: "Default view",
+      adLabel: "Advertisement",
+      adPlaceholder: "Reserved ad inventory that keeps the content layout stable.",
+      recommendedGamesTitle: "Play next",
+      recommendedGamesEmpty: "There are no other public games to recommend yet.",
+      gameInfoTitle: "About this game",
+      publisherLabel: "Publisher",
+      publishedLabel: "Uploaded",
+      playerStatsLabel: "Players",
+      bookmarkStatsLabel: "Bookmarks",
+      officialGameBadge: "Official game",
+      userGameBadge: "Community game",
+      mobilePlayTitle: "Continue on your phone",
+      mobilePlayBody:
+        "Copy or share the link below, then open the same game in your mobile browser.",
+      copyGameLinkCta: "Copy game link",
+      closeDialogCta: "Close",
+      gameLinkCopied: "Game link copied.",
     },
     gameRanking: {
       eyebrow: "Game Ranking",
@@ -3762,6 +3862,15 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       searchPlaceholder: "ゲームを検索...",
       emptyFavorites: "まだお気に入りのゲームがありません。",
       emptySearch: "検索結果に一致するゲームがありません。",
+      sortLabel: "ゲームの並び順",
+      sortOptions: {
+        popular: "人気ゲーム",
+        newest: "新着ゲーム",
+        players: "プレイ人数",
+        bookmarks: "お気に入り数",
+      },
+      playerCountLabel: "プレイしたユーザー",
+      bookmarkCountLabel: "お気に入りユーザー",
       categories: {
         all: "すべて",
         popular: "人気",
@@ -4878,6 +4987,31 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       mobileUnsupportedNotice: "このゲームはモバイル環境に対応していない場合があります。",
       orientationPortraitHint: "このゲームは縦画面に最適化されています。",
       orientationLandscapeHint: "このゲームは横画面に最適化されています。",
+      bookmarkCta: "ブックマーク",
+      bookmarkedCta: "ブックマーク済み",
+      shareGameCta: "共有",
+      shareGameCopied: "リンクをコピーしました",
+      feedbackCta: "フィードバック",
+      mobilePlayCta: "モバイルでプレイ",
+      theaterModeEnterCta: "シアターモード",
+      theaterModeExitCta: "標準表示",
+      adLabel: "広告",
+      adPlaceholder: "コンテンツのレイアウトを安定させるための広告予約枠です。",
+      recommendedGamesTitle: "次にプレイ",
+      recommendedGamesEmpty: "おすすめできる他の公開ゲームはまだありません。",
+      gameInfoTitle: "ゲーム情報",
+      publisherLabel: "制作者",
+      publishedLabel: "アップロード",
+      playerStatsLabel: "プレイヤー",
+      bookmarkStatsLabel: "ブックマーク",
+      officialGameBadge: "公式ゲーム",
+      userGameBadge: "ユーザー制作",
+      mobilePlayTitle: "スマートフォンで続けてプレイ",
+      mobilePlayBody:
+        "下のリンクをコピーまたは共有し、モバイルブラウザで同じゲームを開いてください。",
+      copyGameLinkCta: "ゲームリンクをコピー",
+      closeDialogCta: "閉じる",
+      gameLinkCopied: "ゲームリンクをコピーしました。",
     },
     gameRanking: {
       eyebrow: "ゲーム別ランキング",
@@ -5040,6 +5174,15 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       searchPlaceholder: "搜索游戏...",
       emptyFavorites: "还没有收藏的游戏。",
       emptySearch: "没有匹配的游戏。",
+      sortLabel: "游戏排序",
+      sortOptions: {
+        popular: "热门游戏",
+        newest: "最新游戏",
+        players: "游玩人数",
+        bookmarks: "收藏人数",
+      },
+      playerCountLabel: "游玩用户",
+      bookmarkCountLabel: "收藏用户",
       categories: {
         all: "全部",
         popular: "热门",
@@ -6105,6 +6248,30 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       mobileUnsupportedNotice: "此游戏可能不支持移动设备。",
       orientationPortraitHint: "此游戏针对竖屏进行了优化。",
       orientationLandscapeHint: "此游戏针对横屏进行了优化。",
+      bookmarkCta: "收藏",
+      bookmarkedCta: "已收藏",
+      shareGameCta: "分享",
+      shareGameCopied: "链接已复制",
+      feedbackCta: "反馈",
+      mobilePlayCta: "在手机上玩",
+      theaterModeEnterCta: "影院模式",
+      theaterModeExitCta: "默认视图",
+      adLabel: "广告",
+      adPlaceholder: "用于保持内容布局稳定的预留广告位。",
+      recommendedGamesTitle: "接下来玩",
+      recommendedGamesEmpty: "目前还没有其他可推荐的公开游戏。",
+      gameInfoTitle: "游戏信息",
+      publisherLabel: "制作者",
+      publishedLabel: "上传时间",
+      playerStatsLabel: "玩家",
+      bookmarkStatsLabel: "收藏",
+      officialGameBadge: "官方游戏",
+      userGameBadge: "用户制作",
+      mobilePlayTitle: "在手机上继续游玩",
+      mobilePlayBody: "复制或分享下方链接，然后在手机浏览器中打开同一款游戏。",
+      copyGameLinkCta: "复制游戏链接",
+      closeDialogCta: "关闭",
+      gameLinkCopied: "游戏链接已复制。",
     },
     gameRanking: {
       eyebrow: "游戏排行榜",

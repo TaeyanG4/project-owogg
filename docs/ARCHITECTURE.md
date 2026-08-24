@@ -2,7 +2,7 @@
 
 상태: 기준 문서
 
-마지막 검증: 2026-08-21
+마지막 검증: 2026-08-25
 
 기준 소스:
 
@@ -51,6 +51,12 @@ Browser
 - API 계약을 통해 데이터를 가져오며 D1 repository를 직접 사용하지 않습니다.
 - `GameHost`가 public game, signed game session, 결과/리더보드 흐름을 조정합니다.
 - `IframeRuntime`과 host-side Bridge가 격리된 standalone bundle을 연결합니다.
+- 홈과 전체 게임 목록은 공개 catalog의 서버 업로드 시각·고유 플레이 사용자·현재 북마크 수를 이용해
+  신규·조회·북마크·가중 인기 순으로 정렬합니다. 별도 정적 게임 목록이나 프런트 전용 통계 원장을
+  만들지 않습니다.
+- `/games/:slug`는 일반 페이지 사이드바를 오버레이로 전환하고, 좌측 플레이어·우측 광고/추천·하단
+  게임 정보와 플레이 액션을 배치한 전용 route mode를 사용합니다. 추천 데이터도 동일한 D1/B2 공개
+  catalog에서 계산합니다.
 - 생성된 Web loader는 Git 소스 게임의 build/check 소비자입니다. 프로덕션 runtime authority가
   아니라는 이유만으로 삭제할 수 있는 파일은 아닙니다.
 
@@ -132,10 +138,16 @@ publisher authority를 선택할 수 없으며 USER/sandbox/review row를 만들
 
 ```text
 /play/:slug
-→ generic registry가 live READY version 확인
+→ D1 identity + live READY version + 비활성화 상태 확인
 → /games/<gameId>/<versionId>/index.html
 → GameHost → IframeRuntime → Bridge
 ```
+
+카탈로그와 `GameHost`는 계속 generic D1/B2 canonical을 모두 검증하고, canonical이 없거나 잘못되면
+게임을 노출하지 않습니다. 반면 이미 노출된 게임의 `/play/:slug` 리졸버와 로고 바이트 라우트는
+canonical 전체를 다시 내려받지 않고 D1 control plane에서 현재 공개/READY/비활성화 상태를 확인합니다.
+실제 bundle 경로도 동일한 D1 gate를 다시 통과하므로 저장소 장애나 삭제 상태를 정적 데이터로
+우회하지 않습니다.
 
 `/official-games/*`는 현재 serving surface가 아닙니다. API regression test와 architecture guard가
 그 경로의 재도입을 막습니다. 현재 경로는 숫자 game/version 기반 immutable URL뿐입니다.
@@ -143,6 +155,32 @@ publisher authority를 선택할 수 없으며 USER/sandbox/review row를 만들
 점수는 signed game session으로 묶입니다. 서버는 attempt를 한 번만 소비하고 game/version/
 difficulty binding, 현재 availability, canonical score policy를 다시 검증합니다. iframe 메시지나
 클라이언트 표시값만으로 점수를 신뢰하지 않습니다.
+
+## 공개 게임 읽기 성능과 저장소 결정
+
+2026-08-25 Staging 측정에서 `/api/games`의 cold TTFB는 약 4.1초였지만 warm edge hit는
+약 0.3–0.6초였습니다. 로고와 `/play/:slug`는 반복 요청도 약 1.3–1.6초로, immutable bundle
+바이트보다 요청마다 선행하던 B2 canonical read와 D1 중복 조회가 지연의 주원인이었습니다.
+
+현재 읽기 경로는 다음 원칙을 사용합니다.
+
+- public catalog의 서로 독립적인 canonical 문서는 순차가 아니라 병렬로 읽습니다.
+- 이미 조합된 runtime 목록은 disabled 설정을 한 번만 읽고 D1 identity/version을 다시 N+1 조회하지
+  않습니다.
+- 로고는 D1 identity/version/asset revision을 먼저 확인한 뒤 content-addressed 바이트를 edge cache에서
+  읽습니다.
+- `/play/:slug`의 성공 302는 60초 동안 별도 edge cache에 저장하고, 공개 상태·live version이 바뀌는
+  모든 관리 경로가 API origin과 별도 `GAME_ORIGIN` 양쪽 cache key를 purge합니다.
+- 숫자 game/version asset은 immutable object path와 장기 edge cache를 유지합니다. HTML은 짧은 browser
+  cache, 그 외 asset은 1시간 browser cache로 incident 대응 가능성을 보존합니다.
+- Web 문서는 API와 `GAME_ORIGIN`에 preconnect해 첫 catalog/leaderboard/game 요청의 DNS·TLS 비용을
+  앱 초기화와 겹칩니다.
+
+현재 저장소 결정은 **B2 유지**입니다. B2의 저장 단가가 R2보다 낮고 Cloudflare를 통한 partner egress가
+무료인 반면, R2는 저장 단가와 Class A/B operation 비용이 더 큽니다. 위 구조에서는 versioned asset의
+첫 colo miss만 origin을 읽으므로 R2 전환보다 불필요한 origin read 제거가 속도와 비용 모두에 더 큰
+효과가 있습니다. R2는 캐시 최적화 후에도 cold-origin p95가 서비스 목표를 지속적으로 초과하거나,
+운영 복잡도까지 포함한 실제 트래픽 비용 측정에서 우위가 확인될 때만 Sippy/점진 이관으로 재검토합니다.
 
 ## 인증과 인가
 

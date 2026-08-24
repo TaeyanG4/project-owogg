@@ -5,6 +5,8 @@ import {
   SandboxGameRecordSchema,
   SandboxGameVersionRecordSchema,
   SandboxGameUploadResponseSchema,
+  GameLogoUpdateResponseSchema,
+  type SandboxGameBasicMetadataUpdateRequest,
   type SandboxGameUploadResponse,
 } from "@owogg/contracts";
 import { apiFetch } from "../lib/api/client";
@@ -112,6 +114,72 @@ export async function uploadDevGameVersion(gameId: number, file: File) {
 
   const json = await res.json();
   return SandboxGameVersionRecordSchema.parse(json);
+}
+
+async function uploadDevGamePart<T>(input: {
+  gameId: number;
+  path: "manifest" | "logo";
+  field: "manifest" | "logo";
+  file: File;
+  parse: (value: unknown) => T;
+}): Promise<T> {
+  const form = new FormData();
+  form.append(input.field, input.file);
+  const res = await fetch(`${API_URL}/api/dev/games/${input.gameId}/${input.path}`, {
+    method: "POST",
+    credentials: "include",
+    body: form,
+  });
+  if (!res.ok) {
+    let detail: string | undefined;
+    let code: string | undefined;
+    try {
+      const body = (await res.json()) as { error?: { code?: string; message?: string } };
+      detail = body.error?.message;
+      code = body.error?.code;
+    } catch {
+      // Keep the HTTP fallback below.
+    }
+    throw new ApiClientError(
+      "HttpError",
+      detail || `재업로드에 실패했습니다. (HTTP ${res.status})`,
+      {
+        status: res.status,
+        ...(code ? { code } : {}),
+      },
+    );
+  }
+  return input.parse(await res.json());
+}
+
+export function replaceDevGameManifest(gameId: number, file: File) {
+  return uploadDevGamePart({
+    gameId,
+    path: "manifest",
+    field: "manifest",
+    file,
+    parse: (value) => SandboxGameVersionRecordSchema.parse(value),
+  });
+}
+
+export function replaceDevGameLogo(gameId: number, file: File) {
+  return uploadDevGamePart({
+    gameId,
+    path: "logo",
+    field: "logo",
+    file,
+    parse: (value) => GameLogoUpdateResponseSchema.parse(value),
+  });
+}
+
+export function patchDevGameBasicMetadata(
+  gameId: number,
+  input: SandboxGameBasicMetadataUpdateRequest,
+) {
+  return apiFetch(`/api/dev/games/${gameId}/basic-metadata`, SandboxGameVersionRecordSchema, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
 }
 
 /**

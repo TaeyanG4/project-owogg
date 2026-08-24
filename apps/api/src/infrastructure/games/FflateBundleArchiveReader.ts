@@ -1,5 +1,5 @@
-import { unzipSync } from "fflate";
-import type { BundleArchiveReader } from "@owogg/core";
+import { unzipSync, zipSync } from "fflate";
+import type { BundleArchiveReader, BundleArchiveWriter } from "@owogg/core";
 
 /**
  * The zip half of the publish pipeline. Lives here, with the other infrastructure adapters, so
@@ -31,7 +31,7 @@ import type { BundleArchiveReader } from "@owogg/core";
  * maximum single-stream expansion ratio is documented at roughly ~1032:1, so a 20MiB compressed
  * upload bounds worst-case decode work regardless of anything an entry's header claims).
  */
-export class FflateBundleArchiveReader implements BundleArchiveReader {
+export class FflateBundleArchiveReader implements BundleArchiveReader, BundleArchiveWriter {
   readMetadata(
     archive: ArrayBuffer,
   ): Array<{ path: string; declaredSize: number; compressedSize: number }> {
@@ -56,5 +56,13 @@ export class FflateBundleArchiveReader implements BundleArchiveReader {
 
   read(archive: ArrayBuffer): Record<string, Uint8Array> {
     return unzipSync(new Uint8Array(archive));
+  }
+
+  write(entries: Readonly<Record<string, Uint8Array>>): ArrayBuffer {
+    const archive = zipSync({ ...entries }, { level: 6 });
+    return archive.buffer.slice(
+      archive.byteOffset,
+      archive.byteOffset + archive.byteLength,
+    ) as ArrayBuffer;
   }
 }
