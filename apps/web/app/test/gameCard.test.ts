@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { gameCardHref } from "../components/ui/GameCard";
+import { shouldRenderGameThumbnailImage } from "../components/ui/GameThumbnail";
 
 /**
  * gameCardHref is the pure routing decision GameCard's <Link> renders — extracted specifically so
@@ -23,4 +24,12 @@ test("the route is identical regardless of the slug's shape — no lingering own
   for (const slug of ["reaction-time", "ball-dodge", "some-other-creator-game", "sandbox"]) {
     assert.equal(gameCardHref(slug), `/games/${slug}`);
   }
+});
+
+test("a failed logo is retried when re-upload changes its asset revision URL", () => {
+  const oldUrl = "https://api.example.test/api/games/aim-test/media/logo?v=old";
+  const newUrl = "https://api.example.test/api/games/aim-test/media/logo?v=new";
+
+  assert.equal(shouldRenderGameThumbnailImage(oldUrl, oldUrl), false);
+  assert.equal(shouldRenderGameThumbnailImage(newUrl, oldUrl), true);
 });

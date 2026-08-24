@@ -16,6 +16,7 @@ import {
 import type { ApiEnv } from "./auth.js";
 import { readB2Config } from "./devGames.js";
 import { rateLimit } from "../middleware/rateLimit.js";
+import { purgePublicGameReadCache } from "./publicGameCache.js";
 
 export const adminGamesRouter = new Hono<ApiEnv>();
 
@@ -91,6 +92,8 @@ adminGamesRouter.post(
         bytes: await bundle.arrayBuffer(),
         contentType: bundle.type || undefined,
       });
+      await purgePublicGameReadCache(c.req.url, [result.slug]);
+      c.header("Clear-Site-Data", '"cache"');
       return c.json(AdminOfficialGameUploadResponseSchema.parse(result), 201);
     } catch (error) {
       if (!(error instanceof OfficialGameUploadFailure)) throw error;
@@ -136,6 +139,8 @@ adminGamesRouter.delete("/:gameId", async (c) => {
       slug: c.req.param("gameId"),
       actorAdminId: admin.userId,
     });
+    await purgePublicGameReadCache(c.req.url, [result.slug]);
+    c.header("Clear-Site-Data", '"cache"');
     return c.json(AdminOfficialGameDeleteResponseSchema.parse(result), 200);
   } catch (error) {
     if (!(error instanceof OfficialGameDeleteFailure)) throw error;
@@ -150,6 +155,11 @@ adminGamesRouter.delete("/:gameId", async (c) => {
         404,
       );
     }
+    // prepareDeletion quarantines the identity before touching B2. Even when later cleanup fails,
+    // evict public reads so the already-private game disappears immediately while an operator
+    // retries the idempotent deletion.
+    await purgePublicGameReadCache(c.req.url, [c.req.param("gameId")]);
+    c.header("Clear-Site-Data", '"cache"');
     const message =
       error.code === "STORAGE_DELETE_FAILED"
         ? "게임은 즉시 비공개 처리됐지만 B2 정리가 완료되지 않았습니다. 같은 삭제 작업을 다시 시도해 주세요."
@@ -194,6 +204,9 @@ adminGamesRouter.post("/:gameId/toggle", async (c) => {
   if (!result.ok) {
     return c.json({ error: { code: result.code, message: "존재하지 않는 게임입니다." } }, 404);
   }
+
+  await purgePublicGameReadCache(c.req.url, [gameId]);
+  c.header("Clear-Site-Data", '"cache"');
 
   return c.json(
     {

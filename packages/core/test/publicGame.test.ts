@@ -84,7 +84,7 @@ test("a D1/B2 logo asset is the only public artwork source for every publisher",
   };
   assert.equal(
     publicGameMediaUrl(asset, "https://api.example.test/media/logo"),
-    "https://api.example.test/media/logo",
+    "https://api.example.test/media/logo?v=2026-08-01T00%3A00%3A00.000Z",
   );
 });
 
@@ -101,7 +101,7 @@ test("GENRE_MODE games use the provider-neutral media endpoint only when a logo 
   };
   assert.equal(
     publicGameMediaUrl(asset, "/api/games/ball-dodge/media/logo"),
-    "/api/games/ball-dodge/media/logo",
+    "/api/games/ball-dodge/media/logo?v=2026-08-01T00%3A00%3A00.000Z",
   );
   assert.equal(publicGameMediaUrl(null, "/api/games/ball-dodge/media/logo"), null);
 });

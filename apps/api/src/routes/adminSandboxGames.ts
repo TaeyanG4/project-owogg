@@ -24,6 +24,7 @@ import { SANDBOX_GAME_FAILURE_STATUS, SANDBOX_GAME_FAILURE_MESSAGE } from "./san
 import type { SandboxGameFailureStatus } from "./sandboxGameErrors.js";
 import { readB2Config } from "./devGames.js";
 import type { ApiEnv } from "./auth.js";
+import { purgePublicGameReadCache } from "./publicGameCache.js";
 
 /** Admin-only review/publish surface for sandbox games — approve/reject an uploaded version,
  * adjust the generalized metadata (title/description/genre/XP/score config), and flip
@@ -222,6 +223,11 @@ adminSandboxGamesRouter.post("/versions/:versionId/revoke", async (c) => {
       adminId: admin.userId,
       reason,
     });
+    const game = await sandboxGameUseCases.getById(version.gameId);
+    if (game) {
+      await purgePublicGameReadCache(c.req.url, [game.slug]);
+      c.header("Clear-Site-Data", '"cache"');
+    }
     return c.json(SandboxGameVersionRecordSchema.parse(version), 200);
   } catch (err) {
     const { body: errBody, status } = failureResponse(err);
@@ -269,6 +275,8 @@ adminSandboxGamesRouter.patch("/:id/live-version", async (c) => {
   try {
     const { sandboxGameUseCases } = createContainer(c.env.DB);
     const game = await sandboxGameUseCases.setLiveVersion(id, admin.userId, parsed.data.versionId);
+    await purgePublicGameReadCache(c.req.url, [game.slug]);
+    c.header("Clear-Site-Data", '"cache"');
     return c.json(SandboxGameRecordSchema.parse(toSandboxGameRecordResponse(game)), 200);
   } catch (err) {
     const { body: errBody, status } = failureResponse(err);
@@ -312,6 +320,8 @@ adminSandboxGamesRouter.patch("/:id/metadata", async (c) => {
 
   try {
     const game = await container.sandboxGameUseCases.updateMetadata(id, admin.userId, parsed.data);
+    await purgePublicGameReadCache(c.req.url, [game.slug]);
+    c.header("Clear-Site-Data", '"cache"');
     return c.json(SandboxGameRecordSchema.parse(toSandboxGameRecordResponse(game)), 200);
   } catch (err) {
     const { body: errBody, status } = failureResponse(err);
@@ -336,6 +346,8 @@ adminSandboxGamesRouter.patch("/:id/visibility", async (c) => {
   try {
     const { sandboxGameUseCases } = createContainer(c.env.DB);
     const game = await sandboxGameUseCases.setVisibility(id, admin.userId, parsed.data.visibility);
+    await purgePublicGameReadCache(c.req.url, [game.slug]);
+    c.header("Clear-Site-Data", '"cache"');
     return c.json(SandboxGameRecordSchema.parse(toSandboxGameRecordResponse(game)), 200);
   } catch (err) {
     const { body: errBody, status } = failureResponse(err);
@@ -356,6 +368,8 @@ adminSandboxGamesRouter.delete("/:id", async (c) => {
   try {
     const { sandboxGameUseCases } = createContainer(c.env.DB);
     const game = await sandboxGameUseCases.deleteGame({ gameId: id, actorAdminId: admin.userId });
+    await purgePublicGameReadCache(c.req.url, [game.slug]);
+    c.header("Clear-Site-Data", '"cache"');
     return c.json(SandboxGameRecordSchema.parse(toSandboxGameRecordResponse(game)), 200);
   } catch (err) {
     const { body: errBody, status } = failureResponse(err);
@@ -375,7 +389,10 @@ adminSandboxGamesRouter.delete("/:id/purge", async (c) => {
   const id = Number(c.req.param("id"));
   try {
     const { sandboxGameUseCases } = createContainer(c.env.DB);
+    const existing = await sandboxGameUseCases.getById(id);
     await sandboxGameUseCases.purgeGame({ gameId: id, actorAdminId: admin.userId });
+    await purgePublicGameReadCache(c.req.url, existing ? [existing.slug] : []);
+    c.header("Clear-Site-Data", '"cache"');
     return c.json({ purged: true }, 200);
   } catch (err) {
     const { body: errBody, status } = failureResponse(err);

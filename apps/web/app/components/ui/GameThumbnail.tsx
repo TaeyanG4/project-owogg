@@ -10,6 +10,14 @@ interface GameThumbnailProps {
   rounded?: string | undefined;
 }
 
+export function shouldRenderGameThumbnailImage(
+  thumbnail: string,
+  failedThumbnail: string | null,
+): boolean {
+  const isValidPath = thumbnail.startsWith("/") || thumbnail.startsWith("http");
+  return failedThumbnail !== thumbnail && isValidPath;
+}
+
 /** Single source of truth for "how a game's icon renders": the real thumbnail image when its
  * path looks valid and hasn't failed to load, otherwise a colored two-letter badge from the
  * game's accent color. Previously each screen re-implemented this differently — GameCard had the
@@ -22,15 +30,17 @@ export function GameThumbnail({
   className,
   rounded = "rounded-2xl",
 }: GameThumbnailProps) {
-  const [imageError, setImageError] = useState(false);
-  const isValidPath = thumbnail.startsWith("/") || thumbnail.startsWith("http");
+  // Remember the exact URL that failed, not a permanent boolean for this mounted card. A game can
+  // be deleted and re-registered under the same slug while the catalog page remains open; the
+  // revisioned replacement URL must get a fresh image attempt without requiring a hard reload.
+  const [failedThumbnail, setFailedThumbnail] = useState<string | null>(null);
 
-  if (!imageError && isValidPath) {
+  if (shouldRenderGameThumbnailImage(thumbnail, failedThumbnail)) {
     return (
       <img
         src={thumbnail}
         alt={title}
-        onError={() => setImageError(true)}
+        onError={() => setFailedThumbnail(thumbnail)}
         className={`${className} ${rounded} object-contain`}
       />
     );

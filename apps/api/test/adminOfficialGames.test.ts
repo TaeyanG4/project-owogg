@@ -226,6 +226,7 @@ test("official hard delete removes B2 objects and completes the D1 purge", async
     );
 
     assert.equal(response.status, 200);
+    assert.equal(response.headers.get("Clear-Site-Data"), '"cache"');
     const body = (await response.json()) as {
       slug: string;
       deletedVersionCount: number;

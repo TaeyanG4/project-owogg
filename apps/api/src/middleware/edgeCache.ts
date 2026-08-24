@@ -11,7 +11,26 @@ interface CloudflareCacheStorage {
   default: {
     match(request: Request): Promise<Response | undefined>;
     put(request: Request, response: Response): Promise<void>;
+    delete(request: Request): Promise<boolean>;
   };
+}
+
+export interface EdgeCacheOptions {
+  ttlSeconds: number;
+  /**
+   * Browser-facing TTL. The Cache API entry still uses `ttlSeconds`, so setting this to zero keeps
+   * the D1-saving edge cache while forcing browsers to ask the Worker again. This is important for
+   * mutable catalog surfaces: an admin mutation can evict the edge entry, but it cannot otherwise
+   * reach into every already-open browser's HTTP cache.
+   */
+  browserTtlSeconds?: number;
+}
+
+function browserCacheControl(options: EdgeCacheOptions): string {
+  const browserTtlSeconds = options.browserTtlSeconds ?? options.ttlSeconds;
+  return browserTtlSeconds <= 0
+    ? "no-store"
+    : `public, max-age=${browserTtlSeconds}, s-maxage=${options.ttlSeconds}`;
 }
 
 /**
@@ -37,11 +56,12 @@ interface CloudflareCacheStorage {
  *              visibility-filtered data (e.g. /api/profile/public/:id — favorites/recent-plays
  *              are gated on the *viewer*, so the same URL legitimately returns different bodies)
  *
- * Staleness is bounded by `ttlSeconds` rather than actively purged on write: a leaderboard that
- * lags a few seconds behind the newest submission is acceptable, and purge-on-write would
- * reintroduce a D1-coupled write amplification this is meant to remove.
+ * Staleness is bounded by `ttlSeconds` by default: a leaderboard that lags a few seconds behind
+ * the newest submission is acceptable. Rare, high-impact control-plane writes such as game
+ * takedowns may additionally call `purgeEdgeCacheUrls`; ordinary hot-path writes must not add that
+ * write amplification.
  */
-export function edgeCache(options: { ttlSeconds: number }): MiddlewareHandler<ApiEnv> {
+export function edgeCache(options: EdgeCacheOptions): MiddlewareHandler<ApiEnv> {
   const { ttlSeconds } = options;
 
   return async (c, next) => {
@@ -57,7 +77,13 @@ export function edgeCache(options: { ttlSeconds: number }): MiddlewareHandler<Ap
 
     const cached = await cache.match(cacheKey);
     if (cached) {
-      const hit = new Response(cached.body, cached);
+      const hitHeaders = new Headers(cached.headers);
+      hitHeaders.set("Cache-Control", browserCacheControl(options));
+      const hit = new Response(cached.body, {
+        status: cached.status,
+        statusText: cached.statusText,
+        headers: hitHeaders,
+      });
       hit.headers.set("X-Cache", "HIT");
       return hit;
     }
@@ -68,14 +94,13 @@ export function edgeCache(options: { ttlSeconds: number }): MiddlewareHandler<Ap
     if (!c.res || c.res.status !== 200) return;
 
     const body = await c.res.clone().arrayBuffer();
-    const headers = new Headers(c.res.headers);
+    const storedHeaders = new Headers(c.res.headers);
     // Defense in depth: a Set-Cookie here would mean the response is user-specific after all
     // (and the Cache API rejects such responses outright). Drop it rather than poison the entry.
-    headers.delete("Set-Cookie");
-    headers.set("Cache-Control", `public, max-age=${ttlSeconds}, s-maxage=${ttlSeconds}`);
-    headers.set("X-Cache", "MISS");
+    storedHeaders.delete("Set-Cookie");
+    storedHeaders.set("Cache-Control", `public, max-age=${ttlSeconds}, s-maxage=${ttlSeconds}`);
 
-    const toStore = new Response(body, { status: 200, headers });
+    const toStore = new Response(body, { status: 200, headers: storedHeaders });
 
     // Fill the cache without delaying the response. Hono's `executionCtx` getter *throws* when
     // no ExecutionContext is bound (it does not return undefined), which is the case in the
@@ -87,6 +112,22 @@ export function edgeCache(options: { ttlSeconds: number }): MiddlewareHandler<Ap
       // No ExecutionContext (tests) — skip caching, still return the fresh response below.
     }
 
-    c.res = toStore;
+    const responseHeaders = new Headers(c.res.headers);
+    responseHeaders.delete("Set-Cookie");
+    responseHeaders.set("Cache-Control", browserCacheControl(options));
+    responseHeaders.set("X-Cache", "MISS");
+    c.res = new Response(body, { status: 200, headers: responseHeaders });
   };
+}
+
+/** Best-effort active invalidation for rare control-plane writes. Cache API entries are local to
+ * a Cloudflare data center, so the short edge TTL remains the global safety bound; deleting the
+ * exact public keys here removes the stale response immediately for the colo handling the admin
+ * mutation and pairs with browser `no-store` on mutable catalog reads. */
+export async function purgeEdgeCacheUrls(urls: readonly string[]): Promise<void> {
+  if (typeof caches === "undefined" || urls.length === 0) return;
+  const cache = (caches as unknown as CloudflareCacheStorage).default;
+  await Promise.allSettled(
+    [...new Set(urls)].map((url) => cache.delete(new Request(url, { method: "GET" }))),
+  );
 }

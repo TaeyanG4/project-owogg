@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Hono } from "hono";
-import { edgeCache } from "../src/middleware/edgeCache.js";
+import { edgeCache, purgeEdgeCacheUrls } from "../src/middleware/edgeCache.js";
 
 // The Cache API (`caches.default`) does not exist in the plain-Node test runner. These tests
 // install a minimal in-memory stand-in that mirrors the two behaviors the middleware depends on
@@ -10,11 +10,12 @@ import { edgeCache } from "../src/middleware/edgeCache.js";
 interface FakeCache {
   entries: Map<string, Response>;
   putCount: number;
+  deleteCount: number;
 }
 
 function installFakeCache(): FakeCache {
   const entries = new Map<string, Response>();
-  const state: FakeCache = { entries, putCount: 0 };
+  const state: FakeCache = { entries, putCount: 0, deleteCount: 0 };
 
   (globalThis as unknown as { caches: unknown }).caches = {
     default: {
@@ -25,6 +26,10 @@ function installFakeCache(): FakeCache {
       async put(request: Request, response: Response) {
         state.putCount += 1;
         entries.set(request.url, response);
+      },
+      async delete(request: Request) {
+        state.deleteCount += 1;
+        return entries.delete(request.url);
       },
     },
   };
@@ -94,6 +99,50 @@ test("edgeCache keys on the full URL, so a different query string is a separate 
       { difficulty: "hard" },
       "a different difficulty must not be served the other tier's cached leaderboard",
     );
+  } finally {
+    uninstallFakeCache();
+  }
+});
+
+test("mutable reads can stay edge-cached without being pinned in the browser", async () => {
+  const state = installFakeCache();
+  try {
+    let runs = 0;
+    const app = new Hono();
+    app.get("/catalog", edgeCache({ ttlSeconds: 60, browserTtlSeconds: 0 }), (c) =>
+      c.json({ run: ++runs }),
+    );
+
+    const first = fakeExecutionCtx();
+    const miss = await app.request("/catalog", {}, {}, first.ctx as never);
+    await first.settle();
+    const hit = await app.request("/catalog");
+
+    assert.equal(miss.headers.get("Cache-Control"), "no-store");
+    assert.equal(hit.headers.get("Cache-Control"), "no-store");
+    assert.equal(hit.headers.get("X-Cache"), "HIT");
+    assert.equal(runs, 1, "the browser policy must not disable the edge entry");
+    const stored = state.entries.get(new Request("http://localhost/catalog").url);
+    assert.equal(stored?.headers.get("Cache-Control"), "public, max-age=60, s-maxage=60");
+  } finally {
+    uninstallFakeCache();
+  }
+});
+
+test("purgeEdgeCacheUrls actively removes exact public read keys", async () => {
+  const state = installFakeCache();
+  try {
+    state.entries.set("https://api.example.test/api/games", new Response("old"));
+    state.entries.set("https://api.example.test/api/games/aim-test", new Response("old"));
+
+    await purgeEdgeCacheUrls([
+      "https://api.example.test/api/games",
+      "https://api.example.test/api/games/aim-test",
+      "https://api.example.test/api/games",
+    ]);
+
+    assert.equal(state.entries.size, 0);
+    assert.equal(state.deleteCount, 2, "duplicate cache keys are evicted once");
   } finally {
     uninstallFakeCache();
   }

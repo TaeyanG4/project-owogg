@@ -45,6 +45,7 @@ import {
 import { apiFetch } from "../lib/api/client";
 import { API_URL } from "../lib/api/config";
 import { ApiClientError } from "../lib/api/errors";
+import { notifyPublicGameCatalogChanged } from "./publicGamesApi";
 
 const AdminLogoutResponseSchema = z.object({ success: z.boolean() });
 const AdminSuccessResponseSchema = z.object({ success: z.boolean() });
@@ -52,6 +53,12 @@ export const ADMIN_SESSION_CHANGED_EVENT = "owogg:admin-session-changed";
 
 function notifyAdminSessionChanged() {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(ADMIN_SESSION_CHANGED_EVENT));
+}
+
+async function refreshCatalogAfter<T>(request: Promise<T>): Promise<T> {
+  const result = await request;
+  notifyPublicGameCatalogChanged();
+  return result;
 }
 const AdminAccountSummaryOnCreateSchema = z.object({
   id: z.number(),
@@ -226,10 +233,12 @@ export function fetchAdminGames() {
 }
 
 export function postToggleAdminGame(gameId: string, enabled: boolean, reason: string | null) {
-  return apiFetch(`/api/admin/games/${gameId}/toggle`, AdminGameToggleResponseSchema, {
-    method: "POST",
-    body: JSON.stringify({ enabled, reason }),
-  });
+  return refreshCatalogAfter(
+    apiFetch(`/api/admin/games/${gameId}/toggle`, AdminGameToggleResponseSchema, {
+      method: "POST",
+      body: JSON.stringify({ enabled, reason }),
+    }),
+  );
 }
 
 export async function uploadOfficialGame(file: File) {
@@ -255,14 +264,18 @@ export async function uploadOfficialGame(file: File) {
       ...(code ? { code } : {}),
     });
   }
-  return AdminOfficialGameUploadResponseSchema.parse(await res.json());
+  const result = AdminOfficialGameUploadResponseSchema.parse(await res.json());
+  notifyPublicGameCatalogChanged();
+  return result;
 }
 
 export function deleteOfficialGame(gameId: string) {
-  return apiFetch(
-    `/api/admin/games/${encodeURIComponent(gameId)}`,
-    AdminOfficialGameDeleteResponseSchema,
-    { method: "DELETE" },
+  return refreshCatalogAfter(
+    apiFetch(
+      `/api/admin/games/${encodeURIComponent(gameId)}`,
+      AdminOfficialGameDeleteResponseSchema,
+      { method: "DELETE" },
+    ),
   );
 }
 
@@ -410,40 +423,50 @@ export function postRejectSandboxVersion(versionId: number, reason: string) {
  * mistaken approval. If the version was the game's live version, the game is forced back to
  * PRIVATE server-side in the same call. */
 export function postRevokeSandboxVersion(versionId: number, reason: string | null) {
-  return apiFetch(
-    `/api/admin/sandbox-games/versions/${versionId}/revoke`,
-    SandboxGameVersionRecordSchema,
-    { method: "POST", body: JSON.stringify({ reason }) },
+  return refreshCatalogAfter(
+    apiFetch(
+      `/api/admin/sandbox-games/versions/${versionId}/revoke`,
+      SandboxGameVersionRecordSchema,
+      { method: "POST", body: JSON.stringify({ reason }) },
+    ),
   );
 }
 
 export function patchSandboxGameMetadata(id: number, input: SandboxGameMetadataUpdateRequest) {
-  return apiFetch(`/api/admin/sandbox-games/${id}/metadata`, SandboxGameRecordSchema, {
-    method: "PATCH",
-    body: JSON.stringify(input),
-  });
+  return refreshCatalogAfter(
+    apiFetch(`/api/admin/sandbox-games/${id}/metadata`, SandboxGameRecordSchema, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  );
 }
 
 export function patchSandboxGameVisibility(id: number, visibility: SandboxGameVisibility) {
-  return apiFetch(`/api/admin/sandbox-games/${id}/visibility`, SandboxGameRecordSchema, {
-    method: "PATCH",
-    body: JSON.stringify({ visibility }),
-  });
+  return refreshCatalogAfter(
+    apiFetch(`/api/admin/sandbox-games/${id}/visibility`, SandboxGameRecordSchema, {
+      method: "PATCH",
+      body: JSON.stringify({ visibility }),
+    }),
+  );
 }
 
 /** Soft-deletes a sandbox game (migration 0026) — requires `sandbox_games.delete`, ADMIN/OPERATOR
  * only (MODERATOR has review but not delete, see docs/AUTHORIZATION.md). Forces the game back to
  * PRIVATE server-side; the row itself is kept for audit, not hard-deleted. */
 export function deleteSandboxGame(id: number) {
-  return apiFetch(`/api/admin/sandbox-games/${id}`, SandboxGameRecordSchema, {
-    method: "DELETE",
-  });
+  return refreshCatalogAfter(
+    apiFetch(`/api/admin/sandbox-games/${id}`, SandboxGameRecordSchema, {
+      method: "DELETE",
+    }),
+  );
 }
 
 /** Permanently erases an already-soft-deleted, never-approved sandbox draft. Approval history
  * permanently reserves the slug and makes this operation return 409. */
 export function purgeSandboxGame(id: number) {
-  return apiFetch(`/api/admin/sandbox-games/${id}/purge`, z.object({ purged: z.literal(true) }), {
-    method: "DELETE",
-  });
+  return refreshCatalogAfter(
+    apiFetch(`/api/admin/sandbox-games/${id}/purge`, z.object({ purged: z.literal(true) }), {
+      method: "DELETE",
+    }),
+  );
 }

@@ -52,6 +52,12 @@ export function toPublicGame(
  * migration metadata, not a runtime asset authority. Only a D1 asset row backed by B2 may produce
  * a public media URL; otherwise callers render their neutral no-image fallback. */
 export function publicGameMediaUrl(asset: GameAsset | null, mediaEndpoint: string): string | null {
-  if (asset?.kind === "LOGO") return mediaEndpoint;
+  if (asset?.kind === "LOGO") {
+    // The public endpoint deliberately hides the B2 object key, so the asset row's update time is
+    // the safe cache revision. Re-registering the same slug now produces a different URL and makes
+    // browsers retry a logo that previously returned 404 instead of pinning the text fallback.
+    const separator = mediaEndpoint.includes("?") ? "&" : "?";
+    return `${mediaEndpoint}${separator}v=${encodeURIComponent(asset.updatedAt)}`;
+  }
   return null;
 }

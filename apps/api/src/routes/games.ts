@@ -53,7 +53,7 @@ export const gamesRouter = new Hono<ApiEnv>();
 // everyone and changing only when an admin flips a switch. The kill switch stays effective
 // because POST /api/scores re-checks the disabled set against D1 directly on submission — the
 // cache only ever delays the catalog *display* update by up to a minute, never the enforcement.
-gamesRouter.get("/availability", edgeCache({ ttlSeconds: 60 }), async (c) => {
+gamesRouter.get("/availability", edgeCache({ ttlSeconds: 60, browserTtlSeconds: 0 }), async (c) => {
   if (!c.env?.DB) {
     return c.json(PublicGameAvailabilityResponseSchema.parse({ disabledGameIds: [] }), 200);
   }
@@ -98,7 +98,7 @@ async function publicGameProjection(
 
 // GET /api/games — every currently public, live, READY generic game. D1 kill-switch state is
 // applied after the provider-neutral runtime registry has resolved identity/version/canonical.
-gamesRouter.get("/", edgeCache({ ttlSeconds: 60 }), async (c) => {
+gamesRouter.get("/", edgeCache({ ttlSeconds: 60, browserTtlSeconds: 0 }), async (c) => {
   if (!c.env?.DB) return c.json(PublicGameListResponseSchema.parse({ games: [] }), 200);
 
   const container = createContainer(c.env.DB, readB2Config(c.env));
@@ -118,10 +118,15 @@ gamesRouter.get("/", edgeCache({ ttlSeconds: 60 }), async (c) => {
   );
 });
 
-// Generic public USER logo bytes. The object key is resolved from provider-neutral D1 metadata and
-// never included in JSON responses. Availability is checked before touching B2 so private,
-// deleted, malformed, or disabled games cannot leak media.
-gamesRouter.get("/:slug/media/logo", edgeCache({ ttlSeconds: 3600 }), async (c) => {
+interface PublicLogoCache {
+  match(request: Request): Promise<Response | undefined>;
+  put(request: Request, response: Response): Promise<void>;
+}
+
+// Generic public logo bytes. Availability and the exact D1 asset revision are checked BEFORE the
+// B2 byte cache on every request. A conventional edgeCache middleware would return its hit before
+// these checks and could keep a deleted/disabled game's logo public for an hour.
+gamesRouter.get("/:slug/media/logo", async (c) => {
   if (!c.env?.DB) return c.text("Not Found", 404);
   const container = createContainer(c.env.DB, readB2Config(c.env));
   const runtime = await container.publicGameCatalog.findBySlug(c.req.param("slug"));
@@ -129,15 +134,51 @@ gamesRouter.get("/:slug/media/logo", edgeCache({ ttlSeconds: 3600 }), async (c) 
     if (!runtime) return c.text("Not Found", 404);
     const asset = await container.gameAssetRepo.findByGameId(runtime.identity.id, "LOGO");
     if (!asset) return c.text("Not Found", 404);
+    if (c.req.query("v") !== asset.updatedAt) return c.text("Not Found", 404);
+
+    const cacheKey = new Request(c.req.url, { method: "GET" });
+    const cache =
+      typeof caches === "undefined"
+        ? null
+        : ((caches as unknown as { default: PublicLogoCache }).default ?? null);
+    const cached = await cache?.match(cacheKey);
+    if (cached) {
+      return new Response(cached.body, {
+        status: 200,
+        headers: {
+          "Content-Type": cached.headers.get("Content-Type") ?? "application/octet-stream",
+          "Cache-Control": "no-store",
+          "X-Cache": "HIT",
+        },
+      });
+    }
+
     const bytes = await container.gameBundleStorageRepo.getObject(asset.objectKey);
     if (!bytes) return c.text("Not Found", 404);
-    return new Response(bytes, {
+    const contentType = resolveBundleContentType(asset.objectKey).contentType;
+    const response = new Response(bytes, {
       status: 200,
       headers: {
-        "Content-Type": resolveBundleContentType(asset.objectKey).contentType,
-        "Cache-Control": "public, max-age=3600",
+        "Content-Type": contentType,
+        "Cache-Control": "no-store",
+        "X-Cache": "MISS",
       },
     });
+    if (cache) {
+      const stored = new Response(bytes, {
+        status: 200,
+        headers: {
+          "Content-Type": contentType,
+          "Cache-Control": "public, max-age=3600, s-maxage=3600",
+        },
+      });
+      try {
+        c.executionCtx.waitUntil(cache.put(cacheKey, stored));
+      } catch {
+        // Plain-Node tests have no execution context. The fresh response remains valid.
+      }
+    }
+    return response;
   } catch {
     // Unknown, private, disabled, malformed, or unavailable media is indistinguishable.
     return c.text("Not Found", 404);
@@ -145,7 +186,7 @@ gamesRouter.get("/:slug/media/logo", edgeCache({ ttlSeconds: 3600 }), async (c) 
 });
 
 // GET /api/games/:slug — one provider-neutral runtime resolution path for OWOGG and USER.
-gamesRouter.get("/:slug", edgeCache({ ttlSeconds: 60 }), async (c) => {
+gamesRouter.get("/:slug", edgeCache({ ttlSeconds: 60, browserTtlSeconds: 0 }), async (c) => {
   if (!c.env?.DB) return c.text("Not Found", 404);
 
   const container = createContainer(c.env.DB, readB2Config(c.env));

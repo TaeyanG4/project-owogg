@@ -250,7 +250,10 @@ test("GET /api/games lists generic OWOGG and USER projections and preserves cata
   assert.equal(user?.publisherName, "Taeyang");
   assert.equal(official?.catalog.type, "TAXONOMY");
   assert.equal(user?.catalog.type, "GENRE_MODE");
-  assert.equal(user?.mediaUrl, "https://api.example.test/api/games/ball-dodge/media/logo");
+  assert.equal(
+    user?.mediaUrl,
+    "https://api.example.test/api/games/ball-dodge/media/logo?v=2026-08-01T00%3A00%3A00.000Z",
+  );
   assert.equal("publisher_user_id" in (user ?? {}), false);
   assert.equal("developerUserId" in (user ?? {}), false);
 });
@@ -279,13 +282,55 @@ test("GET /api/games/:slug resolves the same generic projection and denies priva
 test("generic media route serves a D1 asset without exposing its object key and denies disabled games", async () => {
   const games = [USER, { ...OFFICIAL, slug: "typing-test", disabled: true }];
   const db = createDb(games);
-  const mediaResponse = await request("/api/games/ball-dodge/media/logo", db, games);
+  const mediaResponse = await request(
+    "/api/games/ball-dodge/media/logo?v=2026-08-01T00%3A00%3A00.000Z",
+    db,
+    games,
+  );
   assert.equal(mediaResponse.status, 200);
   assert.equal(mediaResponse.headers.get("Content-Type"), "image/svg+xml");
+  assert.equal(mediaResponse.headers.get("Cache-Control"), "no-store");
   assert.deepEqual(new Uint8Array(await mediaResponse.arrayBuffer()), new Uint8Array([1, 2, 3]));
 
-  const disabledResponse = await request("/api/games/typing-test/media/logo", db, games);
+  const staleRevisionResponse = await request("/api/games/ball-dodge/media/logo", db, games);
+  assert.equal(staleRevisionResponse.status, 404);
+
+  const disabledResponse = await request(
+    "/api/games/typing-test/media/logo?v=2026-08-01T00%3A00%3A00.000Z",
+    db,
+    games,
+  );
   assert.equal(disabledResponse.status, 404);
+});
+
+test("cached logo bytes never bypass a current D1 disable/delete decision", async () => {
+  const disabledUser = { ...USER, disabled: true };
+  const games = [disabledUser];
+  const db = createDb(games);
+  let cacheMatches = 0;
+  (globalThis as unknown as { caches: unknown }).caches = {
+    default: {
+      async match() {
+        cacheMatches += 1;
+        return new Response(new Uint8Array([9, 9, 9]), {
+          headers: { "Content-Type": "image/svg+xml" },
+        });
+      },
+      async put() {},
+    },
+  };
+
+  try {
+    const response = await request(
+      "/api/games/ball-dodge/media/logo?v=2026-08-01T00%3A00%3A00.000Z",
+      db,
+      games,
+    );
+    assert.equal(response.status, 404);
+    assert.equal(cacheMatches, 0, "availability must be checked before the byte-cache lookup");
+  } finally {
+    delete (globalThis as unknown as { caches?: unknown }).caches;
+  }
 });
 
 test("generic public routes fail closed without a D1 binding", async () => {
