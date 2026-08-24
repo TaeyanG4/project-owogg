@@ -9,6 +9,7 @@ export interface IframeRuntimeProps {
   title: string;
   poster?: ReactNode;
   className?: string;
+  autoStart?: boolean | undefined;
   frameClassName?: string;
   frameStyle?: React.CSSProperties | undefined;
   iframeStyle?: React.CSSProperties | undefined;
@@ -32,14 +33,16 @@ export interface IframeRuntimeProps {
 }
 
 /**
- * Mounts a Bridge-driven game inside GameFrame's lazy-mount/sandbox embed and wires the Game
- * Bridge to it. GameHost is the sole runtime consumer for every publisher.
+ * Mounts a Bridge-driven game inside GameFrame's sandbox embed and wires the Game Bridge to it.
+ * GameHost enables immediate mounting; preview callers may retain GameFrame's lazy gate. GameHost
+ * is the sole runtime consumer for every publisher.
  */
 export function IframeRuntime({
   src,
   title,
   poster,
   className,
+  autoStart,
   frameClassName,
   frameStyle,
   iframeStyle,
@@ -99,6 +102,7 @@ export function IframeRuntime({
       title={title}
       poster={poster}
       className={className}
+      autoStart={autoStart}
       frameClassName={frameClassName}
       frameStyle={frameStyle}
       iframeStyle={iframeStyle}

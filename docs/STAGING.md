@@ -209,7 +209,9 @@ Access 보호 Web smoke에는 `CF_ACCESS_CLIENT_ID`와 `CF_ACCESS_CLIENT_SECRET`
 3. Access를 거쳐 `stg.owogg.com`에 접속하고 Staging Google client로 로그인합니다.
 4. 실제 Staging `user.id`를 확인해 `STAGING_ADMIN_USER_IDS`에 넣고 다시 배포한 뒤 관리자 bootstrap을
    수행합니다.
-5. Google/Discord 로그인, 게임 실행/점수, D1 write, B2 publish/read를 확인합니다.
+5. Google/Discord 로그인, 게임 실행/점수, D1 write, B2 publish/read를 확인합니다. 게임 상세 화면은
+   별도 PLAY 클릭 없이 iframe을 자동 마운트하고, 로딩 뒤 검은 화면에 머물지 않으며 플레이 영역의
+   가용 너비를 채워야 합니다.
 6. 관리자 센터에서 테스트 ZIP을 게시해 catalog 제작자명이 `OWOGG`인지, Game Creator 경로에서 게시·승인한
    게임은 해당 사용자의 닉네임인지 확인합니다. ZIP 안의 official/publisher spoof 값은 무시되어야 합니다.
 7. 코드만 다시 배포해도 기존 D1/B2 게임과 live version이 바뀌지 않는지 확인합니다.

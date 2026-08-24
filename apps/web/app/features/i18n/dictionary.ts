@@ -26,11 +26,12 @@ export interface Dictionary {
      * "google" + this = "google account". */
     accountSuffix: string;
   };
-  /** Left nav rail (desktop icon-strip that expands on hover) and its mobile drawer equivalent.
-   * The mobile drawer always shows full label text (unlike the desktop rail, which is icon-only
-   * until hovered), so these labels are on-screen by default for every mobile visitor. */
+  /** Left nav rail (desktop icon-strip with an explicit hover-revealed expand control) and its
+   * mobile drawer equivalent. The mobile drawer always shows full label text. */
   sidebar: {
     openMenuAria: string;
+    expandMenuAria: string;
+    collapseMenuAria: string;
     mobileMenuTitle: string;
     home: string;
     allGames: string;
@@ -1195,6 +1196,8 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
     },
     sidebar: {
       openMenuAria: "메뉴 열기",
+      expandMenuAria: "사이드바 펼치기",
+      collapseMenuAria: "사이드바 접기",
       mobileMenuTitle: "메뉴",
       home: "홈",
       allGames: "전체 게임",
@@ -2487,6 +2490,8 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
     },
     sidebar: {
       openMenuAria: "Open menu",
+      expandMenuAria: "Expand sidebar",
+      collapseMenuAria: "Collapse sidebar",
       mobileMenuTitle: "Menu",
       home: "Home",
       allGames: "All Games",
@@ -3802,6 +3807,8 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
     },
     sidebar: {
       openMenuAria: "メニューを開く",
+      expandMenuAria: "サイドバーを展開",
+      collapseMenuAria: "サイドバーを折りたたむ",
       mobileMenuTitle: "メニュー",
       home: "ホーム",
       allGames: "全ゲーム",
@@ -5115,6 +5122,8 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
     },
     sidebar: {
       openMenuAria: "打开菜单",
+      expandMenuAria: "展开侧边栏",
+      collapseMenuAria: "收起侧边栏",
       mobileMenuTitle: "菜单",
       home: "首页",
       allGames: "全部游戏",

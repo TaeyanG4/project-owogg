@@ -9,8 +9,8 @@ interface LayoutProps {
   children: ReactNode;
 }
 
-/** Only the live game route gets the distraction-free overlay navigation. Catalog and ranking
- * routes keep the persistent desktop rail, even though they share the `/games` prefix. */
+/** Only a concrete live game route gets the gameplay shell treatment (for example, no footer).
+ * Catalog and ranking routes are deliberately excluded even though they share `/games`. */
 export function isGamePlayPath(pathname: string): boolean {
   return /^\/games\/[^/]+\/?$/.test(pathname);
 }
@@ -39,18 +39,10 @@ export function Layout({ children }: LayoutProps) {
 
   return (
     <div className="min-h-screen flex flex-col w-full selection:bg-brand/30 selection:text-text-primary bg-surface text-text-primary">
-      <Header
-        onToggleMobileSidebar={toggleMobileSidebar}
-        isAdminWorkspace={isAdminWorkspace}
-        isGamePlayWorkspace={isGamePlayWorkspace}
-      />
+      <Header onToggleMobileSidebar={toggleMobileSidebar} isAdminWorkspace={isAdminWorkspace} />
 
       <div className="flex-1 flex w-full">
-        <Sidebar
-          isMobileOpen={isMobileSidebarOpen}
-          onMobileClose={closeMobileSidebar}
-          overlayOnly={isGamePlayWorkspace}
-        />
+        <Sidebar isMobileOpen={isMobileSidebarOpen} onMobileClose={closeMobileSidebar} />
         {isAdminWorkspace ? (
           <AdminWorkspace
             isMobileOpen={isMobileAdminSidebarOpen}

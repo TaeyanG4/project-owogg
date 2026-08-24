@@ -29,9 +29,6 @@ test.describe("Fullscreen control", () => {
     page,
   }) => {
     await page.goto("/games/e2e-fixed");
-    // GameFrame lazy-mounts the iframe only once PLAY is pressed — needed here so the "wraps the
-    // iframe" check below has an actual iframe in the DOM to find.
-    await page.getByRole("button", { name: "PLAY", exact: true }).click();
 
     const toggle = page.getByTestId("fullscreen-toggle");
     await expect(toggle).toHaveCount(1);

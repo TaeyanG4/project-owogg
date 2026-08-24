@@ -30,6 +30,10 @@ export interface GameFrameProps {
   /** Rendered before the player starts, so a catalog or detail page costs no game download. */
   poster?: React.ReactNode | undefined;
   className?: string | undefined;
+  /** Mounts the iframe immediately. GameHost enables this because a dedicated game page already
+   * represents an explicit play intent; callers that render only a preview can keep the lazy
+   * PLAY gate by leaving it false. */
+  autoStart?: boolean | undefined;
   /** Wraps the iframe itself (poster/play-button and the loading overlay use `className`
    * instead) — lets a page control the frame's aspect ratio independent of the poster's own
    * layout. Defaults to filling `className`'s box. */
@@ -58,10 +62,10 @@ export interface GameFrameProps {
 }
 
 /**
- * Embeds a game for either publisher, mounting the iframe only once the player explicitly starts
- * it.
+ * Embeds a game for either publisher. Dedicated play pages can opt into immediate mounting, while
+ * preview surfaces can retain the explicit PLAY gate.
  *
- * Deferring the mount matters for real reasons, not just polish: a game bundle can be tens of
+ * Deferring the mount can matter for real reasons, not just polish: a game bundle can be tens of
  * megabytes of WASM and assets, so auto-loading on page view would spend the player's bandwidth and
  * the project's storage egress on games nobody chose to play — and a page listing several games
  * would multiply that. Once started, the game runs entirely on the player's own CPU/GPU; OwOGG
@@ -75,13 +79,14 @@ export function GameFrame({
   title,
   poster,
   className,
+  autoStart = false,
   frameClassName,
   frameStyle,
   iframeStyle,
   onFrameLoad,
 }: GameFrameProps) {
-  const [started, setStarted] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [started, setStarted] = useState(autoStart);
+  const [loading, setLoading] = useState(autoStart);
   // Bumping this remounts the iframe with a fresh `src` load — the "다시 시작" affordance.
   const [reloadKey, setReloadKey] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -103,9 +108,15 @@ export function GameFrame({
     }
   };
 
+  // GameHost places this component directly inside a flex row. A flex item with no intrinsic
+  // width can otherwise shrink to the iframe's fallback size (or effectively zero before the
+  // iframe mounts), making the entire player look like an empty black surface. Keep the runtime
+  // root full-width regardless of whether a caller supplied additional classes.
+  const rootClassName = className ? `w-full ${className}` : "w-full";
+
   if (!started) {
     return (
-      <div className={className}>
+      <div className={rootClassName}>
         <div className={`relative overflow-hidden ${frameClassName ?? ""}`} style={frameStyle}>
           {poster}
           <div className="absolute inset-0 flex items-center justify-center bg-black/30">
@@ -123,7 +134,7 @@ export function GameFrame({
   }
 
   return (
-    <div className={className}>
+    <div className={rootClassName}>
       <div className={`relative overflow-hidden ${frameClassName ?? ""}`} style={frameStyle}>
         {loading && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-surface-raised">

@@ -1308,6 +1308,7 @@ export function GameHost({ slug }: GameHostProps) {
                     <IframeRuntime
                       src={resolveGameRuntimeUrl(slug)}
                       title={localizedTitle ?? slug}
+                      autoStart
                       attemptKey={attemptKey}
                       frameClassName={renderedIframeFrameClassName}
                       frameStyle={iframeFrameStyle}

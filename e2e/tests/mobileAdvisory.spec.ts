@@ -11,7 +11,7 @@ import { test, expect, devices } from "@playwright/test";
  * here (see presentationAdvisory.ts's own doc comment on why `inputMethods` isn't used either).
  *
  * Never asserts anything about the synthetic fixture's own content/gameplay — only whether the
- * advisory banner is present, and that PLAY always stays reachable regardless.
+ * advisory banner is present, and that automatic iframe mounting stays available regardless.
  */
 
 // A per-file `test.use({ ...devices["Pixel 5"] })` would force every test below (including the
@@ -27,12 +27,11 @@ test.describe("Mobile support advisory (mobile-like context)", () => {
     await page.goto("/games/e2e-responsive");
     await expect(page.getByTestId("mobile-advisory-experimental")).toHaveCount(0);
     await expect(page.getByTestId("mobile-advisory-unsupported")).toHaveCount(0);
-    // PLAY stays reachable either way — this PR never blocks it.
-    await expect(page.getByRole("button", { name: "PLAY", exact: true })).toBeVisible();
+    await expect(page.locator("iframe")).toHaveCount(1);
     await context.close();
   });
 
-  test("support: experimental shows the experimental notice, and PLAY stays reachable", async ({
+  test("support: experimental shows the experimental notice and still mounts the game", async ({
     browser,
   }) => {
     const context = await browser.newContext({ ...devices["Pixel 5"] });
@@ -41,11 +40,11 @@ test.describe("Mobile support advisory (mobile-like context)", () => {
     await page.goto("/games/e2e-mobile-experimental");
     await expect(page.getByTestId("mobile-advisory-experimental")).toHaveCount(1);
     await expect(page.getByTestId("mobile-advisory-unsupported")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "PLAY", exact: true })).toBeVisible();
+    await expect(page.locator("iframe")).toHaveCount(1);
     await context.close();
   });
 
-  test("support: unsupported shows the unsupported warning, but PLAY is still reachable — a preference, never a hard block", async ({
+  test("support: unsupported shows the warning but does not block automatic game mounting", async ({
     browser,
   }) => {
     const context = await browser.newContext({ ...devices["Pixel 5"] });
@@ -53,9 +52,6 @@ test.describe("Mobile support advisory (mobile-like context)", () => {
     // e2e-fixed declares mobile.support: "unsupported".
     await page.goto("/games/e2e-fixed");
     await expect(page.getByTestId("mobile-advisory-unsupported")).toHaveCount(1);
-    await expect(page.getByRole("button", { name: "PLAY", exact: true })).toBeVisible();
-    // Confirms it's genuinely not blocked: PLAY still actually mounts the iframe.
-    await page.getByRole("button", { name: "PLAY", exact: true }).click();
     await expect(page.locator("iframe")).toHaveCount(1);
     await context.close();
   });

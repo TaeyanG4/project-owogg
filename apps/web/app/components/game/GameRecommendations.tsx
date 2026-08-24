@@ -39,18 +39,20 @@ export function GameRecommendations({ title, emptyLabel, games }: GameRecommenda
               className="group grid min-w-0 grid-cols-[7.5rem_minmax(0,1fr)] gap-3 rounded-xl p-1.5 transition-colors hover:bg-surface-raised"
             >
               <div
-                className="relative aspect-video overflow-hidden rounded-xl border border-border/70 bg-surface-overlay"
+                className="relative flex aspect-video items-center justify-center overflow-hidden rounded-xl border border-border/70 bg-surface-overlay"
                 style={{
                   background: `radial-gradient(circle at center, ${game.accent ?? "#6366f1"}25 0%, rgba(15, 19, 31, 0.96) 100%)`,
                 }}
               >
-                <GameThumbnail
-                  thumbnail={game.thumbnail}
-                  title={game.title}
-                  accent={game.accent}
-                  className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                  rounded="rounded-none"
-                />
+                <div className="h-[78%] w-[78%]">
+                  <GameThumbnail
+                    thumbnail={game.thumbnail}
+                    title={game.title}
+                    accent={game.accent}
+                    className="h-full w-full transition-transform duration-300 group-hover:scale-105"
+                    rounded="rounded-lg"
+                  />
+                </div>
               </div>
 
               <div className="flex min-w-0 flex-col justify-center py-0.5">

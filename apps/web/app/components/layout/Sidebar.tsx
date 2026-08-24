@@ -12,7 +12,11 @@ import {
   ScrollText,
   BookOpen,
   Compass,
+  ChevronLeft,
+  ChevronRight,
+  Languages,
 } from "lucide-react";
+import { useState } from "react";
 import { SUPPORTED_LOCALES } from "@owogg/core";
 import { useI18n } from "../../features/i18n/I18nContext";
 import { DiscordIcon } from "../ui/DiscordIcon";
@@ -25,9 +29,17 @@ interface NavItem {
   badge?: string;
 }
 
-/** Desktop rail row — icon always visible, label/badge fade in on the group hover-expand
- * (w-16 → w-56). Shared by both the game group and the "기타" group below it. */
-function DesktopNavLink({ item, currentPath }: { item: NavItem; currentPath: string }) {
+/** Desktop rail row — icons stay visible in the 64px rail while labels and badges are revealed by
+ * the explicit expand control. Shared by the game, other, and more groups. */
+function DesktopNavLink({
+  item,
+  currentPath,
+  expanded,
+}: {
+  item: NavItem;
+  currentPath: string;
+  expanded: boolean;
+}) {
   const Icon = item.icon;
   const isActive =
     currentPath === item.path || (item.path !== "/" && currentPath.startsWith(item.path));
@@ -44,11 +56,19 @@ function DesktopNavLink({ item, currentPath }: { item: NavItem; currentPath: str
       <Icon
         className={`w-5 h-5 shrink-0 transition-transform group-hover/btn:scale-110 ${isActive ? "text-white" : "text-brand-light"}`}
       />
-      <span className="text-sm font-semibold opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap overflow-hidden">
+      <span
+        className={`overflow-hidden whitespace-nowrap text-sm font-semibold transition-opacity duration-200 ${
+          expanded ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+      >
         {item.label}
       </span>
       {item.badge && (
-        <span className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-accent-red text-white uppercase tracking-wider">
+        <span
+          className={`ml-auto rounded bg-accent-red px-1.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-white transition-opacity duration-200 ${
+            expanded ? "opacity-100" : "pointer-events-none opacity-0"
+          }`}
+        >
           {item.badge}
         </span>
       )}
@@ -95,15 +115,13 @@ function MobileNavLink({
 interface SidebarProps {
   isMobileOpen: boolean;
   onMobileClose: () => void;
-  /** Gameplay uses an on-demand overlay drawer at every breakpoint, leaving the player flush with
-   * the content edge. Every other service route keeps the compact hover-expanding desktop rail. */
-  overlayOnly?: boolean;
 }
 
-export function Sidebar({ isMobileOpen, onMobileClose, overlayOnly = false }: SidebarProps) {
+export function Sidebar({ isMobileOpen, onMobileClose }: SidebarProps) {
   const location = useLocation();
   const currentPath = location.pathname;
   const { dict, locale, setLocale } = useI18n();
+  const [isDesktopExpanded, setIsDesktopExpanded] = useState(false);
 
   // Games first, always — anything that isn't actually a game/game-category destination goes
   // in otherNavItems below instead, rendered as a visually separate second group. 순발력(reaction)
@@ -132,9 +150,17 @@ export function Sidebar({ isMobileOpen, onMobileClose, overlayOnly = false }: Si
     { label: dict.footer.changelog, path: "/changelog", icon: ScrollText },
   ];
 
+  const moreNavItems = [
+    { label: dict.sidebar.favorites, path: "/games?category=favorites", icon: Bookmark },
+    { label: dict.sidebar.discordServers, path: "/discord/servers", icon: Compass },
+  ];
+
   return (
     <>
-      {/* Desktop Sidebar (CrazyGames style: compact w-16 or expanded w-56) */}
+      {/* Desktop Sidebar: a stable 64px icon rail that expands only through the edge control.
+          Merely crossing the rail no longer resizes the game or catalog; hover reveals a clear
+          chevron, then the user deliberately expands or collapses it. Gameplay uses this exact
+          same rail instead of switching to a desktop overlay drawer. */}
       {/* z-30: strictly below Header's z-40. Both are `sticky` and Header is h-16 (Sidebar's
           `top-16` sticky offset matches exactly), so they shouldn't normally overlap — but
           they previously shared the same z-40, meaning any transient overlap (e.g. mid-scroll,
@@ -146,44 +172,129 @@ export function Sidebar({ isMobileOpen, onMobileClose, overlayOnly = false }: Si
           tall — previously the aside itself was both sticky AND h-[calc(100vh-4rem)], so on
           pages taller than the viewport its background simply stopped mid-page, leaving a
           visible horizontal seam with the page background showing through below it. */}
-      {/* overflow-hidden lives on the INNER sticky div, not this <aside>, on purpose: overflow
-          (even just `hidden`) on an ancestor makes that ancestor the sticky element's
-          containing block for `top` resolution instead of the viewport. With it on <aside>,
-          `sticky top-16` below was computing its offset from the aside's own (non-scrolling)
-          box rather than the page scroll, which silently added a bogus ~64px gap above the
-          nav items on every load — nothing was scrolled, so nothing should have been "stuck"
-          yet. Moving overflow-hidden one level in keeps the same visual clipping (still needed
-          so the w-16→w-56 hover-expand doesn't spill icon-row content past the collapsed
-          rail) without it also hijacking the sticky calculation. */}
-      {!overlayOnly && (
-        <aside className="hidden lg:block w-16 hover:w-56 transition-all duration-300 ease-in-out bg-surface-sidebar border-r border-border z-30 group shadow-2xl shrink-0 select-none">
-          <div className="sticky top-16 flex flex-col h-[calc(100vh-4rem)] overflow-hidden p-2">
+      <aside
+        className={`group/sidebar relative z-30 hidden shrink-0 select-none border-r border-border bg-surface-sidebar shadow-2xl transition-[width] duration-300 ease-out lg:block ${
+          isDesktopExpanded ? "w-56" : "w-16"
+        }`}
+      >
+        <div className="sticky top-16 h-[calc(100vh-4rem)]">
+          <button
+            type="button"
+            onClick={() => setIsDesktopExpanded((expanded) => !expanded)}
+            aria-expanded={isDesktopExpanded}
+            aria-label={
+              isDesktopExpanded ? dict.sidebar.collapseMenuAria : dict.sidebar.expandMenuAria
+            }
+            title={isDesktopExpanded ? dict.sidebar.collapseMenuAria : dict.sidebar.expandMenuAria}
+            className={`absolute -right-3 top-4 z-20 flex h-7 w-7 items-center justify-center rounded-full border border-border bg-surface-raised text-brand-light shadow-lg transition-all duration-200 hover:border-brand/60 hover:bg-surface-overlay hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ${
+              isDesktopExpanded
+                ? "opacity-100"
+                : "pointer-events-none translate-x-1 opacity-0 group-hover/sidebar:pointer-events-auto group-hover/sidebar:translate-x-0 group-hover/sidebar:opacity-100 group-focus-within/sidebar:pointer-events-auto group-focus-within/sidebar:translate-x-0 group-focus-within/sidebar:opacity-100"
+            }`}
+          >
+            {isDesktopExpanded ? (
+              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <ChevronRight className="h-4 w-4" aria-hidden="true" />
+            )}
+          </button>
+
+          {/* Horizontal clipping stays inside the sticky panel so labels cannot leak out of the
+              collapsed rail. The aside itself deliberately has visible overflow so the edge
+              control can sit half outside its border without breaking sticky positioning. */}
+          <div className="flex h-full flex-col overflow-x-hidden overflow-y-auto p-2">
             {/* Main Nav — no heading above it (used to be a "탐색 메뉴" label here, which just
               pushed Home down by its own height even while collapsed) so the first item sits
               right at the top. Games first, then a divider, then everything else — see
               gameNavItems/otherNavItems above for why they're split. */}
             <div className="flex flex-col gap-1.5">
               {gameNavItems.map((item) => (
-                <DesktopNavLink key={item.label} item={item} currentPath={currentPath} />
+                <DesktopNavLink
+                  key={item.label}
+                  item={item}
+                  currentPath={currentPath}
+                  expanded={isDesktopExpanded}
+                />
               ))}
             </div>
 
             <div className="mt-3 border-t border-border/60 pt-3 flex flex-col gap-1.5">
-              <p className="px-3.5 text-[10px] font-bold text-text-muted uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap">
+              <p
+                className={`whitespace-nowrap px-3.5 text-[10px] font-bold uppercase tracking-wider text-text-muted transition-opacity duration-200 ${
+                  isDesktopExpanded ? "opacity-100" : "opacity-0"
+                }`}
+              >
                 {dict.sidebar.otherHeading}
               </p>
               {otherNavItems.map((item) => (
-                <DesktopNavLink key={item.label} item={item} currentPath={currentPath} />
+                <DesktopNavLink
+                  key={item.label}
+                  item={item}
+                  currentPath={currentPath}
+                  expanded={isDesktopExpanded}
+                />
               ))}
             </div>
+
+            {/* Keep the useful secondary actions from the mobile drawer in the desktop menu too.
+                Their icons remain reachable in compact mode; labels and locale choices appear
+                when the user explicitly expands the rail. */}
+            <div className="mt-3 flex flex-col gap-1.5 border-t border-border/60 pt-3">
+              <p
+                className={`whitespace-nowrap px-3.5 text-[10px] font-bold uppercase tracking-wider text-text-muted transition-opacity duration-200 ${
+                  isDesktopExpanded ? "opacity-100" : "opacity-0"
+                }`}
+              >
+                {dict.sidebar.moreHeading}
+              </p>
+              {moreNavItems.map((item) => (
+                <DesktopNavLink
+                  key={item.label}
+                  item={item}
+                  currentPath={currentPath}
+                  expanded={isDesktopExpanded}
+                />
+              ))}
+
+              <div className="flex min-w-0 items-start gap-3.5 rounded-xl px-3.5 py-3 text-text-secondary">
+                <Languages className="h-5 w-5 shrink-0 text-brand-light" aria-hidden="true" />
+                {isDesktopExpanded && (
+                  <div className="min-w-0 flex-1">
+                    <p className="mb-2 whitespace-nowrap text-sm font-semibold text-text-secondary">
+                      {dict.language.label}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {SUPPORTED_LOCALES.map((l) => {
+                        const active = l === locale;
+                        return (
+                          <button
+                            key={l}
+                            type="button"
+                            onClick={() => setLocale(l)}
+                            className={`flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-semibold transition-colors ${
+                              active
+                                ? "border-brand/30 bg-brand/10 text-brand-light"
+                                : "border-border text-text-secondary hover:bg-surface-raised hover:text-text-primary"
+                            }`}
+                          >
+                            {active && <Check className="h-3 w-3" aria-hidden="true" />}
+                            {NATIVE_LABELS[l]}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
-        </aside>
-      )}
+        </div>
+      </aside>
 
       {/* Mobile Drawer Overlay */}
       {isMobileOpen && (
         <div
-          className={`${overlayOnly ? "" : "lg:hidden"} fixed inset-0 z-50 flex`}
+          className="fixed inset-0 z-50 flex lg:hidden"
           role="dialog"
           aria-modal="true"
           aria-label={dict.sidebar.mobileMenuTitle}

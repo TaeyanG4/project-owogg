@@ -175,6 +175,9 @@ difficulty binding, 현재 availability, canonical score policy를 다시 검증
   cache, 그 외 asset은 1시간 browser cache로 incident 대응 가능성을 보존합니다.
 - Web 문서는 API와 `GAME_ORIGIN`에 preconnect해 첫 catalog/leaderboard/game 요청의 DNS·TLS 비용을
   앱 초기화와 겹칩니다.
+- `/games/:slug`는 이미 명시적인 플레이 의도를 나타내는 전용 화면이므로 catalog 확인 뒤 iframe을
+  자동 마운트합니다. `GameFrame` 루트는 flex/grid 배치에서도 항상 가용 너비 전체를 소유해야 하며,
+  로딩 화면 뒤 검은 부모 배경만 남는 0폭 축소를 렌더링 단위 테스트와 브라우저 E2E로 방지합니다.
 
 현재 저장소 결정은 **B2 유지**입니다. B2의 저장 단가가 R2보다 낮고 Cloudflare를 통한 partner egress가
 무료인 반면, R2는 저장 단가와 Class A/B operation 비용이 더 큽니다. 위 구조에서는 versioned asset의

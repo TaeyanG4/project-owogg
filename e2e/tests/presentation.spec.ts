@@ -23,7 +23,6 @@ test.describe("GamePresentation viewport — responsive", () => {
     page,
   }) => {
     await page.goto("/games/e2e-responsive");
-    await page.getByRole("button", { name: "PLAY", exact: true }).click();
 
     const iframe = page.locator("iframe");
     await expect(iframe).toHaveCount(1);
@@ -52,7 +51,6 @@ test.describe("GamePresentation viewport — fixed", () => {
     page,
   }) => {
     await page.goto("/games/e2e-fixed");
-    await page.getByRole("button", { name: "PLAY", exact: true }).click();
 
     const iframeHandle = await page.locator("iframe").elementHandle();
     expect(iframeHandle).not.toBeNull();
