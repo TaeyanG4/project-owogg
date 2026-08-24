@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { Link, useSearchParams } from "react-router";
-import { Gamepad2, Sparkles, Clock, Bookmark, TrendingUp } from "lucide-react";
+import { Gamepad2, Sparkles, Clock, Bookmark } from "lucide-react";
 import { usePublicGames } from "../features/publicGamesApi";
 import { publicGameToCard } from "../features/catalog/publicGameAdapter";
 import { GameGrid } from "../components/ui/GameGrid";
@@ -67,11 +67,6 @@ export default function Home() {
     );
   }, [gameManifests, selectedCategory, favoriteGameIds, sortKey]);
 
-  const featuredGames = useMemo(
-    () => sortPublicGameCards(gameManifests, sortKey),
-    [gameManifests, sortKey],
-  );
-
   const recentGames = useMemo(() => {
     return recentPlays
       .map((r) => gameManifests.find((g) => g.slug === r.gameId))
@@ -88,23 +83,37 @@ export default function Home() {
 
   return (
     <div className="flex flex-col w-full px-4 md:px-8 py-6 gap-10 max-w-7xl mx-auto flex-1">
-      {/* Metric-ranked discovery row. The same selection also orders the complete lineup below. */}
-      {featuredGames.length > 0 && (
+      {/* The catalog controls stay together: sort starts at the left edge, while category filters
+          use the remaining desktop space from the right. Both selections apply to this discovery
+          row and to the complete lineup below. */}
+      {gameManifests.length > 0 && (
         <section className="flex flex-col gap-4 w-full">
-          <div className="flex items-center gap-2 border-b border-border/40 pb-3">
-            <TrendingUp className="h-5 w-5 text-brand" />
+          <div
+            data-testid="game-catalog-toolbar"
+            className="flex min-w-0 flex-col gap-3 border-b border-border/40 pb-4 lg:flex-row lg:items-center lg:justify-between"
+          >
             <GameSortSelect
               value={sortKey}
               onChange={setSortKey}
               label={dict.games.sortLabel}
               options={dict.games.sortOptions}
             />
+            <div className="flex min-w-0 flex-1 justify-end">
+              <CategoryChips
+                selectedCategory={selectedCategory}
+                onSelectCategory={handleSelectCategory}
+                className="lg:justify-end"
+              />
+            </div>
           </div>
           <GameGrid
-            games={featuredGames}
+            games={filteredGames}
             mobileColumns={mobileColumns}
             desktopColumns={desktopColumns}
             maxRows={1}
+            emptyMessage={
+              selectedCategory === "favorites" ? dict.games.emptyFavorites : dict.home.emptyCategory
+            }
           />
         </section>
       )}
@@ -150,7 +159,7 @@ export default function Home() {
         </section>
       )}
 
-      {/* Category Chips Bar & Catalog Grid Section (CrazyGames High-Density Style) */}
+      {/* Complete catalog for the same sort/category selection shown in the discovery row. */}
       <section className="flex flex-col gap-6 w-full">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-border/60 pb-4 min-w-0">
           <div className="flex items-center gap-2.5">
@@ -160,13 +169,7 @@ export default function Home() {
             </h2>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2.5 w-full sm:w-auto min-w-0">
-            {/* Category Pills Bar — min-w-0 above and here keeps its own overflow-x-auto as the
-                scroll boundary instead of the un-wrapped chip row pushing the whole page wide. */}
-            <CategoryChips
-              selectedCategory={selectedCategory}
-              onSelectCategory={handleSelectCategory}
-            />
+          <div className="flex w-full min-w-0 items-start sm:w-auto sm:items-center">
             <GridColumnSwitcher
               mobileColumns={mobileColumns}
               onMobileChange={setMobileColumns}
