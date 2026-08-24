@@ -112,7 +112,7 @@ export interface SandboxGamePendingVersionsPage {
  * Persistence port for sandbox game catalog entries + their uploaded bundle versions (migration
  * 0024). Review (per-version) and visibility (per-game) are independent axes — see the migration
  * file's comment on sandbox_games for why. No update/delete path on the review audit log
- * (append-only), same pattern as UserModerationRepository/CreatorReviewRepository.
+ * (append-only), same pattern as UserModerationRepository/StreamerReviewRepository.
  */
 export interface SandboxGameRepository {
   findById(id: number): Promise<SandboxGameRecord | null>;

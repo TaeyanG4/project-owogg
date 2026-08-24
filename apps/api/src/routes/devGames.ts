@@ -50,7 +50,7 @@ export function readB2Config(env: ApiEnv["Bindings"]): BackblazeB2Config | undef
  * flow. Deliberately gated by plain OwOGG session + active game_creator_access row, NOT the
  * elevated admin step-up session (adminSession.ts) — a Game Creator who isn't also an admin must never
  * be forced through Google step-up + admin password just to upload a game. Admin/operator-only
- * actions (appoint creators, review applications, approve/reject versions, publish) live in
+ * actions (appoint Game Creators, review applications, approve/reject versions, publish) live in
  * adminGameCreators.ts / adminSandboxGames.ts behind requireElevatedAdmin instead.
  *
  * GAME_CREATOR is a Program/Entitlement, never a Staff Role — see
@@ -92,8 +92,8 @@ async function resolveDevSession(c: Context<ApiEnv>): Promise<DevSession | null>
   if (!sessionResult) return null;
 
   const userId = sessionResult.user.id;
-  const [isActiveCreator, eligibility] = await Promise.all([
-    container.gameCreatorUseCases.isActiveCreator(userId),
+  const [isActiveGameCreator, eligibility] = await Promise.all([
+    container.gameCreatorUseCases.isActiveGameCreator(userId),
     resolveAdminEligibility(userId, c.env.ADMIN_USER_IDS, container.adminAccountUseCases),
   ]);
 
@@ -101,7 +101,7 @@ async function resolveDevSession(c: Context<ApiEnv>): Promise<DevSession | null>
   // hasImplicitGameCreatorAccess's doc comment) — ORed with the real access-grant row, never a
   // replacement for it.
   const staffRole = resolveEffectiveStaffRole(eligibility);
-  const hasGameCreatorAccess = isActiveCreator || hasImplicitGameCreatorAccess(staffRole);
+  const hasGameCreatorAccess = isActiveGameCreator || hasImplicitGameCreatorAccess(staffRole);
 
   return { userId, hasGameCreatorAccess, isAdmin: eligibility.eligible };
 }

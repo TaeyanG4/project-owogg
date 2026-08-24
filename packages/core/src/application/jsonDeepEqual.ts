@@ -5,7 +5,7 @@
  * `node:util`'s `isDeepStrictEqual`: `packages/core` has to stay runnable inside a Cloudflare
  * Worker, where Node builtins aren't guaranteed.
  *
- * Promoted out of application/creatorCanonicalBackfill.ts's own private `deepEqualJson` (Stage B-2)
+ * Promoted out of the former Game Creator canonical backfill's private `deepEqualJson` (Stage B-2)
  * — same implementation, unchanged, now shared so Unified Game Platform U-2's generic canonical
  * migration (application/genericCanonicalMigration.ts) doesn't duplicate it. Stage B-2's own
  * `canonicalDocumentsEqual` now delegates here instead of keeping a second copy.

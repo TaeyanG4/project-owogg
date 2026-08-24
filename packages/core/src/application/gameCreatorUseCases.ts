@@ -48,7 +48,7 @@ export class GameCreatorUseCases {
     return this.accessRepo.findByUserId(userId);
   }
 
-  async isActiveCreator(userId: number): Promise<boolean> {
+  async isActiveGameCreator(userId: number): Promise<boolean> {
     const record = await this.accessRepo.findByUserId(userId);
     return record?.status === "ACTIVE";
   }

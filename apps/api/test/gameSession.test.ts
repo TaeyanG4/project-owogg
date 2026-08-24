@@ -199,7 +199,7 @@ test("404s for an unknown slug", async () => {
   assert.equal(res.status, 404);
 });
 
-test("404s for a PRIVATE Creator game — never distinguishes from an unknown slug", async () => {
+test("404s for a PRIVATE Game Creator game — never distinguishes from an unknown slug", async () => {
   const { db } = createDb({
     game: { ...LIVE_GAME, visibility: "PRIVATE", live_version_id: null },
   });

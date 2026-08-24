@@ -222,14 +222,14 @@ test("revoke on a never-granted or already-revoked user is rejected with NOT_A_C
   );
 });
 
-test("isActiveCreator reflects grant/revoke state", async () => {
+test("isActiveGameCreator reflects grant/revoke state", async () => {
   const accessRepo = createFakeAccessRepo();
   const useCases = new GameCreatorUseCases(accessRepo, createFakeUserRepo([1]));
-  assert.equal(await useCases.isActiveCreator(1), false);
+  assert.equal(await useCases.isActiveGameCreator(1), false);
   await useCases.grant(1, 99);
-  assert.equal(await useCases.isActiveCreator(1), true);
+  assert.equal(await useCases.isActiveGameCreator(1), true);
   await useCases.revoke(1, 99);
-  assert.equal(await useCases.isActiveCreator(1), false);
+  assert.equal(await useCases.isActiveGameCreator(1), false);
 });
 
 // ── Self-serve application flow ────────────────────────────────────────────
@@ -362,7 +362,7 @@ test("decideApplication(APPROVED) grants Game Creator access; REJECTED does not"
     decision: "APPROVED",
   });
   assert.equal(decidedApproved.status, "APPROVED");
-  assert.equal(await useCases.isActiveCreator(1), true);
+  assert.equal(await useCases.isActiveGameCreator(1), true);
 
   const rejected = await useCases.apply(2, null);
   const decidedRejected = await useCases.decideApplication({
@@ -373,7 +373,7 @@ test("decideApplication(APPROVED) grants Game Creator access; REJECTED does not"
   });
   assert.equal(decidedRejected.status, "REJECTED");
   assert.equal(decidedRejected.rejectReason, "부적절한 콘텐츠");
-  assert.equal(await useCases.isActiveCreator(2), false);
+  assert.equal(await useCases.isActiveGameCreator(2), false);
 });
 
 test("decideApplication on an already-decided application is rejected with APPLICATION_NOT_PENDING", async () => {
@@ -427,7 +427,7 @@ test("decideApplication(APPROVED) is idempotent-safe when the applicant already 
     decision: "APPROVED",
   });
   assert.equal(decided.status, "APPROVED");
-  assert.equal(await useCases.isActiveCreator(1), true);
+  assert.equal(await useCases.isActiveGameCreator(1), true);
 });
 
 test("listPendingApplications only returns PENDING items, oldest first", async () => {
