@@ -15,13 +15,12 @@ import {
   KeyRound,
   LayoutDashboard,
   LockKeyhole,
+  Menu,
   Search,
-  ServerCog,
   ShieldCheck,
   UserCog,
   Users,
   Video,
-  Wrench,
   X,
 } from "lucide-react";
 import type { PermissionValue, StaffRoleValue } from "@owogg/contracts";
@@ -47,9 +46,6 @@ const ICONS: Record<AdminNavigationItemId, ComponentType<{ className?: string }>
   monitoring: Activity,
   accounts: KeyRound,
   security: LockKeyhole,
-  "ops-center": Wrench,
-  "mod-center": ShieldCheck,
-  "system-dev-center": ServerCog,
 };
 
 const ROLE_LABELS: Record<StaffRoleValue, string> = {
@@ -62,11 +58,17 @@ const ROLE_LABELS: Record<StaffRoleValue, string> = {
 interface AdminWorkspaceProps {
   children: ReactNode;
   isMobileOpen: boolean;
+  onMobileOpen: () => void;
   onMobileClose: () => void;
 }
 
 /** Persistent admin chrome. Server-side route checks remain the authorization authority. */
-export function AdminWorkspace({ children, isMobileOpen, onMobileClose }: AdminWorkspaceProps) {
+export function AdminWorkspace({
+  children,
+  isMobileOpen,
+  onMobileOpen,
+  onMobileClose,
+}: AdminWorkspaceProps) {
   const location = useLocation();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [stage, setStage] = useState<WorkspaceStage>("loading");
@@ -257,14 +259,24 @@ export function AdminWorkspace({ children, isMobileOpen, onMobileClose }: AdminW
 
       <main className="min-w-0 flex-1 bg-surface">
         <div className="sticky top-16 z-20 flex min-h-12 items-center justify-between gap-3 border-b border-border/80 bg-surface/90 px-4 py-2 backdrop-blur-xl md:px-8">
-          <div className="min-w-0 text-xs text-text-muted" aria-label="현재 관리자 위치">
-            <Link to="/admin" className="font-bold hover:text-text-primary">
-              관리자
-            </Link>
-            <span className="mx-2 text-border">/</span>
-            <span className="truncate font-bold text-text-primary">
-              {currentItem?.label ?? "관리 기능"}
-            </span>
+          <div className="flex min-w-0 items-center gap-2.5">
+            <button
+              type="button"
+              onClick={onMobileOpen}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface-raised px-2.5 py-1.5 text-[11px] font-black text-text-secondary transition-colors hover:border-brand/40 hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-brand lg:hidden"
+              aria-label="관리자 메뉴 열기"
+            >
+              <Menu className="h-3.5 w-3.5" /> 관리 메뉴
+            </button>
+            <div className="min-w-0 text-xs text-text-muted" aria-label="현재 관리자 위치">
+              <Link to="/admin" className="font-bold hover:text-text-primary">
+                관리자
+              </Link>
+              <span className="mx-2 text-border">/</span>
+              <span className="truncate font-bold text-text-primary">
+                {currentItem?.label ?? "관리 기능"}
+              </span>
+            </div>
           </div>
           {stage === "ready" && (
             <span className="hidden shrink-0 items-center gap-1.5 rounded-full bg-accent-green/10 px-2.5 py-1 text-[10px] font-black text-accent-green sm:inline-flex">

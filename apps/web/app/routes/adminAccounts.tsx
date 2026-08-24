@@ -1,6 +1,16 @@
 import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router";
-import { KeyRound, Power, RotateCcw, ShieldAlert, UserCog, UserPlus, Key } from "lucide-react";
+import {
+  KeyRound,
+  Power,
+  RotateCcw,
+  Save,
+  ShieldAlert,
+  SlidersHorizontal,
+  UserCog,
+  UserPlus,
+  Key,
+} from "lucide-react";
 import { useAuth } from "../features/auth";
 import {
   fetchAdminAccounts,
@@ -13,6 +23,8 @@ import {
   fetchAdminAccountPermissions,
   postGrantAdminPermission,
   deleteRevokeAdminPermission,
+  fetchAdminRolePermissions,
+  putAdminRolePermissions,
 } from "../features/adminApi";
 import { ApiClientError } from "../lib/api/errors";
 import type {
@@ -20,6 +32,8 @@ import type {
   AdminAccountAuditEntry,
   AdminAccountRoleValue,
   PermissionValue,
+  ConfigurableStaffRoleValue,
+  RolePermissionPolicy,
 } from "@owogg/contracts";
 
 export function meta() {
@@ -38,27 +52,57 @@ const STAFF_ROLE_LABELS: Record<AdminAccountRoleValue, string> = {
   SYSTEM_DEVELOPER: "시스템 개발자",
 };
 
-/** Individually delegable permissions only — `roles.manage` is deliberately excluded (never
- * delegable, see packages/core/src/domain/staffRoles.ts's isDelegatablePermission). Every role
- * already has its own default bundle server-side; this UI is specifically for the "one extra
- * permission outside the role's defaults" case (e.g. admin.center.access for a SYSTEM_DEVELOPER). */
-const DELEGABLE_PERMISSIONS: PermissionValue[] = [
-  "admin.center.access",
-  "users.view",
-  "users.suspend",
-  "users.ban",
-  "users.score_moderation",
-  "games.moderate",
-  "sandbox_games.review",
-  "game_creators.manage",
-  "streamers.review",
-  "system.monitor",
-  "system.dev.access",
+const CONFIGURABLE_ROLES: ConfigurableStaffRoleValue[] = [
+  "OPERATOR",
+  "MODERATOR",
+  "SYSTEM_DEVELOPER",
 ];
+
+const PERMISSION_OPTIONS: Array<{
+  value: PermissionValue;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "admin.center.access",
+    label: "관리자 센터 접근",
+    description: "통합 관리자 센터에 진입",
+  },
+  { value: "users.view", label: "유저 조회", description: "유저 목록과 상세 정보 조회" },
+  { value: "users.suspend", label: "유저 일시 정지", description: "계정 일시 정지 및 해제" },
+  { value: "users.ban", label: "유저 영구 차단", description: "계정 영구 차단" },
+  {
+    value: "users.score_moderation",
+    label: "점수 관리",
+    description: "점수 제출 차단과 점수 초기화/복원",
+  },
+  { value: "games.moderate", label: "공식 게임 관리", description: "공식 게임 게시와 안전 제어" },
+  {
+    value: "sandbox_games.review",
+    label: "사용자 게임 심사",
+    description: "사용자 제작 게임 승인·거절·공개 설정",
+  },
+  {
+    value: "sandbox_games.delete",
+    label: "사용자 게임 삭제",
+    description: "사용자 제작 게임 삭제 및 영구 정리",
+  },
+  {
+    value: "game_creators.manage",
+    label: "게임 크리에이터 관리",
+    description: "제작 권한과 신청 심사",
+  },
+  { value: "streamers.review", label: "Creator 심사", description: "Featured Creator 수동 심사" },
+  { value: "system.monitor", label: "운영 모니터링", description: "서비스와 데이터 상태 조회" },
+  { value: "system.dev.access", label: "시스템 개발 도구", description: "내부 진단·개발 기능" },
+];
+
+const DELEGABLE_PERMISSIONS = PERMISSION_OPTIONS.map(({ value }) => value);
 
 export default function AdminAccountsRoute() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [accounts, setAccounts] = useState<AdminAccountSummary[] | null>(null);
+  const [rolePolicies, setRolePolicies] = useState<RolePermissionPolicy[] | null>(null);
   const [audit, setAudit] = useState<AdminAccountAuditEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [accessDenied, setAccessDenied] = useState(false);
@@ -67,12 +111,14 @@ export default function AdminAccountsRoute() {
 
   const load = useCallback(async () => {
     try {
-      const [accountData, auditData] = await Promise.all([
+      const [accountData, auditData, rolePermissionData] = await Promise.all([
         fetchAdminAccounts(),
         fetchAdminAccountAudit(),
+        fetchAdminRolePermissions(),
       ]);
       setAccounts(accountData.accounts);
       setAudit(auditData.entries);
+      setRolePolicies(rolePermissionData.roles);
       setError(null);
     } catch (err) {
       if (err instanceof ApiClientError && (err.status === 401 || err.status === 403)) {
@@ -155,6 +201,15 @@ export default function AdminAccountsRoute() {
         </p>
       )}
 
+      <RolePermissionEditor
+        policies={rolePolicies}
+        onSaved={async (role) => {
+          setNotice(`${STAFF_ROLE_LABELS[role]} 역할 권한이 저장되었습니다.`);
+          await load();
+        }}
+        onError={setError}
+      />
+
       <CreateAdminForm
         onCreated={() => {
           setNotice("관리자 계정이 생성되었습니다.");
@@ -231,11 +286,11 @@ export default function AdminAccountsRoute() {
       </section>
 
       <section className="rounded-2xl border border-border bg-surface-raised p-5">
-        <h2 className="text-sm font-black text-text-primary">개별 권한 위임</h2>
+        <h2 className="text-sm font-black text-text-primary">계정별 추가 권한</h2>
         <p className="mt-1 text-xs text-text-muted">
-          역할의 기본 권한 외에, 특정 계정에게 권한을 하나씩 추가로 부여하거나 회수합니다 (예:
-          신뢰하는 시스템 개발자에게 관리자센터 접근만 허용). <code>roles.manage</code>는 이 화면에
-          나타나지 않습니다 — 위임할 수 없는 권한입니다.
+          위 역할 권한에 더해 특정 계정에만 예외 권한을 추가하거나 회수합니다. 역할 전체를 바꾸려면
+          위의 역할별 기능 권한을 사용하세요. <code>roles.manage</code>는 ADMIN 전용이라 위임할 수
+          없습니다.
         </p>
         <div className="mt-4 space-y-3">
           {(accounts ?? []).map((account) => (
@@ -262,6 +317,144 @@ export default function AdminAccountsRoute() {
         </div>
       </section>
     </div>
+  );
+}
+
+function RolePermissionEditor({
+  policies,
+  onSaved,
+  onError,
+}: {
+  policies: RolePermissionPolicy[] | null;
+  onSaved: (role: ConfigurableStaffRoleValue) => Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const [selectedRole, setSelectedRole] = useState<ConfigurableStaffRoleValue>("OPERATOR");
+  const [draft, setDraft] = useState<PermissionValue[]>([]);
+  const [saving, setSaving] = useState(false);
+  const persisted = policies?.find((policy) => policy.role === selectedRole)?.permissions ?? [];
+
+  useEffect(() => {
+    setDraft([...(policies?.find((policy) => policy.role === selectedRole)?.permissions ?? [])]);
+  }, [policies, selectedRole]);
+
+  const normalized = (permissions: readonly PermissionValue[]) => [...permissions].sort().join("|");
+  const dirty = normalized(draft) !== normalized(persisted);
+
+  const toggle = (permission: PermissionValue) => {
+    setDraft((current) =>
+      current.includes(permission)
+        ? current.filter((candidate) => candidate !== permission)
+        : [...current, permission],
+    );
+  };
+
+  const save = async () => {
+    if (!dirty || saving) return;
+    setSaving(true);
+    onError("");
+    try {
+      await putAdminRolePermissions(selectedRole, draft);
+      await onSaved(selectedRole);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "역할 권한을 저장할 수 없습니다.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-brand/25 bg-surface-raised">
+      <div className="border-b border-border bg-brand/5 px-5 py-4">
+        <div className="flex items-start gap-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand/15 text-brand-light">
+            <SlidersHorizontal className="h-4 w-4" />
+          </span>
+          <div>
+            <h2 className="text-sm font-black text-text-primary">역할별 기능 권한</h2>
+            <p className="mt-1 text-xs leading-relaxed text-text-muted">
+              운영자·모더레이터·시스템 개발자가 통합 관리자 센터에서 사용할 기능을 설정합니다. 변경
+              사항은 해당 역할의 모든 계정에 즉시 적용됩니다.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-5">
+        <div className="flex flex-wrap gap-2" role="tablist" aria-label="권한을 설정할 역할">
+          {CONFIGURABLE_ROLES.map((role) => {
+            const selected = role === selectedRole;
+            const count = policies?.find((policy) => policy.role === role)?.permissions.length ?? 0;
+            return (
+              <button
+                key={role}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => setSelectedRole(role)}
+                className={`rounded-xl border px-3 py-2 text-left transition-colors cursor-pointer ${
+                  selected
+                    ? "border-brand bg-brand/15 text-brand-light"
+                    : "border-border bg-surface text-text-secondary hover:border-brand/50"
+                }`}
+              >
+                <span className="block text-xs font-black">{STAFF_ROLE_LABELS[role]}</span>
+                <span className="mt-0.5 block text-[10px] opacity-70">{count}개 기능</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {policies === null ? (
+          <p className="py-10 text-center text-xs text-text-muted">역할 권한을 불러오는 중...</p>
+        ) : (
+          <div className="mt-5 grid gap-2 sm:grid-cols-2">
+            {PERMISSION_OPTIONS.map((option) => {
+              const checked = draft.includes(option.value);
+              return (
+                <label
+                  key={option.value}
+                  className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${
+                    checked
+                      ? "border-brand/60 bg-brand/10"
+                      : "border-border bg-surface hover:border-brand/35"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggle(option.value)}
+                    className="mt-0.5 h-4 w-4 accent-brand"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-xs font-bold text-text-primary">
+                      {option.label}
+                    </span>
+                    <span className="mt-0.5 block text-[10px] leading-relaxed text-text-muted">
+                      {option.description}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+          <p className="text-[10px] text-text-muted">
+            ADMIN은 항상 모든 기능과 역할 권한 관리를 보유하며 이 목록에서 변경할 수 없습니다.
+          </p>
+          <button
+            type="button"
+            disabled={!dirty || saving || policies === null}
+            onClick={() => void save()}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-xs font-bold text-white hover:bg-brand-light disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+          >
+            <Save className="h-3.5 w-3.5" /> {saving ? "저장 중..." : "역할 권한 저장"}
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -571,6 +764,9 @@ function PermissionEditor({ account }: { account: AdminAccountSummary }) {
               <div className="flex flex-wrap gap-1.5">
                 {DELEGABLE_PERMISSIONS.map((permission) => {
                   const isGranted = granted.includes(permission);
+                  const option = PERMISSION_OPTIONS.find(
+                    (candidate) => candidate.value === permission,
+                  );
                   return (
                     <button
                       key={permission}
@@ -582,8 +778,9 @@ function PermissionEditor({ account }: { account: AdminAccountSummary }) {
                           ? "border-brand bg-brand/10 text-brand-light"
                           : "border-border text-text-muted hover:border-brand/50"
                       }`}
+                      title={`${option?.label ?? permission}: ${option?.description ?? ""}`}
                     >
-                      {permission}
+                      {option?.label ?? permission}
                     </button>
                   );
                 })}

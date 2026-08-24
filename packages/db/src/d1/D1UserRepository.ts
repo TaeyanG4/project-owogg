@@ -39,6 +39,7 @@ export class D1UserRepository implements UserRepository {
       nickname: String(row.nickname),
       email: row.email ? String(row.email) : null,
       avatar_url: row.avatar_url ? String(row.avatar_url) : null,
+      avatar_provider: row.avatar_provider ? String(row.avatar_provider) : null,
       created_at: String(row.created_at),
       updated_at: String(row.updated_at),
       providers,
@@ -74,6 +75,7 @@ export class D1UserRepository implements UserRepository {
       nickname: String(oauthRow.nickname),
       email: oauthRow.email ? String(oauthRow.email) : null,
       avatar_url: oauthRow.avatar_url ? String(oauthRow.avatar_url) : null,
+      avatar_provider: oauthRow.avatar_provider ? String(oauthRow.avatar_provider) : null,
       created_at: String(oauthRow.created_at),
       updated_at: String(oauthRow.updated_at),
       providers,
@@ -100,54 +102,58 @@ export class D1UserRepository implements UserRepository {
   }): Promise<User> {
     const existingUser = await this.findByOAuth(data.provider, data.providerUserId);
     if (existingUser) {
-      // Update email/avatar if changed
-      let needsUpdate = false;
-      let updatedEmail = existingUser.email;
-      let updatedAvatar = existingUser.avatar_url;
+      const selectedProvider = existingUser.avatar_provider ?? data.provider;
+      const selectedAvatar =
+        selectedProvider === data.provider && data.avatarUrl
+          ? data.avatarUrl
+          : existingUser.avatar_url;
 
-      if (data.email && existingUser.email !== data.email) {
-        updatedEmail = data.email;
-        needsUpdate = true;
-      }
-      if (data.avatarUrl && existingUser.avatar_url !== data.avatarUrl) {
-        updatedAvatar = data.avatarUrl;
-        needsUpdate = true;
-      }
-
-      if (needsUpdate) {
-        await this.db
+      await this.db.batch([
+        this.db
           .prepare(
-            `UPDATE users SET email = ?, avatar_url = ?, updated_at = datetime('now') WHERE id = ?`,
+            `UPDATE oauth_accounts
+             SET provider_email = COALESCE(?, provider_email),
+                 avatar_url = COALESCE(?, avatar_url)
+             WHERE user_id = ? AND provider = ? AND provider_user_id = ?`,
           )
-          .bind(updatedEmail, updatedAvatar, existingUser.id)
-          .run();
-        existingUser.email = updatedEmail;
-        existingUser.avatar_url = updatedAvatar;
-      }
+          .bind(data.email, data.avatarUrl, existingUser.id, data.provider, data.providerUserId),
+        this.db
+          .prepare(
+            `UPDATE users
+             SET email = COALESCE(?, email), avatar_url = ?, avatar_provider = ?,
+                 updated_at = datetime('now')
+             WHERE id = ?`,
+          )
+          .bind(data.email, selectedAvatar, selectedProvider, existingUser.id),
+      ]);
 
-      return existingUser;
+      const refreshed = await this.findById(existingUser.id);
+      if (!refreshed) throw new Error(`User ${existingUser.id} disappeared after OAuth refresh`);
+      return refreshed;
     }
 
-    // Insert new user
-    await this.db
-      .prepare(
-        `INSERT INTO users (nickname, email, avatar_url, created_at, updated_at) VALUES (?, ?, ?, datetime('now'), datetime('now'))`,
-      )
-      .bind(data.nickname, data.email, data.avatarUrl)
-      .run();
-
+    // INSERT ... RETURNING avoids the shared-connection last_insert_rowid() race when two users
+    // complete OAuth at the same time.
     const newUserRow = await this.db
-      .prepare(`SELECT * FROM users WHERE rowid = last_insert_rowid()`)
+      .prepare(
+        `INSERT INTO users
+           (nickname, email, avatar_url, avatar_provider, created_at, updated_at)
+         VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
+         RETURNING *`,
+      )
+      .bind(data.nickname, data.email, data.avatarUrl, data.provider)
       .first<Record<string, unknown>>();
-
-    const userId = Number(newUserRow?.id ?? (await this.getLastInsertId()));
+    if (!newUserRow) throw new Error("OAuth user insert returned no row");
+    const userId = Number(newUserRow.id);
 
     // Insert oauth record
     await this.db
       .prepare(
-        `INSERT INTO oauth_accounts (user_id, provider, provider_user_id, provider_email) VALUES (?, ?, ?, ?)`,
+        `INSERT INTO oauth_accounts
+           (user_id, provider, provider_user_id, provider_email, avatar_url)
+         VALUES (?, ?, ?, ?, ?)`,
       )
-      .bind(userId, data.provider, data.providerUserId, data.email)
+      .bind(userId, data.provider, data.providerUserId, data.email, data.avatarUrl)
       .run();
 
     return {
@@ -155,6 +161,7 @@ export class D1UserRepository implements UserRepository {
       nickname: data.nickname,
       email: data.email,
       avatar_url: data.avatarUrl,
+      avatar_provider: data.provider,
       created_at: String(newUserRow?.created_at ?? new Date().toISOString()),
       updated_at: String(newUserRow?.updated_at ?? new Date().toISOString()),
       providers: [data.provider],
@@ -182,7 +189,7 @@ export class D1UserRepository implements UserRepository {
   async getOAuthAccounts(userId: number): Promise<OAuthAccount[]> {
     const res = await this.db
       .prepare(
-        `SELECT id, user_id, provider, provider_user_id, provider_email, created_at
+        `SELECT id, user_id, provider, provider_user_id, provider_email, avatar_url, created_at
          FROM oauth_accounts WHERE user_id = ? ORDER BY created_at ASC`,
       )
       .bind(userId)
@@ -194,6 +201,7 @@ export class D1UserRepository implements UserRepository {
       provider: String(row.provider),
       provider_user_id: String(row.provider_user_id),
       provider_email: row.provider_email ? String(row.provider_email) : null,
+      avatar_url: row.avatar_url ? String(row.avatar_url) : null,
       created_at: String(row.created_at),
     }));
   }
@@ -201,7 +209,7 @@ export class D1UserRepository implements UserRepository {
   async findOAuthAccount(provider: string, providerUserId: string): Promise<OAuthAccount | null> {
     const row = await this.db
       .prepare(
-        `SELECT id, user_id, provider, provider_user_id, provider_email, created_at
+        `SELECT id, user_id, provider, provider_user_id, provider_email, avatar_url, created_at
          FROM oauth_accounts WHERE provider = ? AND provider_user_id = ?`,
       )
       .bind(provider, providerUserId)
@@ -215,6 +223,7 @@ export class D1UserRepository implements UserRepository {
       provider: String(row.provider),
       provider_user_id: String(row.provider_user_id),
       provider_email: row.provider_email ? String(row.provider_email) : null,
+      avatar_url: row.avatar_url ? String(row.avatar_url) : null,
       created_at: String(row.created_at),
     };
   }
@@ -224,22 +233,81 @@ export class D1UserRepository implements UserRepository {
     provider: string,
     providerUserId: string,
     providerEmail: string | null,
+    avatarUrl: string | null,
   ): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO oauth_accounts (user_id, provider, provider_user_id, provider_email, created_at)
-         VALUES (?, ?, ?, ?, datetime('now'))
-         ON CONFLICT(provider, provider_user_id) DO NOTHING`,
+        `INSERT INTO oauth_accounts
+           (user_id, provider, provider_user_id, provider_email, avatar_url, created_at)
+         VALUES (?, ?, ?, ?, ?, datetime('now'))
+         ON CONFLICT(provider, provider_user_id) DO UPDATE SET
+           provider_email = COALESCE(excluded.provider_email, oauth_accounts.provider_email),
+           avatar_url = COALESCE(excluded.avatar_url, oauth_accounts.avatar_url)
+         WHERE oauth_accounts.user_id = excluded.user_id`,
       )
-      .bind(userId, provider, providerUserId, providerEmail)
+      .bind(userId, provider, providerUserId, providerEmail, avatarUrl)
+      .run();
+
+    // Legacy rows may not have an initial preference. The first connected provider becomes the
+    // default only in that case; linking a second provider never changes an explicit choice.
+    await this.db
+      .prepare(
+        `UPDATE users
+         SET avatar_provider = ?, avatar_url = COALESCE(?, avatar_url), updated_at = datetime('now')
+         WHERE id = ? AND avatar_provider IS NULL`,
+      )
+      .bind(provider, avatarUrl, userId)
       .run();
   }
 
   async unlinkOAuthAccount(userId: number, provider: string): Promise<void> {
+    const user = await this.db
+      .prepare(`SELECT avatar_provider FROM users WHERE id = ?`)
+      .bind(userId)
+      .first<{ avatar_provider: string | null }>();
+
     await this.db
       .prepare(`DELETE FROM oauth_accounts WHERE user_id = ? AND provider = ?`)
       .bind(userId, provider)
       .run();
+
+    if (user?.avatar_provider === provider) {
+      const fallback = await this.db
+        .prepare(
+          `SELECT provider, avatar_url FROM oauth_accounts
+           WHERE user_id = ? ORDER BY created_at ASC, id ASC LIMIT 1`,
+        )
+        .bind(userId)
+        .first<{ provider: string; avatar_url: string | null }>();
+      await this.db
+        .prepare(
+          `UPDATE users SET avatar_provider = ?, avatar_url = ?, updated_at = datetime('now')
+           WHERE id = ?`,
+        )
+        .bind(fallback?.provider ?? null, fallback?.avatar_url ?? null, userId)
+        .run();
+    }
+  }
+
+  async updateAvatarPreference(
+    userId: number,
+    provider: string,
+    avatarUrl: string,
+    updatedAt: string,
+  ): Promise<User> {
+    await this.db
+      .prepare(
+        `UPDATE users SET avatar_provider = ?, avatar_url = ?, updated_at = ?
+         WHERE id = ? AND EXISTS (
+           SELECT 1 FROM oauth_accounts WHERE user_id = ? AND provider = ?
+         )`,
+      )
+      .bind(provider, avatarUrl, updatedAt, userId, userId, provider)
+      .run();
+
+    const updated = await this.findById(userId);
+    if (!updated) throw new Error(`User ${userId} not found after avatar preference update`);
+    return updated;
   }
 
   async updateNickname(userId: number, nickname: string, updatedAt: string): Promise<User> {
@@ -301,11 +369,5 @@ export class D1UserRepository implements UserRepository {
       throw new Error(`User ${userId} not found after visibility update`);
     }
     return updated;
-  }
-
-  private async getLastInsertId(): Promise<number> {
-    const res = await this.db.prepare(`SELECT last_insert_rowid() as id`).first<{ id: number }>();
-
-    return res?.id ?? 0;
   }
 }

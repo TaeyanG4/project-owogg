@@ -9,6 +9,7 @@ import { localizedDifficultyLabel } from "../features/catalog/difficultyLabels";
 import { useI18n } from "../features/i18n/I18nContext";
 import { GameThumbnail } from "../components/ui/GameThumbnail";
 import type { LeaderRecord, PublicGame } from "@owogg/contracts";
+import { formatPublicUserTag } from "@owogg/core";
 
 export function meta() {
   return [
@@ -51,7 +52,7 @@ function PlayerCell({ record }: { record: LeaderRecord }) {
       className="flex w-fit items-center gap-2 text-brand-light hover:underline"
     >
       {avatar}
-      <span>{record.playerName}</span>
+      <span>{formatPublicUserTag(record.playerName, record.userId)}</span>
     </Link>
   );
 }

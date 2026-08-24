@@ -2,11 +2,18 @@ import type { Score, ScoreRepository, UserPersonalBestAggregate } from "@owogg/c
 import type { D1Database } from "./D1UserRepository.js";
 
 function mapScoreRow(row: Record<string, unknown>): Score {
+  const hasCurrentAvatar = Object.prototype.hasOwnProperty.call(row, "current_avatar_url");
   return {
     id: Number(row.id),
     user_id: Number(row.user_id),
-    nickname: String(row.nickname),
-    avatar_url: row.avatar_url ? String(row.avatar_url) : null,
+    nickname: String(row.current_nickname ?? row.nickname),
+    avatar_url: hasCurrentAvatar
+      ? row.current_avatar_url
+        ? String(row.current_avatar_url)
+        : null
+      : row.avatar_url
+        ? String(row.avatar_url)
+        : null,
     game_id: String(row.game_id),
     score: Number(row.score),
     difficulty: row.difficulty ? String(row.difficulty) : "normal",
@@ -86,7 +93,9 @@ export class D1ScoreRepository implements ScoreRepository {
       // and difficulty doesn't apply either (mixes many games, each with its own tiers).
       const res = await this.db
         .prepare(
-          `SELECT s.* FROM scores s
+          `SELECT s.*, u.nickname AS current_nickname, u.avatar_url AS current_avatar_url
+           FROM scores s
+           JOIN users u ON u.id = s.user_id
            JOIN games g ON g.slug = s.game_id
              AND g.deleted_at IS NULL
              AND g.leaderboard_generation = s.leaderboard_generation
@@ -108,11 +117,13 @@ export class D1ScoreRepository implements ScoreRepository {
     // comparable (see docs/GAME_CREATION_GUIDE.md §4) and must never rank against each other.
     const query = `
       WITH ranked AS (
-        SELECT s.*, ROW_NUMBER() OVER (
+        SELECT s.*, u.nickname AS current_nickname, u.avatar_url AS current_avatar_url,
+          ROW_NUMBER() OVER (
           PARTITION BY s.user_id
           ORDER BY s.score ${orderClause}, s.created_at ASC, s.id ASC
         ) AS rn
         FROM scores s
+        JOIN users u ON u.id = s.user_id
         JOIN games g ON g.slug = s.game_id
           AND g.deleted_at IS NULL
           AND g.leaderboard_generation = s.leaderboard_generation

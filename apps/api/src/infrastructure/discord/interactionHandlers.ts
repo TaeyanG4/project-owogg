@@ -1,4 +1,4 @@
-import { ACHIEVEMENT_DEFINITIONS, ALL_ACHIEVEMENT_CODES } from "@owogg/core";
+import { ACHIEVEMENT_DEFINITIONS, ALL_ACHIEVEMENT_CODES, formatPublicUserTag } from "@owogg/core";
 import type { AchievementCode } from "@owogg/core";
 import type { AppContainer } from "../../container.js";
 import { DISCORD_SUBCOMMANDS, OWOGG_DISCORD_COMMAND } from "./commands.js";
@@ -450,7 +450,8 @@ async function handleLeaderboardCommand(
   }
 
   const lines = leaderboard.entries.map(
-    (e) => `${e.rank}. **${escapeMarkdown(e.nickname)}** — ${e.xp.toLocaleString()} XP`,
+    (e) =>
+      `${e.rank}. **${escapeMarkdown(formatPublicUserTag(e.nickname, e.userId))}** — ${e.xp.toLocaleString()} XP`,
   );
 
   return publicEmbed({

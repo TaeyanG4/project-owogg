@@ -17,7 +17,8 @@ export class D1SessionRepository implements SessionRepository {
     const row = await this.db
       .prepare(
         `SELECT s.id as session_id, s.user_id, s.created_at as session_created_at, s.expires_at,
-                u.id as user_id, u.nickname, u.email, u.avatar_url, u.created_at as user_created_at, u.updated_at,
+                u.id as user_id, u.nickname, u.email, u.avatar_url, u.avatar_provider,
+                u.created_at as user_created_at, u.updated_at,
                 u.country, u.nickname_updated_at, u.country_updated_at, u.locale,
                 u.current_streak, u.longest_streak, u.last_active_date,
                 m.status as moderation_status, m.suspended_until, m.score_submission_blocked
@@ -162,6 +163,7 @@ export class D1SessionRepository implements SessionRepository {
         nickname: String(row.nickname),
         email: row.email ? String(row.email) : null,
         avatar_url: row.avatar_url ? String(row.avatar_url) : null,
+        avatar_provider: row.avatar_provider ? String(row.avatar_provider) : null,
         created_at: String(row.user_created_at),
         updated_at: String(row.updated_at),
         providers,

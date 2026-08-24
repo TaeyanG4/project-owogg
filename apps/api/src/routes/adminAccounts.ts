@@ -10,6 +10,9 @@ import {
   AdminAccountAuditListResponseSchema,
   PermissionGrantRequestSchema,
   PermissionSchema,
+  ConfigurableStaffRoleSchema,
+  RolePermissionPolicyListResponseSchema,
+  RolePermissionUpdateRequestSchema,
 } from "@owogg/contracts";
 import {
   evaluateAdminPasswordPolicy,
@@ -64,6 +67,8 @@ function failureMessage(code: AdminAccountUseCaseFailure["code"]): string {
       return "자기 자신의 권한은 이 화면에서 변경할 수 없습니다.";
     case "PERMISSION_NOT_DELEGABLE":
       return "이 권한은 위임할 수 없습니다.";
+    case "ROLE_NOT_CONFIGURABLE":
+      return "이 역할의 권한은 변경할 수 없습니다.";
   }
 }
 
@@ -274,6 +279,18 @@ function isResponse(value: Response | ManagedAdminActor): value is Response {
   return value instanceof Response;
 }
 
+async function requireManagedAdminActor(
+  c: Parameters<typeof requireElevatedAdmin>[0],
+): Promise<Response | ManagedAdminActor> {
+  const admin = await requireElevatedAdmin(c);
+  if (isElevatedAdminResponse(admin)) return admin;
+  const account = admin.account;
+  if (!account || account.role !== "ADMIN") {
+    return c.json({ error: { code: "FORBIDDEN", message: "ADMIN만 접근할 수 있습니다." } }, 403);
+  }
+  return { actorAdminId: account.id };
+}
+
 /** Requires a genuine MANAGED ADMIN account specifically — not merely `admin.role === "ADMIN"`,
  * which a root-only ADMIN_USER_IDS admin (no admin_accounts row at all) also resolves to. Account
  * management (creating/disabling/reassigning other administrators) stays gated on having gone
@@ -283,17 +300,60 @@ async function requireManagedAdminTarget(
   c: Parameters<typeof requireElevatedAdmin>[0],
   targetId: number,
 ): Promise<Response | ManagedAdminActor> {
-  const admin = await requireElevatedAdmin(c);
-  if (isElevatedAdminResponse(admin)) return admin;
-  const account = admin.account;
-  if (!account || account.role !== "ADMIN") {
-    return c.json({ error: { code: "FORBIDDEN", message: "ADMIN만 접근할 수 있습니다." } }, 403);
-  }
+  const actor = await requireManagedAdminActor(c);
+  if (isResponse(actor)) return actor;
   if (!Number.isSafeInteger(targetId) || targetId <= 0) {
     return c.json({ error: { code: "INVALID_REQUEST", message: "잘못된 요청입니다." } }, 400);
   }
-  return { actorAdminId: account.id };
+  return actor;
 }
+
+// ── Role-level functional permissions (migration 0038) ─────────────────────
+// The managed ADMIN gate is deliberately stricter than roles.manage: roles.manage itself can
+// never be assigned by either this policy editor or the individual-grant endpoints below.
+
+// GET /api/admin/role-permissions — all configurable role policies.
+adminAccountsRouter.get("/role-permissions", async (c) => {
+  const actor = await requireManagedAdminActor(c);
+  if (isResponse(actor)) return actor;
+
+  const { adminAccountUseCases } = createContainer(c.env.DB);
+  const roles = await adminAccountUseCases.listRolePermissionPolicies();
+  return c.json(RolePermissionPolicyListResponseSchema.parse({ roles }));
+});
+
+// PUT /api/admin/role-permissions/:role — atomically replace one role's policy.
+adminAccountsRouter.put("/role-permissions/:role", async (c) => {
+  const actor = await requireManagedAdminActor(c);
+  if (isResponse(actor)) return actor;
+
+  const role = ConfigurableStaffRoleSchema.safeParse(c.req.param("role"));
+  const body = RolePermissionUpdateRequestSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!role.success || !body.success) {
+    return c.json(
+      { error: { code: "INVALID_REQUEST", message: "역할 또는 권한 목록이 올바르지 않습니다." } },
+      400,
+    );
+  }
+
+  const { adminAccountUseCases } = createContainer(c.env.DB);
+  try {
+    const permissions = await adminAccountUseCases.replaceRolePermissions({
+      actorAdminId: actor.actorAdminId,
+      role: role.data,
+      permissions: body.data.permissions,
+    });
+    return c.json({ role: role.data, permissions });
+  } catch (err) {
+    if (err instanceof AdminAccountUseCaseFailure) {
+      return c.json(
+        { error: { code: err.code, message: failureMessage(err.code) } },
+        failureStatus(err.code),
+      );
+    }
+    throw err;
+  }
+});
 
 // PATCH /api/admin/accounts/:id/status — enable/disable (ADMIN only).
 adminAccountsRouter.patch("/accounts/:id/status", async (c) => {
@@ -449,8 +509,8 @@ adminAccountsRouter.post("/accounts/:id/revoke-sessions", async (c) => {
 
 // ── Individual permission delegation (migration 0025) ────────────────────────
 //
-// e.g. granting a trusted SYSTEM_DEVELOPER `admin.center.access` without making them a full
-// OPERATOR. Gated the same way as the rest of this file (a genuine managed ADMIN account, not
+// e.g. adding one narrow exception without widening that account's entire role. Gated the same
+// way as the rest of this file (a genuine managed ADMIN account, not
 // merely root eligibility) rather than via requirePermission("roles.manage") — see
 // requireManagedAdminTarget's doc comment for why account management stays on this stricter gate.
 

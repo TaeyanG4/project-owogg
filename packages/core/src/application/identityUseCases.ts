@@ -12,17 +12,24 @@ export interface ConnectedProvider {
   provider: string;
   providerUserId: string;
   providerEmail: string | null;
+  avatarUrl: string | null;
+  isAvatarSelected: boolean;
 }
 
 export class IdentityUseCases {
   constructor(private userRepo: UserRepository) {}
 
   async getConnectedProviders(userId: number): Promise<ConnectedProvider[]> {
-    const accounts = await this.userRepo.getOAuthAccounts(userId);
+    const [user, accounts] = await Promise.all([
+      this.userRepo.findById(userId),
+      this.userRepo.getOAuthAccounts(userId),
+    ]);
     return accounts.map((a) => ({
       provider: a.provider,
       providerUserId: a.provider_user_id,
       providerEmail: a.provider_email,
+      avatarUrl: a.avatar_url ?? null,
+      isAvatarSelected: user?.avatar_provider === a.provider,
     }));
   }
 
@@ -31,11 +38,19 @@ export class IdentityUseCases {
     provider: string,
     providerUserId: string,
     providerEmail: string | null,
+    avatarUrl: string | null,
   ): Promise<LinkProviderResult> {
     // 1. Does this provider identity already exist anywhere?
     const existing = await this.userRepo.findOAuthAccount(provider, providerUserId);
     if (existing) {
       if (existing.user_id === userId) {
+        await this.userRepo.linkOAuthAccount(
+          userId,
+          provider,
+          providerUserId,
+          providerEmail,
+          avatarUrl,
+        );
         return { ok: true, provider, alreadyLinked: true };
       }
       // Belongs to a different OwOGG account — explicit conflict.
@@ -50,7 +65,13 @@ export class IdentityUseCases {
     }
 
     // 3. Attach the new provider identity to the current account.
-    await this.userRepo.linkOAuthAccount(userId, provider, providerUserId, providerEmail);
+    await this.userRepo.linkOAuthAccount(
+      userId,
+      provider,
+      providerUserId,
+      providerEmail,
+      avatarUrl,
+    );
     return { ok: true, provider, alreadyLinked: false };
   }
 

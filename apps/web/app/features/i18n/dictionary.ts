@@ -199,6 +199,15 @@ export interface Dictionary {
     nicknameCooldownPrefix: string;
     nicknameCooldownSuffix: string;
     nicknameUpdateFailed: string;
+    nicknamePolicyHint: string;
+    nicknamePreviewLabel: string;
+    avatarTitle: string;
+    avatarSubtitle: string;
+    avatarUseButton: string;
+    avatarSelected: string;
+    avatarUpdated: string;
+    avatarUpdateFailed: string;
+    avatarUnavailable: string;
     countryUpdated: string;
     countryCooldownPrefix: string;
     countryCooldownSuffix: string;
@@ -1311,6 +1320,16 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       nicknameCooldownPrefix: "닉네임은",
       nicknameCooldownSuffix: "이후 다시 변경할 수 있습니다.",
       nicknameUpdateFailed: "닉네임 변경에 실패했습니다.",
+      nicknamePolicyHint:
+        "닉네임은 중복될 수 있으며 공개 화면에는 ‘닉네임 #사용자번호’로 표시됩니다. 변경 후 30일 동안 다시 바꿀 수 없습니다.",
+      nicknamePreviewLabel: "공개 표시",
+      avatarTitle: "프로필 이미지",
+      avatarSubtitle: "연결된 Google 또는 Discord 계정의 이미지 중 하나를 선택합니다.",
+      avatarUseButton: "이 이미지 사용",
+      avatarSelected: "현재 사용 중",
+      avatarUpdated: "프로필 이미지를 변경했습니다.",
+      avatarUpdateFailed: "프로필 이미지를 변경하지 못했습니다.",
+      avatarUnavailable: "사용 가능한 이미지가 없습니다.",
       countryUpdated: "국가/지역이 변경되었습니다.",
       countryCooldownPrefix: "국가/지역은",
       countryCooldownSuffix: "이후 다시 변경할 수 있습니다.",
@@ -2558,6 +2577,16 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       nicknameCooldownPrefix: "You can change your nickname again after",
       nicknameCooldownSuffix: ".",
       nicknameUpdateFailed: "Failed to change your nickname.",
+      nicknamePolicyHint:
+        "Nicknames may be duplicated and appear publicly as ‘Nickname #UserNumber’. After a change, you must wait 30 days to change it again.",
+      nicknamePreviewLabel: "Public display",
+      avatarTitle: "Profile picture",
+      avatarSubtitle: "Choose an image from your connected Google or Discord account.",
+      avatarUseButton: "Use this image",
+      avatarSelected: "Currently selected",
+      avatarUpdated: "Your profile picture has been changed.",
+      avatarUpdateFailed: "Failed to change your profile picture.",
+      avatarUnavailable: "No profile picture is available.",
       countryUpdated: "Your country/region has been changed.",
       countryCooldownPrefix: "You can change your country/region again after",
       countryCooldownSuffix: ".",
@@ -3831,6 +3860,16 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       nicknameCooldownPrefix: "ニックネームは",
       nicknameCooldownSuffix: "以降に再度変更できます。",
       nicknameUpdateFailed: "ニックネームの変更に失敗しました。",
+      nicknamePolicyHint:
+        "ニックネームは重複可能で、公開画面では「ニックネーム #ユーザー番号」と表示されます。変更後30日間は再変更できません。",
+      nicknamePreviewLabel: "公開表示",
+      avatarTitle: "プロフィール画像",
+      avatarSubtitle: "連携済みのGoogleまたはDiscordアカウントの画像から選択します。",
+      avatarUseButton: "この画像を使用",
+      avatarSelected: "現在使用中",
+      avatarUpdated: "プロフィール画像を変更しました。",
+      avatarUpdateFailed: "プロフィール画像を変更できませんでした。",
+      avatarUnavailable: "使用できる画像がありません。",
       countryUpdated: "国/地域が変更されました。",
       countryCooldownPrefix: "国/地域は",
       countryCooldownSuffix: "以降に再度変更できます。",
@@ -5096,6 +5135,16 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       nicknameCooldownPrefix: "昵称需在",
       nicknameCooldownSuffix: "之后才能再次修改。",
       nicknameUpdateFailed: "修改昵称失败。",
+      nicknamePolicyHint:
+        "昵称可以重复，并会在公开页面显示为“昵称 #用户编号”。修改后30天内不能再次修改。",
+      nicknamePreviewLabel: "公开显示",
+      avatarTitle: "头像",
+      avatarSubtitle: "从已关联的 Google 或 Discord 账号头像中选择一个。",
+      avatarUseButton: "使用此头像",
+      avatarSelected: "当前使用",
+      avatarUpdated: "头像已修改。",
+      avatarUpdateFailed: "头像修改失败。",
+      avatarUnavailable: "没有可用的头像。",
       countryUpdated: "国家/地区已修改。",
       countryCooldownPrefix: "国家/地区需在",
       countryCooldownSuffix: "之后才能再次修改。",

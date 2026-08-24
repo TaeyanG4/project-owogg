@@ -17,6 +17,7 @@ import { GameThumbnail } from "../components/ui/GameThumbnail";
 import { ApiClientError } from "../lib/api/errors";
 import { ArrowLeft, Trophy, Zap, Calendar, Users, AlertCircle, RefreshCw } from "lucide-react";
 import { useI18n } from "../features/i18n/I18nContext";
+import { formatPublicUserTag } from "@owogg/core";
 
 type ServerTab = "alltime" | "weekly" | "games";
 
@@ -295,6 +296,7 @@ export default function DiscordServerSlugRoute() {
                   key={entry.userId}
                   rank={entry.rank}
                   nickname={entry.nickname}
+                  userId={entry.userId}
                   avatarUrl={entry.avatarUrl}
                   valueLabel={`${entry.xp.toLocaleString()} XP`}
                 />
@@ -316,6 +318,7 @@ export default function DiscordServerSlugRoute() {
                   key={entry.userId}
                   rank={entry.rank}
                   nickname={entry.nickname}
+                  userId={entry.userId}
                   avatarUrl={entry.avatarUrl}
                   valueLabel={`${entry.xp.toLocaleString()} XP`}
                 />
@@ -370,6 +373,7 @@ export default function DiscordServerSlugRoute() {
                     key={entry.id}
                     rank={idx + 1}
                     nickname={entry.nickname}
+                    userId={entry.userId}
                     avatarUrl={entry.avatarUrl}
                     subtext={entry.createdAt.slice(0, 10)}
                     valueLabel={`${entry.score.toLocaleString()} ${currentGame?.scoreUnit ?? "pts"}`}
@@ -414,12 +418,14 @@ export default function DiscordServerSlugRoute() {
 function LeaderboardRow({
   rank,
   nickname,
+  userId,
   avatarUrl,
   valueLabel,
   subtext,
 }: {
   rank: number;
   nickname: string;
+  userId: number;
   avatarUrl?: string | null;
   valueLabel: string;
   subtext?: string;
@@ -453,7 +459,9 @@ function LeaderboardRow({
         </div>
 
         <div className="min-w-0">
-          <div className="truncate text-sm font-bold text-text-primary">{nickname}</div>
+          <div className="truncate text-sm font-bold text-text-primary">
+            {formatPublicUserTag(nickname, userId)}
+          </div>
           {subtext && <div className="text-[11px] text-text-muted">{subtext}</div>}
         </div>
       </div>

@@ -8,6 +8,7 @@ export const AuthUserSchema = z.object({
   nickname: z.string(),
   email: z.string().nullable(),
   avatar_url: z.string().nullable(),
+  avatar_provider: SocialProviderSchema.nullable().optional(),
   providers: z.array(SocialProviderSchema),
   created_at: z.string(),
   // Self-reported "국가/지역" (ISO 3166-1 alpha-2), not verified nationality. Optional so

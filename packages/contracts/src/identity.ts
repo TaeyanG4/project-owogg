@@ -18,6 +18,8 @@ export const ConnectedProviderSchema = z.object({
   provider: SocialProviderSchema,
   providerUserId: z.string(),
   providerEmail: z.string().nullable(),
+  avatarUrl: z.string().nullable(),
+  isAvatarSelected: z.boolean(),
 });
 export type ConnectedProvider = z.infer<typeof ConnectedProviderSchema>;
 

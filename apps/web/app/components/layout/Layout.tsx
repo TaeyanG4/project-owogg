@@ -12,27 +12,36 @@ interface LayoutProps {
 export function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isMobileAdminSidebarOpen, setIsMobileAdminSidebarOpen] = useState(false);
   const isAdminWorkspace =
     location.pathname === "/admin" || location.pathname.startsWith("/admin/");
   const closeMobileSidebar = useCallback(() => setIsMobileSidebarOpen(false), []);
+  const closeMobileAdminSidebar = useCallback(() => setIsMobileAdminSidebarOpen(false), []);
+  const toggleMobileSidebar = useCallback(() => {
+    setIsMobileAdminSidebarOpen(false);
+    setIsMobileSidebarOpen((previous) => !previous);
+  }, []);
+  const openMobileAdminSidebar = useCallback(() => {
+    setIsMobileSidebarOpen(false);
+    setIsMobileAdminSidebarOpen(true);
+  }, []);
 
   return (
     <div className="min-h-screen flex flex-col w-full selection:bg-brand/30 selection:text-text-primary bg-surface text-text-primary">
-      <Header
-        onToggleMobileSidebar={() => setIsMobileSidebarOpen((prev) => !prev)}
-        isAdminWorkspace={isAdminWorkspace}
-      />
+      <Header onToggleMobileSidebar={toggleMobileSidebar} isAdminWorkspace={isAdminWorkspace} />
 
       <div className="flex-1 flex w-full">
+        <Sidebar isMobileOpen={isMobileSidebarOpen} onMobileClose={closeMobileSidebar} />
         {isAdminWorkspace ? (
-          <AdminWorkspace isMobileOpen={isMobileSidebarOpen} onMobileClose={closeMobileSidebar}>
+          <AdminWorkspace
+            isMobileOpen={isMobileAdminSidebarOpen}
+            onMobileOpen={openMobileAdminSidebar}
+            onMobileClose={closeMobileAdminSidebar}
+          >
             {children}
           </AdminWorkspace>
         ) : (
-          <>
-            <Sidebar isMobileOpen={isMobileSidebarOpen} onMobileClose={closeMobileSidebar} />
-            <main className="flex-1 w-full min-w-0 flex flex-col">{children}</main>
-          </>
+          <main className="flex-1 w-full min-w-0 flex flex-col">{children}</main>
         )}
       </div>
 

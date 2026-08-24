@@ -18,7 +18,7 @@ import { PlatformIconRow, PlatformIcon } from "../components/ui/PlatformIcon";
 import { GameThumbnail } from "../components/ui/GameThumbnail";
 import type { LeaderRecord, XpLeaderboardEntry, CreatorRankEntryDto } from "@owogg/contracts";
 
-import { levelForTotalXp } from "@owogg/core";
+import { formatPublicUserTag, levelForTotalXp } from "@owogg/core";
 
 import { usePublicGames } from "../features/publicGamesApi";
 import { publicGameToCard } from "../features/catalog/publicGameAdapter";
@@ -479,7 +479,9 @@ export default function Ranking() {
                                             record.playerName.slice(0, 2)
                                           )}
                                         </div>
-                                        <span>{record.playerName}</span>
+                                        <span>
+                                          {formatPublicUserTag(record.playerName, record.userId)}
+                                        </span>
                                       </Link>
                                     ) : (
                                       <div className="flex items-center gap-2">
@@ -569,7 +571,9 @@ export default function Ranking() {
                                           record.nickname.slice(0, 2)
                                         )}
                                       </div>
-                                      <span>{record.nickname}</span>
+                                      <span>
+                                        {formatPublicUserTag(record.nickname, record.userId)}
+                                      </span>
                                     </Link>
                                   </td>
 
@@ -629,7 +633,7 @@ export default function Ranking() {
                                   <div>
                                     <div className="flex items-center gap-1.5">
                                       <span className="font-bold text-white">
-                                        {record.nickname}
+                                        {formatPublicUserTag(record.nickname, record.userId)}
                                       </span>
                                       {record.country && (
                                         <span className="text-[10px] text-text-muted font-mono">

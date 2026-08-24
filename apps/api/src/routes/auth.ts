@@ -385,6 +385,7 @@ authRouter.get("/discord/callback", async (c) => {
       "discord",
       profile.id,
       profile.email,
+      profile.avatarUrl,
     );
 
     if (!result.ok) {
@@ -558,6 +559,7 @@ authRouter.post("/link/google", async (c) => {
     "google",
     profile.sub,
     profile.email,
+    profile.picture,
   );
 
   if (!result.ok) {

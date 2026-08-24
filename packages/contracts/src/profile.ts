@@ -6,6 +6,9 @@ export const ProfileErrorCodeSchema = z.enum([
   "INVALID_COUNTRY",
   "COUNTRY_COOLDOWN_ACTIVE",
   "INVALID_VISIBILITY",
+  "INVALID_AVATAR_PROVIDER",
+  "AVATAR_PROVIDER_NOT_LINKED",
+  "AVATAR_UNAVAILABLE",
   "USER_NOT_FOUND",
 ]);
 export type ProfileErrorCode = z.infer<typeof ProfileErrorCodeSchema>;
@@ -21,6 +24,18 @@ export const UpdateNicknameResponseSchema = z.object({
   nicknameUpdatedAt: z.string(),
 });
 export type UpdateNicknameResponse = z.infer<typeof UpdateNicknameResponseSchema>;
+
+export const UpdateAvatarPreferenceRequestSchema = z.object({
+  provider: z.enum(["google", "discord"]),
+});
+export type UpdateAvatarPreferenceRequest = z.infer<typeof UpdateAvatarPreferenceRequestSchema>;
+
+export const UpdateAvatarPreferenceResponseSchema = z.object({
+  success: z.literal(true),
+  avatarProvider: z.enum(["google", "discord"]),
+  avatarUrl: z.string(),
+});
+export type UpdateAvatarPreferenceResponse = z.infer<typeof UpdateAvatarPreferenceResponseSchema>;
 
 // null = unset ("국가/지역" not provided). Server accepts "UNSET"/"" as the same intent.
 export const UpdateCountryRequestSchema = z.object({

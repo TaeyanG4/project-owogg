@@ -96,6 +96,7 @@ CREATE TABLE users (
   nickname TEXT NOT NULL,
   email TEXT,
   avatar_url TEXT,
+  avatar_provider TEXT,
   country TEXT,
   nickname_updated_at TEXT,
   country_updated_at TEXT,
@@ -118,6 +119,7 @@ CREATE TABLE oauth_accounts (
   provider TEXT NOT NULL,
   provider_user_id TEXT NOT NULL,
   provider_email TEXT,
+  avatar_url TEXT,
   created_at TEXT NOT NULL
 );
 CREATE TABLE user_moderation (
@@ -184,6 +186,23 @@ CREATE TABLE admin_permission_grants (
   created_at TEXT NOT NULL,
   UNIQUE (account_id, permission)
 );
+CREATE TABLE admin_role_permissions (
+  role TEXT NOT NULL,
+  permission TEXT NOT NULL,
+  granted_by_admin_id INTEGER,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (role, permission)
+);
+INSERT INTO admin_role_permissions (role, permission, updated_at) VALUES
+  ('OPERATOR', 'admin.center.access', datetime('now')),
+  ('OPERATOR', 'users.view', datetime('now')),
+  ('OPERATOR', 'users.ban', datetime('now')),
+  ('OPERATOR', 'games.moderate', datetime('now')),
+  ('MODERATOR', 'admin.center.access', datetime('now')),
+  ('MODERATOR', 'users.view', datetime('now')),
+  ('SYSTEM_DEVELOPER', 'admin.center.access', datetime('now')),
+  ('SYSTEM_DEVELOPER', 'system.dev.access', datetime('now')),
+  ('SYSTEM_DEVELOPER', 'system.monitor', datetime('now'));
 CREATE TABLE discord_guilds (
   guild_id TEXT PRIMARY KEY,
   slug TEXT UNIQUE NOT NULL,

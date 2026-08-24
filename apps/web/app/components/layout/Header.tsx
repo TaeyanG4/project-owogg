@@ -8,7 +8,6 @@ import {
   Trophy,
   Settings as SettingsIcon,
   ShieldCheck,
-  ServerCog,
   Gamepad2,
   Video,
 } from "lucide-react";
@@ -22,27 +21,12 @@ import { useClickOutside } from "../../hooks/useClickOutside";
 import { fetchMyAccess } from "../../features/myAccess";
 import { ApiClientError } from "../../lib/api/errors.js";
 import { retryAsync } from "../../lib/api/retry.js";
-import type { MyAccessResponse, StaffRoleValue } from "@owogg/contracts";
+import type { MyAccessResponse } from "@owogg/contracts";
 
 interface HeaderProps {
   onToggleMobileSidebar: () => void;
   isAdminWorkspace?: boolean;
 }
-
-/** Staff Role → profile-dropdown center entry. One entry at most, since `staffRole` is a single
- * nullable value (a person's managed admin_accounts row has exactly one role) — see
- * docs/AUTHORIZATION.md and packages/core/src/domain/staffRoles.ts. Kept as a plain lookup rather
- * than a switch so a missing case fails loudly (unmapped role falls through to `undefined`,
- * i.e. no entry, rather than crashing the header). */
-const STAFF_CENTER_ENTRIES: Record<
-  StaffRoleValue,
-  { to: string; label: string; Icon: typeof ShieldCheck }
-> = {
-  ADMIN: { to: "/admin", label: "관리자 센터", Icon: ShieldCheck },
-  OPERATOR: { to: "/ops", label: "운영 센터", Icon: ShieldCheck },
-  MODERATOR: { to: "/mod", label: "모더레이션", Icon: ShieldCheck },
-  SYSTEM_DEVELOPER: { to: "/system-dev", label: "시스템 개발", Icon: ServerCog },
-};
 
 export function Header({ onToggleMobileSidebar, isAdminWorkspace = false }: HeaderProps) {
   const [searchQuery, setSearchQuery] = useState("");
@@ -98,7 +82,11 @@ export function Header({ onToggleMobileSidebar, isAdminWorkspace = false }: Head
     }
   };
 
-  const staffCenter = myAccess?.staffRole ? STAFF_CENTER_ENTRIES[myAccess.staffRole] : null;
+  const staffCenter =
+    myAccess?.staffRole &&
+    (myAccess.staffRole === "ADMIN" || myAccess.permissions.includes("admin.center.access"))
+      ? { to: "/admin", label: "관리자 센터", Icon: ShieldCheck }
+      : null;
   const gameCreator = myAccess?.gameCreator;
   // Always shown to every logged-in user, regardless of canApply — even while self-serve
   // applications are closed (canApplyForGameCreator() currently false, §"추후 업데이트 예정"), the

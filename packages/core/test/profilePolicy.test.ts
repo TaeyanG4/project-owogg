@@ -8,6 +8,7 @@ import {
   NICKNAME_MAX_LENGTH,
   NICKNAME_COOLDOWN_DAYS,
   COUNTRY_COOLDOWN_DAYS,
+  formatPublicUserTag,
 } from "../src/domain/profilePolicy.js";
 
 test("validateNickname trims surrounding whitespace", () => {
@@ -68,13 +69,13 @@ test("checkCooldown blocks a change within the cooldown window", () => {
   const result = checkCooldown(lastChangedAt, NICKNAME_COOLDOWN_DAYS, now);
   assert.equal(result.allowed, false);
   if (!result.allowed) {
-    assert.equal(result.nextAllowedAt, "2026-01-15T00:00:00.000Z");
+    assert.equal(result.nextAllowedAt, "2026-02-07T00:00:00.000Z");
   }
 });
 
 test("checkCooldown allows a change exactly at the cooldown boundary", () => {
   const lastChangedAt = "2026-01-01T00:00:00.000Z";
-  const exactlyAtBoundary = new Date("2026-01-08T00:00:00.000Z"); // +7 days
+  const exactlyAtBoundary = new Date("2026-01-31T00:00:00.000Z"); // +30 days
   const result = checkCooldown(lastChangedAt, NICKNAME_COOLDOWN_DAYS, exactlyAtBoundary);
   assert.equal(result.allowed, true);
 });
@@ -85,4 +86,12 @@ test("country cooldown uses its own, longer window", () => {
   const lastChangedAt = "2026-01-01T00:00:00.000Z"; // 19 days ago, below 30
   const result = checkCooldown(lastChangedAt, COUNTRY_COOLDOWN_DAYS, now);
   assert.equal(result.allowed, false);
+});
+
+test("nickname cooldown is 30 days", () => {
+  assert.equal(NICKNAME_COOLDOWN_DAYS, 30);
+});
+
+test("formatPublicUserTag combines a duplicate-safe nickname and stable user number", () => {
+  assert.equal(formatPublicUserTag("Taeyang", 123), "Taeyang #123");
 });

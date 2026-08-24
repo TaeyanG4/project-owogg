@@ -22,6 +22,10 @@ import {
   AdminScoreActionResponseSchema,
   PermissionSchema,
   type PermissionValue,
+  ConfigurableStaffRoleSchema,
+  RolePermissionPolicyListResponseSchema,
+  RolePermissionPolicySchema,
+  type ConfigurableStaffRoleValue,
   GameCreatorAccessListResponseSchema,
   GameCreatorAccessRecordSchema,
   GameCreatorApplicationListResponseSchema,
@@ -198,6 +202,23 @@ export function deleteRevokeAdminPermission(id: number, permission: PermissionVa
       method: "DELETE",
     },
   );
+}
+
+// ── Role-level functional policies (managed ADMIN only) ──
+
+export function fetchAdminRolePermissions() {
+  return apiFetch("/api/admin/role-permissions", RolePermissionPolicyListResponseSchema);
+}
+
+export function putAdminRolePermissions(
+  role: ConfigurableStaffRoleValue,
+  permissions: PermissionValue[],
+) {
+  const safeRole = ConfigurableStaffRoleSchema.parse(role);
+  return apiFetch(`/api/admin/role-permissions/${safeRole}`, RolePermissionPolicySchema, {
+    method: "PUT",
+    body: JSON.stringify({ permissions }),
+  });
 }
 
 export function fetchAdminGames() {

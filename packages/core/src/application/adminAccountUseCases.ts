@@ -1,5 +1,10 @@
 import type { AdminAccountRole, AdminAccountStatus } from "../domain/adminAccounts.js";
-import { isDelegatablePermission, type Permission } from "../domain/staffRoles.js";
+import {
+  CONFIGURABLE_STAFF_ROLES,
+  isDelegatablePermission,
+  type ConfigurableStaffRole,
+  type Permission,
+} from "../domain/staffRoles.js";
 import type {
   AdminAccountRecord,
   AdminAccountAuditEntry,
@@ -23,7 +28,8 @@ export type AdminAccountUseCaseError =
   | "CANNOT_MODIFY_SELF"
   /** `roles.manage` is deliberately never delegable via admin_permission_grants — see
    * domain/staffRoles.ts's isDelegatablePermission. */
-  | "PERMISSION_NOT_DELEGABLE";
+  | "PERMISSION_NOT_DELEGABLE"
+  | "ROLE_NOT_CONFIGURABLE";
 
 export class AdminAccountUseCaseFailure extends Error {
   constructor(public readonly code: AdminAccountUseCaseError) {
@@ -351,5 +357,57 @@ export class AdminAccountUseCases {
       metadata: { permission: input.permission },
       nowIso,
     });
+  }
+
+  // ── Role-level functional policy (migration 0038) ────────────────────────
+
+  async listRolePermissions(role: ConfigurableStaffRole): Promise<Permission[]> {
+    return this.repo.listRolePermissions(role);
+  }
+
+  async listRolePermissionPolicies(): Promise<
+    Array<{ role: ConfigurableStaffRole; permissions: Permission[] }>
+  > {
+    return Promise.all(
+      CONFIGURABLE_STAFF_ROLES.map(async (role) => ({
+        role,
+        permissions: await this.repo.listRolePermissions(role),
+      })),
+    );
+  }
+
+  /** Replaces one role's full functional permission set. ADMIN is not a configurable role and
+   * roles.manage is never accepted, so only a managed ADMIN can control this policy without being
+   * able to delegate the policy editor itself. */
+  async replaceRolePermissions(input: {
+    actorAdminId: number;
+    role: ConfigurableStaffRole;
+    permissions: readonly Permission[];
+    now?: Date;
+  }): Promise<Permission[]> {
+    if (!CONFIGURABLE_STAFF_ROLES.includes(input.role)) {
+      throw new AdminAccountUseCaseFailure("ROLE_NOT_CONFIGURABLE");
+    }
+    if (input.permissions.some((permission) => !isDelegatablePermission(permission))) {
+      throw new AdminAccountUseCaseFailure("PERMISSION_NOT_DELEGABLE");
+    }
+
+    const permissions = [...new Set(input.permissions)];
+    const before = await this.repo.listRolePermissions(input.role);
+    const nowIso = (input.now ?? new Date()).toISOString();
+    await this.repo.replaceRolePermissions({
+      role: input.role,
+      permissions,
+      grantedByAdminId: input.actorAdminId,
+      nowIso,
+    });
+    await this.repo.appendAudit({
+      actorAdminId: input.actorAdminId,
+      targetAdminId: null,
+      action: "ROLE_PERMISSIONS_UPDATED",
+      metadata: { role: input.role, before, after: permissions },
+      nowIso,
+    });
+    return permissions;
   }
 }

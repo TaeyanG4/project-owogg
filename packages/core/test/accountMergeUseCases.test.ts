@@ -87,6 +87,7 @@ class FixtureUserRepo implements UserRepository {
       nickname: data.nickname,
       email: data.email,
       avatar_url: data.avatarUrl,
+      avatar_provider: data.provider,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       providers: [data.provider],
@@ -98,6 +99,7 @@ class FixtureUserRepo implements UserRepository {
       provider: data.provider,
       provider_user_id: data.providerUserId,
       provider_email: data.email,
+      avatar_url: data.avatarUrl,
       created_at: new Date().toISOString(),
     });
     return user;
@@ -113,6 +115,7 @@ class FixtureUserRepo implements UserRepository {
     provider: string,
     providerUserId: string,
     providerEmail: string | null,
+    avatarUrl: string | null,
   ): Promise<void> {
     this.s.oauth.set(`${provider}:${providerUserId}`, {
       id: this.s.nextId,
@@ -120,6 +123,7 @@ class FixtureUserRepo implements UserRepository {
       provider,
       provider_user_id: providerUserId,
       provider_email: providerEmail,
+      avatar_url: avatarUrl,
       created_at: new Date().toISOString(),
     });
   }
@@ -129,6 +133,23 @@ class FixtureUserRepo implements UserRepository {
         this.s.oauth.delete(key);
       }
     }
+  }
+  async updateAvatarPreference(
+    userId: number,
+    provider: string,
+    avatarUrl: string,
+    updatedAt: string,
+  ): Promise<User> {
+    const user = this.s.users.get(userId);
+    if (!user) throw new Error("user not found");
+    const updated = {
+      ...user,
+      avatar_provider: provider,
+      avatar_url: avatarUrl,
+      updated_at: updatedAt,
+    };
+    this.s.users.set(userId, updated);
+    return updated;
   }
 }
 
@@ -540,7 +561,7 @@ test("confirmMerge blocks same-provider conflict (both accounts have the same pr
     avatarUrl: null,
   });
   // B also has a google identity
-  await userRepo.linkOAuthAccount(userB.id, "google", "google-sub-B", "b2@example.com");
+  await userRepo.linkOAuthAccount(userB.id, "google", "google-sub-B", "b2@example.com", null);
 
   const challenge = await mergeRepo.createMergeChallenge({
     userA: userA.id,

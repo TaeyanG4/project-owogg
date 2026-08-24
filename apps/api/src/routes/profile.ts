@@ -3,6 +3,8 @@ import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import {
   UpdateNicknameRequestSchema,
+  UpdateAvatarPreferenceRequestSchema,
+  UpdateAvatarPreferenceResponseSchema,
   UpdateCountryRequestSchema,
   UpdateLocaleRequestSchema,
   UpdateVisibilityRequestSchema,
@@ -33,6 +35,50 @@ profileRouter.get("/public/:userId", async (c) => {
   }
 
   return c.json(PublicProfileResponseSchema.parse(data), 200);
+});
+
+// PATCH /api/profile/avatar — select one of the current user's verified, linked OAuth avatars.
+// The client sends only a provider name; the URL always comes from the server-owned account row.
+profileRouter.patch("/avatar", async (c) => {
+  const userId = await getAuthUserId(c);
+  if (!userId) {
+    return profileError(c, "UNAUTHORIZED", "Unauthenticated", 401);
+  }
+  if (!c.env?.DB) {
+    return c.json({ error: "Database unavailable" }, 500);
+  }
+
+  const body = await c.req.json().catch(() => ({}));
+  const parsed = UpdateAvatarPreferenceRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    return profileError(
+      c,
+      "INVALID_AVATAR_PROVIDER",
+      "프로필 이미지 출처가 올바르지 않습니다.",
+      400,
+    );
+  }
+
+  const { profileUseCases } = createContainer(c.env.DB);
+  const result = await profileUseCases.updateAvatarPreference(userId, parsed.data.provider);
+  if (!result.ok) {
+    if (result.code === "USER_NOT_FOUND") {
+      return profileError(c, result.code, "계정을 찾을 수 없습니다.", 404);
+    }
+    if (result.code === "AVATAR_PROVIDER_NOT_LINKED") {
+      return profileError(c, result.code, "연결되지 않은 로그인 계정입니다.", 400);
+    }
+    return profileError(c, result.code, "이 로그인 계정에는 사용할 프로필 이미지가 없습니다.", 400);
+  }
+
+  return c.json(
+    UpdateAvatarPreferenceResponseSchema.parse({
+      success: true,
+      avatarProvider: result.user.avatar_provider,
+      avatarUrl: result.user.avatar_url,
+    }),
+    200,
+  );
 });
 
 async function getAuthUserId(c: Context<ApiEnv>): Promise<number | null> {

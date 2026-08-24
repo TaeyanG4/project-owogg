@@ -8,10 +8,7 @@ export type AdminNavigationItemId =
   | "users"
   | "monitoring"
   | "accounts"
-  | "security"
-  | "ops-center"
-  | "mod-center"
-  | "system-dev-center";
+  | "security";
 
 export interface AdminNavigationItem {
   id: AdminNavigationItemId;
@@ -25,7 +22,7 @@ export interface AdminNavigationItem {
 }
 
 export interface AdminNavigationGroup {
-  id: "overview" | "operations" | "people" | "system" | "centers";
+  id: "overview" | "operations" | "people" | "system";
   label: string;
   items: AdminNavigationItem[];
 }
@@ -114,36 +111,6 @@ export const ADMIN_NAVIGATION_GROUPS: AdminNavigationGroup[] = [
         label: "내 보안 설정",
         description: "관리자 비밀번호 변경",
         path: "/admin/settings/security",
-        elevatedOnly: true,
-      },
-    ],
-  },
-  {
-    id: "centers",
-    label: "역할별 센터",
-    items: [
-      {
-        id: "ops-center",
-        label: "운영 센터",
-        description: "운영자 전용 작업 공간",
-        path: "/ops",
-        permissionAny: ["admin.center.access"],
-        elevatedOnly: true,
-      },
-      {
-        id: "mod-center",
-        label: "모더레이션",
-        description: "모더레이터 전용 작업 공간",
-        path: "/mod",
-        permissionAny: ["admin.center.access"],
-        elevatedOnly: true,
-      },
-      {
-        id: "system-dev-center",
-        label: "시스템 개발",
-        description: "내부 진단 및 개발 도구",
-        path: "/system-dev",
-        permissionAny: ["system.dev.access"],
         elevatedOnly: true,
       },
     ],

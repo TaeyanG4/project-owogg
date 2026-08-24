@@ -3,7 +3,7 @@ import type {
   AdminAccountStatus,
   AdminAccountAuditAction,
 } from "../domain/adminAccounts.js";
-import type { Permission } from "../domain/staffRoles.js";
+import type { ConfigurableStaffRole, Permission } from "../domain/staffRoles.js";
 
 export interface AdminAccountRecord {
   id: number;
@@ -75,8 +75,8 @@ export interface AdminAccountRepository {
 
   listAudit(limit: number): Promise<AdminAccountAuditEntry[]>;
 
-  /** Individual permission delegation (migration 0025) — e.g. handing a trusted
-   * SYSTEM_DEVELOPER `admin.center.access` without making them a full OPERATOR. Idempotent:
+  /** Individual permission delegation (migration 0025) — one account-specific exception on top
+   * of the D1 role policy. Idempotent:
    * granting an already-granted permission is a no-op success (UNIQUE(account_id, permission)),
    * never a conflict the caller needs to handle specially. */
   grantPermission(
@@ -87,4 +87,13 @@ export interface AdminAccountRepository {
   ): Promise<void>;
   revokePermission(accountId: number, permission: Permission): Promise<void>;
   listPermissions(accountId: number): Promise<Permission[]>;
+
+  /** D1-backed functional policy shared by every account holding the same non-ADMIN role. */
+  listRolePermissions(role: ConfigurableStaffRole): Promise<Permission[]>;
+  replaceRolePermissions(input: {
+    role: ConfigurableStaffRole;
+    permissions: readonly Permission[];
+    grantedByAdminId: number;
+    nowIso: string;
+  }): Promise<void>;
 }

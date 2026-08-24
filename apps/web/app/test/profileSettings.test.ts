@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { UpdateNicknameRequestSchema, UpdateCountryRequestSchema } from "@owogg/contracts";
+import {
+  UpdateNicknameRequestSchema,
+  UpdateCountryRequestSchema,
+  UpdateAvatarPreferenceRequestSchema,
+} from "@owogg/contracts";
 import { COUNTRY_OPTIONS, countryLabel } from "../lib/countries.js";
 
 describe("Profile settings (nickname/country) client contracts", () => {
@@ -17,6 +21,18 @@ describe("Profile settings (nickname/country) client contracts", () => {
   it("UpdateCountryRequestSchema accepts a country code or null (unset)", () => {
     assert.equal(UpdateCountryRequestSchema.safeParse({ country: "KR" }).success, true);
     assert.equal(UpdateCountryRequestSchema.safeParse({ country: null }).success, true);
+  });
+
+  it("UpdateAvatarPreferenceRequestSchema accepts only supported OAuth providers", () => {
+    assert.equal(
+      UpdateAvatarPreferenceRequestSchema.safeParse({ provider: "google" }).success,
+      true,
+    );
+    assert.equal(
+      UpdateAvatarPreferenceRequestSchema.safeParse({ provider: "discord" }).success,
+      true,
+    );
+    assert.equal(UpdateAvatarPreferenceRequestSchema.safeParse({ provider: "url" }).success, false);
   });
 
   it("COUNTRY_OPTIONS entries are unique two-letter codes with a Korean label", () => {

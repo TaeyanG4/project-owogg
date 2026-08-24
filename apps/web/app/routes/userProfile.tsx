@@ -19,7 +19,7 @@ import { usePublicGames } from "../features/publicGamesApi";
 import { publicGameToCard } from "../features/catalog/publicGameAdapter";
 import { GameThumbnail } from "../components/ui/GameThumbnail";
 import { GameFavoriteCard, GameActivityCard } from "../components/ui/GameLinkCard";
-import { ACHIEVEMENT_DEFINITIONS, type AchievementCode } from "@owogg/core";
+import { ACHIEVEMENT_DEFINITIONS, formatPublicUserTag, type AchievementCode } from "@owogg/core";
 import { ApiClientError } from "../lib/api";
 import type { PublicProfileResponse } from "@owogg/contracts";
 
@@ -186,7 +186,9 @@ export default function UserProfileRoute() {
             {dict.userProfile.eyebrow}
           </p>
           <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
-            <h1 className="text-3xl font-black text-text-primary">{data.nickname}</h1>
+            <h1 className="text-3xl font-black text-text-primary">
+              {formatPublicUserTag(data.nickname, data.id)}
+            </h1>
             {flag && <span className="text-xl">{flag}</span>}
           </div>
           <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs font-semibold text-text-muted sm:justify-start">

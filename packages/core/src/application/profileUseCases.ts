@@ -28,6 +28,12 @@ export type UpdateLocaleResult =
 export type UpdateVisibilityResult =
   { ok: true; user: User } | { ok: false; code: "USER_NOT_FOUND" };
 
+export type UpdateAvatarPreferenceResult =
+  | { ok: true; user: User }
+  | { ok: false; code: "USER_NOT_FOUND" }
+  | { ok: false; code: "AVATAR_PROVIDER_NOT_LINKED" }
+  | { ok: false; code: "AVATAR_UNAVAILABLE" };
+
 export class ProfileUseCases {
   constructor(private userRepo: UserRepository) {}
 
@@ -48,6 +54,27 @@ export class ProfileUseCases {
     const updated = await this.userRepo.updateNickname(
       userId,
       validation.nickname,
+      new Date().toISOString(),
+    );
+    return { ok: true, user: updated };
+  }
+
+  async updateAvatarPreference(
+    userId: number,
+    provider: string,
+  ): Promise<UpdateAvatarPreferenceResult> {
+    const user = await this.userRepo.findById(userId);
+    if (!user) return { ok: false, code: "USER_NOT_FOUND" };
+
+    const accounts = await this.userRepo.getOAuthAccounts(userId);
+    const account = accounts.find((item) => item.provider === provider);
+    if (!account) return { ok: false, code: "AVATAR_PROVIDER_NOT_LINKED" };
+    if (!account.avatar_url) return { ok: false, code: "AVATAR_UNAVAILABLE" };
+
+    const updated = await this.userRepo.updateAvatarPreference(
+      userId,
+      provider,
+      account.avatar_url,
       new Date().toISOString(),
     );
     return { ok: true, user: updated };

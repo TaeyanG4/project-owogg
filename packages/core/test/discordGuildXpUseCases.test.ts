@@ -395,6 +395,9 @@ class MockUserRepo implements UserRepository {
     return this.oauthAccounts;
   }
   async unlinkOAuthAccount(): Promise<void> {}
+  async updateAvatarPreference(): Promise<User> {
+    throw new Error("Not implemented");
+  }
   async updateNickname(): Promise<User> {
     throw new Error("Not implemented");
   }

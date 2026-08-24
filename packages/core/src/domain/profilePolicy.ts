@@ -7,7 +7,7 @@ export const NICKNAME_MIN_LENGTH = 2;
 export const NICKNAME_MAX_LENGTH = 20;
 
 /** Nickname change cooldown, in days. Applies only after the first explicit change. */
-export const NICKNAME_COOLDOWN_DAYS = 7;
+export const NICKNAME_COOLDOWN_DAYS = 30;
 
 /**
  * Country/region change cooldown, in days. "국가/지역" is self-reported metadata, not a
@@ -95,4 +95,10 @@ export function checkCooldown(
   if (now.getTime() >= nextAllowedMs) return { allowed: true };
 
   return { allowed: false, nextAllowedAt: new Date(nextAllowedMs).toISOString() };
+}
+
+/** Public duplicate-safe identity. `userId` is the stable public user number already used by
+ * `/users/:id`; nicknames intentionally remain non-unique and user-controlled. */
+export function formatPublicUserTag(nickname: string, userId: number): string {
+  return `${nickname} #${userId}`;
 }

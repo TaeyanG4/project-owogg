@@ -18,6 +18,7 @@ CREATE TABLE users (
   nickname TEXT NOT NULL,
   email TEXT,
   avatar_url TEXT,
+  avatar_provider TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   country TEXT,
@@ -42,6 +43,7 @@ CREATE TABLE oauth_accounts (
   provider TEXT NOT NULL,
   provider_user_id TEXT NOT NULL,
   provider_email TEXT,
+  avatar_url TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -87,6 +89,24 @@ CREATE TABLE admin_permission_grants (
   created_at TEXT NOT NULL,
   UNIQUE (account_id, permission)
 );
+
+CREATE TABLE admin_role_permissions (
+  role TEXT NOT NULL,
+  permission TEXT NOT NULL,
+  granted_by_admin_id INTEGER,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (role, permission)
+);
+INSERT INTO admin_role_permissions (role, permission, updated_at) VALUES
+  ('OPERATOR', 'admin.center.access', datetime('now')),
+  ('OPERATOR', 'users.view', datetime('now')),
+  ('OPERATOR', 'users.ban', datetime('now')),
+  ('OPERATOR', 'games.moderate', datetime('now')),
+  ('MODERATOR', 'admin.center.access', datetime('now')),
+  ('MODERATOR', 'users.view', datetime('now')),
+  ('SYSTEM_DEVELOPER', 'admin.center.access', datetime('now')),
+  ('SYSTEM_DEVELOPER', 'system.dev.access', datetime('now')),
+  ('SYSTEM_DEVELOPER', 'system.monitor', datetime('now'));
 
 CREATE TABLE game_creator_access (
   user_id INTEGER PRIMARY KEY,
@@ -288,19 +308,19 @@ test("GET /api/me/access for a managed ADMIN resolves the full permission catalo
   const body = (await res.json()) as { staffRole: string; permissions: string[] };
   assert.equal(body.staffRole, "ADMIN");
   // ADMIN's response enumerates the entire catalog (see effectivePermissions) — spot-check a
-  // permission that is never in any *other* role's default bundle to confirm it's really "all".
+  // permission absent from the other roles' initial policies to confirm it's really "all".
   assert.ok(body.permissions.includes("roles.manage"));
   assert.ok(body.permissions.includes("system.dev.access"));
 });
 
-test("GET /api/me/access for a managed OPERATOR merges the default bundle with an individual grant, deduped", async () => {
+test("GET /api/me/access for a managed OPERATOR merges the D1 role policy with an individual grant, deduped", async () => {
   const db = await createDb();
   const rawToken = "operator_session";
   const userId = await createUserWithSession(db, rawToken);
   const accountId = await createManagedAdmin(db, userId, "OPERATOR");
-  // system.dev.access isn't part of OPERATOR's default bundle — grant it individually.
+  // system.dev.access isn't part of OPERATOR's seeded role policy — grant it individually.
   await grantPermission(db, accountId, "system.dev.access");
-  // sandbox_games.review IS already in OPERATOR's default bundle — granting it again must not
+  // sandbox_games.review IS already in OPERATOR's seeded role policy — granting it again must not
   // produce a duplicate entry in the response.
   await grantPermission(db, accountId, "sandbox_games.review");
 
@@ -312,15 +332,49 @@ test("GET /api/me/access for a managed OPERATOR merges the default bundle with a
   assert.equal(res.status, 200);
   const body = (await res.json()) as { staffRole: string; permissions: string[] };
   assert.equal(body.staffRole, "OPERATOR");
-  assert.ok(body.permissions.includes("users.ban")); // default bundle
+  assert.ok(body.permissions.includes("users.ban")); // role policy
   assert.ok(body.permissions.includes("system.dev.access")); // individual grant
   assert.equal(
     body.permissions.filter((p) => p === "sandbox_games.review").length,
     1,
-    "an individual grant for an already-default permission must not duplicate it",
+    "an individual grant for an already-role-granted permission must not duplicate it",
   );
   // ADMIN-only permission must never leak in.
   assert.ok(!body.permissions.includes("roles.manage"));
+});
+
+test("GET /api/me/access reflects a role-policy revocation and grant on the next request", async () => {
+  const db = await createDb();
+  const rawToken = "dynamic_moderator_policy";
+  const userId = await createUserWithSession(db, rawToken);
+  await createManagedAdmin(db, userId, "MODERATOR");
+
+  const requestAccess = async () => {
+    const response = await app.request(
+      "/api/me/access",
+      { headers: { Cookie: `owogg_session=${rawToken}` } },
+      { DB: db } as any,
+    );
+    assert.equal(response.status, 200);
+    return (await response.json()) as { permissions: string[] };
+  };
+
+  assert.ok((await requestAccess()).permissions.includes("users.view"));
+  await db
+    .prepare(
+      "DELETE FROM admin_role_permissions WHERE role = 'MODERATOR' AND permission = 'users.view'",
+    )
+    .run();
+  await db
+    .prepare(
+      `INSERT INTO admin_role_permissions (role, permission, updated_at)
+       VALUES ('MODERATOR', 'users.ban', datetime('now'))`,
+    )
+    .run();
+
+  const changed = await requestAccess();
+  assert.equal(changed.permissions.includes("users.view"), false);
+  assert.equal(changed.permissions.includes("users.ban"), true);
 });
 
 test("GET /api/me/access reflects ACTIVE Game Creator access (hasAccess true, canApply false)", async () => {

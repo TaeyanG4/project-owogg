@@ -30,6 +30,7 @@ export const ADMIN_ACCOUNT_AUDIT_ACTIONS = [
   "SESSIONS_REVOKED",
   "PERMISSION_GRANTED",
   "PERMISSION_REVOKED",
+  "ROLE_PERMISSIONS_UPDATED",
 ] as const;
 export type AdminAccountAuditAction = (typeof ADMIN_ACCOUNT_AUDIT_ACTIONS)[number];
 

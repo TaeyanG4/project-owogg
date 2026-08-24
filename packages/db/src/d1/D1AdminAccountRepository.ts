@@ -5,6 +5,7 @@ import type {
   AdminAccountRole,
   AdminAccountStatus,
   AdminAccountAuditAction,
+  ConfigurableStaffRole,
   Permission,
 } from "@owogg/core";
 import type { D1Database } from "./D1UserRepository.js";
@@ -233,5 +234,34 @@ export class D1AdminAccountRepository implements AdminAccountRepository {
       .bind(accountId)
       .all<{ permission: string }>();
     return (res.results || []).map((r) => r.permission as Permission);
+  }
+
+  async listRolePermissions(role: ConfigurableStaffRole): Promise<Permission[]> {
+    const res = await this.db
+      .prepare(`SELECT permission FROM admin_role_permissions WHERE role = ? ORDER BY permission`)
+      .bind(role)
+      .all<{ permission: string }>();
+    return (res.results || []).map((row) => row.permission as Permission);
+  }
+
+  async replaceRolePermissions(input: {
+    role: ConfigurableStaffRole;
+    permissions: readonly Permission[];
+    grantedByAdminId: number;
+    nowIso: string;
+  }): Promise<void> {
+    const statements = [
+      this.db.prepare(`DELETE FROM admin_role_permissions WHERE role = ?`).bind(input.role),
+      ...input.permissions.map((permission) =>
+        this.db
+          .prepare(
+            `INSERT INTO admin_role_permissions
+               (role, permission, granted_by_admin_id, updated_at)
+             VALUES (?, ?, ?, ?)`,
+          )
+          .bind(input.role, permission, input.grantedByAdminId, input.nowIso),
+      ),
+    ];
+    await this.db.batch(statements);
   }
 }

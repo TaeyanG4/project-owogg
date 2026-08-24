@@ -49,14 +49,16 @@ admin login fallback도 여전히 compatibility 경로로 사용됩니다. 이 f
 `admin_accounts.role`은 다음 네 값 중 하나입니다.
 
 - `ADMIN`: 보호되는 최상위 역할. permission catalog 전체를 암묵적으로 보유합니다.
-- `OPERATOR`: 강한 운영/제재/game-program 권한을 가진 운영자입니다.
-- `MODERATOR`: 사용자 조회/일시정지와 콘텐츠 review 중심의 좁은 bundle입니다.
-- `SYSTEM_DEVELOPER`: 내부 진단/monitoring 기본 권한을 가지며 Admin Center 입장은 기본이 아닙니다.
+- `OPERATOR`: 운영 기능을 부여할 수 있는 운영자 역할입니다.
+- `MODERATOR`: moderation 기능을 부여할 수 있는 모더레이터 역할입니다.
+- `SYSTEM_DEVELOPER`: 내부 진단/개발 기능을 부여할 수 있는 시스템 개발자 역할입니다.
 
-역할은 숫자 서열로 비교하지 않습니다. 각 non-ADMIN 역할의 default permission을 독립적으로
-나열합니다.
+역할은 숫자 서열로 비교하지 않습니다. 역할별 별도 센터도 두지 않습니다. 세 역할 모두
+`/admin`의 통합 관리자 센터를 사용하며, D1 `admin_role_permissions`에 저장된 역할 정책에 따라
+메뉴와 API 기능이 결정됩니다. 아래 표는 migration 0038이 저장하는 초기값이며 ADMIN이 관리자
+계정 화면에서 변경할 수 있습니다.
 
-## Permission 목록과 기본 묶음
+## Permission 목록과 역할 정책 초기값
 
 현재 catalog:
 
@@ -78,7 +80,7 @@ roles.manage
 
 | Permission                            | OPERATOR | MODERATOR | SYSTEM_DEVELOPER |
 | ------------------------------------- | :------: | :-------: | :--------------: |
-| `admin.center.access`                 |   yes    |    yes    |        no        |
+| `admin.center.access`                 |   yes    |    yes    |       yes        |
 | `users.view`, `users.suspend`         |   yes    |    yes    |        no        |
 | `users.ban`, `users.score_moderation` |   yes    |    no     |        no        |
 | `games.moderate`                      |   yes    |    no     |        no        |
@@ -89,14 +91,15 @@ roles.manage
 | `system.monitor`                      |   yes    |    no     |       yes        |
 | `system.dev.access`                   |    no    |    no     |       yes        |
 
-ADMIN은 표의 bundle을 쓰지 않고 `PERMISSIONS` 전체를 보유합니다. `roles.manage`도 ADMIN의
-암묵적 권한으로만 성립합니다.
+ADMIN은 역할 정책을 쓰지 않고 `PERMISSIONS` 전체를 보유합니다. `roles.manage`도 ADMIN의
+암묵적 권한으로만 성립합니다. 역할 정책 조회·수정 API는 활성 managed ADMIN만 사용할 수 있고,
+변경은 `ROLE_PERMISSIONS_UPDATED` 감사 로그에 남습니다.
 
 ## 개별 permission 부여
 
-유효 permission은 non-ADMIN role default와 `admin_permission_grants`의 합집합입니다.
-SYSTEM_DEVELOPER에게 `admin.center.access`와 필요한 좁은 permission만 추가하는 것이 대표적인
-사용법입니다.
+유효 permission은 `admin_role_permissions`의 역할 정책과 `admin_permission_grants`의 계정별
+예외 권한 합집합입니다. 공통 접근은 역할 정책에서 관리하고, 같은 역할 안에서도 특정 계정에만
+필요한 예외가 있을 때 개별 permission을 추가합니다.
 
 `roles.manage`는 `isDelegatablePermission()`과 use case에서 모두 위임을 거부합니다. 따라서 다른
 role이 자신이나 타인의 role/permission을 확대할 수 없습니다. Web에서 메뉴를 숨기는 것은 편의일

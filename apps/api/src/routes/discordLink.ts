@@ -100,6 +100,7 @@ discordLinkRouter.post("/link/confirm", async (c) => {
     "discord",
     challenge.discordUserId,
     null,
+    null,
   );
 
   if (!result.ok) {

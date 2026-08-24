@@ -1,12 +1,15 @@
 import {
   UpdateNicknameRequestSchema,
   UpdateNicknameResponseSchema,
+  UpdateAvatarPreferenceRequestSchema,
+  UpdateAvatarPreferenceResponseSchema,
   UpdateCountryRequestSchema,
   UpdateCountryResponseSchema,
   UpdateVisibilityRequestSchema,
   UpdateVisibilityResponseSchema,
   PublicProfileResponseSchema,
   type UpdateNicknameResponse,
+  type UpdateAvatarPreferenceResponse,
   type UpdateCountryResponse,
   type UpdateVisibilityResponse,
   type PublicProfileResponse,
@@ -17,6 +20,16 @@ export async function updateNicknameApi(nickname: string): Promise<UpdateNicknam
   const body = UpdateNicknameRequestSchema.parse({ nickname });
   return await apiFetch("/api/profile/nickname", UpdateNicknameResponseSchema, {
     method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateAvatarPreferenceApi(
+  provider: "google" | "discord",
+): Promise<UpdateAvatarPreferenceResponse> {
+  const body = UpdateAvatarPreferenceRequestSchema.parse({ provider });
+  return await apiFetch("/api/profile/avatar", UpdateAvatarPreferenceResponseSchema, {
+    method: "PATCH",
     body: JSON.stringify(body),
   });
 }

@@ -19,6 +19,7 @@ import {
   Code2,
   Gamepad2,
   ShieldCheck,
+  Image as ImageIcon,
 } from "lucide-react";
 import {
   fetchConnectedProviders,
@@ -28,6 +29,7 @@ import {
 } from "../features/auth/authService";
 import {
   updateNicknameApi,
+  updateAvatarPreferenceApi,
   updateCountryApi,
   updateVisibilityApi,
   fetchPublicProfileApi,
@@ -45,7 +47,7 @@ import type {
   CreatorProfileDto,
   GameCreatorMeResponse,
 } from "@owogg/contracts";
-import type { CreatorPlatformType } from "@owogg/core";
+import { formatPublicUserTag, type CreatorPlatformType } from "@owogg/core";
 import { ApiClientError } from "../lib/api";
 import { MergeModal } from "../components/ui/MergeModal";
 
@@ -83,6 +85,7 @@ export default function SettingsPage() {
   const [nicknameInput, setNicknameInput] = useState("");
   const [nicknameBusy, setNicknameBusy] = useState(false);
   const [nicknameError, setNicknameError] = useState<string | null>(null);
+  const [avatarBusyProvider, setAvatarBusyProvider] = useState<SocialProvider | null>(null);
   const [countryInput, setCountryInput] = useState("");
   const [countryBusy, setCountryBusy] = useState(false);
   const [countryError, setCountryError] = useState<string | null>(null);
@@ -174,6 +177,7 @@ export default function SettingsPage() {
       if (linkStatus === "success") {
         setStatusMessage(dict.profile.linkSuccess);
         void refreshConnected();
+        void refreshUser();
       } else if (linkStatus === "already") {
         setStatusMessage(dict.profile.alreadyLinkedAccount);
       } else if (linkStatus === "conflict" && challenge) {
@@ -205,7 +209,14 @@ export default function SettingsPage() {
       }
       setSearchParams({}, { replace: true });
     }
-  }, [searchParams, refreshConnected, refreshCreatorProfile, setSearchParams, dict.profile]);
+  }, [
+    searchParams,
+    refreshConnected,
+    refreshCreatorProfile,
+    refreshUser,
+    setSearchParams,
+    dict.profile,
+  ]);
 
   const isConnected = (provider: SocialProvider) => connected.some((p) => p.provider === provider);
 
@@ -229,7 +240,7 @@ export default function SettingsPage() {
         try {
           await linkGoogleProvider(response.credential);
           setStatusMessage(dict.profile.googleLinkSuccess);
-          await refreshConnected();
+          await Promise.all([refreshConnected(), refreshUser()]);
         } catch (err: unknown) {
           const code = err instanceof ApiClientError ? err.code : undefined;
           const data = err instanceof ApiClientError ? err.data : undefined;
@@ -278,7 +289,7 @@ export default function SettingsPage() {
     try {
       await unlinkProvider(provider);
       setStatusMessage(`${providerLabel(provider)} ${dict.profile.unlinkSuccessSuffix}`);
-      await refreshConnected();
+      await Promise.all([refreshConnected(), refreshUser()]);
     } catch (err: unknown) {
       const code = err instanceof ApiClientError ? err.code : undefined;
       if (code === "LAST_AUTH_PROVIDER") {
@@ -325,6 +336,24 @@ export default function SettingsPage() {
       }
     } finally {
       setNicknameBusy(false);
+    }
+  };
+
+  const handleUpdateAvatar = async (provider: SocialProvider) => {
+    if (avatarBusyProvider) return;
+    setAvatarBusyProvider(provider);
+    try {
+      await updateAvatarPreferenceApi(provider);
+      await Promise.all([refreshConnected(), refreshUser()]);
+      setStatusMessage(dict.profile.avatarUpdated);
+    } catch (err: unknown) {
+      if (err instanceof ApiClientError && err.code === "AVATAR_UNAVAILABLE") {
+        setStatusMessage(dict.profile.avatarUnavailable);
+      } else {
+        setStatusMessage(dict.profile.avatarUpdateFailed);
+      }
+    } finally {
+      setAvatarBusyProvider(null);
     }
   };
 
@@ -430,7 +459,9 @@ export default function SettingsPage() {
 
           <div className="flex flex-col gap-1 text-center md:text-left">
             <div className="flex items-center gap-2 justify-center md:justify-start flex-wrap">
-              <h1 className="text-xl font-black text-text-primary">{user.nickname}</h1>
+              <h1 className="text-xl font-black text-text-primary">
+                {formatPublicUserTag(user.nickname, user.id)}
+              </h1>
               {user.providers.map((p) => (
                 <span
                   key={p}
@@ -516,6 +547,70 @@ export default function SettingsPage() {
           {nicknameError && (
             <p className="text-[11px] text-accent-red font-semibold">{nicknameError}</p>
           )}
+          <p className="text-[11px] leading-relaxed text-text-muted">
+            {dict.profile.nicknamePolicyHint}
+          </p>
+          <p className="text-xs font-bold text-text-secondary">
+            {dict.profile.nicknamePreviewLabel}: {nicknameInput.trim() || user.nickname} #{user.id}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-3 border-t border-border/60 pt-5">
+          <div className="flex items-center gap-2">
+            <ImageIcon className="h-4 w-4 text-brand" />
+            <div>
+              <div className="text-xs font-bold text-text-primary">{dict.profile.avatarTitle}</div>
+              <div className="text-[11px] text-text-muted">{dict.profile.avatarSubtitle}</div>
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {connected.map((account) => {
+              const selected = account.isAvatarSelected;
+              const unavailable = !account.avatarUrl;
+              return (
+                <button
+                  key={account.provider}
+                  type="button"
+                  onClick={() => void handleUpdateAvatar(account.provider)}
+                  disabled={selected || unavailable || avatarBusyProvider !== null}
+                  className={`flex items-center gap-3 rounded-2xl border p-3 text-left transition-all ${
+                    selected
+                      ? "border-brand bg-brand/10"
+                      : "border-border bg-surface hover:border-brand/40"
+                  } disabled:cursor-default disabled:opacity-70`}
+                >
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand/10 text-xs font-black text-brand">
+                    {account.avatarUrl ? (
+                      <img
+                        src={account.avatarUrl}
+                        alt={`${providerLabel(account.provider)} avatar`}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <User className="h-5 w-5" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-bold text-text-primary">
+                      {providerLabel(account.provider)}
+                    </div>
+                    <div className="text-[11px] text-text-muted">
+                      {unavailable
+                        ? dict.profile.avatarUnavailable
+                        : selected
+                          ? dict.profile.avatarSelected
+                          : dict.profile.avatarUseButton}
+                    </div>
+                  </div>
+                  {avatarBusyProvider === account.provider ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-brand" />
+                  ) : selected ? (
+                    <CheckCircle2 className="h-4 w-4 text-brand" />
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <div className="flex flex-col gap-2">

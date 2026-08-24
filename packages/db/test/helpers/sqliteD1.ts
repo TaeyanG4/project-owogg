@@ -181,6 +181,7 @@ CREATE TABLE users (
   nickname TEXT NOT NULL,
   email TEXT,
   avatar_url TEXT,
+  avatar_provider TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   country TEXT,
@@ -320,6 +321,14 @@ CREATE TABLE admin_permission_grants (
   granted_by_admin_id INTEGER,
   created_at TEXT NOT NULL,
   UNIQUE (account_id, permission)
+);
+
+CREATE TABLE admin_role_permissions (
+  role TEXT NOT NULL,
+  permission TEXT NOT NULL,
+  granted_by_admin_id INTEGER,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (role, permission)
 );
 `;
 

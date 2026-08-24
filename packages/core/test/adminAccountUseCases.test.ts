@@ -4,7 +4,7 @@ import {
   AdminAccountUseCases,
   AdminAccountUseCaseFailure,
 } from "../src/application/adminAccountUseCases.js";
-import type { Permission } from "../src/domain/staffRoles.js";
+import type { ConfigurableStaffRole, Permission } from "../src/domain/staffRoles.js";
 import type {
   AdminAccountRepository,
   AdminAccountRecord,
@@ -21,10 +21,12 @@ function createFakeRepo(): AdminAccountRepository & {
   rows: AdminAccountRecord[];
   audit: AdminAccountAuditEntry[];
   permissions: Map<number, Set<Permission>>;
+  rolePermissions: Map<ConfigurableStaffRole, Set<Permission>>;
 } {
   const rows: AdminAccountRecord[] = [];
   const audit: AdminAccountAuditEntry[] = [];
   const permissions = new Map<number, Set<Permission>>();
+  const rolePermissions = new Map<ConfigurableStaffRole, Set<Permission>>();
   let nextId = 1;
   let nextAuditId = 1;
 
@@ -32,6 +34,7 @@ function createFakeRepo(): AdminAccountRepository & {
     rows,
     audit,
     permissions,
+    rolePermissions,
     async countActive() {
       return rows.filter((r) => r.status === "ACTIVE").length;
     },
@@ -111,6 +114,12 @@ function createFakeRepo(): AdminAccountRepository & {
     async listPermissions(accountId) {
       return [...(permissions.get(accountId) ?? [])];
     },
+    async listRolePermissions(role) {
+      return [...(rolePermissions.get(role) ?? [])];
+    },
+    async replaceRolePermissions(input) {
+      rolePermissions.set(input.role, new Set(input.permissions));
+    },
   };
 }
 
@@ -142,6 +151,37 @@ function createFakeAuthRepo(): AdminAuthRepository & { revokedForUser: number[] 
     async cleanupExpired() {},
   };
 }
+
+test("role permission policy replacement is persisted and audited; roles.manage is rejected", async () => {
+  const repo = createFakeRepo();
+  const useCases = new AdminAccountUseCases(repo, createFakeAuthRepo());
+
+  const permissions = await useCases.replaceRolePermissions({
+    actorAdminId: 7,
+    role: "MODERATOR",
+    permissions: ["admin.center.access", "users.view", "users.view"],
+    now: new Date("2026-08-24T00:00:00.000Z"),
+  });
+  assert.deepEqual(permissions, ["admin.center.access", "users.view"]);
+  assert.deepEqual(await useCases.listRolePermissions("MODERATOR"), permissions);
+  assert.equal(repo.audit.at(-1)?.action, "ROLE_PERMISSIONS_UPDATED");
+  assert.deepEqual(repo.audit.at(-1)?.metadata, {
+    role: "MODERATOR",
+    before: [],
+    after: permissions,
+  });
+
+  await assert.rejects(
+    () =>
+      useCases.replaceRolePermissions({
+        actorAdminId: 7,
+        role: "OPERATOR",
+        permissions: ["roles.manage"],
+      }),
+    (error: unknown) =>
+      error instanceof AdminAccountUseCaseFailure && error.code === "PERMISSION_NOT_DELEGABLE",
+  );
+});
 
 test("bootstrapFirstAdmin succeeds once, then rejects when an active account already exists", async () => {
   const repo = createFakeRepo();

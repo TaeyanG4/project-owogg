@@ -45,9 +45,15 @@ myAccessRouter.get("/access", async (c) => {
   ]);
 
   const staffRole = resolveEffectiveStaffRole(eligibility);
-  const grantedPermissions = eligibility.account
-    ? await container.adminAccountUseCases.listPermissions(eligibility.account.id)
-    : [];
+  const [rolePermissions, individualPermissions] =
+    !staffRole || staffRole === "ADMIN"
+      ? [[], []]
+      : await Promise.all([
+          container.adminAccountUseCases.listRolePermissions(staffRole),
+          eligibility.account
+            ? container.adminAccountUseCases.listPermissions(eligibility.account.id)
+            : Promise.resolve([]),
+        ]);
 
   // ADMIN/OPERATOR/SYSTEM_DEVELOPER hold Game Creator access implicitly — see
   // hasImplicitGameCreatorAccess's doc comment. This is ORed with the real access-grant row, never
@@ -58,7 +64,7 @@ myAccessRouter.get("/access", async (c) => {
   return c.json(
     MyAccessResponseSchema.parse({
       staffRole,
-      permissions: effectivePermissions(staffRole, grantedPermissions),
+      permissions: effectivePermissions(staffRole, rolePermissions, individualPermissions),
       gameCreator: {
         hasAccess,
         canApply: !hasAccess && latestApplication?.status !== "PENDING" && canApplyForGameCreator(),

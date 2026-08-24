@@ -19,6 +19,11 @@
 export const STAFF_ROLES = ["ADMIN", "OPERATOR", "MODERATOR", "SYSTEM_DEVELOPER"] as const;
 export type StaffRole = (typeof STAFF_ROLES)[number];
 
+/** Roles whose functional permission bundle can be edited by a managed ADMIN. ADMIN is
+ * intentionally absent: it is the protected top role and always resolves to every permission. */
+export const CONFIGURABLE_STAFF_ROLES = ["OPERATOR", "MODERATOR", "SYSTEM_DEVELOPER"] as const;
+export type ConfigurableStaffRole = (typeof CONFIGURABLE_STAFF_ROLES)[number];
+
 export const STAFF_ROLE_LABELS_KO: Record<StaffRole, string> = {
   ADMIN: "관리자",
   OPERATOR: "운영자",
@@ -27,15 +32,12 @@ export const STAFF_ROLE_LABELS_KO: Record<StaffRole, string> = {
 };
 
 /** ADMIN is the sole top-level, protected role — see isProtectedStaffRole. Every other role's
- * default permission bundle is enumerated explicitly below rather than derived from a numeric
- * hierarchy: MODERATOR's bundle happens to be a subset of OPERATOR's today, but that's a product
- * decision to keep in sync by hand, not a structural "OPERATOR >= MODERATOR" relationship a
- * future change could rely on. */
+ * initial permission policy is enumerated explicitly below rather than derived from a numeric
+ * hierarchy. Runtime policy is persisted in D1 and can diverge after an ADMIN edits it. */
 export const PERMISSIONS = [
-  // Meta-permission: can the admin center shell be entered at all. Granted by default to every
-  // staff role except SYSTEM_DEVELOPER (see §10/§25 of the design spec this implements — a
-  // SYSTEM_DEVELOPER's baseline is system.dev.access/system.monitor, NOT the admin center; a
-  // specific trusted individual can be handed admin.center.access without becoming an OPERATOR).
+  // Meta-permission: can the unified admin center shell be entered at all. The initial role
+  // policies grant it to every configurable staff role; a managed ADMIN can later change that
+  // policy in D1 without a code deployment.
   "admin.center.access",
 
   // User moderation (apps/api/src/routes/adminUsers.ts).
@@ -72,19 +74,35 @@ export const PERMISSIONS = [
   // Read-only operational dashboards (apps/api/src/routes/admin.ts: /overview, /monitoring).
   "system.monitor",
 
-  // SYSTEM_DEVELOPER's own baseline — internal diagnostics, distinct from admin.center.access.
-  // Nothing in apps/api currently gates on this beyond the System Developer Center route guard
-  // itself; it exists so the permission catalog has a place to grow internal dev-only endpoints
-  // into without overloading system.monitor's meaning.
+  // Internal diagnostics, distinct from admin.center.access. The permission catalog has a place
+  // to grow dev-only endpoints without overloading system.monitor's meaning.
   "system.dev.access",
 
   // Staff role grants/revokes + individual permission grants/revokes + managed-admin-account
   // lifecycle (apps/api/src/routes/adminAccounts.ts). Deliberately never included in any
-  // non-ADMIN default bundle and never delegable via admin_permission_grants — see
+  // non-ADMIN role policy and never delegable via admin_permission_grants — see
   // isDelegatablePermission below.
   "roles.manage",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
+
+/** Permission catalog that can be assigned to a role or an individual account. roles.manage is
+ * intentionally omitted so the role-policy editor can never delegate its own authority. */
+export const ASSIGNABLE_PERMISSIONS = [
+  "admin.center.access",
+  "users.view",
+  "users.suspend",
+  "users.ban",
+  "users.score_moderation",
+  "games.moderate",
+  "sandbox_games.review",
+  "sandbox_games.delete",
+  "game_creators.manage",
+  "streamers.review",
+  "system.monitor",
+  "system.dev.access",
+] as const satisfies readonly Permission[];
+export type AssignablePermission = (typeof ASSIGNABLE_PERMISSIONS)[number];
 
 /** `roles.manage` is intentionally excluded — it must never be handed out piecemeal via
  * admin.center.access-style delegation. Granting/revoking roles and permissions (including this
@@ -97,11 +115,10 @@ export function isDelegatablePermission(permission: Permission): boolean {
 }
 
 /**
- * Default permission bundle per Staff Role. ADMIN is handled specially in {@link hasPermission}
- * (implicit "all permissions") rather than listed here, so this map never needs updating when
- * PERMISSIONS grows — an omission here would otherwise silently under-grant the top role.
+ * Initial policy seeded by migration 0038. Runtime authorization never reads this constant;
+ * ADMIN is handled specially in {@link hasPermission} as implicit "all permissions".
  */
-export const DEFAULT_ROLE_PERMISSIONS: Record<Exclude<StaffRole, "ADMIN">, Permission[]> = {
+export const INITIAL_ROLE_PERMISSIONS: Record<ConfigurableStaffRole, Permission[]> = {
   OPERATOR: [
     "admin.center.access",
     "users.view",
@@ -125,10 +142,9 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Exclude<StaffRole, "ADMIN">, Permi
     "sandbox_games.review",
     "streamers.review",
   ],
-  // No admin.center.access by default — see the PERMISSIONS entry's doc comment. A
-  // SYSTEM_DEVELOPER who also needs the admin center gets admin.center.access as an individual
-  // grant (admin_permission_grants), not by widening this bundle.
-  SYSTEM_DEVELOPER: ["system.dev.access", "system.monitor"],
+  // Role-specific centers no longer exist. System developers enter the same admin center and see
+  // only the features enabled by this D1-backed policy.
+  SYSTEM_DEVELOPER: ["admin.center.access", "system.dev.access", "system.monitor"],
 };
 
 /** ADMIN is the sole top-level, protected Staff Role — see docs/AUTHORIZATION.md "Protected
@@ -140,34 +156,37 @@ export function isProtectedStaffRole(role: StaffRole | null): boolean {
 }
 
 /**
- * Resolves whether an actor holding `role` (their Staff Role, or null if they have none) plus
- * `grantedPermissions` (their individual admin_permission_grants rows) may perform `permission`.
+ * Resolves whether an actor holding `role` (their Staff Role, or null if they have none), the
+ * role's current D1 policy, plus their individual admin_permission_grants rows may perform
+ * `permission`.
  *
  * ADMIN always returns true — "ALL ADMIN PERMISSIONS" per docs/AUTHORIZATION.md, not an
  * enumerated bundle that could drift out of sync as PERMISSIONS grows. Every other role checks
- * its default bundle first, then individual grants (which is how a SYSTEM_DEVELOPER — or anyone
- * — receives a permission outside their role's defaults, e.g. admin.center.access).
+ * the persisted role policy first, then individual grants. No hard-coded bundle participates in
+ * runtime authorization after migration 0038.
  */
 export function hasPermission(
   role: StaffRole | null,
-  grantedPermissions: readonly Permission[],
+  rolePermissions: readonly Permission[],
+  individualPermissions: readonly Permission[],
   permission: Permission,
 ): boolean {
   if (role === null) return false;
   if (role === "ADMIN") return true;
-  if (DEFAULT_ROLE_PERMISSIONS[role].includes(permission)) return true;
-  return grantedPermissions.includes(permission);
+  if (permission === "roles.manage") return false;
+  return rolePermissions.includes(permission) || individualPermissions.includes(permission);
 }
 
-/** The full, de-duplicated set of permissions `role` + `grantedPermissions` resolves to — what a
- * client-facing "here is everything you can do" response enumerates (e.g. GET /api/me/access),
- * as opposed to hasPermission's single yes/no check. ADMIN returns the entire PERMISSIONS catalog
- * (matching hasPermission's "implicit all" rule) rather than an empty default bundle. */
+/** The full, de-duplicated set of persisted role + individual permissions. ADMIN returns the
+ * entire catalog, matching hasPermission's protected top-role rule. */
 export function effectivePermissions(
   role: StaffRole | null,
-  grantedPermissions: readonly Permission[],
+  rolePermissions: readonly Permission[],
+  individualPermissions: readonly Permission[],
 ): Permission[] {
   if (role === null) return [];
   if (role === "ADMIN") return [...PERMISSIONS];
-  return [...new Set([...DEFAULT_ROLE_PERMISSIONS[role], ...grantedPermissions])];
+  return [...new Set([...rolePermissions, ...individualPermissions])].filter(
+    (permission) => permission !== "roles.manage",
+  );
 }

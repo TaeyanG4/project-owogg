@@ -35,6 +35,7 @@ class MockUserRepository implements UserRepository {
       nickname: data.nickname,
       email: data.email,
       avatar_url: data.avatarUrl,
+      avatar_provider: data.provider,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       providers: [data.provider],
@@ -46,6 +47,7 @@ class MockUserRepository implements UserRepository {
       provider: data.provider,
       provider_user_id: data.providerUserId,
       provider_email: data.email,
+      avatar_url: data.avatarUrl,
       created_at: new Date().toISOString(),
     });
     return user;
@@ -61,6 +63,7 @@ class MockUserRepository implements UserRepository {
     provider: string,
     providerUserId: string,
     providerEmail: string | null,
+    avatarUrl: string | null,
   ): Promise<void> {
     this.oauth.set(`${provider}:${providerUserId}`, {
       id: this.nextUserId,
@@ -68,6 +71,7 @@ class MockUserRepository implements UserRepository {
       provider,
       provider_user_id: providerUserId,
       provider_email: providerEmail,
+      avatar_url: avatarUrl,
       created_at: new Date().toISOString(),
     });
   }
@@ -77,6 +81,23 @@ class MockUserRepository implements UserRepository {
         this.oauth.delete(key);
       }
     }
+  }
+  async updateAvatarPreference(
+    userId: number,
+    provider: string,
+    avatarUrl: string,
+    updatedAt: string,
+  ): Promise<User> {
+    const user = this.users.get(userId);
+    if (!user) throw new Error("user not found");
+    const updated = {
+      ...user,
+      avatar_provider: provider,
+      avatar_url: avatarUrl,
+      updated_at: updatedAt,
+    };
+    this.users.set(userId, updated);
+    return updated;
   }
 }
 
@@ -108,6 +129,7 @@ test("linkProvider attaches an unused provider identity to the current account",
     "discord",
     "discord-id-free",
     "d@example.com",
+    "https://discord.example/avatar.png",
   );
   assert.equal(result.ok, true);
   if (result.ok) {
@@ -126,7 +148,13 @@ test("linkProvider linking an identity already on the same account is idempotent
   const useCases = new IdentityUseCases(repo);
 
   // Attaching the same Google identity that userA already owns
-  const result = await useCases.linkProvider(userA.id, "google", "google-sub-A", "a@example.com");
+  const result = await useCases.linkProvider(
+    userA.id,
+    "google",
+    "google-sub-A",
+    "a@example.com",
+    null,
+  );
   assert.equal(result.ok, true);
   if (result.ok) assert.equal(result.alreadyLinked, true);
 
@@ -141,7 +169,13 @@ test("linkProvider returns ACCOUNT_ALREADY_LINKED when the identity belongs to a
   const useCases = new IdentityUseCases(repo);
 
   // userA tries to link the Discord identity that userB owns
-  const result = await useCases.linkProvider(userA.id, "discord", "discord-id-B", "b@example.com");
+  const result = await useCases.linkProvider(
+    userA.id,
+    "discord",
+    "discord-id-B",
+    "b@example.com",
+    null,
+  );
   assert.equal(result.ok, false);
   if (!result.ok) {
     assert.equal(result.code, "ACCOUNT_ALREADY_LINKED");
@@ -160,6 +194,7 @@ test("linkProvider blocks a second identity for a provider the account already h
     "google",
     "google-sub-second",
     "a2@example.com",
+    null,
   );
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.code, "PROVIDER_ALREADY_LINKED");
@@ -185,7 +220,7 @@ test("unlinkProvider succeeds when another provider remains", async () => {
   const useCases = new IdentityUseCases(repo);
 
   // attach discord first
-  await useCases.linkProvider(userA.id, "discord", "discord-d", "d@example.com");
+  await useCases.linkProvider(userA.id, "discord", "discord-d", "d@example.com", null);
   const unlink = await useCases.unlinkProvider(userA.id, "google");
   assert.equal(unlink.ok, true);
 
@@ -208,6 +243,7 @@ test("linkProvider never uses matching email as proof of identity", async () => 
     "discord",
     "discord-id-free",
     "b@example.com",
+    null,
   );
   assert.equal(result.ok, true);
 

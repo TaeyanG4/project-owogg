@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   findAdminNavigationItem,
   getVisibleAdminNavigation,
@@ -16,7 +18,10 @@ test("admin navigation shows the full workspace to an elevated ADMIN", () => {
   assert.ok(ids.includes("dashboard"));
   assert.ok(ids.includes("games"));
   assert.ok(ids.includes("accounts"));
-  assert.ok(ids.includes("system-dev-center"));
+  assert.equal(
+    ids.some((id) => id.endsWith("-center")),
+    false,
+  );
 });
 
 test("admin navigation filters sections by effective permissions", () => {
@@ -27,7 +32,7 @@ test("admin navigation filters sections by effective permissions", () => {
       permissions: ["admin.center.access", "users.view", "sandbox_games.review"],
     }),
   );
-  assert.deepEqual(ids, ["dashboard", "games", "users", "security", "ops-center", "mod-center"]);
+  assert.deepEqual(ids, ["dashboard", "games", "users", "security"]);
   assert.equal(ids.includes("accounts"), false);
   assert.equal(ids.includes("monitoring"), false);
 });
@@ -50,4 +55,21 @@ test("legacy sandbox route resolves to the unified games navigation entry", () =
   const item = findAdminNavigationItem("/admin/sandbox-games");
   assert.equal(item?.id, "games");
   assert.equal(item ? isAdminNavigationItemActive(item, "/admin/sandbox-games/42") : false, true);
+});
+
+test("admin routes keep the service sidebar and use a separate mobile admin drawer", () => {
+  const layout = readFileSync(
+    fileURLToPath(new URL("../components/layout/Layout.tsx", import.meta.url)),
+    "utf8",
+  );
+  const workspace = readFileSync(
+    fileURLToPath(new URL("../components/admin/AdminWorkspace.tsx", import.meta.url)),
+    "utf8",
+  );
+
+  const serviceSidebarIndex = layout.indexOf("<Sidebar");
+  const adminConditionalIndex = layout.indexOf("{isAdminWorkspace ? (");
+  assert.ok(serviceSidebarIndex > -1 && serviceSidebarIndex < adminConditionalIndex);
+  assert.match(layout, /isMobileAdminSidebarOpen/);
+  assert.match(workspace, /aria-label="관리자 메뉴 열기"/);
 });

@@ -15,10 +15,10 @@ export interface ElevatedAdmin {
   /** See adminEligibility.ts's resolveEffectiveStaffRole — always non-null here, since reaching
    * this type at all required passing eligibility. */
   role: StaffRole;
-  /** This admin's individual admin_permission_grants rows (empty for ADMIN, whose every
-   * permission check short-circuits to true — see hasPermission). Combine with `role` via
-   * hasPermission() rather than checking this array directly. */
-  grantedPermissions: Permission[];
+  /** Current D1 policy shared by this non-ADMIN role. Empty for ADMIN. */
+  rolePermissions: Permission[];
+  /** This account's individual exception grants. Empty for unmanaged/root ADMIN. */
+  individualPermissions: Permission[];
 }
 
 /**
@@ -98,11 +98,17 @@ export async function requireElevatedAdmin(
     return c.json({ error: { code: "FORBIDDEN", message: "관리자 권한이 필요합니다." } }, 403);
   }
 
-  const grantedPermissions = account
-    ? await container.adminAccountUseCases.listPermissions(account.id)
-    : [];
+  const [rolePermissions, individualPermissions] =
+    role === "ADMIN"
+      ? [[], []]
+      : await Promise.all([
+          container.adminAccountUseCases.listRolePermissions(role),
+          account
+            ? container.adminAccountUseCases.listPermissions(account.id)
+            : Promise.resolve([]),
+        ]);
 
-  return { userId, rawSessionToken, account, role, grantedPermissions };
+  return { userId, rawSessionToken, account, role, rolePermissions, individualPermissions };
 }
 
 export function isElevatedAdminResponse(value: Response | ElevatedAdmin): value is Response {
@@ -111,7 +117,7 @@ export function isElevatedAdminResponse(value: Response | ElevatedAdmin): value 
 
 /**
  * Second gate after {@link requireElevatedAdmin}: does this specific admin have `permission`
- * (their role's default bundle, or an individual admin_permission_grants row)? Returns the
+ * (their role's current D1 policy, or an individual admin_permission_grants row)? Returns the
  * 403 Response to send as-is on failure, or `null` on success — callers write
  * `const denied = requirePermission(admin, "users.ban"); if (denied) return denied;`.
  *
@@ -122,7 +128,8 @@ export function isElevatedAdminResponse(value: Response | ElevatedAdmin): value 
  * endpoint) but wrong for anything permission-specific.
  */
 export function requirePermission(admin: ElevatedAdmin, permission: Permission): Response | null {
-  if (hasPermission(admin.role, admin.grantedPermissions, permission)) return null;
+  if (hasPermission(admin.role, admin.rolePermissions, admin.individualPermissions, permission))
+    return null;
   return Response.json(
     { error: { code: "FORBIDDEN", message: "이 작업을 수행할 권한이 없습니다.", permission } },
     { status: 403 },

@@ -15,6 +15,12 @@ const ADMIN_SESSION_RAW_TOKEN = "admin_session_valid_token";
 const OWOGG_SESSION_TOKEN_HASH = await hashSessionToken(OWOGG_SESSION_RAW_TOKEN);
 const ADMIN_SESSION_TOKEN_HASH = await hashSessionToken(ADMIN_SESSION_RAW_TOKEN);
 
+const SEEDED_ROLE_PERMISSIONS: Record<string, string[]> = {
+  OPERATOR: ["admin.center.access", "users.view", "users.suspend", "users.ban"],
+  MODERATOR: ["admin.center.access", "users.view", "users.suspend"],
+  SYSTEM_DEVELOPER: ["admin.center.access", "system.dev.access", "system.monitor"],
+};
+
 // `managedAccount` is optional and, when present, makes the session's user resolve via a real
 // admin_accounts row (role + individual grants) instead of ADMIN_USER_IDS root eligibility —
 // used by the OPERATOR/MODERATOR permission-gating tests below. Every admin_accounts /
@@ -77,6 +83,14 @@ function createAdminDb(userId: number, managedAccount?: { role: string; grants?:
         return null;
       },
       async all<T>() {
+        if (query.includes("FROM admin_role_permissions WHERE role")) {
+          return {
+            results: (managedAccount
+              ? (SEEDED_ROLE_PERMISSIONS[managedAccount.role] ?? [])
+              : []
+            ).map((permission) => ({ permission })),
+          } as { results: T[] };
+        }
         if (query.includes("FROM admin_permission_grants WHERE account_id")) {
           return {
             results: (managedAccount?.grants ?? []).map((permission) => ({ permission })),
@@ -263,13 +277,13 @@ test("POST /api/admin/users/:userId/ban without a reason is rejected before touc
   assert.equal(res.status, 400);
 });
 
-// The OPERATOR/MODERATOR distinction that matters most in the design spec: users.ban is in
-// OPERATOR's default bundle (staffRoles.ts) but deliberately not in MODERATOR's. Neither test
+// The OPERATOR/MODERATOR distinction that matters most here: users.ban is in the seeded
+// OPERATOR D1 role policy but deliberately not in MODERATOR's. Neither test
 // needs ADMIN_USER_IDS at all — eligibility comes purely from the mocked managed account being
 // ACTIVE (see resolveAdminEligibility), same as a real OPERATOR/MODERATOR created via
 // POST /api/admin/accounts and never listed in the ADMIN_USER_IDS root/break-glass env var.
 
-test("POST /api/admin/users/:userId/ban reaches body validation for a managed OPERATOR (users.ban is in its default bundle)", async () => {
+test("POST /api/admin/users/:userId/ban reaches body validation for a managed OPERATOR with users.ban in its role policy", async () => {
   const mock = createAdminDb(1, { role: "OPERATOR" });
   const res = await app.request(
     "/api/admin/users/1/ban",
@@ -288,7 +302,7 @@ test("POST /api/admin/users/:userId/ban reaches body validation for a managed OP
   assert.equal(res.status, 400);
 });
 
-test("POST /api/admin/users/:userId/ban is denied (403) for a managed MODERATOR (users.ban is not in its default bundle)", async () => {
+test("POST /api/admin/users/:userId/ban is denied (403) for a managed MODERATOR without users.ban in its role policy", async () => {
   const mock = createAdminDb(1, { role: "MODERATOR" });
   const res = await app.request(
     "/api/admin/users/1/ban",
@@ -306,7 +320,7 @@ test("POST /api/admin/users/:userId/ban is denied (403) for a managed MODERATOR 
   assert.equal(res.status, 403);
 });
 
-test("POST /api/admin/users/:userId/suspend reaches body validation for a managed MODERATOR (users.suspend IS in its default bundle, unlike users.ban)", async () => {
+test("POST /api/admin/users/:userId/suspend reaches body validation for a managed MODERATOR with users.suspend in its role policy", async () => {
   const mock = createAdminDb(1, { role: "MODERATOR" });
   const res = await app.request(
     "/api/admin/users/1/suspend",
@@ -324,7 +338,7 @@ test("POST /api/admin/users/:userId/suspend reaches body validation for a manage
   assert.equal(res.status, 400);
 });
 
-test("GET /api/admin/users is reachable for a managed SYSTEM_DEVELOPER individually granted users.view (not part of its default bundle)", async () => {
+test("GET /api/admin/users is reachable for a managed SYSTEM_DEVELOPER individually granted users.view", async () => {
   const mock = createAdminDb(1, { role: "SYSTEM_DEVELOPER", grants: ["users.view"] });
   const res = await app.request(
     "/api/admin/users?query=nobody",

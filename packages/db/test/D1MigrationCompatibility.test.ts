@@ -11,13 +11,15 @@ test("generic production migrations avoid Cloudflare-incompatible TEMP table DDL
     "0034_unified_game_control_plane.sql",
     "0035_creator_manifest_results.sql",
     "0036_official_game_lifecycle.sql",
+    "0037_user_profile_identity.sql",
+    "0038_admin_role_permissions.sql",
   ]) {
     const sql = fs.readFileSync(new URL(`../migrations/${filename}`, import.meta.url), "utf8");
     assert.doesNotMatch(sql, /\bCREATE\s+TEMP(?:ORARY)?\s+TABLE\b/i, filename);
   }
 });
 
-test("full production migration chain applies through 0036 with lifecycle schema and triggers", () => {
+test("full production migration chain applies through 0038 with profile and role-policy schema", () => {
   const { raw } = createSqliteD1("");
   const migrationUrl = new URL("../migrations/", import.meta.url);
   const filenames = fs
@@ -30,8 +32,23 @@ test("full production migration chain applies through 0036 with lifecycle schema
 
   const gameColumns = raw.prepare("PRAGMA table_info(games)").all() as Array<{ name: string }>;
   const scoreColumns = raw.prepare("PRAGMA table_info(scores)").all() as Array<{ name: string }>;
+  const userColumns = raw.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>;
+  const oauthColumns = raw.prepare("PRAGMA table_info(oauth_accounts)").all() as Array<{
+    name: string;
+  }>;
   assert.ok(gameColumns.some((column) => column.name === "leaderboard_generation"));
   assert.ok(scoreColumns.some((column) => column.name === "leaderboard_generation"));
+  assert.ok(userColumns.some((column) => column.name === "avatar_provider"));
+  assert.ok(oauthColumns.some((column) => column.name === "avatar_url"));
+  const rolePermissions = raw
+    .prepare(
+      "SELECT role, permission FROM admin_role_permissions WHERE role = 'SYSTEM_DEVELOPER' ORDER BY permission",
+    )
+    .all() as Array<{ role: string; permission: string }>;
+  assert.deepEqual(
+    rolePermissions.map((row) => row.permission),
+    ["admin.center.access", "system.dev.access", "system.monitor"],
+  );
   assert.ok(
     raw
       .prepare(
@@ -64,6 +81,57 @@ test("full production migration chain applies through 0036 with lifecycle schema
     .prepare("SELECT leaderboard_generation FROM scores WHERE game_id = 'rolling-official'")
     .get() as { leaderboard_generation: number };
   assert.equal(rollingScore.leaderboard_generation, 4);
+});
+
+test("0037 preserves the current avatar while backfilling provider-specific choices", () => {
+  const { raw } = createSqliteD1(`
+    CREATE TABLE users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nickname TEXT NOT NULL,
+      avatar_url TEXT
+    );
+    CREATE TABLE oauth_accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      provider TEXT NOT NULL,
+      provider_user_id TEXT NOT NULL,
+      provider_email TEXT,
+      created_at TEXT NOT NULL,
+      UNIQUE(provider, provider_user_id)
+    );
+    INSERT INTO users (id, nickname, avatar_url)
+    VALUES (123, 'Taeyang', 'https://old.example/avatar.png');
+    INSERT INTO oauth_accounts
+      (user_id, provider, provider_user_id, provider_email, created_at)
+    VALUES
+      (123, 'google', 'google-123', NULL, '2026-01-01T00:00:00.000Z'),
+      (123, 'discord', 'discord-123', NULL, '2026-01-02T00:00:00.000Z');
+  `);
+  raw.exec(
+    fs.readFileSync(
+      new URL("../migrations/0037_user_profile_identity.sql", import.meta.url),
+      "utf8",
+    ),
+  );
+
+  const user = raw
+    .prepare("SELECT avatar_url, avatar_provider FROM users WHERE id = 123")
+    .get() as {
+    avatar_url: string;
+    avatar_provider: string;
+  };
+  const accounts = raw
+    .prepare("SELECT provider, avatar_url FROM oauth_accounts WHERE user_id = 123 ORDER BY id")
+    .all() as Array<{ provider: string; avatar_url: string }>;
+  assert.equal(user.avatar_url, "https://old.example/avatar.png");
+  assert.equal(user.avatar_provider, "google");
+  assert.deepEqual(
+    accounts.map((account) => ({ ...account })),
+    [
+      { provider: "google", avatar_url: "https://old.example/avatar.png" },
+      { provider: "discord", avatar_url: "https://old.example/avatar.png" },
+    ],
+  );
 });
 
 test("0032 migrates one-use attempts to generic identity/version foreign keys", () => {

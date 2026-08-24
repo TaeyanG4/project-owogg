@@ -82,9 +82,10 @@ export async function exchangeDiscordCode(params: {
       avatar?: string;
     };
 
+    const defaultAvatarIndex = Number((BigInt(userInfo.id) >> 22n) % 6n);
     const avatarUrl = userInfo.avatar
-      ? `https://cdn.discordapp.com/avatars/${userInfo.id}/${userInfo.avatar}.png`
-      : null;
+      ? `https://cdn.discordapp.com/avatars/${userInfo.id}/${userInfo.avatar}.png?size=128`
+      : `https://cdn.discordapp.com/embed/avatars/${defaultAvatarIndex}.png`;
 
     return {
       valid: true,

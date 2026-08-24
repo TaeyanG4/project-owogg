@@ -58,9 +58,8 @@ export function canApplyForGameCreator(): boolean {
  * ADMIN/OPERATOR/SYSTEM_DEVELOPER get Game Creator access **implicitly**, without a separate
  * admin-grant or self-serve application — added 2026-08-18 so ops/dev staff can use the sandbox
  * game upload/review/publish pipeline for testing and support without an extra manual grant step.
- * MODERATOR is deliberately excluded (matches its narrower default permission bundle elsewhere —
- * see staffRoles.ts's DEFAULT_ROLE_PERMISSIONS, which also omits MODERATOR from
- * `game_creators.manage`).
+ * MODERATOR is deliberately excluded. This is a product decision rather than an incidental side
+ * effect of the editable role-permission policy.
  *
  * This does NOT make GAME_CREATOR a Staff Role or fold it into the role tree — it stays a
  * Program/Entitlement whose axis is independent of Staff Role (docs/AUTHORIZATION.md §0). This is

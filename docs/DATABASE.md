@@ -4,7 +4,7 @@
 
 마지막 검증: 2026-08-24
 
-최신 마이그레이션: `0036_official_game_lifecycle.sql`
+최신 마이그레이션: `0038_admin_role_permissions.sql`
 
 기준 소스:
 
@@ -15,7 +15,7 @@
 - `.github/workflows/deploy.yml`
 
 Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 권한 원천입니다. 이 문서는
-현재 `0000_initial_schema.sql`부터 `0036_official_game_lifecycle.sql`까지의 역할을 설명합니다.
+현재 `0000_initial_schema.sql`부터 `0038_admin_role_permissions.sql`까지의 역할을 설명합니다.
 
 ## 마이그레이션 범위
 
@@ -35,6 +35,8 @@ Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 
 | `0034`        | USER control/review 필드의 generic authority 전환과 구 Worker 호환 미러  |
 | `0035`        | Creator Manifest v1 결과 원장, score projection, 게임별 도전과제 해금    |
 | `0036`        | live-version 리더보드 세대와 OWOGG 완전 삭제 감사 로그                   |
+| `0037`        | OAuth provider별 avatar 후보와 사용자 avatar 선택                        |
+| `0038`        | 관리자 역할별 기능 권한 정책과 통합 관리자 센터 접근                     |
 
 기존 migration은 변경, squash, 삭제하지 않습니다. 프로덕션 배포는 API보다 먼저
 `pnpm d1:migrate:prod`를 실행합니다.
@@ -163,6 +165,19 @@ guard를 통과시킨 뒤 application read authority를 전환합니다. `sandbo
 D1 migration이 새 Worker보다 먼저 실행되는 동안 이전 Worker가 깨지므로 금지합니다.
 
 ## 주요 비게임 도메인
+
+### 사용자 공개 identity
+
+- `users.nickname`은 Google/Discord 이름과 분리된 사용자의 공개 별명이며 중복을 허용합니다. 변경은
+  서버 정책으로 30일에 한 번만 허용합니다.
+- 공개 식별 태그는 별도 가변 문자열을 저장하지 않고 안정적인 `users.id`를 사용해
+  `nickname #id`로 표시합니다.
+- `oauth_accounts.avatar_url`은 연동된 provider별 검증된 프로필 이미지 후보를 보존합니다.
+  `users.avatar_provider`가 Google/Discord 중 사용자가 선택한 provider를 가리키며,
+  `users.avatar_url`은 공개 조회가 사용할 현재 선택 결과입니다. 클라이언트가 임의 이미지 URL을
+  제출하지 않고 서버가 연동 계정의 저장된 후보만 선택합니다.
+- 점수 row의 nickname/avatar snapshot은 감사·이력용으로 유지하되, 현재 leaderboard는 `users`를
+  join하여 최신 별명과 선택 avatar를 표시합니다.
 
 - **Identity/auth**: `users`, provider identity/link/merge, user/admin sessions, managed admin
   accounts와 permission grants

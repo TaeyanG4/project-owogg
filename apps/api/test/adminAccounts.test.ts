@@ -96,6 +96,7 @@ CREATE TABLE users (
   nickname TEXT NOT NULL,
   email TEXT,
   avatar_url TEXT,
+  avatar_provider TEXT,
   country TEXT,
   nickname_updated_at TEXT,
   country_updated_at TEXT,
@@ -118,6 +119,7 @@ CREATE TABLE oauth_accounts (
   provider TEXT NOT NULL,
   provider_user_id TEXT NOT NULL,
   provider_email TEXT,
+  avatar_url TEXT,
   created_at TEXT NOT NULL
 );
 CREATE TABLE user_moderation (
@@ -184,6 +186,23 @@ CREATE TABLE admin_permission_grants (
   created_at TEXT NOT NULL,
   UNIQUE (account_id, permission)
 );
+CREATE TABLE admin_role_permissions (
+  role TEXT NOT NULL,
+  permission TEXT NOT NULL,
+  granted_by_admin_id INTEGER,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (role, permission)
+);
+INSERT INTO admin_role_permissions (role, permission, updated_at) VALUES
+  ('OPERATOR', 'admin.center.access', datetime('now')),
+  ('OPERATOR', 'users.view', datetime('now')),
+  ('OPERATOR', 'users.ban', datetime('now')),
+  ('OPERATOR', 'games.moderate', datetime('now')),
+  ('MODERATOR', 'admin.center.access', datetime('now')),
+  ('MODERATOR', 'users.view', datetime('now')),
+  ('SYSTEM_DEVELOPER', 'admin.center.access', datetime('now')),
+  ('SYSTEM_DEVELOPER', 'system.dev.access', datetime('now')),
+  ('SYSTEM_DEVELOPER', 'system.monitor', datetime('now'));
 `;
 
 function extractCookie(res: Response, name: string): string | null {
@@ -621,8 +640,7 @@ test("ADMIN grants and revokes an individual permission on a managed OPERATOR ac
     assert.equal(createRes.status, 201);
     const targetId = ((await createRes.json()) as { id: number }).id;
 
-    // Starts empty — system.dev.access isn't part of OPERATOR's default bundle (staffRoles.ts),
-    // so this individual grant is the only way this account would ever get it.
+    // Starts empty — this endpoint lists account-specific exceptions, not the role policy.
     const emptyList = await app.request(
       `/api/admin/accounts/${targetId}/permissions`,
       { headers: { Cookie: rootAdminCookie } },
@@ -686,6 +704,83 @@ test("ADMIN grants and revokes an individual permission on a managed OPERATOR ac
       env as any,
     );
     assert.deepEqual((await afterRevoke.json()) as { permissions: string[] }, { permissions: [] });
+  } finally {
+    jwks.restore();
+  }
+});
+
+test("managed ADMIN lists and replaces a role permission policy; roles.manage is rejected", async () => {
+  clearGoogleJwksCache();
+  const { privateKey, publicJwk } = createRsaKeySet();
+  const jwks = mockJwksFetch([{ ...publicJwk, kid: "test-kid-1", use: "sig", alg: "RS256" }]);
+  jwks.install();
+  try {
+    const { env, raw } = await setupWithRootAdmin();
+    const rootAdminCookie = await elevateToRootAdmin(env, privateKey);
+
+    const listRes = await app.request(
+      "/api/admin/role-permissions",
+      { headers: { Cookie: rootAdminCookie } },
+      env as any,
+    );
+    assert.equal(listRes.status, 200);
+    const listed = (await listRes.json()) as {
+      roles: Array<{ role: string; permissions: string[] }>;
+    };
+    assert.deepEqual(
+      listed.roles.map(({ role }) => role),
+      ["OPERATOR", "MODERATOR", "SYSTEM_DEVELOPER"],
+    );
+
+    const replaceRes = await app.request(
+      "/api/admin/role-permissions/MODERATOR",
+      {
+        method: "PUT",
+        headers: {
+          Cookie: rootAdminCookie,
+          "Content-Type": "application/json",
+          Origin: "http://localhost:5173",
+        },
+        body: JSON.stringify({ permissions: ["admin.center.access", "users.view"] }),
+      },
+      env as any,
+    );
+    assert.equal(replaceRes.status, 200);
+    assert.deepEqual((await replaceRes.json()) as object, {
+      role: "MODERATOR",
+      permissions: ["admin.center.access", "users.view"],
+    });
+    assert.deepEqual(
+      raw
+        .prepare(
+          "SELECT permission FROM admin_role_permissions WHERE role = 'MODERATOR' ORDER BY permission",
+        )
+        .all()
+        .map((row) => (row as { permission: string }).permission),
+      ["admin.center.access", "users.view"],
+    );
+    const audit = raw
+      .prepare(
+        "SELECT action, metadata_json FROM admin_account_audit_log WHERE action = 'ROLE_PERMISSIONS_UPDATED'",
+      )
+      .get() as { action: string; metadata_json: string };
+    assert.equal(audit.action, "ROLE_PERMISSIONS_UPDATED");
+    assert.equal(JSON.parse(audit.metadata_json).role, "MODERATOR");
+
+    const forbidden = await app.request(
+      "/api/admin/role-permissions/OPERATOR",
+      {
+        method: "PUT",
+        headers: {
+          Cookie: rootAdminCookie,
+          "Content-Type": "application/json",
+          Origin: "http://localhost:5173",
+        },
+        body: JSON.stringify({ permissions: ["roles.manage"] }),
+      },
+      env as any,
+    );
+    assert.equal(forbidden.status, 400);
   } finally {
     jwks.restore();
   }
@@ -766,6 +861,28 @@ test("a managed OPERATOR (not ADMIN) is denied on every permission-delegation en
       env as any,
     );
     assert.equal(revokeRes.status, 403);
+
+    const roleListRes = await app.request(
+      "/api/admin/role-permissions",
+      { headers: { Cookie: operatorCookie } },
+      env as any,
+    );
+    assert.equal(roleListRes.status, 403);
+
+    const roleUpdateRes = await app.request(
+      "/api/admin/role-permissions/MODERATOR",
+      {
+        method: "PUT",
+        headers: {
+          Cookie: operatorCookie,
+          "Content-Type": "application/json",
+          Origin: "http://localhost:5173",
+        },
+        body: JSON.stringify({ permissions: ["users.view"] }),
+      },
+      env as any,
+    );
+    assert.equal(roleUpdateRes.status, 403);
   } finally {
     jwks.restore();
   }

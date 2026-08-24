@@ -246,3 +246,40 @@ test("list orders by created_at ascending", async () => {
     ["first", "second"],
   );
 });
+
+test("role permission policy replacement is role-scoped and removes stale permissions", async () => {
+  const { db, raw } = createSqliteD1(ADMIN_ACCOUNTS_TEST_SCHEMA);
+  await seedUsers(raw, 1);
+  const repo = new D1AdminAccountRepository(db);
+  const admin = await repo.create({
+    userId: 1,
+    googleSub: "sub-1",
+    username: "admin",
+    passwordHash: "hash",
+    role: "ADMIN",
+    mustChangePassword: false,
+    createdByAdminId: null,
+    nowIso: iso(),
+  });
+
+  await repo.replaceRolePermissions({
+    role: "MODERATOR",
+    permissions: ["admin.center.access", "users.view", "users.suspend"],
+    grantedByAdminId: admin.id,
+    nowIso: iso(),
+  });
+  assert.deepEqual(await repo.listRolePermissions("MODERATOR"), [
+    "admin.center.access",
+    "users.suspend",
+    "users.view",
+  ]);
+
+  await repo.replaceRolePermissions({
+    role: "MODERATOR",
+    permissions: ["users.view"],
+    grantedByAdminId: admin.id,
+    nowIso: iso(),
+  });
+  assert.deepEqual(await repo.listRolePermissions("MODERATOR"), ["users.view"]);
+  assert.deepEqual(await repo.listRolePermissions("OPERATOR"), []);
+});

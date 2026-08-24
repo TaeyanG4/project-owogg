@@ -34,7 +34,7 @@ adminRouter.use("*", async (c, next) => {
 adminRouter.get("/overview", async (c) => {
   const admin = await requireElevatedAdmin(c);
   if (isElevatedAdminResponse(admin)) return admin;
-  const denied = requirePermission(admin, "system.monitor");
+  const denied = requirePermission(admin, "admin.center.access");
   if (denied) return denied;
 
   const container = createContainer(c.env.DB);

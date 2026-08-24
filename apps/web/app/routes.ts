@@ -19,11 +19,6 @@ export default [
   route("admin/game-creators", "routes/adminGameCreators.tsx"),
   route("admin/sandbox-games", "routes/adminSandboxGames.tsx"),
   route("admin/settings/security", "routes/adminSettingsSecurity.tsx"),
-  // Staff Role centers (docs/AUTHORIZATION.md) — distinct from /admin, reached via
-  // admin.center.access/system.dev.access rather than the ADMIN role specifically.
-  route("ops", "routes/opsCenter.tsx"),
-  route("mod", "routes/modCenter.tsx"),
-  route("system-dev", "routes/systemDevCenter.tsx"),
   // Program/Entitlement centers — never Staff Roles, see the same doc.
   route("game-creator", "routes/gameCreatorCenter.tsx"),
   route("discord", "routes/discordHub.tsx"),

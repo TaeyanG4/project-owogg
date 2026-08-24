@@ -148,6 +148,9 @@ function createFakeUserRepo(existingIds: number[]): UserRepository {
     },
     async linkOAuthAccount() {},
     async unlinkOAuthAccount() {},
+    async updateAvatarPreference() {
+      throw new Error("not used in this suite");
+    },
     async updateNickname() {
       throw new Error("not used in this suite");
     },

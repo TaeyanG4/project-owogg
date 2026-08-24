@@ -160,6 +160,7 @@ export const AdminAccountAuditEntrySchema = z.object({
     "SESSIONS_REVOKED",
     "PERMISSION_GRANTED",
     "PERMISSION_REVOKED",
+    "ROLE_PERMISSIONS_UPDATED",
   ]),
   metadata: z.record(z.unknown()).nullable(),
   createdAt: z.string(),

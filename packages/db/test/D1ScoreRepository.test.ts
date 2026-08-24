@@ -94,3 +94,25 @@ test("getLeaderboard returns a saved decimal score exactly, through the full sav
   assert.equal(leaderboard.length, 1);
   assert.equal(leaderboard[0]?.score, 4.4);
 });
+
+test("leaderboard reads the current alias and selected avatar instead of the score snapshot", async () => {
+  const { db, raw } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);
+  const userId = seedUser(raw, "OldAlias");
+  const repo = new D1ScoreRepository(db);
+  await repo.saveScore({
+    userId,
+    nickname: "OldAlias",
+    avatarUrl: "https://old.example/avatar.png",
+    gameId: "reaction-time",
+    score: 250,
+    difficulty: "normal",
+  });
+
+  raw
+    .prepare("UPDATE users SET nickname = ?, avatar_url = ? WHERE id = ?")
+    .run("Taeyang", "https://discord.example/avatar.png", userId);
+
+  const leaderboard = await repo.getLeaderboard("reaction-time", 20, "asc");
+  assert.equal(leaderboard[0]?.nickname, "Taeyang");
+  assert.equal(leaderboard[0]?.avatar_url, "https://discord.example/avatar.png");
+});

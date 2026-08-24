@@ -5,6 +5,8 @@ export interface User {
   nickname: string;
   email: string | null;
   avatar_url: string | null;
+  /** OAuth provider whose verified avatar is currently exposed on public surfaces. */
+  avatar_provider?: string | null;
   created_at: string;
   updated_at: string;
   providers?: string[];
@@ -37,6 +39,8 @@ export interface OAuthAccount {
   provider: string;
   provider_user_id: string;
   provider_email: string | null;
+  /** Latest avatar observed from this exact verified OAuth identity. */
+  avatar_url?: string | null;
   created_at: string;
 }
 
@@ -83,8 +87,15 @@ export interface UserRepository {
     provider: string,
     providerUserId: string,
     providerEmail: string | null,
+    avatarUrl: string | null,
   ): Promise<void>;
   unlinkOAuthAccount(userId: number, provider: string): Promise<void>;
+  updateAvatarPreference(
+    userId: number,
+    provider: string,
+    avatarUrl: string,
+    updatedAt: string,
+  ): Promise<User>;
   updateNickname(userId: number, nickname: string, updatedAt: string): Promise<User>;
   updateCountry(userId: number, country: string | null, updatedAt: string): Promise<User>;
   updateLocale(userId: number, locale: string, updatedAt: string): Promise<User>;
