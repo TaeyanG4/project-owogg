@@ -8,7 +8,7 @@
     "sections": [
       {
         "heading": "1. Service Overview",
-        "body": "OwOGG (hereinafter \"Service\") is a web mini-game collection platform enjoyed directly in the browser without installation, providing additional features such as Discord server integration, rankings/experience points (XP), and Creator channel verification."
+        "body": "OwOGG (hereinafter \"Service\") is a web mini-game collection platform enjoyed directly in the browser without installation, providing additional features such as Discord server integration, rankings/experience points (XP), and Streamer channel verification."
       },
       {
         "heading": "2. Accounts and Login",
@@ -75,7 +75,7 @@
             "desc": " — Discord user ID when linking accounts, server ID/name/icon and administrative permissions when registering servers (guilds)"
           },
           {
-            "term": "Creator Channel Verification Information",
+            "term": "Streamer Channel Verification Information",
             "desc": " — Channel name, channel URL, subscriber/follower count verified through official APIs of respective platforms (YouTube/Twitch/CHZZK/SOOP) when voluntarily completing channel ownership verification to participate in Streamer rankings"
           }
         ],
@@ -87,7 +87,7 @@
           "Member identification and maintaining login state",
           "Providing game records, rankings, and experience point systems",
           "Querying user account information in Discord bot commands and aggregating activity per server",
-          "Verifying eligibility for Creator/Streamer rankings",
+          "Verifying eligibility for Streamer rankings",
           "Detecting abusive behavior (abuse) and maintaining service stability"
         ]
       },

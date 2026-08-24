@@ -13,13 +13,14 @@ test("generic production migrations avoid Cloudflare-incompatible TEMP table DDL
     "0036_official_game_lifecycle.sql",
     "0037_user_profile_identity.sql",
     "0038_admin_role_permissions.sql",
+    "0039_streamer_terminology.sql",
   ]) {
     const sql = fs.readFileSync(new URL(`../migrations/${filename}`, import.meta.url), "utf8");
     assert.doesNotMatch(sql, /\bCREATE\s+TEMP(?:ORARY)?\s+TABLE\b/i, filename);
   }
 });
 
-test("full production migration chain applies through 0038 with profile and role-policy schema", () => {
+test("full production migration chain applies through 0039 with Streamer compatibility schema", () => {
   const { raw } = createSqliteD1("");
   const migrationUrl = new URL("../migrations/", import.meta.url);
   const filenames = fs
@@ -56,6 +57,28 @@ test("full production migration chain applies through 0038 with profile and role
       )
       .get(),
   );
+  assert.ok(
+    raw
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'streamer_profiles'")
+      .get(),
+  );
+  assert.ok(
+    raw
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'view' AND name = 'creator_profiles'")
+      .get(),
+  );
+  raw.prepare("INSERT INTO users (id, nickname) VALUES (1, 'compat-streamer')").run();
+  raw
+    .prepare(
+      `INSERT INTO creator_profiles
+         (user_id, status, featured_status, created_at, updated_at)
+       VALUES (1, 'PENDING', 'NONE', 'now', 'now')`,
+    )
+    .run();
+  const compatibilityStreamer = raw
+    .prepare("SELECT user_id, status FROM streamer_profiles WHERE user_id = 1")
+    .get() as { user_id: number; status: string };
+  assert.deepEqual({ ...compatibilityStreamer }, { user_id: 1, status: "PENDING" });
   const updateTrigger = raw
     .prepare(
       "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_sandbox_games_after_update'",

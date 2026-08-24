@@ -4,8 +4,8 @@ import {
   sourceArchiveObjectKey,
   type PreparedBundle,
 } from "../domain/sandboxGameBundle.js";
-import { extractCreatorManifest } from "../domain/creatorManifest.js";
-import { mapCreatorManifestToCanonical } from "../domain/creatorManifestCanonical.js";
+import { extractGameCreatorManifest } from "../domain/gameCreatorManifest.js";
+import { mapGameCreatorManifestToCanonical } from "../domain/gameCreatorManifestCanonical.js";
 import { SANDBOX_GAME_POLICY } from "../domain/sandboxGames.js";
 import type { GameCanonicalDocument } from "../modules/game/domain/gameCanonicalDocument.js";
 import type { GameIdentity } from "../modules/game/domain/gameIdentity.js";
@@ -146,16 +146,16 @@ export class OfficialGameUploadUseCases {
       throw new OfficialGameUploadFailure("BUNDLE_INVALID");
     }
 
-    let manifest: ReturnType<typeof extractCreatorManifest>;
+    let manifest: ReturnType<typeof extractGameCreatorManifest>;
     try {
-      manifest = extractCreatorManifest(prepared.files);
+      manifest = extractGameCreatorManifest(prepared.files);
     } catch {
       throw new OfficialGameUploadFailure("MANIFEST_INVALID");
     }
     if (!manifest) throw new OfficialGameUploadFailure("MANIFEST_MISSING");
 
     const nowIso = new Date().toISOString();
-    const canonical = mapCreatorManifestToCanonical({
+    const canonical = mapGameCreatorManifestToCanonical({
       manifest,
       publisherOfficial: true,
       updatedAt: nowIso,

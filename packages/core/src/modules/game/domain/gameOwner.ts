@@ -22,7 +22,7 @@ export interface SystemGameOwner {
   readonly type: "SYSTEM";
 }
 
-/** A game uploaded through the Game Creator program. `userId` is the submitting creator's OwOGG
+/** A game uploaded through the Game Creator program. `userId` is the submitting Game Creator's OwOGG
  * user id (`sandbox_games.developer_user_id` today). */
 export interface CreatorGameOwner {
   readonly type: "CREATOR";

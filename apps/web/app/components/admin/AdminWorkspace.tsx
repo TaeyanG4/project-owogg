@@ -40,7 +40,7 @@ type WorkspaceStage = "loading" | "signed-out" | "step-up" | "ready" | "unavaila
 const ICONS: Record<AdminNavigationItemId, ComponentType<{ className?: string }>> = {
   dashboard: LayoutDashboard,
   games: Gamepad2,
-  "creator-reviews": Video,
+  "streamer-reviews": Video,
   "game-creators": UserCog,
   users: Users,
   monitoring: Activity,

@@ -9,7 +9,7 @@
  * deliberately deferred.
  *
  * Deliberately NOT a free-text/display-name concept. `displayName` (whatever a UI shows next to a
- * game — "OwOGG", a creator's nickname, ...) is presentation, never authorization: a user could
+ * game — "OwOGG", a Game Creator's nickname, ...) is presentation, never authorization: a user could
  * set their own display name to look like "owogg", so "is this the official publisher" can never
  * be answered by comparing strings. `GamePublisher` is instead:
  *

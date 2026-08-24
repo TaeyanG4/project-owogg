@@ -101,17 +101,17 @@ export class D1AccountMergeRepository implements AccountMergeRepository {
   async findMergeIntegrityConflict(
     primaryId: number,
     secondaryId: number,
-  ): Promise<"CREATOR_PLATFORM_CONFLICT" | null> {
+  ): Promise<"STREAMER_PLATFORM_CONFLICT" | null> {
     const row = await this.db
       .prepare(
         `SELECT 1
-         FROM creator_platform_accounts secondary_account
-         JOIN creator_profiles secondary_profile
-           ON secondary_profile.id = secondary_account.creator_id
-         JOIN creator_platform_accounts primary_account
+         FROM streamer_platform_accounts secondary_account
+         JOIN streamer_profiles secondary_profile
+           ON secondary_profile.id = secondary_account.streamer_id
+         JOIN streamer_platform_accounts primary_account
            ON primary_account.platform = secondary_account.platform
-         JOIN creator_profiles primary_profile
-           ON primary_profile.id = primary_account.creator_id
+         JOIN streamer_profiles primary_profile
+           ON primary_profile.id = primary_account.streamer_id
          WHERE primary_profile.user_id = ?
            AND secondary_profile.user_id = ?
          LIMIT 1`,
@@ -119,7 +119,7 @@ export class D1AccountMergeRepository implements AccountMergeRepository {
       .bind(primaryId, secondaryId)
       .first();
 
-    return row ? "CREATOR_PLATFORM_CONFLICT" : null;
+    return row ? "STREAMER_PLATFORM_CONFLICT" : null;
   }
 
   async mergeAccounts(primaryId: number, secondaryId: number, challengeId: string): Promise<void> {
@@ -130,7 +130,7 @@ export class D1AccountMergeRepository implements AccountMergeRepository {
 
     // Primary-Wins atomic merge. D1 batch runs all statements as a single transaction:
     // secondary gameplay/personalization/progression/sessions are deleted (never unioned
-    // into primary), identity-like Discord/Creator relationships are remapped safely,
+    // into primary), identity-like Discord/Streamer relationships are remapped safely,
     // secondary OAuth identities are transferred to the primary, and the secondary user is
     // deleted. The derived Discord guild ledger is explicitly removed before its source XP
     // events so the invariant does not depend only on a database FK pragma being enabled.
@@ -169,31 +169,31 @@ export class D1AccountMergeRepository implements AccountMergeRepository {
       this.db
         .prepare(`UPDATE discord_play_contexts SET user_id = ? WHERE user_id = ?`)
         .bind(primaryId, secondaryId),
-      // If Primary already has a Creator profile, keep its presentation/settings row and
+      // If Primary already has a Streamer profile, keep its presentation/settings row and
       // move Secondary's platform accounts. Review jobs and audit rows retain their account
       // IDs, so their history remains coherent. If Primary has no profile, transfer the
       // Secondary profile row itself instead.
       this.db
         .prepare(
-          `UPDATE creator_platform_accounts
-           SET creator_id = (SELECT id FROM creator_profiles WHERE user_id = ?)
-           WHERE creator_id = (SELECT id FROM creator_profiles WHERE user_id = ?)
-             AND EXISTS (SELECT 1 FROM creator_profiles WHERE user_id = ?)`,
+          `UPDATE streamer_platform_accounts
+           SET streamer_id = (SELECT id FROM streamer_profiles WHERE user_id = ?)
+           WHERE streamer_id = (SELECT id FROM streamer_profiles WHERE user_id = ?)
+             AND EXISTS (SELECT 1 FROM streamer_profiles WHERE user_id = ?)`,
         )
         .bind(primaryId, secondaryId, primaryId),
       this.db
         .prepare(
-          `DELETE FROM creator_profiles
+          `DELETE FROM streamer_profiles
            WHERE user_id = ?
-             AND EXISTS (SELECT 1 FROM creator_profiles WHERE user_id = ?)`,
+             AND EXISTS (SELECT 1 FROM streamer_profiles WHERE user_id = ?)`,
         )
         .bind(secondaryId, primaryId),
       this.db
         .prepare(
-          `UPDATE creator_profiles
+          `UPDATE streamer_profiles
            SET user_id = ?
            WHERE user_id = ?
-             AND NOT EXISTS (SELECT 1 FROM creator_profiles WHERE user_id = ?)`,
+             AND NOT EXISTS (SELECT 1 FROM streamer_profiles WHERE user_id = ?)`,
         )
         .bind(primaryId, secondaryId, primaryId),
       this.db

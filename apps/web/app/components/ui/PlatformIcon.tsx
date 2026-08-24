@@ -1,16 +1,16 @@
-import type { CreatorPlatform } from "@owogg/contracts";
+import type { StreamerPlatform } from "@owogg/contracts";
 import { useI18n } from "../../features/i18n/I18nContext";
 import type { Dictionary } from "../../features/i18n/dictionary";
 
 /**
- * Lightweight local SVG badges for the four supported Creator platforms — deliberately not
+ * Lightweight local SVG badges for the four supported Streamer platforms — deliberately not
  * emoji (▶️/🟢/🔵/💜) and not a hotlinked third-party image. Each badge is a brand-colored
  * circle with a simple glyph; it is not a pixel-accurate trademark reproduction, just a
  * compact, distinguishable, accessible indicator.
  */
 function platformMeta(
   dict: Dictionary["platformIcon"],
-): Record<CreatorPlatform, { label: string; bg: string; fg: string }> {
+): Record<StreamerPlatform, { label: string; bg: string; fg: string }> {
   return {
     YOUTUBE: { label: "YouTube", bg: "#FF0000", fg: "#ffffff" },
     CHZZK: { label: dict.chzzkLabel, bg: "#1ECB4F", fg: "#0b1b0f" },
@@ -19,7 +19,7 @@ function platformMeta(
   };
 }
 
-function PlatformGlyph({ platform }: { platform: CreatorPlatform }) {
+function PlatformGlyph({ platform }: { platform: StreamerPlatform }) {
   if (platform === "YOUTUBE") {
     // Universal "play" triangle — not the trademarked YouTube wordmark/icon, just the shape.
     return (
@@ -57,7 +57,7 @@ export function PlatformIcon({
   href,
   className = "",
 }: {
-  platform: CreatorPlatform;
+  platform: StreamerPlatform;
   size?: number;
   /** Verified channel URL — when provided, the badge becomes a link that opens the channel. */
   href?: string;
@@ -101,16 +101,16 @@ export function PlatformIconRow({
   accounts,
   size = 22,
 }: {
-  accounts: Array<{ platform: CreatorPlatform; channelUrl: string }>;
+  accounts: Array<{ platform: StreamerPlatform; channelUrl: string }>;
   size?: number;
 }) {
   const { dict } = useI18n();
-  const order: CreatorPlatform[] = ["YOUTUBE", "CHZZK", "SOOP", "TWITCH"];
+  const order: StreamerPlatform[] = ["YOUTUBE", "CHZZK", "SOOP", "TWITCH"];
   const byPlatform = new Map(accounts.map((a) => [a.platform, a] as const));
 
   const verified = order
     .map((platform) => byPlatform.get(platform))
-    .filter((account): account is { platform: CreatorPlatform; channelUrl: string } =>
+    .filter((account): account is { platform: StreamerPlatform; channelUrl: string } =>
       Boolean(account),
     );
 

@@ -1,4 +1,4 @@
-import type { OwoggCompletionPayload } from "./creatorManifest.js";
+import type { OwoggCompletionPayload } from "./gameCreatorManifest.js";
 
 export interface GameResult extends OwoggCompletionPayload {
   readonly gameId: string;

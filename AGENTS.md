@@ -39,7 +39,7 @@ repository에 포함되지 않는 로컬 보충 문서이므로, 배포 안전 �
 - 관리자 센터의 단일 **게임 관리 및 심사** 화면(`/admin/games`)은 OWOGG 업로드, 전체 게임 안전
   제어, 사용자 제작 게임 심사를 함께 제공합니다. 관리자 ZIP 업로드는 Game Creator Center와 같은
   standalone ZIP/drag-and-drop 입력을 공유하지만 서버가 publisher를 `OWOGG`로 고정합니다. Game
-  Creator 업로드는 인증된 `USER(userId)`를 소유자로 저장하고 공개 제작자명은 그 사용자의 닉네임을
+  Game Creator 업로드는 인증된 `USER(userId)`를 소유자로 저장하고 공개 제작자명은 그 사용자의 닉네임을
   사용합니다. ZIP metadata가 official 여부나 제작자 identity를 스스로 선언하도록 허용하지 않습니다.
   `/admin/sandbox-games`는 예전 북마크 호환용이며 새 메뉴·문서 링크를 만들지 않습니다.
 - Git 기반 `game-registry`, 생성 manifest/definition, 정적 게임 목록을 복원하지 않습니다. Web, API,

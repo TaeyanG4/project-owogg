@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import { OWOGG_BROWSER_API_SOURCE } from "../src/bridge/browserApiSource.js";
-import type { OwoggBrowserApi } from "../src/contracts/creatorManifest.js";
+import type { OwoggBrowserApi } from "../src/contracts/gameCreatorManifest.js";
 
 function plain(value: unknown): unknown {
   return JSON.parse(JSON.stringify(value)) as unknown;

@@ -14,7 +14,7 @@ const STATIC_ROUTES_TO_CHECK = [
   "/ranking",
   "/profile",
   "/admin",
-  "/admin/creators",
+  "/admin/streamers",
   "/discord",
   "/discord/servers",
   "/discord/guide",
@@ -175,44 +175,44 @@ async function verifyApi(expectedSha?: string): Promise<boolean> {
   return false;
 }
 
-const CREATOR_PLATFORM_KEYS = ["YOUTUBE", "TWITCH", "CHZZK", "SOOP"] as const;
-type CreatorPlatformKey = (typeof CREATOR_PLATFORM_KEYS)[number];
+const STREAMER_PLATFORM_KEYS = ["YOUTUBE", "TWITCH", "CHZZK", "SOOP"] as const;
+type StreamerPlatformKey = (typeof STREAMER_PLATFORM_KEYS)[number];
 
 /**
- * Creator providers are optional integrations — OwOGG must deploy cleanly with some (or all)
- * unconfigured. `CREATOR_ENABLED_PROVIDERS` (comma-separated) is this deployment's explicit list
+ * Streamer providers are optional integrations — OwOGG must deploy cleanly with some (or all)
+ * unconfigured. `STREAMER_ENABLED_PROVIDERS` (comma-separated) is this deployment's explicit list
  * of providers operations expects to be live; only those are required to report configured=true.
  * An unconfigured provider that was never declared enabled is reported, not treated as failure.
  */
-async function verifyCreatorProviders(): Promise<boolean> {
-  console.log("🔍 Checking Creator provider readiness (GET /api/creators/providers)...");
+async function verifyStreamerProviders(): Promise<boolean> {
+  console.log("🔍 Checking Streamer provider readiness (GET /api/streamers/providers)...");
 
-  const enabledRaw = (process.env.CREATOR_ENABLED_PROVIDERS || "").trim();
+  const enabledRaw = (process.env.STREAMER_ENABLED_PROVIDERS || "").trim();
   const enabled = new Set(
     enabledRaw
       .split(",")
       .map((p) => p.trim().toUpperCase())
-      .filter((p): p is CreatorPlatformKey =>
-        (CREATOR_PLATFORM_KEYS as readonly string[]).includes(p),
+      .filter((p): p is StreamerPlatformKey =>
+        (STREAMER_PLATFORM_KEYS as readonly string[]).includes(p),
       ),
   );
 
-  let data: Partial<Record<CreatorPlatformKey, { configured?: boolean }>>;
+  let data: Partial<Record<StreamerPlatformKey, { configured?: boolean }>>;
   try {
     const res = await fetchWithTimeout(
-      `${API_URL}/api/creators/providers?v=${Date.now()}`,
+      `${API_URL}/api/streamers/providers?v=${Date.now()}`,
       FETCH_TIMEOUT_MS,
     );
     if (!res.ok) throw new Error(`HTTP status ${res.status}`);
     data = (await res.json()) as typeof data;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`❌ Failed to reach GET /api/creators/providers: ${message}`);
+    console.error(`❌ Failed to reach GET /api/streamers/providers: ${message}`);
     return false;
   }
 
   let allRequiredConfigured = true;
-  for (const platform of CREATOR_PLATFORM_KEYS) {
+  for (const platform of STREAMER_PLATFORM_KEYS) {
     const configured = Boolean(data[platform]?.configured);
     const isEnabled = enabled.has(platform);
     const statusLabel = configured ? "configured" : "외부 설정 대기";
@@ -221,7 +221,7 @@ async function verifyCreatorProviders(): Promise<boolean> {
 
     if (isEnabled && !configured) {
       console.error(
-        `❌ ${platform} is declared in CREATOR_ENABLED_PROVIDERS but is not configured in production.`,
+        `❌ ${platform} is declared in STREAMER_ENABLED_PROVIDERS but is not configured in production.`,
       );
       allRequiredConfigured = false;
     }
@@ -229,12 +229,12 @@ async function verifyCreatorProviders(): Promise<boolean> {
 
   if (enabled.size === 0) {
     console.log(
-      "ℹ️ CREATOR_ENABLED_PROVIDERS is unset — no Creator provider is required for this deployment.",
+      "ℹ️ STREAMER_ENABLED_PROVIDERS is unset — no Streamer provider is required for this deployment.",
     );
   }
 
   if (allRequiredConfigured) {
-    console.log("✅ Creator provider readiness OK.");
+    console.log("✅ Streamer provider readiness OK.");
   }
   return allRequiredConfigured;
 }
@@ -354,15 +354,15 @@ async function main() {
     let success = true;
     if (options.apiOnly) {
       const apiOk = await verifyApi(options.expectedSha);
-      const creatorProvidersOk = await verifyCreatorProviders();
-      success = apiOk && creatorProvidersOk;
+      const streamerProvidersOk = await verifyStreamerProviders();
+      success = apiOk && streamerProvidersOk;
     } else if (options.webOnly) {
       success = await verifyWeb(options.expectedSha);
     } else {
       const apiOk = await verifyApi(options.expectedSha);
-      const creatorProvidersOk = await verifyCreatorProviders();
+      const streamerProvidersOk = await verifyStreamerProviders();
       const webOk = await verifyWeb(options.expectedSha);
-      success = apiOk && creatorProvidersOk && webOk;
+      success = apiOk && streamerProvidersOk && webOk;
     }
 
     clearTimeout(hardTimeout);

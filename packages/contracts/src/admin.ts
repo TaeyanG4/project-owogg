@@ -173,7 +173,7 @@ export const AdminAccountAuditListResponseSchema = z.object({
 export type AdminAccountAuditListResponse = z.infer<typeof AdminAccountAuditListResponseSchema>;
 
 export const AdminOverviewResponseSchema = z.object({
-  pendingCreatorReviews: z.number().int().nonnegative(),
+  pendingStreamerReviews: z.number().int().nonnegative(),
   recentAudits: z.array(
     z.object({
       action: z.string(),
@@ -190,7 +190,7 @@ export const AdminOverviewResponseSchema = z.object({
     expectedInteractionsEndpoint: z.string(),
     localSubcommands: z.array(z.string()),
   }),
-  creatorProviders: z.record(z.boolean()),
+  streamerProviders: z.record(z.boolean()),
 });
 export type AdminOverviewResponse = z.infer<typeof AdminOverviewResponseSchema>;
 

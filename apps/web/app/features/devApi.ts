@@ -56,7 +56,7 @@ export function countActiveSubmissions(games: Array<{ reviewSlot: 1 | 2 | null }
 }
 
 /**
- * Creator self-service full removal of their OWN game — only while it has never been approved
+ * Game Creator self-service full removal of their OWN game — only while it has never been approved
  * (see SandboxGameUseCases.deleteOwnGame). Distinct from adminApi.deleteSandboxGame, which is
  * ADMIN/OPERATOR-only and works on any game, approved or not. A raw fetch (not apiFetch) since the
  * route returns a small `{ deleted: true }` acknowledgement rather than a SandboxGameRecord.
@@ -115,7 +115,7 @@ export async function uploadDevGameVersion(gameId: number, file: File) {
 }
 
 /**
- * Drag-and-drop registration: a single ZIP whose root contains Creator Manifest v1 `owogg.json`
+ * Drag-and-drop registration: a single ZIP whose root contains Game Creator Manifest v1 `owogg.json`
  * (slug/title/genre) creates the game *and* its first version in one call — see
  * SandboxGameUseCases.createGameFromBundle. Same multipart shape as uploadDevGameVersion, so it
  * shares that function's error-mapping (MANIFEST_MISSING/MANIFEST_INVALID/SLUG_TAKEN etc. all

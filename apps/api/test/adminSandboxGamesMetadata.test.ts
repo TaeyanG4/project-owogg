@@ -15,7 +15,7 @@ const ADMIN_SESSION_TOKEN_HASH = await hashSessionToken(ADMIN_SESSION_RAW_TOKEN)
 const ADMIN_COOKIE = "owogg_session=valid_session; owogg_admin_session=admin_session_valid_token";
 
 /** A root-via-ADMIN_USER_IDS elevated admin session — no admin_accounts row, matching
- * adminCreators.test.ts's own established fake-DB convention for this exact auth chain. */
+ * adminStreamers.test.ts's own established fake-DB convention for this exact auth chain. */
 function createAdminDb(options: { userId: number; sandboxGameRow?: Record<string, unknown> }) {
   const gameQueries: string[] = [];
   function statement(query: string) {
@@ -147,7 +147,7 @@ test("PATCH /api/admin/sandbox-games/:id/metadata is still denied for a non-admi
   );
 
   // userId 7 is not in ADMIN_USER_IDS ("1") -> not eligible at all, same 403 as
-  // adminCreators.test.ts's own "non-admin is denied" case.
+  // adminStreamers.test.ts's own "non-admin is denied" case.
   assert.equal(res.status, 403);
 });
 

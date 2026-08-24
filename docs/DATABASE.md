@@ -4,7 +4,7 @@
 
 마지막 검증: 2026-08-24
 
-최신 마이그레이션: `0038_admin_role_permissions.sql`
+최신 마이그레이션: `0039_streamer_terminology.sql`
 
 기준 소스:
 
@@ -15,28 +15,29 @@
 - `.github/workflows/deploy.yml`
 
 Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 권한 원천입니다. 이 문서는
-현재 `0000_initial_schema.sql`부터 `0038_admin_role_permissions.sql`까지의 역할을 설명합니다.
+현재 `0000_initial_schema.sql`부터 `0039_streamer_terminology.sql`까지의 역할을 설명합니다.
 
 ## 마이그레이션 범위
 
-| 범위          | 주제                                                                     |
-| ------------- | ------------------------------------------------------------------------ |
-| `0000`–`0005` | 사용자, 점수, identity/merge, progression                                |
-| `0006`–`0009` | Discord link, guild, guild XP                                            |
-| `0010`–`0014` | creator profile, metrics, review                                         |
-| `0015`–`0018` | admin 인증/계정, locale, 활동 연속 기록                                  |
-| `0019`–`0023` | 게임 설정, 난이도 점수, 프로필 공개 범위, 모니터링, moderation           |
-| `0024`–`0028` | USER sandbox game, staff/program, soft delete, mode/logo, 일회성 attempt |
-| `0029`        | generic `games` identity와 USER backfill                                 |
-| `0030`        | USER identity write convergence                                          |
-| `0031`        | 공통 `game_versions`, slug/live-version 불변식, version 수렴             |
-| `0032`        | generic score acceptance에 필요한 relational binding                     |
-| `0033`        | generic `game_assets`, USER logo convergence                             |
-| `0034`        | USER control/review 필드의 generic authority 전환과 구 Worker 호환 미러  |
-| `0035`        | Creator Manifest v1 결과 원장, score projection, 게임별 도전과제 해금    |
-| `0036`        | live-version 리더보드 세대와 OWOGG 완전 삭제 감사 로그                   |
-| `0037`        | OAuth provider별 avatar 후보와 사용자 avatar 선택                        |
-| `0038`        | 관리자 역할별 기능 권한 정책과 통합 관리자 센터 접근                     |
+| 범위          | 주제                                                                       |
+| ------------- | -------------------------------------------------------------------------- |
+| `0000`–`0005` | 사용자, 점수, identity/merge, progression                                  |
+| `0006`–`0009` | Discord link, guild, guild XP                                              |
+| `0010`–`0014` | 방송 채널 profile, metrics, review(당시 `creator_*` 역사 명칭)             |
+| `0015`–`0018` | admin 인증/계정, locale, 활동 연속 기록                                    |
+| `0019`–`0023` | 게임 설정, 난이도 점수, 프로필 공개 범위, 모니터링, moderation             |
+| `0024`–`0028` | USER sandbox game, staff/program, soft delete, mode/logo, 일회성 attempt   |
+| `0029`        | generic `games` identity와 USER backfill                                   |
+| `0030`        | USER identity write convergence                                            |
+| `0031`        | 공통 `game_versions`, slug/live-version 불변식, version 수렴               |
+| `0032`        | generic score acceptance에 필요한 relational binding                       |
+| `0033`        | generic `game_assets`, USER logo convergence                               |
+| `0034`        | USER control/review 필드의 generic authority 전환과 구 Worker 호환 미러    |
+| `0035`        | Game Creator Manifest v1 결과 원장, score projection, 게임별 도전과제 해금 |
+| `0036`        | live-version 리더보드 세대와 OWOGG 완전 삭제 감사 로그                     |
+| `0037`        | OAuth provider별 avatar 후보와 사용자 avatar 선택                          |
+| `0038`        | 관리자 역할별 기능 권한 정책과 통합 관리자 센터 접근                       |
+| `0039`        | 방송 채널 도메인의 `streamer_*` 명명 전환과 롤링 배포 호환 계층            |
 
 기존 migration은 변경, squash, 삭제하지 않습니다. 프로덕션 배포는 API보다 먼저
 `pnpm d1:migrate:prod`를 실행합니다.
@@ -73,7 +74,7 @@ publisher authority는 서버/배포 과정이 기록하는 relational fact이�
 않습니다.
 
 `live_version_id`가 다른 version으로 바뀔 때만 `leaderboard_generation`이 증가합니다. `scores` row도
-승인 시점의 동일 generation을 저장하며 공개·개인·Creator·Discord 게임 랭킹 쿼리는 현재 game
+승인 시점의 동일 generation을 저장하며 공개·개인·Streamer·Discord 게임 랭킹 쿼리는 현재 game
 generation과 일치하는 row만 읽습니다. 따라서 version rollout은 과거 score를 물리 삭제하지 않고도
 현재 leaderboard를 초기화합니다.
 
@@ -96,7 +97,7 @@ Publisher-neutral bundle identity와 publication 사실을 저장합니다.
 
 ### `game_results`와 `user_game_achievements`
 
-`0035`부터 `owogg.json` Creator Manifest v1 계약으로 보고된 완료 사실은 `game_results`에 먼저
+`0035`부터 `owogg.json` Game Creator Manifest v1 계약으로 보고된 완료 사실은 `game_results`에 먼저
 기록됩니다. 서버는 live canonical 계약을 기준으로 outcome, score, progression, metrics, events를
 검증하며, 범위 정책이 `clamp`인 값은 보정 사실과 사유를 함께 남기되 보상·랭킹 대상에서는
 제외합니다. 랭킹이 활성화된 유효 score만 기존 `scores` 테이블에 `result_id`로 연결된 projection을
@@ -160,7 +161,7 @@ READY != APPROVED
 guard를 통과시킨 뒤 application read authority를 전환합니다. `sandbox_*`는 별도 게임 모델이 아니라
 이전 배포 호환 미러입니다.
 
-구 테이블과 동기화 trigger를 삭제하는 contract migration은 이 변경의 Staging 배포·Creator
+구 테이블과 동기화 trigger를 삭제하는 contract migration은 이 변경의 Staging 배포·Game Creator
 등록/심사/공개/rollback smoke가 끝난 다음 릴리스에서만 추가합니다. expand와 drop을 한 배포에 넣으면
 D1 migration이 새 Worker보다 먼저 실행되는 동안 이전 Worker가 깨지므로 금지합니다.
 
@@ -185,7 +186,7 @@ D1 migration이 새 Worker보다 먼저 실행되는 동안 이전 Worker가 깨
   streak
 - **Personalization**: favorites, recently played, settings/profile visibility
 - **Discord**: link challenges, guild registration/manager, play context, guild XP attribution
-- **Creator/Streamer**: creator profile, platform account, metrics, verification/review
+- **Streamer**: streamer profile, platform account, metrics, verification/review
 - **Operations**: game kill switch, moderation, monitoring indexes, staff/program entitlement
 
 정확한 column, index, foreign key, trigger는 해당 migration과 `packages/db/src/d1` query를

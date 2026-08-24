@@ -1,4 +1,4 @@
-import type { NormalizedCreatorResult } from "../domain/creatorResult.js";
+import type { NormalizedGameCreatorResult } from "../domain/gameCreatorResult.js";
 
 export interface GameResultAcceptanceRepository {
   acceptResult(input: {
@@ -10,7 +10,7 @@ export interface GameResultAcceptanceRepository {
     nickname: string;
     avatarUrl: string | null;
     difficulty: string;
-    result: NormalizedCreatorResult;
+    result: NormalizedGameCreatorResult;
     leaderboardEnabled: boolean;
     nowIso: string;
   }): Promise<{ accepted: boolean; resultId: number | null; scoreId: number | null }>;

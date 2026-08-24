@@ -2,7 +2,7 @@ import type {
   OwoggAchievementCondition,
   OwoggAchievementDefinition,
 } from "@owogg/game-sdk/contracts";
-import type { NormalizedCreatorResult } from "../domain/creatorResult.js";
+import type { NormalizedGameCreatorResult } from "../domain/gameCreatorResult.js";
 import type { GameAchievementRepository } from "../ports/gameAchievements.js";
 
 function compare(actual: number | string | boolean, condition: OwoggAchievementCondition): boolean {
@@ -25,7 +25,7 @@ function compare(actual: number | string | boolean, condition: OwoggAchievementC
 
 function sessionFact(
   condition: OwoggAchievementCondition,
-  result: NormalizedCreatorResult,
+  result: NormalizedGameCreatorResult,
 ): number | string | null {
   switch (condition.source) {
     case "score":
@@ -48,7 +48,7 @@ export class GameAchievementUseCases {
     userId: number;
     gameId: number;
     resultId: number;
-    result: NormalizedCreatorResult;
+    result: NormalizedGameCreatorResult;
     achievements: readonly OwoggAchievementDefinition[];
   }): Promise<string[]> {
     // Any clamped fact excludes the entire result from achievements by default, matching the v1

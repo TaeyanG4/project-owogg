@@ -170,7 +170,7 @@ export class D1GameCreatorRepository
     // "concurrent" callers, so last_insert_rowid() can reflect a DIFFERENT caller's row under real
     // concurrency (see packages/db/src/d1/D1SandboxGameRepository.ts's header comment for the full
     // finding). This endpoint is guarded by the one-PENDING-per-user partial unique index, but
-    // RETURNING is used everywhere new sandbox/creator code is written regardless, since it's
+    // RETURNING is used everywhere new sandbox/Game Creator code is written regardless, since it's
     // simply the correct pattern rather than a targeted fix for one known-race table.
     const row = await this.db
       .prepare(

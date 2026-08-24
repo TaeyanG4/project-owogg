@@ -1,4 +1,4 @@
-import type { GameResultAcceptanceRepository, NormalizedCreatorResult } from "@owogg/core";
+import type { GameResultAcceptanceRepository, NormalizedGameCreatorResult } from "@owogg/core";
 import type { D1Database } from "./D1UserRepository.js";
 
 /** Atomic one-attempt result acceptance plus optional leaderboard score projection. */
@@ -14,7 +14,7 @@ export class D1GameResultAcceptanceRepository implements GameResultAcceptanceRep
     nickname: string;
     avatarUrl: string | null;
     difficulty: string;
-    result: NormalizedCreatorResult;
+    result: NormalizedGameCreatorResult;
     leaderboardEnabled: boolean;
     nowIso: string;
   }): Promise<{ accepted: boolean; resultId: number | null; scoreId: number | null }> {

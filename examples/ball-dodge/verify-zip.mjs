@@ -22,7 +22,7 @@ import {
   normalizeBundleEntryPath,
   findGameLogoFile,
 } from "../../packages/core/src/domain/sandboxGameBundle.ts";
-import { extractCreatorManifest } from "../../packages/core/src/domain/creatorManifest.ts";
+import { extractGameCreatorManifest } from "../../packages/core/src/domain/gameCreatorManifest.ts";
 import { SANDBOX_GAME_POLICY } from "../../packages/core/src/domain/sandboxGames.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -68,9 +68,9 @@ for (const f of prepared.files) {
 // The same manifest/logo extraction createGameFromBundle actually runs (see
 // SandboxGameUseCases.createGameFromBundle) — confirms this zip really does register through the
 // drag-and-drop auto-registration path, not just "is a valid zip".
-const manifest = extractCreatorManifest(prepared.files);
+const manifest = extractGameCreatorManifest(prepared.files);
 if (!manifest) throw new Error("FAIL: no owogg.json manifest found");
-console.log(`PASS: extractCreatorManifest — ${JSON.stringify(manifest)}`);
+console.log(`PASS: extractGameCreatorManifest — ${JSON.stringify(manifest)}`);
 if (manifest.game.slug !== "ball-dodge") {
   throw new Error(`FAIL: unexpected slug ${manifest.game.slug}`);
 }

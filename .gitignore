@@ -30,7 +30,7 @@ __pycache__/
 # Internal-only docs (repo is public — work lists, roadmap/strategy, agent instructions,
 # operational/security runbooks, session logs, and detailed archives of content cut from the
 # public docs stay local-only, not pushed). Contributor-facing technical docs (ARCHITECTURE.md,
-# I18N.md, CREATOR_SYSTEM.md, DISCORD_*.md) are unaffected and stay public.
+# I18N.md, STREAMER_SYSTEM.md, DISCORD_*.md) are unaffected and stay public.
 docs/WORK_PROGRESS.md
 docs/ROADMAP.md
 docs/AGENTS.md

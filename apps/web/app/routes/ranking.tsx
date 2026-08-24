@@ -13,10 +13,10 @@ import {
 } from "lucide-react";
 import { fetchLeaderboardApi } from "../features/scores/api";
 import { fetchXpLeaderboardApi } from "../features/progression/api";
-import { fetchCreatorRankingsApi } from "../features/creators/creatorApi";
+import { fetchStreamerRankingsApi } from "../features/streamers/streamerApi";
 import { PlatformIconRow, PlatformIcon } from "../components/ui/PlatformIcon";
 import { GameThumbnail } from "../components/ui/GameThumbnail";
-import type { LeaderRecord, XpLeaderboardEntry, CreatorRankEntryDto } from "@owogg/contracts";
+import type { LeaderRecord, XpLeaderboardEntry, StreamerRankEntryDto } from "@owogg/contracts";
 
 import { formatPublicUserTag, levelForTotalXp } from "@owogg/core";
 
@@ -32,7 +32,7 @@ export function meta() {
   ];
 }
 
-type MainTab = "game" | "xp" | "creator";
+type MainTab = "game" | "xp" | "streamer";
 type LeaderboardState = "loading" | "success" | "error";
 
 export default function Ranking() {
@@ -55,10 +55,10 @@ export default function Ranking() {
   // XP Ranking state
   const [xpRecords, setXpRecords] = useState<XpLeaderboardEntry[]>([]);
 
-  // Creator Ranking state
-  const [creatorMode, setCreatorMode] = useState<"score" | "xp">("score");
+  // Streamer Ranking state
+  const [streamerMode, setStreamerMode] = useState<"score" | "xp">("score");
   const [selectedPlatform, setSelectedPlatform] = useState<string>("ALL");
-  const [creatorRecords, setCreatorRecords] = useState<CreatorRankEntryDto[]>([]);
+  const [streamerRecords, setStreamerRecords] = useState<StreamerRankEntryDto[]>([]);
 
   const [status, setStatus] = useState<LeaderboardState>("loading");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -90,15 +90,15 @@ export default function Ranking() {
       } else if (mainTab === "xp") {
         const res = await fetchXpLeaderboardApi(50);
         setXpRecords(res.entries);
-      } else if (mainTab === "creator") {
-        const res = await fetchCreatorRankingsApi(
-          creatorMode,
+      } else if (mainTab === "streamer") {
+        const res = await fetchStreamerRankingsApi(
+          streamerMode,
           selectedGameId,
           selectedPlatform,
           50,
           0,
         );
-        setCreatorRecords(res.entries);
+        setStreamerRecords(res.entries);
       }
       setStatus("success");
     } catch (err) {
@@ -106,7 +106,7 @@ export default function Ranking() {
       setErrorMsg(dict.common.error);
       setStatus("error");
     }
-  }, [mainTab, selectedGameId, creatorMode, selectedPlatform, dict.common.error]);
+  }, [mainTab, selectedGameId, streamerMode, selectedPlatform, dict.common.error]);
 
   useEffect(() => {
     void loadData();
@@ -154,15 +154,15 @@ export default function Ranking() {
           </button>
 
           <button
-            onClick={() => setMainTab("creator")}
+            onClick={() => setMainTab("streamer")}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs md:text-sm font-extrabold transition-all cursor-pointer ${
-              mainTab === "creator"
+              mainTab === "streamer"
                 ? "bg-purple-600 text-white shadow-lg shadow-purple-600/25"
                 : "text-text-secondary hover:text-text-primary"
             }`}
           >
             <Video className="w-4 h-4 text-purple-300" />
-            <span>{dict.ranking.creatorTab}</span>
+            <span>{dict.ranking.streamerTab}</span>
           </button>
         </div>
       </div>
@@ -171,7 +171,7 @@ export default function Ranking() {
           chip row here enumerates every game unconditionally, which stops working once the
           catalog grows well past a handful of entries. */}
 
-      {mainTab === "creator" && (
+      {mainTab === "streamer" && (
         <div className="space-y-3 border-b border-border/40 pb-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             {/* Platform Filter Pills */}
@@ -207,9 +207,9 @@ export default function Ranking() {
             {/* Metric Mode Switch */}
             <div className="flex items-center gap-1 rounded-xl bg-surface-sidebar p-1 border border-border self-start sm:self-auto">
               <button
-                onClick={() => setCreatorMode("score")}
+                onClick={() => setStreamerMode("score")}
                 className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                  creatorMode === "score"
+                  streamerMode === "score"
                     ? "bg-purple-600 text-white"
                     : "text-text-muted hover:text-text-primary"
                 }`}
@@ -217,9 +217,9 @@ export default function Ranking() {
                 🎮 {dict.ranking.scoreMode}
               </button>
               <button
-                onClick={() => setCreatorMode("xp")}
+                onClick={() => setStreamerMode("xp")}
                 className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                  creatorMode === "xp"
+                  streamerMode === "xp"
                     ? "bg-purple-600 text-white"
                     : "text-text-muted hover:text-text-primary"
                 }`}
@@ -229,8 +229,8 @@ export default function Ranking() {
             </div>
           </div>
 
-          {/* If Creator Score mode, show game selector pills */}
-          {creatorMode === "score" && (
+          {/* If Streamer Score mode, show game selector pills */}
+          {streamerMode === "score" && (
             <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pt-2">
               <button
                 onClick={() => setSelectedGameId("all")}
@@ -265,7 +265,7 @@ export default function Ranking() {
           of enumerating every game as chips or grid cards), and moving the picker out of the
           top bar into a fixed-width column frees up the rest of the width for the table, which
           used to compete with a full-width chip row above it for the same horizontal space.
-          xp/creator tabs have no sidebar and keep the full-width single-column layout. */}
+          xp/streamer tabs have no sidebar and keep the full-width single-column layout. */}
       <div className="flex flex-col gap-6 lg:flex-row">
         {mainTab === "game" && (
           <aside className="flex shrink-0 flex-col gap-3 lg:w-64">
@@ -361,7 +361,7 @@ export default function Ranking() {
                       <tr className="bg-surface-sidebar border-b border-border text-xs font-extrabold text-text-muted uppercase tracking-wider">
                         <th className="py-4 px-6">{dict.ranking.rankHeader}</th>
                         <th className="py-4 px-6">
-                          {mainTab === "creator"
+                          {mainTab === "streamer"
                             ? dict.ranking.streamerHeader
                             : dict.ranking.playerHeader}
                         </th>
@@ -378,10 +378,10 @@ export default function Ranking() {
                             <th className="py-4 px-6">{dict.ranking.totalXpHeader}</th>
                           </>
                         )}
-                        {mainTab === "creator" && (
+                        {mainTab === "streamer" && (
                           <>
                             <th className="py-4 px-6">
-                              {creatorMode === "score"
+                              {streamerMode === "score"
                                 ? dict.ranking.recordOrCategory
                                 : dict.ranking.activityLevel}
                             </th>
@@ -593,25 +593,25 @@ export default function Ranking() {
                         </>
                       )}
 
-                      {/* Mode 3: Creator Ranking */}
-                      {status === "success" && mainTab === "creator" && (
+                      {/* Mode 3: Streamer Ranking */}
+                      {status === "success" && mainTab === "streamer" && (
                         <>
-                          {creatorRecords.length === 0 ? (
+                          {streamerRecords.length === 0 ? (
                             <tr>
                               <td colSpan={5} className="py-16 text-center space-y-3">
                                 <div className="text-3xl">🎥</div>
                                 <p className="text-sm font-semibold text-text-secondary">
-                                  {dict.ranking.emptyCreatorTitle}
+                                  {dict.ranking.emptyStreamerTitle}
                                 </p>
                                 <p className="text-xs text-text-muted max-w-md mx-auto leading-relaxed">
-                                  {dict.ranking.emptyCreatorBody}
+                                  {dict.ranking.emptyStreamerBody}
                                 </p>
                               </td>
                             </tr>
                           ) : (
-                            creatorRecords.map((record) => (
+                            streamerRecords.map((record) => (
                               <tr
-                                key={record.creatorId}
+                                key={record.streamerId}
                                 className="hover:bg-surface-overlay/50 transition-colors"
                               >
                                 <td className="py-4 px-6 whitespace-nowrap font-bold">
@@ -645,7 +645,7 @@ export default function Ranking() {
                                 </td>
 
                                 <td className="py-4 px-6 whitespace-nowrap font-black text-purple-200">
-                                  {creatorMode === "score" ? (
+                                  {streamerMode === "score" ? (
                                     <div>
                                       <div>{record.formattedScore}</div>
                                       {record.gameTitle && (
@@ -669,11 +669,11 @@ export default function Ranking() {
                                 <td className="py-4 px-6 whitespace-nowrap">
                                   {/* Featured/Partner 배지는 현재 공개 노출하지 않습니다 — 심사 최소 기준을
                               임시로 낮춘 테스트 단계라, 관리자가 실제로 승인하기 전까지는 모든
-                              검증된 크리에이터를 동일하게 "CREATOR"로만 표시합니다. 실제
-                              featuredStatus는 계속 계산/저장되며 관리자 화면(/admin/creators)에서만
+                              검증된 스트리머를 동일하게 "STREAMER"로만 표시합니다. 실제
+                              featuredStatus는 계속 계산/저장되며 관리자 화면(/admin/streamers)에서만
                               확인할 수 있습니다. */}
                                   <span className="inline-flex items-center rounded-full border border-indigo-500/30 bg-indigo-500/20 px-2.5 py-0.5 text-[10px] font-extrabold text-indigo-300">
-                                    CREATOR
+                                    STREAMER
                                   </span>
                                 </td>
 

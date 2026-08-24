@@ -10,7 +10,7 @@
  *                                              → GameDefinition → /play/:slug → GameHost →
  *                                                IframeRuntime → Game Bridge
  *
- * SYSTEM and CREATOR are not meant to stay two permanently-separate deployment platforms — an
+ * SYSTEM and GAME_CREATOR are not meant to stay two permanently-separate deployment platforms — an
  * official game and a user-published game are meant to use the exact same D1+B2+iframe+Bridge
  * mechanics; the only real difference is {@link GamePublisher} (gamePublisher.ts) and whatever
  * review/permission policy applies to that publisher. This document is the "what the game is"
@@ -29,7 +29,7 @@
  *     GameDefinition's own `GamePolicy` doc comment).
  *     `score: null` is a real, explicit "this game deliberately has no score" — never conflated
  *     with an upstream identity row whose score policy simply hasn't been configured yet (see
- *     domain/creatorScorePolicy.ts's own doc comment on why that distinction is load-bearing).
+ *     domain/gameCreatorScorePolicy.ts's own doc comment on why that distinction is load-bearing).
  *   - **presentation**: reuses `GamePresentation` verbatim.
  *   - **difficulty**: reuses `DifficultyConfig` verbatim.
  *   - **supportsReplay**: whether the game can record/replay a session.
@@ -56,11 +56,11 @@ import type {
   GameMode,
   GamePresentation,
   InputMethod,
-  OwoggCreatorManifest,
+  OwoggGameCreatorManifest,
   ScoreConfig,
 } from "@owogg/game-sdk/contracts";
 import type { SandboxGameMode } from "../../../domain/sandboxGames.js";
-import { parseCreatorManifest } from "../../../domain/creatorManifest.js";
+import { parseGameCreatorManifest } from "../../../domain/gameCreatorManifest.js";
 
 export const GAME_CANONICAL_SCHEMA_VERSION = 3 as const;
 
@@ -75,7 +75,7 @@ export interface GameCanonicalPublisher {
  * domain-invalid-state rejections (never silently coerced), the same invariants every existing
  * policy source already guarantees: `score.min < score.max` when scored (decimals allowed, no
  * integer restriction); `leaderboard: true` requires `score !== null` (nothing to rank otherwise);
- * `xpPerCompletion` is a non-negative integer capped at 100_000, matching the Creator admin
+ * `xpPerCompletion` is a non-negative integer capped at 100_000, matching the Game Creator admin
  * contract. `requiresAuth` is unaffected by any of this — it is still purely "must a
  * player sign in to PLAY at all", independent of score submission auth. */
 export interface GameCanonicalPolicy {
@@ -88,8 +88,8 @@ export interface GameCanonicalPolicy {
 /**
  * A catalog metadata SHAPE, not a publisher distinction — `GENRE_MODE` does not mean "this is a
  * USER game" and `TAXONOMY` does not mean "this is an OWOGG game" (see this type's own name
- * deliberately avoiding "CREATOR"/"SYSTEM"). The two shapes exist because today's two metadata
- * sources genuinely collect different information — Creator submissions have never collected
+ * deliberately avoiding "GAME_CREATOR"/"SYSTEM"). The two shapes exist because today's two metadata
+ * sources genuinely collect different information — Game Creator submissions have never collected
  * categories/tags/inputMethods/thumbnail/minPlayers/maxPlayers (see
  * the USER submission model), while
  * legacy taxonomy-shaped games require them. Inventing values for the fields one shape doesn't
@@ -107,7 +107,7 @@ export type GameCanonicalCatalog =
       readonly genre: string;
       /** `"single" | "multi"` — never translated into `TAXONOMY`'s richer
        * `"local-multi" | "online-multi"` distinction, which this shape's source has no way to
-       * declare (see domain/gameDefinition.ts's own `CreatorGameDefinition.mode` doc comment). */
+       * declare (see domain/gameDefinition.ts's own legacy `CreatorGameDefinition.mode` doc comment). */
       readonly mode: SandboxGameMode;
       readonly tags?: readonly string[] | undefined;
       readonly inputMethods?: readonly InputMethod[] | undefined;
@@ -140,9 +140,11 @@ export interface GameCanonicalDocument {
   readonly difficulty?: DifficultyConfig | undefined;
   readonly supportsReplay: boolean;
   readonly catalog: GameCanonicalCatalog;
-  /** The normalized public Creator v1 contract that produced this game/version. Publisher and
+  /** The normalized public Game Creator v1 contract that produced this game/version. The persisted
+   * key remains `creatorManifest` for canonical schema v3 compatibility; new TypeScript symbols
+   * use `GameCreator` so it cannot be confused with the Streamer domain. Publisher and
    * authorization facts are deliberately outside it and remain server-controlled. */
-  readonly creatorManifest?: OwoggCreatorManifest | undefined;
+  readonly creatorManifest?: OwoggGameCreatorManifest | undefined;
   /** When this exact document was last written — provenance for debugging/audit, never a review
    * or publish timestamp (those stay in D1, on the identity row they actually describe). */
   readonly updatedAt: string;
@@ -313,7 +315,7 @@ const SCORE_KEYS = [
   "displaySuffix",
 ] as const;
 const SCORE_DIRECTIONS = ["asc", "desc"] as const;
-// Same bound the Creator admin contract enforces, so this canonical schema fails closed on the
+// Same bound the Game Creator admin contract enforces, so this canonical schema fails closed on the
 // same domain-invalid state.
 const MAX_XP_PER_COMPLETION = 100_000;
 
@@ -718,13 +720,13 @@ export function parseGameCanonicalDocument(
   const presentation =
     obj.presentation !== undefined ? parsePresentation(obj.presentation) : undefined;
   const difficulty = obj.difficulty !== undefined ? parseDifficulty(obj.difficulty) : undefined;
-  let creatorManifest: OwoggCreatorManifest | undefined;
+  let creatorManifest: OwoggGameCreatorManifest | undefined;
   if (obj.creatorManifest !== undefined) {
     if (schemaVersion !== GAME_CANONICAL_SCHEMA_VERSION) {
       fail("INVALID_DOCUMENT", "creatorManifest requires the current canonical schema");
     }
     try {
-      creatorManifest = parseCreatorManifest(obj.creatorManifest);
+      creatorManifest = parseGameCreatorManifest(obj.creatorManifest);
     } catch (error) {
       fail(
         "INVALID_DOCUMENT",

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Builds the ball-dodge OWOGG Browser API reference bundle: compiles main.ts, copies the static assets, and
-// zips the result — producing dist/ball-dodge.zip, the exact artifact a Creator would drag onto
+// zips the result — producing dist/ball-dodge.zip, the exact artifact a Game Creator would drag onto
 // the Game Creator Center to register/upload this game through the existing
 // upload/review/publish/B2 pipeline. Nothing here is wired into `pnpm build`/CI: this bundle is
 // built and uploaded manually (see the PR description's manual E2E steps).

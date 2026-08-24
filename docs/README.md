@@ -40,11 +40,11 @@
 - [Discord 연동](DISCORD_INTEGRATION.md) — **기준 문서/가이드**, HTTP Interactions와 길드 연동
 - [Discord 봇 가이드](DISCORD_BOT_GUIDE.md) — **가이드**, 명령과 설정
 
-## Creator
+## 스트리머
 
-- [Creator 시스템](CREATOR_SYSTEM.md) — **기준 문서/가이드**, 채널 소유권 검증과 Featured
+- [스트리머 시스템](STREAMER_SYSTEM.md) — **기준 문서/가이드**, 채널 소유권 검증과 Featured
 
-`Creator System`의 스트리머/채널 인증과 `Authorization`의 GAME_CREATOR 업로드 자격은 서로 다른
+`Streamer System`의 스트리머/채널 인증과 `Authorization`의 GAME_CREATOR 업로드 자격은 서로 다른
 프로그램입니다.
 
 ## 국제화

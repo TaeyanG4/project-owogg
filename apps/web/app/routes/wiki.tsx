@@ -6,7 +6,7 @@ import type { Dictionary } from "../features/i18n/dictionary";
 export function meta() {
   return [
     { title: "OwOGG Wiki" },
-    { name: "description", content: "OwOGG 설치, 계정, 게임/랭킹, Discord, Creator 이용 안내" },
+    { name: "description", content: "OwOGG 설치, 계정, 게임/랭킹, Discord, Streamer 이용 안내" },
   ];
 }
 
@@ -42,9 +42,9 @@ function buildCategories(dict: Dictionary["wiki"]) {
     },
     {
       icon: Video,
-      title: "Creator",
-      description: dict.catCreatorDesc,
-      path: "/wiki/creator",
+      title: "Streamer",
+      description: dict.catStreamerDesc,
+      path: "/wiki/streamer",
       tone: "text-purple-300 bg-purple-500/10 border-purple-500/30",
     },
     {

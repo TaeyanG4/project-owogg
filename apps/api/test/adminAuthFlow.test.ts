@@ -217,7 +217,7 @@ CREATE TABLE discord_guilds (
   last_seen_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
-CREATE TABLE creator_profiles (
+CREATE TABLE streamer_profiles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER UNIQUE NOT NULL,
   status TEXT NOT NULL DEFAULT 'UNVERIFIED',
@@ -227,9 +227,9 @@ CREATE TABLE creator_profiles (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
-CREATE TABLE creator_platform_accounts (
+CREATE TABLE streamer_platform_accounts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  creator_id INTEGER NOT NULL,
+  streamer_id INTEGER NOT NULL,
   platform TEXT NOT NULL,
   platform_user_id TEXT NOT NULL,
   channel_name TEXT NOT NULL,
@@ -245,9 +245,9 @@ CREATE TABLE creator_platform_accounts (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
-CREATE TABLE creator_review_jobs (
+CREATE TABLE streamer_review_jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  creator_platform_account_id INTEGER NOT NULL,
+  streamer_platform_account_id INTEGER NOT NULL,
   review_type TEXT NOT NULL DEFAULT 'ACQUISITION',
   status TEXT NOT NULL,
   initial_audience INTEGER,
@@ -260,9 +260,9 @@ CREATE TABLE creator_review_jobs (
   updated_at TEXT NOT NULL,
   completed_at TEXT
 );
-CREATE TABLE creator_review_audit_log (
+CREATE TABLE streamer_review_audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  creator_platform_account_id INTEGER NOT NULL,
+  streamer_platform_account_id INTEGER NOT NULL,
   review_job_id INTEGER,
   reviewer_user_id INTEGER NOT NULL,
   action TEXT NOT NULL,

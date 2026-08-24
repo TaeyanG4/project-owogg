@@ -52,11 +52,11 @@ export function buildWikiSections(dict: Dictionary): WikiNavSection[] {
       ],
     },
     {
-      title: "Creator",
+      title: "Streamer",
       items: [
-        { path: "/wiki/creator", label: dict.wiki.navCreatorOverview },
-        { path: "/wiki/creator/verification", label: dict.wiki.navCreatorVerification },
-        { path: "/wiki/creator/featured", label: dict.wiki.navCreatorFeatured },
+        { path: "/wiki/streamer", label: dict.wiki.navStreamerOverview },
+        { path: "/wiki/streamer/verification", label: dict.wiki.navStreamerVerification },
+        { path: "/wiki/streamer/featured", label: dict.wiki.navStreamerFeatured },
       ],
     },
     {

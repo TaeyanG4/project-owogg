@@ -35,19 +35,19 @@ import {
   fetchPublicProfileApi,
 } from "../features/profile/api";
 import {
-  fetchMyCreatorProfileApi,
-  fetchCreatorProvidersApi,
-} from "../features/creators/creatorApi";
+  fetchMyStreamerProfileApi,
+  fetchStreamerProvidersApi,
+} from "../features/streamers/streamerApi";
 import { fetchDevMe } from "../features/devApi";
 import { COUNTRY_OPTIONS } from "../lib/countries";
 import type {
   ConnectedProvider,
   SocialProvider,
   CreateMergeChallengeResponse,
-  CreatorProfileDto,
+  StreamerProfileDto,
   GameCreatorMeResponse,
 } from "@owogg/contracts";
-import { formatPublicUserTag, type CreatorPlatformType } from "@owogg/core";
+import { formatPublicUserTag, type StreamerPlatformType } from "@owogg/core";
 import { ApiClientError } from "../lib/api";
 import { MergeModal } from "../components/ui/MergeModal";
 
@@ -98,9 +98,9 @@ export default function SettingsPage() {
     "favorites" | "recentPlays" | null
   >(null);
 
-  const [creatorProfile, setCreatorProfile] = useState<CreatorProfileDto | null>(null);
-  const [creatorProviders, setCreatorProviders] = useState<
-    Record<CreatorPlatformType, { configured: boolean }>
+  const [streamerProfile, setStreamerProfile] = useState<StreamerProfileDto | null>(null);
+  const [streamerProviders, setStreamerProviders] = useState<
+    Record<StreamerPlatformType, { configured: boolean }>
   >({
     YOUTUBE: { configured: false },
     TWITCH: { configured: false },
@@ -113,19 +113,19 @@ export default function SettingsPage() {
   // the dedicated /game-creator route now — this page only shows a pointer card.
   const [devMe, setDevMe] = useState<GameCreatorMeResponse | null>(null);
 
-  const refreshCreatorProfile = useCallback(async () => {
+  const refreshStreamerProfile = useCallback(async () => {
     try {
-      const res = await fetchMyCreatorProfileApi();
-      setCreatorProfile(res.profile);
+      const res = await fetchMyStreamerProfileApi();
+      setStreamerProfile(res.profile);
     } catch {
-      setCreatorProfile(null);
+      setStreamerProfile(null);
     }
   }, []);
 
-  const refreshCreatorProviders = useCallback(async () => {
+  const refreshStreamerProviders = useCallback(async () => {
     try {
-      const res = await fetchCreatorProvidersApi();
-      setCreatorProviders(res);
+      const res = await fetchStreamerProvidersApi();
+      setStreamerProviders(res);
     } catch {
       // keep defaults
     }
@@ -152,8 +152,8 @@ export default function SettingsPage() {
   useEffect(() => {
     if (isAuthenticated && user) {
       void refreshConnected();
-      void refreshCreatorProfile();
-      void refreshCreatorProviders();
+      void refreshStreamerProfile();
+      void refreshStreamerProviders();
       // Reuses the public-profile endpoint (rather than a dedicated GET) to seed the current
       // toggle state — as the owner, the response always includes visibilitySettings.
       void fetchPublicProfileApi(user.id)
@@ -165,13 +165,13 @@ export default function SettingsPage() {
         .then(setDevMe)
         .catch(() => setDevMe(null));
     }
-  }, [isAuthenticated, user, refreshConnected, refreshCreatorProfile, refreshCreatorProviders]);
+  }, [isAuthenticated, user, refreshConnected, refreshStreamerProfile, refreshStreamerProviders]);
 
-  // Handle Discord link and Creator verify redirect status params
+  // Handle Discord link and Streamer verify redirect status params
   useEffect(() => {
     const linkStatus = searchParams.get("link_status");
     const challenge = searchParams.get("challenge");
-    const creatorVerify = searchParams.get("creator_verify");
+    const streamerVerify = searchParams.get("streamer_verify");
 
     if (linkStatus) {
       if (linkStatus === "success") {
@@ -189,30 +189,30 @@ export default function SettingsPage() {
       return;
     }
 
-    if (creatorVerify) {
+    if (streamerVerify) {
       const channelName = searchParams.get("channel");
-      if (creatorVerify === "success") {
+      if (streamerVerify === "success") {
         setStatusMessage(
-          `${dict.profile.creatorVerifySuccess}${
+          `${dict.profile.streamerVerifySuccess}${
             channelName ? ` (${decodeURIComponent(channelName)})` : ""
           }`,
         );
-        void refreshCreatorProfile();
-      } else if (creatorVerify === "conflict") {
-        setStatusMessage(dict.profile.creatorVerifyConflict);
-      } else if (creatorVerify === "unconfigured") {
-        setStatusMessage(dict.profile.creatorVerifyUnconfigured);
-      } else if (creatorVerify === "unauthorized") {
-        setStatusMessage(dict.profile.creatorVerifyUnauthorized);
-      } else if (creatorVerify === "error") {
-        setStatusMessage(dict.profile.creatorVerifyError);
+        void refreshStreamerProfile();
+      } else if (streamerVerify === "conflict") {
+        setStatusMessage(dict.profile.streamerVerifyConflict);
+      } else if (streamerVerify === "unconfigured") {
+        setStatusMessage(dict.profile.streamerVerifyUnconfigured);
+      } else if (streamerVerify === "unauthorized") {
+        setStatusMessage(dict.profile.streamerVerifyUnauthorized);
+      } else if (streamerVerify === "error") {
+        setStatusMessage(dict.profile.streamerVerifyError);
       }
       setSearchParams({}, { replace: true });
     }
   }, [
     searchParams,
     refreshConnected,
-    refreshCreatorProfile,
+    refreshStreamerProfile,
     refreshUser,
     setSearchParams,
     dict.profile,
@@ -774,7 +774,7 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Creator Channel Ownership Verification — this is the STREAMER program (see
+      {/* Streamer Channel Ownership Verification — this is the STREAMER program (see
           docs/AUTHORIZATION.md): id="streamer-center" gives the profile dropdown's "스트리머 센터"
           entry a real anchor to deep-link to, since this program has no dedicated route of its
           own (base status has no application/approval step, so there was never a separate page
@@ -784,18 +784,18 @@ export default function SettingsPage() {
           <div className="flex items-center gap-2">
             <Video className="w-5 h-5 text-brand" />
             <h2 className="text-xl font-bold text-text-primary">
-              {dict.profile.creatorVerificationTitle}
+              {dict.profile.streamerVerificationTitle}
             </h2>
           </div>
-          <p className="text-xs text-text-muted">{dict.profile.creatorVerificationSubtitle}</p>
+          <p className="text-xs text-text-muted">{dict.profile.streamerVerificationSubtitle}</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-          {(["YOUTUBE", "CHZZK", "SOOP", "TWITCH"] as CreatorPlatformType[]).map((platform) => {
-            const verifiedAcc = creatorProfile?.platformAccounts?.find(
+          {(["YOUTUBE", "CHZZK", "SOOP", "TWITCH"] as StreamerPlatformType[]).map((platform) => {
+            const verifiedAcc = streamerProfile?.platformAccounts?.find(
               (a) => a.platform === platform && a.verificationStatus === "VERIFIED",
             );
-            const isConfigured = creatorProviders[platform]?.configured ?? false;
+            const isConfigured = streamerProviders[platform]?.configured ?? false;
 
             return (
               <div
@@ -849,7 +849,7 @@ export default function SettingsPage() {
                   <div className="flex items-center justify-between gap-2 mt-1">
                     {isConfigured ? (
                       <a
-                        href={`/api/creators/verify/${platform.toLowerCase()}`}
+                        href={`/api/streamers/verify/${platform.toLowerCase()}`}
                         className="flex items-center justify-center gap-1.5 w-full py-2 bg-brand text-white border border-brand rounded-xl font-bold text-xs hover:bg-brand-dark transition-all cursor-pointer shadow-md"
                       >
                         <Video className="w-3.5 h-3.5" />
@@ -867,8 +867,8 @@ export default function SettingsPage() {
           })}
         </div>
 
-        {/* Featured Creator 심사 상태 */}
-        {creatorProfile && (
+        {/* Featured Streamer 심사 상태 */}
+        {streamerProfile && (
           <div className="flex flex-col gap-1 p-4 rounded-2xl bg-surface-raised border border-border shadow-md">
             <div className="flex items-center gap-2">
               <Award className="w-4 h-4 text-accent-yellow" />
@@ -876,15 +876,15 @@ export default function SettingsPage() {
                 {dict.profile.featuredReviewStatusTitle}
               </h3>
             </div>
-            {creatorProfile.featuredStatus === "FEATURED" ? (
+            {streamerProfile.featuredStatus === "FEATURED" ? (
               <p className="text-xs font-bold text-accent-yellow">
-                {dict.profile.featuredCreatorLabel}
-                {creatorProfile.featuredSince
-                  ? ` (${creatorProfile.featuredSince.split("T")[0]} ${dict.profile.featuredSelectedSuffix})`
+                {dict.profile.featuredStreamerLabel}
+                {streamerProfile.featuredSince
+                  ? ` (${streamerProfile.featuredSince.split("T")[0]} ${dict.profile.featuredSelectedSuffix})`
                   : ""}
               </p>
             ) : (
-              <FeaturedReviewStatusLine profile={creatorProfile} />
+              <FeaturedReviewStatusLine profile={streamerProfile} />
             )}
             <p className="text-[10px] text-text-muted">{dict.profile.featuredHint}</p>
           </div>
@@ -936,7 +936,7 @@ export default function SettingsPage() {
   );
 }
 
-function FeaturedReviewStatusLine({ profile }: { profile: CreatorProfileDto }) {
+function FeaturedReviewStatusLine({ profile }: { profile: StreamerProfileDto }) {
   const { dict } = useI18n();
   const review = profile.featuredReview;
   const reason = profile.featuredReason;

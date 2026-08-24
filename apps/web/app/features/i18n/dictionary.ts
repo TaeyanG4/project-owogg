@@ -121,7 +121,7 @@ export interface Dictionary {
     subtitle: string;
     gameTab: string;
     xpTab: string;
-    creatorTab: string;
+    streamerTab: string;
     allCategories: string;
     allPlatforms: string;
     platformChzzk: string;
@@ -142,8 +142,8 @@ export interface Dictionary {
     platformHeader: string;
     emptyGames: string;
     emptyXp: string;
-    emptyCreatorTitle: string;
-    emptyCreatorBody: string;
+    emptyStreamerTitle: string;
+    emptyStreamerBody: string;
     retryButton: string;
     rank1: string;
     rank2: string;
@@ -181,11 +181,11 @@ export interface Dictionary {
     linkSuccess: string;
     alreadyLinkedAccount: string;
     linkError: string;
-    creatorVerifySuccess: string;
-    creatorVerifyConflict: string;
-    creatorVerifyUnconfigured: string;
-    creatorVerifyUnauthorized: string;
-    creatorVerifyError: string;
+    streamerVerifySuccess: string;
+    streamerVerifyConflict: string;
+    streamerVerifyUnconfigured: string;
+    streamerVerifyUnauthorized: string;
+    streamerVerifyError: string;
     googleScriptNotReady: string;
     googleLinkSuccess: string;
     googleAccountInUse: string;
@@ -233,8 +233,8 @@ export interface Dictionary {
     notLinkedStatus: string;
     unlinkButton: string;
     linkButton: string;
-    creatorVerificationTitle: string;
-    creatorVerificationSubtitle: string;
+    streamerVerificationTitle: string;
+    streamerVerificationSubtitle: string;
     ownershipVerified: string;
     unverified: string;
     verifiedConfirmedText: string;
@@ -244,7 +244,7 @@ export interface Dictionary {
     verifyChannelCta: string;
     verifyUnavailable: string;
     featuredReviewStatusTitle: string;
-    featuredCreatorLabel: string;
+    featuredStreamerLabel: string;
     featuredSelectedSuffix: string;
     featuredHint: string;
     achievedSuffix: string;
@@ -511,9 +511,9 @@ export interface Dictionary {
     navRanking: string;
     navGamesXp: string;
     navGamesDevelopment: string;
-    navCreatorOverview: string;
-    navCreatorVerification: string;
-    navCreatorFeatured: string;
+    navStreamerOverview: string;
+    navStreamerVerification: string;
+    navStreamerFeatured: string;
     navSupport: string;
     catSupportDesc: string;
     tocAriaLabel: string;
@@ -526,7 +526,7 @@ export interface Dictionary {
     catGettingStartedDesc: string;
     catAccountDesc: string;
     catGamesDesc: string;
-    catCreatorDesc: string;
+    catStreamerDesc: string;
     catPolicyTitle: string;
     catPolicyDesc: string;
   };
@@ -535,7 +535,7 @@ export interface Dictionary {
    * are split into ...Prefix/...Strong/...Suffix parts rather than embedding markup in the
    * string — same approach `wiki.homeInstallPrompt`/`homeInstallGuideLink` already uses. */
   wikiBody: {
-    creator: {
+    streamer: {
       title: string;
       description: string;
       intro: string;
@@ -546,7 +546,7 @@ export interface Dictionary {
       profileHint: string;
       profileLink: string;
     };
-    creatorVerification: {
+    streamerVerification: {
       title: string;
       description: string;
       platformsHeading: string;
@@ -571,12 +571,12 @@ export interface Dictionary {
       footerLink: string;
       footerSuffix: string;
     };
-    creatorFeatured: {
+    streamerFeatured: {
       title: string;
       description: string;
       conceptHeading: string;
-      conceptCreatorTerm: string;
-      conceptCreatorDesc: string;
+      conceptStreamerTerm: string;
+      conceptStreamerDesc: string;
       conceptFeaturedTerm: string;
       conceptFeaturedDesc: string;
       reviewHeading: string;
@@ -1081,7 +1081,7 @@ export interface Dictionary {
     achievedSuffix: string;
     gameRecordsTitle: string;
     gameRecordsEmpty: string;
-    creatorBadgesTitle: string;
+    streamerBadgesTitle: string;
     manageProfileCta: string;
     favoritesTitle: string;
     favoritesEmpty: string;
@@ -1242,7 +1242,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       subtitle: "최고 기록, 유저 활동 레벨, 그리고 검증된 스트리머 랭킹입니다.",
       gameTab: "게임 랭킹",
       xpTab: "경험치 랭킹",
-      creatorTab: "스트리머 랭킹",
+      streamerTab: "스트리머 랭킹",
       allCategories: "전체 종목",
       allPlatforms: "전체 플랫폼",
       platformChzzk: "치지직 (CHZZK)",
@@ -1263,9 +1263,9 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       platformHeader: "플랫폼",
       emptyGames: "아직 등록된 기록이 없습니다. 첫 기록의 주인공이 되어보세요.",
       emptyXp: "아직 활동 내역이 있는 유저가 없습니다.",
-      emptyCreatorTitle: "아직 검증된 스트리머 기록이 없습니다",
-      emptyCreatorBody:
-        "OwOGG 크리에이터 채널 소유권 인증 서비스가 준비 중입니다. 인증된 크리에이터의 게임 최고 기록과 활동 XP가 여기에 게시됩니다.",
+      emptyStreamerTitle: "아직 검증된 스트리머 기록이 없습니다",
+      emptyStreamerBody:
+        "OwOGG 스트리머 채널 소유권 인증 서비스가 준비 중입니다. 인증된 스트리머의 게임 최고 기록과 활동 XP가 여기에 게시됩니다.",
       retryButton: "다시 시도",
       rank1: "1위",
       rank2: "2위",
@@ -1302,11 +1302,11 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       linkSuccess: "로그인 수단이 연결되었습니다.",
       alreadyLinkedAccount: "이미 연결된 계정입니다.",
       linkError: "로그인 수단 연결 중 오류가 발생했습니다.",
-      creatorVerifySuccess: "크리에이터 채널 소유권 인증이 완료되었습니다.",
-      creatorVerifyConflict: "이 채널은 이미 다른 OwOGG 크리에이터 계정에 연동되어 있습니다.",
-      creatorVerifyUnconfigured: "현재 해당 플랫폼 인증을 사용할 수 없습니다.",
-      creatorVerifyUnauthorized: "로그인이 만료되었습니다. 다시 로그인 해주세요.",
-      creatorVerifyError: "크리에이터 채널 인증 중 오류가 발생했습니다.",
+      streamerVerifySuccess: "스트리머 채널 소유권 인증이 완료되었습니다.",
+      streamerVerifyConflict: "이 채널은 이미 다른 OwOGG 스트리머 계정에 연동되어 있습니다.",
+      streamerVerifyUnconfigured: "현재 해당 플랫폼 인증을 사용할 수 없습니다.",
+      streamerVerifyUnauthorized: "로그인이 만료되었습니다. 다시 로그인 해주세요.",
+      streamerVerifyError: "스트리머 채널 인증 중 오류가 발생했습니다.",
       googleScriptNotReady: "Google 로그인 스크립트가 준비되지 않았습니다.",
       googleLinkSuccess: "Google 로그인이 연결되었습니다.",
       googleAccountInUse: "이 Google 계정은 이미 다른 OwOGG 계정으로 사용 중입니다.",
@@ -1355,8 +1355,8 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       notLinkedStatus: "연결 안 됨",
       unlinkButton: "연결 해제",
       linkButton: "연결",
-      creatorVerificationTitle: "크리에이터 채널 소유권 인증",
-      creatorVerificationSubtitle:
+      streamerVerificationTitle: "스트리머 채널 소유권 인증",
+      streamerVerificationSubtitle:
         "공식 OAuth / API를 통해 해당 채널을 직접 소유하고 있음을 검증합니다. (셀프 텍스트 입력 및 웹 스크래핑 금지)",
       ownershipVerified: "소유권 인증됨",
       unverified: "미인증",
@@ -1367,7 +1367,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       verifyChannelCta: "채널 소유권 인증",
       verifyUnavailable: "현재 인증을 사용할 수 없습니다",
       featuredReviewStatusTitle: "Featured 심사 상태",
-      featuredCreatorLabel: "★ Featured Creator",
+      featuredStreamerLabel: "★ Featured Streamer",
       featuredSelectedSuffix: "선정",
       featuredHint:
         "Featured는 공식 채널 지표 기반 자격(구독자/팔로워 12,000+ · 채널 120일+)이며 게임 점수·XP·랭킹 순위에는 영향을 주지 않습니다.",
@@ -1660,9 +1660,9 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       navRanking: "랭킹",
       navGamesXp: "XP와 레벨",
       navGamesDevelopment: "게임 개발 및 등록",
-      navCreatorOverview: "Creator 개요",
-      navCreatorVerification: "채널 소유권 인증",
-      navCreatorFeatured: "Featured Creator",
+      navStreamerOverview: "Streamer 개요",
+      navStreamerVerification: "채널 소유권 인증",
+      navStreamerFeatured: "Featured Streamer",
       navSupport: "지원",
       catSupportDesc: "문의, 신고, 버그 제보 채널 안내",
       tocAriaLabel: "Wiki 목차",
@@ -1676,25 +1676,25 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       catGettingStartedDesc: "OwOGG 계정 만들기부터 첫 게임까지, 가장 빠른 시작 경로.",
       catAccountDesc: "로그인 방식, 프로필 설정, 여러 계정을 하나로 합치는 계정 통합.",
       catGamesDesc: "게임 카탈로그, 순위 계산 방식, 경험치(XP)와 레벨.",
-      catCreatorDesc: "채널 소유권 인증, 스트리머 랭킹 자격, Featured Creator 기준.",
+      catStreamerDesc: "채널 소유권 인증, 스트리머 랭킹 자격, Featured Streamer 기준.",
       catPolicyTitle: "정책",
       catPolicyDesc: "이용약관과 개인정보 처리방침을 확인하세요.",
     },
     wikiBody: {
-      creator: {
-        title: "Creator 개요",
+      streamer: {
+        title: "Streamer 개요",
         description:
-          "공식 OAuth/API로 채널 소유권을 검증한 스트리머/유튜버를 OwOGG Creator로 인정합니다.",
+          "공식 OAuth/API로 채널 소유권을 검증한 스트리머/유튜버를 OwOGG Streamer로 인정합니다.",
         intro:
-          "Creator 인증은 게임 점수나 XP에 어떤 가산점도 주지 않습니다. 대신 명예의 전당의 스트리머 랭킹 탭 노출, 내 프로필의 검증 배지와 공식 채널 링크 표시라는 혜택을 제공합니다.",
+          "Streamer 인증은 게임 점수나 XP에 어떤 가산점도 주지 않습니다. 대신 명예의 전당의 스트리머 랭킹 탭 노출, 내 프로필의 검증 배지와 공식 채널 링크 표시라는 혜택을 제공합니다.",
         cardVerification: "채널 소유권 인증 →",
         cardVerificationDesc: "지원 플랫폼과 인증 방법",
-        cardFeatured: "Featured Creator →",
+        cardFeatured: "Featured Streamer →",
         cardFeaturedDesc: "Featured 자격 기준",
         profileHint: "인증은 내 프로필 페이지에서 시작할 수 있습니다.",
         profileLink: "내 프로필로 이동",
       },
-      creatorVerification: {
+      streamerVerification: {
         title: "채널 소유권 인증",
         description:
           "공식 OAuth와 API만으로 소유권을 검증합니다. 텍스트 입력이나 스크래핑은 절대 사용하지 않습니다.",
@@ -1703,7 +1703,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         condOnePrefix: "위 4개 플랫폼(YouTube · CHZZK · SOOP · Twitch) 중 ",
         condOneStrong: "단 하나만",
         condOneSuffix:
-          " 인증에 성공하면 OwOGG Creator로 인정되며, 4개를 모두 인증할 필요는 없습니다.",
+          " 인증에 성공하면 OwOGG Streamer로 인정되며, 4개를 모두 인증할 필요는 없습니다.",
         condNoMinimum:
           "현재 구독자/팔로워 수나 채널 개설 기간에 대한 최소 기준은 요구하지 않습니다. 채널 소유권만 공식 OAuth로 확인되면 됩니다.",
         condOauthOnly:
@@ -1711,7 +1711,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         condOneChannelOneAccount:
           "하나의 외부 채널은 한 OwOGG 계정에만 연동할 수 있습니다(1채널 = 1계정).",
         methodHeading: "인증 방법",
-        step1: "내 프로필 페이지의 [크리에이터 채널 소유권 인증] 섹션으로 이동합니다.",
+        step1: "내 프로필 페이지의 [스트리머 채널 소유권 인증] 섹션으로 이동합니다.",
         step2: "인증하려는 플랫폼의 [채널 소유권 인증] 버튼을 클릭합니다.",
         step3: "해당 플랫폼의 공식 로그인 화면에서 본인 계정으로 로그인·승인합니다.",
         step4: "OwOGG로 돌아오면 채널 정보가 자동으로 확인되어 표시됩니다.",
@@ -1726,15 +1726,15 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         footerLink: "랭킹 문서",
         footerSuffix: "를 참고하세요.",
       },
-      creatorFeatured: {
-        title: "Featured Creator",
+      streamerFeatured: {
+        title: "Featured Streamer",
         description: "Featured는 OwOGG 기준 공개 채널 지표로 심사하는 표시·필터링 전용 배지입니다.",
         conceptHeading: "개념 구분",
-        conceptCreatorTerm: "Creator",
-        conceptCreatorDesc: " — 공식 OAuth/API로 채널 소유권이 검증된 상태.",
-        conceptFeaturedTerm: "Featured Creator",
+        conceptStreamerTerm: "Streamer",
+        conceptStreamerDesc: " — 공식 OAuth/API로 채널 소유권이 검증된 상태.",
+        conceptFeaturedTerm: "Featured Streamer",
         conceptFeaturedDesc:
-          " — Creator 중에서 OwOGG 기준(구독자/팔로워, 채널 개설 기간 등 공개 지표)을 충족해 자동/수동 심사를 통과한 상태.",
+          " — Streamer 중에서 OwOGG 기준(구독자/팔로워, 채널 개설 기간 등 공개 지표)을 충족해 자동/수동 심사를 통과한 상태.",
         reviewHeading: "심사 방식",
         reviewBody:
           "채널 소유권 인증 직후에는 Featured가 즉시 부여되지 않습니다. 일정 시간 뒤 신선한 공식 지표로 자동 재심사가 이루어지며, 지표가 모호하거나 플랫폼이 공식 API로 지표를 제공하지 않으면 운영진 수동 심사로 안전하게 넘어갑니다. Featured로 인정된 이후에도 주기적으로 재검증합니다.",
@@ -1742,7 +1742,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         calloutNoRankImpactBody:
           " 표시 전용 배지이며, Featured 여부와 무관하게 스트리머 랭킹은 채널 소유권 인증만으로 노출됩니다.",
         calloutTestingPhase:
-          "현재는 서비스 검증 단계라 Featured가 자동으로 부여되지 않고, 채널 소유권이 인증된 모든 Creator가 운영진 수동 심사 대기 상태를 거칩니다. 스트리머 랭킹에는 Featured 여부와 무관하게 동일하게 노출되며, Featured 배지도 아직 공개적으로 표시하지 않습니다.",
+          "현재는 서비스 검증 단계라 Featured가 자동으로 부여되지 않고, 채널 소유권이 인증된 모든 Streamer가 운영진 수동 심사 대기 상태를 거칩니다. 스트리머 랭킹에는 Featured 여부와 무관하게 동일하게 노출되며, Featured 배지도 아직 공개적으로 표시하지 않습니다.",
         footerNote:
           "운영진의 심사 기준과 절차는 내부 운영 문서로 별도 관리되며, 특정 수치를 공개하지 않습니다 — 심사는 항상 공식 API로 확인 가능한 지표만 사용합니다.",
       },
@@ -1781,8 +1781,8 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         calloutAdminStrong: "Secondary 계정이 관리자 계정이면 통합이 차단됩니다.",
         calloutAdminBody:
           " 관리자 권한이 있는 계정을 Secondary로 통합하면 그 권한이 어디로도 옮겨지지 않고 사라질 수 있어, OwOGG는 안전을 위해 이 경우 통합 자체를 막고 운영진의 별도 처리를 요구합니다.",
-        footerPrefix: "플랫폼 소유권 인증(Creator)이 되어 있는 계정을 통합하는 경우의 규칙은 ",
-        footerLink: "Creator 채널 소유권 인증",
+        footerPrefix: "플랫폼 소유권 인증(Streamer)이 되어 있는 계정을 통합하는 경우의 규칙은 ",
+        footerLink: "Streamer 채널 소유권 인증",
         footerSuffix: " 문서를 참고하세요.",
       },
       games: {
@@ -1848,10 +1848,10 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         streamerBodySuffix:
           "의 플랫폼에서 공식 채널 소유권 인증을 완료한 사용자만 노출됩니다. 순위 값은 일반 게임 랭킹/XP 랭킹과 동일한 계산식을 사용하며, 인증한 플랫폼 수는 순위에 영향을 주지 않습니다 — 오른쪽 끝의 플랫폼 아이콘은 필터링·표시 전용입니다.",
         streamerLinkPrefix: "자세한 인증 방법은 ",
-        streamerLink: "Creator 채널 소유권 인증",
+        streamerLink: "Streamer 채널 소유권 인증",
         streamerLinkSuffix: " 문서를 참고하세요.",
         calloutFeatured:
-          "Featured Creator 표시는 랭킹 순위나 XP 계산에 어떠한 영향도 주지 않는 표시 전용 배지입니다.",
+          "Featured Streamer 표시는 랭킹 순위나 XP 계산에 어떠한 영향도 주지 않는 표시 전용 배지입니다.",
         footerPrefix: "Discord 서버 단위 랭킹은 ",
         footerLink: "Discord 서버 XP 문서",
         footerSuffix: "를 참고하세요.",
@@ -2171,7 +2171,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         effectiveDate: "시행일: 2026년 8월 14일",
         section1Heading: "1. 서비스 개요",
         section1Body:
-          'OwOGG(이하 "서비스")는 설치 없이 브라우저에서 바로 즐기는 웹 미니게임 모음 플랫폼이며, Discord 서버 연동, 랭킹/경험치(XP), Creator 채널 인증 등 부가 기능을 함께 제공합니다.',
+          'OwOGG(이하 "서비스")는 설치 없이 브라우저에서 바로 즐기는 웹 미니게임 모음 플랫폼이며, Discord 서버 연동, 랭킹/경험치(XP), Streamer 채널 인증 등 부가 기능을 함께 제공합니다.',
         section2Heading: "2. 계정 및 로그인",
         section2Body:
           "서비스는 Google 또는 Discord 계정을 통한 OAuth 로그인만 지원하며, 별도의 아이디/비밀번호를 직접 발급하지 않습니다(관리자 전용 계정 제외). 이용자는 본인이 소유한 계정으로만 로그인해야 하며, 계정 관리에 대한 책임은 이용자 본인에게 있습니다.",
@@ -2225,7 +2225,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
             desc: " — 계정 연동 시 Discord 사용자 ID, 서버(길드) 등록 시 서버 ID/이름/아이콘, 관리 권한 여부",
           },
           {
-            term: "Creator 채널 인증 정보",
+            term: "Streamer 채널 인증 정보",
             desc: " — 스트리머 랭킹 참여를 위해 자발적으로 채널 소유권 인증을 진행한 경우, 해당 플랫폼(YouTube/Twitch/CHZZK/SOOP)의 공식 API를 통해 확인된 채널명, 채널 URL, 구독자/팔로워 수",
           },
         ],
@@ -2236,7 +2236,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
           "회원 식별 및 로그인 상태 유지",
           "게임 기록·랭킹·경험치 시스템 제공",
           "Discord 봇 명령어에서 본인 계정 정보 조회, 서버별 활동 집계",
-          "Creator/스트리머 랭킹 자격 확인",
+          "Streamer/스트리머 랭킹 자격 확인",
           "부정 이용(어뷰징) 탐지 및 서비스 안정성 유지",
         ],
         section3Heading: "3. 보관 기간",
@@ -2344,7 +2344,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       achievedSuffix: "달성",
       gameRecordsTitle: "게임별 최고 기록",
       gameRecordsEmpty: "아직 등록된 기록이 없습니다.",
-      creatorBadgesTitle: "인증된 크리에이터 채널",
+      streamerBadgesTitle: "인증된 스트리머 채널",
       manageProfileCta: "설정 →",
       favoritesTitle: "즐겨찾기",
       favoritesEmpty: "아직 즐겨찾기한 게임이 없습니다.",
@@ -2501,7 +2501,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       subtitle: "Top records, player activity levels, and verified streamer rankings.",
       gameTab: "Game Ranking",
       xpTab: "XP Ranking",
-      creatorTab: "Streamer Ranking",
+      streamerTab: "Streamer Ranking",
       allCategories: "All Games",
       allPlatforms: "All Platforms",
       platformChzzk: "CHZZK",
@@ -2522,9 +2522,9 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       platformHeader: "Platform",
       emptyGames: "No records yet. Be the first to set one.",
       emptyXp: "No users with activity yet.",
-      emptyCreatorTitle: "No verified streamers yet",
-      emptyCreatorBody:
-        "OwOGG's creator channel ownership verification is being rolled out. Verified creators' best game records and activity XP will appear here.",
+      emptyStreamerTitle: "No verified streamers yet",
+      emptyStreamerBody:
+        "OwOGG's streamer channel ownership verification is being rolled out. Verified streamers' best game records and activity XP will appear here.",
       retryButton: "Retry",
       rank1: "1st",
       rank2: "2nd",
@@ -2559,11 +2559,12 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       linkSuccess: "Your login method has been linked.",
       alreadyLinkedAccount: "This account is already linked.",
       linkError: "An error occurred while linking your login method.",
-      creatorVerifySuccess: "Creator channel ownership verification is complete.",
-      creatorVerifyConflict: "This channel is already linked to a different OwOGG creator account.",
-      creatorVerifyUnconfigured: "Verification for this platform isn't available right now.",
-      creatorVerifyUnauthorized: "Your login has expired. Please log in again.",
-      creatorVerifyError: "An error occurred while verifying your creator channel.",
+      streamerVerifySuccess: "Streamer channel ownership verification is complete.",
+      streamerVerifyConflict:
+        "This channel is already linked to a different OwOGG streamer account.",
+      streamerVerifyUnconfigured: "Verification for this platform isn't available right now.",
+      streamerVerifyUnauthorized: "Your login has expired. Please log in again.",
+      streamerVerifyError: "An error occurred while verifying your streamer channel.",
       googleScriptNotReady: "The Google login script isn't ready yet.",
       googleLinkSuccess: "Your Google login has been linked.",
       googleAccountInUse: "This Google account is already in use by a different OwOGG account.",
@@ -2612,8 +2613,8 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       notLinkedStatus: "Not linked",
       unlinkButton: "Unlink",
       linkButton: "Link",
-      creatorVerificationTitle: "Creator Channel Ownership Verification",
-      creatorVerificationSubtitle:
+      streamerVerificationTitle: "Streamer Channel Ownership Verification",
+      streamerVerificationSubtitle:
         "Verified directly via official OAuth/API that you own the channel. (No self-reported text entry or web scraping.)",
       ownershipVerified: "Ownership verified",
       unverified: "Unverified",
@@ -2625,7 +2626,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       verifyChannelCta: "Verify channel ownership",
       verifyUnavailable: "Verification isn't available right now",
       featuredReviewStatusTitle: "Featured Review Status",
-      featuredCreatorLabel: "★ Featured Creator",
+      featuredStreamerLabel: "★ Featured Streamer",
       featuredSelectedSuffix: "selected",
       featuredHint:
         "Featured status is based on official channel metrics (12,000+ subscribers/followers · channel 120+ days old) and has no effect on game scores, XP, or ranking.",
@@ -2922,9 +2923,9 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       navRanking: "Ranking",
       navGamesXp: "XP & Levels",
       navGamesDevelopment: "게임 개발 및 등록",
-      navCreatorOverview: "Creator Overview",
-      navCreatorVerification: "Channel Ownership Verification",
-      navCreatorFeatured: "Featured Creator",
+      navStreamerOverview: "Streamer Overview",
+      navStreamerVerification: "Channel Ownership Verification",
+      navStreamerFeatured: "Featured Streamer",
       navSupport: "Support",
       catSupportDesc: "Contact, report, and bug report channels",
       tocAriaLabel: "Wiki table of contents",
@@ -2939,26 +2940,26 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       catGettingStartedDesc: "The fastest path from creating a OwOGG account to your first game.",
       catAccountDesc: "Login methods, profile settings, and merging multiple accounts into one.",
       catGamesDesc: "The game catalog, how rankings are calculated, and XP & levels.",
-      catCreatorDesc:
-        "Channel ownership verification, streamer ranking eligibility, and Featured Creator criteria.",
+      catStreamerDesc:
+        "Channel ownership verification, streamer ranking eligibility, and Featured Streamer criteria.",
       catPolicyTitle: "Policies",
       catPolicyDesc: "Check the Terms of Service and Privacy Policy.",
     },
     wikiBody: {
-      creator: {
-        title: "Creator Overview",
+      streamer: {
+        title: "Streamer Overview",
         description:
-          "Streamers and YouTubers whose channel ownership is verified through official OAuth/APIs are recognized as OwOGG Creators.",
+          "Streamers and YouTubers whose channel ownership is verified through official OAuth/APIs are recognized as OwOGG Streamers.",
         intro:
-          "Creator verification gives no bonus whatsoever to game scores or XP. Instead it unlocks visibility in the Hall of Fame's streamer ranking tab, plus a verified badge and official channel links on your profile.",
+          "Streamer verification gives no bonus whatsoever to game scores or XP. Instead it unlocks visibility in the Hall of Fame's streamer ranking tab, plus a verified badge and official channel links on your profile.",
         cardVerification: "Channel Ownership Verification →",
         cardVerificationDesc: "Supported platforms and how to verify",
-        cardFeatured: "Featured Creator →",
+        cardFeatured: "Featured Streamer →",
         cardFeaturedDesc: "Featured eligibility criteria",
         profileHint: "You can start verification from your profile page.",
         profileLink: "Go to my profile",
       },
-      creatorVerification: {
+      streamerVerification: {
         title: "Channel Ownership Verification",
         description:
           "Ownership is verified using official OAuth and APIs only. Text entry and scraping are never used.",
@@ -2967,7 +2968,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         condOnePrefix: "Verifying ",
         condOneStrong: "just one",
         condOneSuffix:
-          " of the four platforms above (YouTube · CHZZK · SOOP · Twitch) is enough to be recognized as an OwOGG Creator — you do not need to verify all four.",
+          " of the four platforms above (YouTube · CHZZK · SOOP · Twitch) is enough to be recognized as an OwOGG Streamer — you do not need to verify all four.",
         condNoMinimum:
           "There is currently no minimum subscriber/follower count or channel age requirement. Ownership simply needs to be confirmed via official OAuth.",
         condOauthOnly:
@@ -2975,7 +2976,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         condOneChannelOneAccount:
           "An external channel can be linked to only one OwOGG account (1 channel = 1 account).",
         methodHeading: "How to verify",
-        step1: "Go to the [Creator Channel Ownership Verification] section on your profile page.",
+        step1: "Go to the [Streamer Channel Ownership Verification] section on your profile page.",
         step2: "Click the [Verify Channel Ownership] button for the platform you want to verify.",
         step3:
           "Sign in and approve with your own account on that platform's official login screen.",
@@ -2992,16 +2993,16 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         footerLink: "ranking article",
         footerSuffix: ".",
       },
-      creatorFeatured: {
-        title: "Featured Creator",
+      streamerFeatured: {
+        title: "Featured Streamer",
         description:
           "Featured is a display/filtering-only badge, reviewed against public channel metrics by OwOGG's criteria.",
         conceptHeading: "Terminology",
-        conceptCreatorTerm: "Creator",
-        conceptCreatorDesc: " — channel ownership verified through official OAuth/APIs.",
-        conceptFeaturedTerm: "Featured Creator",
+        conceptStreamerTerm: "Streamer",
+        conceptStreamerDesc: " — channel ownership verified through official OAuth/APIs.",
+        conceptFeaturedTerm: "Featured Streamer",
         conceptFeaturedDesc:
-          " — a Creator that also passed automatic/manual review against OwOGG's criteria (public metrics such as subscribers/followers and channel age).",
+          " — a Streamer that also passed automatic/manual review against OwOGG's criteria (public metrics such as subscribers/followers and channel age).",
         reviewHeading: "How review works",
         reviewBody:
           "Featured is not granted immediately after ownership verification. After some time an automatic re-review runs against fresh official metrics; if the metrics are ambiguous, or the platform does not expose them via an official API, the job is safely routed to manual staff review. Featured accounts are also periodically re-validated afterwards.",
@@ -3009,7 +3010,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         calloutNoRankImpactBody:
           " It is a display-only badge — the streamer ranking is driven purely by channel ownership verification, regardless of Featured status.",
         calloutTestingPhase:
-          "We are currently in a service validation phase, so Featured is not granted automatically: every Creator with verified channel ownership goes through a staff manual-review queue. Streamer ranking visibility is identical regardless of Featured status, and the Featured badge is not publicly displayed yet.",
+          "We are currently in a service validation phase, so Featured is not granted automatically: every Streamer with verified channel ownership goes through a staff manual-review queue. Streamer ranking visibility is identical regardless of Featured status, and the Featured badge is not publicly displayed yet.",
         footerNote:
           "Staff review criteria and procedures are maintained separately as internal operations documents, and specific figures are not published — review always uses only metrics verifiable through official APIs.",
       },
@@ -3053,8 +3054,8 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         calloutAdminBody:
           " Merging an account that holds admin privileges as the Secondary could make those privileges vanish without transferring anywhere, so for safety OwOGG blocks the merge outright and requires separate handling by staff.",
         footerPrefix:
-          "For the rules that apply when merging an account with Creator channel ownership verification, see the ",
-        footerLink: "Creator channel ownership verification",
+          "For the rules that apply when merging an account with Streamer channel ownership verification, see the ",
+        footerLink: "Streamer channel ownership verification",
         footerSuffix: " article.",
       },
       games: {
@@ -3120,10 +3121,10 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         streamerBodySuffix:
           " of YouTube / CHZZK / SOOP / Twitch appear here. Ranking values use the exact same formula as the regular game/XP rankings, and the number of verified platforms has no effect on position — the platform icons at the right edge are for filtering and display only.",
         streamerLinkPrefix: "For how to verify, see the ",
-        streamerLink: "Creator channel ownership verification",
+        streamerLink: "Streamer channel ownership verification",
         streamerLinkSuffix: " article.",
         calloutFeatured:
-          "The Featured Creator mark is a display-only badge that has no effect whatsoever on ranking position or XP calculation.",
+          "The Featured Streamer mark is a display-only badge that has no effect whatsoever on ranking position or XP calculation.",
         footerPrefix: "For per-Discord-server rankings, see the ",
         footerLink: "Discord server XP article",
         footerSuffix: ".",
@@ -3449,7 +3450,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         effectiveDate: "Effective Date: August 14, 2026",
         section1Heading: "1. Service Overview",
         section1Body:
-          'OwOGG (hereinafter "Service") is a web mini-game collection platform enjoyed directly in the browser without installation, providing additional features such as Discord server integration, rankings/experience points (XP), and Creator channel verification.',
+          'OwOGG (hereinafter "Service") is a web mini-game collection platform enjoyed directly in the browser without installation, providing additional features such as Discord server integration, rankings/experience points (XP), and Streamer channel verification.',
         section2Heading: "2. Accounts and Login",
         section2Body:
           "The Service only supports OAuth login through Google or Discord accounts and does not directly issue separate IDs/passwords (excluding administrator-exclusive accounts). Users must log in only with accounts they own, and users themselves are responsible for managing their accounts.",
@@ -3503,7 +3504,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
             desc: " — Discord user ID when linking accounts, server ID/name/icon and administrative permissions when registering servers (guilds)",
           },
           {
-            term: "Creator Channel Verification Information",
+            term: "Streamer Channel Verification Information",
             desc: " — Channel name, channel URL, subscriber/follower count verified through official APIs of respective platforms (YouTube/Twitch/CHZZK/SOOP) when voluntarily completing channel ownership verification to participate in Streamer rankings",
           },
         ],
@@ -3514,7 +3515,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
           "Member identification and maintaining login state",
           "Providing game records, rankings, and experience point systems",
           "Querying user account information in Discord bot commands and aggregating activity per server",
-          "Verifying eligibility for Creator/Streamer rankings",
+          "Verifying eligibility for Streamer rankings",
           "Detecting abusive behavior (abuse) and maintaining service stability",
         ],
         section3Heading: "3. Retention Period",
@@ -3623,7 +3624,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       achievedSuffix: "unlocked",
       gameRecordsTitle: "Best records by game",
       gameRecordsEmpty: "No records yet.",
-      creatorBadgesTitle: "Verified creator channels",
+      streamerBadgesTitle: "Verified streamer channels",
       manageProfileCta: "Settings →",
       favoritesTitle: "Favorites",
       favoritesEmpty: "No favorite games yet.",
@@ -3781,7 +3782,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       subtitle: "最高記録、ユーザー活動レベル、認証済みストリーマーランキングです。",
       gameTab: "ゲームランキング",
       xpTab: "経験値ランキング",
-      creatorTab: "ストリーマーランキング",
+      streamerTab: "ストリーマーランキング",
       allCategories: "全種目",
       allPlatforms: "全プラットフォーム",
       platformChzzk: "CHZZK",
@@ -3802,9 +3803,9 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       platformHeader: "プラットフォーム",
       emptyGames: "まだ登録された記録がありません。最初の記録に挑戦しましょう。",
       emptyXp: "まだ活動履歴のあるユーザーがいません。",
-      emptyCreatorTitle: "まだ認証済みストリーマーがいません",
-      emptyCreatorBody:
-        "OwOGGクリエイターチャンネル所有権認証サービスを準備中です。認証済みクリエイターのゲーム最高記録と活動XPがここに表示されます。",
+      emptyStreamerTitle: "まだ認証済みストリーマーがいません",
+      emptyStreamerBody:
+        "OwOGGストリーマーチャンネル所有権認証サービスを準備中です。認証済みストリーマーのゲーム最高記録と活動XPがここに表示されます。",
       retryButton: "再試行",
       rank1: "1位",
       rank2: "2位",
@@ -3841,12 +3842,12 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       linkSuccess: "ログイン方法が連携されました。",
       alreadyLinkedAccount: "すでに連携済みのアカウントです。",
       linkError: "ログイン方法の連携中にエラーが発生しました。",
-      creatorVerifySuccess: "クリエイターチャンネルの所有権認証が完了しました。",
-      creatorVerifyConflict:
-        "このチャンネルはすでに別のOwOGGクリエイターアカウントに連携されています。",
-      creatorVerifyUnconfigured: "現在このプラットフォームの認証は利用できません。",
-      creatorVerifyUnauthorized: "ログインの有効期限が切れました。再度ログインしてください。",
-      creatorVerifyError: "クリエイターチャンネル認証中にエラーが発生しました。",
+      streamerVerifySuccess: "ストリーマーチャンネルの所有権認証が完了しました。",
+      streamerVerifyConflict:
+        "このチャンネルはすでに別のOwOGGストリーマーアカウントに連携されています。",
+      streamerVerifyUnconfigured: "現在このプラットフォームの認証は利用できません。",
+      streamerVerifyUnauthorized: "ログインの有効期限が切れました。再度ログインしてください。",
+      streamerVerifyError: "ストリーマーチャンネル認証中にエラーが発生しました。",
       googleScriptNotReady: "Googleログインスクリプトの準備ができていません。",
       googleLinkSuccess: "Googleログインが連携されました。",
       googleAccountInUse: "このGoogleアカウントはすでに別のOwOGGアカウントで使用されています。",
@@ -3895,8 +3896,8 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       notLinkedStatus: "未連携",
       unlinkButton: "連携解除",
       linkButton: "連携する",
-      creatorVerificationTitle: "クリエイターチャンネル所有権認証",
-      creatorVerificationSubtitle:
+      streamerVerificationTitle: "ストリーマーチャンネル所有権認証",
+      streamerVerificationSubtitle:
         "公式OAuth/APIを通じて、当該チャンネルを直接所有していることを検証します。（自己申告のテキスト入力やWebスクレイピングは禁止）",
       ownershipVerified: "所有権認証済み",
       unverified: "未認証",
@@ -3908,7 +3909,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       verifyChannelCta: "チャンネル所有権認証",
       verifyUnavailable: "現在認証を利用できません",
       featuredReviewStatusTitle: "Featured審査状況",
-      featuredCreatorLabel: "★ Featured Creator",
+      featuredStreamerLabel: "★ Featured Streamer",
       featuredSelectedSuffix: "選定",
       featuredHint:
         "Featuredは公式チャンネル指標に基づく資格（登録者/フォロワー12,000人以上・チャンネル開設120日以上）であり、ゲームスコア・XP・ランキング順位には影響しません。",
@@ -4206,9 +4207,9 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       navRanking: "ランキング",
       navGamesXp: "XPとレベル",
       navGamesDevelopment: "게임 개발 및 등록",
-      navCreatorOverview: "Creator概要",
-      navCreatorVerification: "チャンネル所有権認証",
-      navCreatorFeatured: "Featured Creator",
+      navStreamerOverview: "Streamer概要",
+      navStreamerVerification: "チャンネル所有権認証",
+      navStreamerFeatured: "Featured Streamer",
       navSupport: "サポート",
       catSupportDesc: "お問い合わせ・通報・不具合報告チャンネルのご案内",
       tocAriaLabel: "Wiki目次",
@@ -4224,25 +4225,25 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       catAccountDesc:
         "ログイン方法、プロフィール設定、複数アカウントを1つに統合するアカウント統合。",
       catGamesDesc: "ゲームカタログ、順位の計算方法、経験値（XP）とレベル。",
-      catCreatorDesc: "チャンネル所有権認証、ストリーマーランキング資格、Featured Creator基準。",
+      catStreamerDesc: "チャンネル所有権認証、ストリーマーランキング資格、Featured Streamer基準。",
       catPolicyTitle: "ポリシー",
       catPolicyDesc: "利用規約とプライバシーポリシーをご確認ください。",
     },
     wikiBody: {
-      creator: {
-        title: "Creator 概要",
+      streamer: {
+        title: "Streamer 概要",
         description:
-          "公式OAuth/APIでチャンネル所有権を検証したストリーマー・YouTuberをOwOGG Creatorとして認定します。",
+          "公式OAuth/APIでチャンネル所有権を検証したストリーマー・YouTuberをOwOGG Streamerとして認定します。",
         intro:
-          "Creator認証はゲームスコアやXPに一切の加点を与えません。代わりに、殿堂のストリーマーランキングタブへの掲載、プロフィールの認証バッジと公式チャンネルリンクの表示という特典があります。",
+          "Streamer認証はゲームスコアやXPに一切の加点を与えません。代わりに、殿堂のストリーマーランキングタブへの掲載、プロフィールの認証バッジと公式チャンネルリンクの表示という特典があります。",
         cardVerification: "チャンネル所有権認証 →",
         cardVerificationDesc: "対応プラットフォームと認証方法",
-        cardFeatured: "Featured Creator →",
+        cardFeatured: "Featured Streamer →",
         cardFeaturedDesc: "Featured 資格基準",
         profileHint: "認証はプロフィールページから開始できます。",
         profileLink: "プロフィールへ移動",
       },
-      creatorVerification: {
+      streamerVerification: {
         title: "チャンネル所有権認証",
         description:
           "公式OAuthとAPIのみで所有権を検証します。テキスト入力やスクレイピングは一切使用しません。",
@@ -4251,7 +4252,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         condOnePrefix: "上記4つのプラットフォーム（YouTube · CHZZK · SOOP · Twitch）のうち",
         condOneStrong: "1つだけ",
         condOneSuffix:
-          "認証に成功すればOwOGG Creatorとして認定され、4つすべてを認証する必要はありません。",
+          "認証に成功すればOwOGG Streamerとして認定され、4つすべてを認証する必要はありません。",
         condNoMinimum:
           "現在、登録者・フォロワー数やチャンネル開設期間の最低基準は設けていません。チャンネル所有権が公式OAuthで確認できれば十分です。",
         condOauthOnly:
@@ -4259,7 +4260,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         condOneChannelOneAccount:
           "1つの外部チャンネルは1つのOwOGGアカウントにのみ連携できます（1チャンネル = 1アカウント）。",
         methodHeading: "認証方法",
-        step1: "プロフィールページの［クリエイターチャンネル所有権認証］セクションへ移動します。",
+        step1: "プロフィールページの［ストリーマーチャンネル所有権認証］セクションへ移動します。",
         step2: "認証したいプラットフォームの［チャンネル所有権認証］ボタンをクリックします。",
         step3: "該当プラットフォームの公式ログイン画面でご本人のアカウントでログイン・承認します。",
         step4: "OwOGGに戻ると、チャンネル情報が自動的に確認され表示されます。",
@@ -4274,16 +4275,16 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         footerLink: "ランキングのドキュメント",
         footerSuffix: "をご覧ください。",
       },
-      creatorFeatured: {
-        title: "Featured Creator",
+      streamerFeatured: {
+        title: "Featured Streamer",
         description:
           "FeaturedはOwOGG基準の公開チャンネル指標で審査する、表示・フィルタリング専用のバッジです。",
         conceptHeading: "概念の区別",
-        conceptCreatorTerm: "Creator",
-        conceptCreatorDesc: " — 公式OAuth/APIでチャンネル所有権が検証された状態。",
-        conceptFeaturedTerm: "Featured Creator",
+        conceptStreamerTerm: "Streamer",
+        conceptStreamerDesc: " — 公式OAuth/APIでチャンネル所有権が検証された状態。",
+        conceptFeaturedTerm: "Featured Streamer",
         conceptFeaturedDesc:
-          " — Creatorのうち、OwOGG基準（登録者・フォロワー数、チャンネル開設期間などの公開指標）を満たし自動・手動審査を通過した状態。",
+          " — Streamerのうち、OwOGG基準（登録者・フォロワー数、チャンネル開設期間などの公開指標）を満たし自動・手動審査を通過した状態。",
         reviewHeading: "審査方式",
         reviewBody:
           "チャンネル所有権の認証直後にFeaturedが即時付与されることはありません。一定時間後に新しい公式指標で自動再審査が行われ、指標が曖昧な場合やプラットフォームが公式APIで指標を提供していない場合は、運営による手動審査へ安全に回されます。Featured認定後も定期的に再検証します。",
@@ -4291,7 +4292,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         calloutNoRankImpactBody:
           " 表示専用のバッジであり、Featuredの有無に関わらずストリーマーランキングはチャンネル所有権の認証のみで掲載されます。",
         calloutTestingPhase:
-          "現在はサービス検証段階のためFeaturedは自動付与されず、チャンネル所有権が認証されたすべてのCreatorが運営の手動審査待ち状態を経ます。ストリーマーランキングにはFeaturedの有無に関わらず同様に掲載され、Featuredバッジもまだ公開表示していません。",
+          "現在はサービス検証段階のためFeaturedは自動付与されず、チャンネル所有権が認証されたすべてのStreamerが運営の手動審査待ち状態を経ます。ストリーマーランキングにはFeaturedの有無に関わらず同様に掲載され、Featuredバッジもまだ公開表示していません。",
         footerNote:
           "運営の審査基準と手順は内部運用ドキュメントとして別途管理され、具体的な数値は公開していません — 審査には常に公式APIで確認可能な指標のみを使用します。",
       },
@@ -4332,8 +4333,8 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         calloutAdminBody:
           " 管理者権限を持つアカウントをSecondaryとして統合すると、その権限がどこにも移らずに失われる可能性があるため、OwOGGは安全のためこの場合の統合自体を防ぎ、運営による個別対応を必要とします。",
         footerPrefix:
-          "プラットフォーム所有権認証（Creator）済みのアカウントを統合する場合のルールは、",
-        footerLink: "Creatorチャンネル所有権認証",
+          "プラットフォーム所有権認証（Streamer）済みのアカウントを統合する場合のルールは、",
+        footerLink: "Streamerチャンネル所有権認証",
         footerSuffix: "のドキュメントをご覧ください。",
       },
       games: {
@@ -4399,10 +4400,10 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         streamerBodySuffix:
           "のプラットフォームで公式チャンネル所有権認証を完了したユーザーのみが表示されます。順位の値は通常のゲームランキング・XPランキングと同じ計算式を使用し、認証したプラットフォームの数は順位に影響しません — 右端のプラットフォームアイコンはフィルタリング・表示専用です。",
         streamerLinkPrefix: "詳しい認証方法は",
-        streamerLink: "Creatorチャンネル所有権認証",
+        streamerLink: "Streamerチャンネル所有権認証",
         streamerLinkSuffix: "のドキュメントをご覧ください。",
         calloutFeatured:
-          "Featured Creatorの表示は、ランキング順位やXP計算に一切影響しない表示専用のバッジです。",
+          "Featured Streamerの表示は、ランキング順位やXP計算に一切影響しない表示専用のバッジです。",
         footerPrefix: "Discordサーバー単位のランキングは",
         footerLink: "DiscordサーバーXPのドキュメント",
         footerSuffix: "をご覧ください。",
@@ -4726,7 +4727,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         effectiveDate: "施行日: 2026年8月14日",
         section1Heading: "1. サービスの概要",
         section1Body:
-          "OwOGG（以下「サービス」）は、インストール不要でブラウザから直接楽しめるウェブミニゲーム集プラットフォームであり、Discordサーバー連携、ランキング/経験値（XP）、Creatorチャンネル認証などの付加機能を併せて提供します。",
+          "OwOGG（以下「サービス」）は、インストール不要でブラウザから直接楽しめるウェブミニゲーム集プラットフォームであり、Discordサーバー連携、ランキング/経験値（XP）、Streamerチャンネル認証などの付加機能を併せて提供します。",
         section2Heading: "2. アカウントおよびログイン",
         section2Body:
           "本サービスはGoogleまたはDiscordアカウントによるOAuthログインのみをサポートし、別途のID/パスワードを直接発行しません（管理者専用アカウントを除く）。利用者はご自身が所有するアカウントでのみログインする必要があり、アカウント管理に関する責任は利用者ご自身にあります。",
@@ -4780,7 +4781,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
             desc: " — アカウント連携時のDiscordユーザーID、サーバー（ギルド）登録時のサーバーID/名前/アイコン、管理権限の有無",
           },
           {
-            term: "Creatorチャンネル認証情報",
+            term: "Streamerチャンネル認証情報",
             desc: " — ストリーマーランキング参加のために自主的にチャンネル所有権認証を行った場合、該当プラットフォーム（YouTube/Twitch/CHZZK/SOOP）の公式APIを通じて確認されたチャンネル名、チャンネルURL、チャンネル登録者/フォロワー数",
           },
         ],
@@ -4791,7 +4792,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
           "会員識別およびログイン状態の維持",
           "ゲーム記録・ランキング・経験値システムの提供",
           "Discordボットコマンドでのご自身のアカウント情報照会、サーバー別活動集計",
-          "Creator/ストリーマーランキング資格の確認",
+          "Streamer/ストリーマーランキング資格の確認",
           "不正利用（アビューズ）の検知およびサービスの安定性維持",
         ],
         section3Heading: "3. 保管期間",
@@ -4902,7 +4903,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       achievedSuffix: "達成",
       gameRecordsTitle: "ゲーム別ベスト記録",
       gameRecordsEmpty: "まだ記録がありません。",
-      creatorBadgesTitle: "認証済みクリエイターチャンネル",
+      streamerBadgesTitle: "認証済みストリーマーチャンネル",
       manageProfileCta: "設定 →",
       favoritesTitle: "お気に入り",
       favoritesEmpty: "まだお気に入りのゲームがありません。",
@@ -5059,7 +5060,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       subtitle: "最高记录、用户活动等级，以及认证主播排行榜。",
       gameTab: "游戏排行",
       xpTab: "经验排行",
-      creatorTab: "主播排行",
+      streamerTab: "主播排行",
       allCategories: "全部项目",
       allPlatforms: "全部平台",
       platformChzzk: "CHZZK",
@@ -5080,9 +5081,9 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       platformHeader: "平台",
       emptyGames: "暂无记录，成为第一个创造记录的人吧。",
       emptyXp: "暂无活跃用户。",
-      emptyCreatorTitle: "暂无认证主播",
-      emptyCreatorBody:
-        "OwOGG 创作者频道所有权认证服务正在筹备中。认证创作者的游戏最高记录和活动 XP 将显示在这里。",
+      emptyStreamerTitle: "暂无认证主播",
+      emptyStreamerBody:
+        "OwOGG 主播频道所有权认证服务正在筹备中。认证主播的游戏最高记录和活动 XP 将显示在这里。",
       retryButton: "重试",
       rank1: "第1名",
       rank2: "第2名",
@@ -5117,11 +5118,11 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       linkSuccess: "登录方式已关联。",
       alreadyLinkedAccount: "该账户已经关联。",
       linkError: "关联登录方式时发生错误。",
-      creatorVerifySuccess: "创作者频道所有权认证已完成。",
-      creatorVerifyConflict: "该频道已关联到另一个 OwOGG 创作者账户。",
-      creatorVerifyUnconfigured: "当前该平台的认证暂不可用。",
-      creatorVerifyUnauthorized: "登录已过期，请重新登录。",
-      creatorVerifyError: "创作者频道认证过程中发生错误。",
+      streamerVerifySuccess: "主播频道所有权认证已完成。",
+      streamerVerifyConflict: "该频道已关联到另一个 OwOGG 主播账户。",
+      streamerVerifyUnconfigured: "当前该平台的认证暂不可用。",
+      streamerVerifyUnauthorized: "登录已过期，请重新登录。",
+      streamerVerifyError: "主播频道认证过程中发生错误。",
       googleScriptNotReady: "Google 登录脚本尚未准备就绪。",
       googleLinkSuccess: "Google 登录已关联。",
       googleAccountInUse: "该 Google 账户已被另一个 OwOGG 账户使用。",
@@ -5170,8 +5171,8 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       notLinkedStatus: "未关联",
       unlinkButton: "解除关联",
       linkButton: "关联",
-      creatorVerificationTitle: "创作者频道所有权认证",
-      creatorVerificationSubtitle:
+      streamerVerificationTitle: "主播频道所有权认证",
+      streamerVerificationSubtitle:
         "通过官方 OAuth / API 验证你直接拥有该频道。（禁止自行填写文本或网页抓取）",
       ownershipVerified: "已认证所有权",
       unverified: "未认证",
@@ -5182,7 +5183,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       verifyChannelCta: "认证频道所有权",
       verifyUnavailable: "当前无法使用认证功能",
       featuredReviewStatusTitle: "Featured 审核状态",
-      featuredCreatorLabel: "★ Featured Creator",
+      featuredStreamerLabel: "★ Featured Streamer",
       featuredSelectedSuffix: "入选",
       featuredHint:
         "Featured 基于官方频道数据资格（订阅者/关注者 12,000+ · 频道运营 120 天以上），不会影响游戏分数、XP 或排行榜排名。",
@@ -5463,9 +5464,9 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       navRanking: "排行榜",
       navGamesXp: "XP 与等级",
       navGamesDevelopment: "게임 개발 및 등록",
-      navCreatorOverview: "Creator 概览",
-      navCreatorVerification: "频道所有权认证",
-      navCreatorFeatured: "Featured Creator",
+      navStreamerOverview: "Streamer 概览",
+      navStreamerVerification: "频道所有权认证",
+      navStreamerFeatured: "Featured Streamer",
       navSupport: "支持",
       catSupportDesc: "联系、举报、错误反馈渠道说明",
       tocAriaLabel: "Wiki 目录",
@@ -5478,39 +5479,39 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       catGettingStartedDesc: "从创建 OwOGG 账户到第一局游戏的最快路径。",
       catAccountDesc: "登录方式、个人资料设置，以及将多个账户合并为一个的账户合并功能。",
       catGamesDesc: "游戏目录、排名计算方式、经验值（XP）与等级。",
-      catCreatorDesc: "频道所有权认证、主播排行榜资格、Featured Creator 标准。",
+      catStreamerDesc: "频道所有权认证、主播排行榜资格、Featured Streamer 标准。",
       catPolicyTitle: "政策",
       catPolicyDesc: "查看服务条款和隐私政策。",
     },
     wikiBody: {
-      creator: {
-        title: "Creator 概览",
+      streamer: {
+        title: "Streamer 概览",
         description:
-          "通过官方 OAuth/API 验证频道所有权的主播和 YouTuber 将被认定为 OwOGG Creator。",
+          "通过官方 OAuth/API 验证频道所有权的主播和 YouTuber 将被认定为 OwOGG Streamer。",
         intro:
-          "Creator 认证不会为游戏分数或 XP 提供任何加成。作为替代，它带来的权益是：在名人堂的主播排行榜标签页中展示，以及在个人资料页显示认证徽章和官方频道链接。",
+          "Streamer 认证不会为游戏分数或 XP 提供任何加成。作为替代，它带来的权益是：在名人堂的主播排行榜标签页中展示，以及在个人资料页显示认证徽章和官方频道链接。",
         cardVerification: "频道所有权认证 →",
         cardVerificationDesc: "支持的平台与认证方法",
-        cardFeatured: "Featured Creator →",
+        cardFeatured: "Featured Streamer →",
         cardFeaturedDesc: "Featured 资格标准",
         profileHint: "可以从我的个人资料页面开始认证。",
         profileLink: "前往我的个人资料",
       },
-      creatorVerification: {
+      streamerVerification: {
         title: "频道所有权认证",
         description: "仅通过官方 OAuth 和 API 验证所有权，绝不使用文本输入或网页抓取。",
         platformsHeading: "支持的平台",
         conditionsHeading: "认证条件",
         condOnePrefix: "在上述四个平台（YouTube · CHZZK · SOOP · Twitch）中，",
         condOneStrong: "只需认证一个",
-        condOneSuffix: "即可被认定为 OwOGG Creator，无需认证全部四个平台。",
+        condOneSuffix: "即可被认定为 OwOGG Streamer，无需认证全部四个平台。",
         condNoMinimum:
           "目前不要求订阅/关注人数或频道创建时长的最低标准，只需通过官方 OAuth 确认频道所有权即可。",
         condOauthOnly:
           "所有权认证始终只能通过各平台的官方 OAuth 登录页面完成，不支持直接输入频道 URL 或昵称的方式。",
         condOneChannelOneAccount: "一个外部频道只能绑定到一个 OwOGG 账户（1 个频道 = 1 个账户）。",
         methodHeading: "认证方法",
-        step1: "前往个人资料页面的［创作者频道所有权认证］板块。",
+        step1: "前往个人资料页面的［主播频道所有权认证］板块。",
         step2: "点击要认证的平台的［频道所有权认证］按钮。",
         step3: "在该平台的官方登录页面使用本人账户登录并授权。",
         step4: "返回 OwOGG 后，频道信息会被自动确认并显示。",
@@ -5525,16 +5526,16 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         footerLink: "排行榜文档",
         footerSuffix: "。",
       },
-      creatorFeatured: {
-        title: "Featured Creator",
+      streamerFeatured: {
+        title: "Featured Streamer",
         description:
           "Featured 是依据 OwOGG 标准，以公开频道指标进行审核的、仅用于展示与筛选的徽章。",
         conceptHeading: "概念区分",
-        conceptCreatorTerm: "Creator",
-        conceptCreatorDesc: " —— 已通过官方 OAuth/API 验证频道所有权的状态。",
-        conceptFeaturedTerm: "Featured Creator",
+        conceptStreamerTerm: "Streamer",
+        conceptStreamerDesc: " —— 已通过官方 OAuth/API 验证频道所有权的状态。",
+        conceptFeaturedTerm: "Featured Streamer",
         conceptFeaturedDesc:
-          " —— 在 Creator 之中，满足 OwOGG 标准（订阅/关注人数、频道创建时长等公开指标）并通过自动/人工审核的状态。",
+          " —— 在 Streamer 之中，满足 OwOGG 标准（订阅/关注人数、频道创建时长等公开指标）并通过自动/人工审核的状态。",
         reviewHeading: "审核方式",
         reviewBody:
           "频道所有权认证完成后不会立即授予 Featured。一段时间后会使用最新的官方指标进行自动复审；若指标存在歧义，或平台未通过官方 API 提供指标，则会安全地转入运营人工审核。获得 Featured 之后也会定期重新验证。",
@@ -5542,7 +5543,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         calloutNoRankImpactBody:
           " 它仅是展示用徽章 —— 无论是否为 Featured，主播排行榜都只依据频道所有权认证来展示。",
         calloutTestingPhase:
-          "目前处于服务验证阶段，因此不会自动授予 Featured，所有已认证频道所有权的 Creator 都会进入运营人工审核等待状态。无论是否为 Featured，在主播排行榜中的展示完全相同，并且 Featured 徽章目前尚未公开显示。",
+          "目前处于服务验证阶段，因此不会自动授予 Featured，所有已认证频道所有权的 Streamer 都会进入运营人工审核等待状态。无论是否为 Featured，在主播排行榜中的展示完全相同，并且 Featured 徽章目前尚未公开显示。",
         footerNote:
           "运营的审核标准与流程作为内部运营文档单独管理，不公开具体数值 —— 审核始终只使用可通过官方 API 核实的指标。",
       },
@@ -5580,8 +5581,8 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         calloutAdminStrong: "若 Secondary 为管理员账户，合并将被阻止。",
         calloutAdminBody:
           " 若将拥有管理员权限的账户作为 Secondary 合并，该权限可能不会转移到任何地方而直接消失，因此出于安全考虑，OwOGG 会直接阻止此类合并，并要求由运营单独处理。",
-        footerPrefix: "关于合并已完成平台所有权认证（Creator）账户的规则，请参阅",
-        footerLink: "Creator 频道所有权认证",
+        footerPrefix: "关于合并已完成平台所有权认证（Streamer）账户的规则，请参阅",
+        footerLink: "Streamer 频道所有权认证",
         footerSuffix: "文档。",
       },
       games: {
@@ -5645,10 +5646,10 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         streamerBodySuffix:
           "平台完成官方频道所有权认证的用户才会显示。名次数值使用与普通游戏排行榜/XP 排行榜完全相同的计算公式，已认证的平台数量不会影响名次 —— 最右侧的平台图标仅用于筛选与展示。",
         streamerLinkPrefix: "详细的认证方法请参阅",
-        streamerLink: "Creator 频道所有权认证",
+        streamerLink: "Streamer 频道所有权认证",
         streamerLinkSuffix: "文档。",
         calloutFeatured:
-          "Featured Creator 标识是仅用于展示的徽章，对排行榜名次和 XP 计算没有任何影响。",
+          "Featured Streamer 标识是仅用于展示的徽章，对排行榜名次和 XP 计算没有任何影响。",
         footerPrefix: "关于 Discord 服务器维度的排行榜，请参阅",
         footerLink: "Discord 服务器 XP 文档",
         footerSuffix: "。",
@@ -5956,7 +5957,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         effectiveDate: "生效日期：2026年8月14日",
         section1Heading: "1. 服务概述",
         section1Body:
-          "OwOGG（以下简称「服务」）是一个无需安装、可在浏览器中直接游玩的网页小游戏集合平台，同时提供 Discord 服务器联动、排行榜/经验值（XP）、Creator 频道认证等附加功能。",
+          "OwOGG（以下简称「服务」）是一个无需安装、可在浏览器中直接游玩的网页小游戏集合平台，同时提供 Discord 服务器联动、排行榜/经验值（XP）、Streamer 频道认证等附加功能。",
         section2Heading: "2. 账号与登录",
         section2Body:
           "本服务仅支持通过 Google 或 Discord 账号进行 OAuth 登录，不直接发放单独的账号/密码（管理员专用账号除外）。用户必须仅使用自己拥有的账号登录，账号管理的责任由用户本人承担。",
@@ -6010,7 +6011,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
             desc: " — 绑定账号时的 Discord 用户 ID，注册服务器（公会）时的服务器 ID/名称/图标、管理权限状态",
           },
           {
-            term: "Creator 频道认证信息",
+            term: "Streamer 频道认证信息",
             desc: " — 为参与主播排行榜而自愿完成频道所有权认证时，通过相应平台（YouTube/Twitch/CHZZK/SOOP）官方 API 确认的频道名称、频道 URL、订阅者/粉丝数量",
           },
         ],
@@ -6021,7 +6022,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
           "会员识别及维持登录状态",
           "提供游戏记录·排行榜·经验值系统",
           "在 Discord 机器人命令中查询本人账号信息，按服务器统计活动",
-          "确认 Creator/主播排行榜资格",
+          "确认 Streamer/主播排行榜资格",
           "检测不正当使用（滥用）及维持服务稳定性",
         ],
         section3Heading: "3. 保管期限",
@@ -6129,7 +6130,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       achievedSuffix: "已解锁",
       gameRecordsTitle: "各游戏最佳记录",
       gameRecordsEmpty: "暂无记录。",
-      creatorBadgesTitle: "认证创作者频道",
+      streamerBadgesTitle: "认证主播频道",
       manageProfileCta: "设置 →",
       favoritesTitle: "收藏",
       favoritesEmpty: "还没有收藏的游戏。",

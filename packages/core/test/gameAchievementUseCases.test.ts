@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import {
   GameAchievementUseCases,
   type GameAchievementRepository,
-  type NormalizedCreatorResult,
+  type NormalizedGameCreatorResult,
 } from "../src/index.js";
 import type { OwoggAchievementDefinition } from "@owogg/game-sdk/contracts";
 
-const RESULT: NormalizedCreatorResult = {
+const RESULT: NormalizedGameCreatorResult = {
   outcome: "success",
   rawScore: 80,
   normalizedScore: 80,

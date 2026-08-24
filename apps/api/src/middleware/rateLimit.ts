@@ -12,7 +12,7 @@ import type { ApiEnv } from "../routes/auth.js";
  * (Score *validity* is enforced separately and authoritatively by scoreValidation.ts.)
  *
  * The binding is OPTIONAL by design: when `RATE_LIMITER` is not bound, this middleware
- * no-ops and requests pass through. That mirrors how creator OAuth providers degrade when
+ * no-ops and requests pass through. That mirrors how Streamer OAuth providers degrade when
  * unconfigured, and means adding the binding to wrangler.jsonc can never hard-fail a deploy on
  * an account/plan where the namespace has not been provisioned. The tradeoff is explicit: an
  * unconfigured environment is UNPROTECTED rather than closed — acceptable because the failure

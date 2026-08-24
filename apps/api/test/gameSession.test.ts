@@ -6,7 +6,7 @@ import { verifyGameSession, gameSessionMatches } from "@owogg/core";
 // POST /api/games/:slug/session — the route-layer half of the Game Session prerequisite (the
 // signing/verification logic itself is unit-tested directly against real Web Crypto in
 // packages/core/test/gameSession.test.ts; this file only confirms auth gating, the PUBLIC + live
-// Creator game gate, and that the token this route actually issues round-trips through the real
+// Game Creator game gate, and that the token this route actually issues round-trips through the real
 // verifyGameSession with the right claims — the same "real Hono app, fake D1" pattern
 // gameServing.test.ts and devGames.test.ts use.
 

@@ -326,6 +326,72 @@ export const REQUIRED_TOKEN_RULES: RequiredTokenRule[] = [
 
 export const TOKEN_RULES: TokenRule[] = [
   {
+    scope: "packages/contracts/src",
+    files: ["streamer.ts", "streamerAdmin.ts", "admin.ts", "publicProfile.ts"],
+    rule: "broadcast-channel contracts must use Streamer terminology",
+    tokens: [
+      "CreatorPlatform",
+      "CreatorProfile",
+      "CreatorRank",
+      "CreatorManualReview",
+      "creatorBadges",
+      "pendingCreatorReviews",
+    ],
+    extensions: [".ts"],
+  },
+  {
+    scope: "packages/core/src",
+    files: [
+      "application/streamerUseCases.ts",
+      "ports/streamerProvider.ts",
+      "ports/repositories.ts",
+    ],
+    rule: "broadcast-channel core code must use Streamer terminology",
+    tokens: ["CreatorUseCases", "CreatorRepository", "CreatorProvider", "creatorId"],
+    extensions: [".ts"],
+  },
+  {
+    scope: "packages/db/src/d1",
+    files: ["D1StreamerRepository.ts", "D1StreamerReviewRepository.ts"],
+    rule: "broadcast-channel repositories must use streamer tables and columns",
+    tokens: [
+      "D1Creator",
+      "creator_profiles",
+      "creator_platform_accounts",
+      "creator_review_jobs",
+      "creator_review_audit_log",
+      "creator_id",
+    ],
+    extensions: [".ts"],
+  },
+  {
+    scope: "apps/api/src/routes",
+    files: ["streamers.ts", "adminStreamers.ts", "myAccess.ts", "admin.ts"],
+    rule: "broadcast-channel API code must use Streamer terminology",
+    tokens: [
+      "export class CreatorUseCases",
+      "container.creatorUseCases",
+      "const { creatorUseCases",
+      "creatorRepo =",
+      "creatorBadges",
+    ],
+    extensions: [".ts"],
+  },
+  {
+    scope: "apps/web/app",
+    files: [
+      "features/streamers/streamerApi.ts",
+      "features/streamers/adminStreamerApi.ts",
+      "routes/adminStreamers.tsx",
+      "routes/wikiStreamer.tsx",
+      "routes/wikiStreamerVerification.tsx",
+      "routes/wikiStreamerFeatured.tsx",
+    ],
+    rule: "broadcast-channel Web modules must use Streamer terminology",
+    tokens: ["CreatorProfile", "CreatorRank", "creatorApi", "adminCreatorApi", "/wiki/creator"],
+    extensions: [".ts", ".tsx"],
+  },
+  {
     scope: "packages/core/src",
     rule: "packages/core must not contain browser APIs, HTTP fetch calls, or environment URLs",
     tokens: ["window.", "localStorage.", "fetch(", "import.meta.env", "owogg.workers.dev"],
@@ -405,7 +471,7 @@ export const TOKEN_RULES: TokenRule[] = [
   },
   {
     scope: "apps/web/app",
-    rule: "the web must not restore transitional Creator/System catalog or runtime selection",
+    rule: "the web must not restore transitional Game Creator/System catalog or runtime selection",
     tokens: [
       "LegacyReactRuntime",
       "CreatorGameHost",

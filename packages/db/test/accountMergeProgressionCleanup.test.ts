@@ -12,7 +12,7 @@ function createMockD1(seed: {
   xpEvents: { user_id: number }[];
   userProgress: { user_id: number }[];
   userAchievements: { user_id: number }[];
-  creatorConflict?: boolean;
+  streamerConflict?: boolean;
 }): { db: D1Database; deletedFrom: Record<string, number[]>; batchCalls: number } {
   const deletedFrom: Record<string, number[]> = {
     scores: [],
@@ -23,7 +23,7 @@ function createMockD1(seed: {
     user_achievements: [],
     discord_guild_xp_events: [],
     discord_guild_managers: [],
-    creator_profiles: [],
+    streamer_profiles: [],
     sessions: [],
     users: [],
   };
@@ -38,7 +38,7 @@ function createMockD1(seed: {
           return stmt;
         },
         async first() {
-          if (seed.creatorConflict && query.includes("creator_platform_accounts")) {
+          if (seed.streamerConflict && query.includes("streamer_platform_accounts")) {
             return { conflict: 1 };
           }
           return null;
@@ -100,15 +100,15 @@ test("mergeAccounts deletes the secondary user's XP events, progress aggregate, 
   }
 });
 
-test("mergeAccounts blocks Creator platform conflicts before opening the destructive batch", async () => {
+test("mergeAccounts blocks Streamer platform conflicts before opening the destructive batch", async () => {
   const { db, batchCalls } = createMockD1({
     xpEvents: [],
     userProgress: [],
     userAchievements: [],
-    creatorConflict: true,
+    streamerConflict: true,
   });
   const repo = new D1AccountMergeRepository(db);
 
-  await assert.rejects(() => repo.mergeAccounts(1, 2, "merge-1"), /CREATOR_PLATFORM_CONFLICT/);
+  await assert.rejects(() => repo.mergeAccounts(1, 2, "merge-1"), /STREAMER_PLATFORM_CONFLICT/);
   assert.equal(batchCalls, 0);
 });

@@ -48,7 +48,7 @@ type LoadState = "loading" | "success" | "notFound" | "error";
  * page and /profile's private "내 프로필" tab, which duplicated header/avatar/records). Not a
  * grid-of-bordered-cards; leans on generous whitespace, type hierarchy, and thin dividers so it
  * reads as one continuous page instead of stacked boxes. Account settings (nickname, connected
- * logins, creator verification, visibility toggles) live separately at /settings — this page is
+ * logins, streamer verification, visibility toggles) live separately at /settings — this page is
  * display-only. Favorites/recent-plays are gated server-side per viewer (see
  * getPublicProfileData's viewerId param): `null` means hidden from the CURRENT viewer, which
  * for a guest or another user can mean either "set private" or "empty" — those aren't
@@ -278,15 +278,15 @@ export default function UserProfileRoute() {
         )}
       </section>
 
-      {/* Creator badges — only rendered when there's at least one verified channel. */}
-      {data.creatorBadges.length > 0 && (
+      {/* Streamer badges — only rendered when there's at least one verified channel. */}
+      {data.streamerBadges.length > 0 && (
         <section className="flex flex-col gap-3 border-t border-border pt-6">
           <h2 className="flex items-center gap-2 text-sm font-black uppercase tracking-wide text-text-primary">
             <Video className="h-4 w-4 text-brand" />
-            {dict.userProfile.creatorBadgesTitle}
+            {dict.userProfile.streamerBadgesTitle}
           </h2>
           <div className="flex flex-wrap gap-2">
-            {data.creatorBadges.map((badge) => (
+            {data.streamerBadges.map((badge) => (
               <a
                 key={`${badge.platform}-${badge.channelUrl}`}
                 href={badge.channelUrl}

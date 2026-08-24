@@ -77,9 +77,9 @@ export type GameCreatorApplicationDecisionRequest = z.infer<
 >;
 
 /** GET /api/dev/me — everything a session needs to render "신청하기" vs "신청 대기 중" vs "게임
- * 크리에이터 센터" without a second round-trip. Also carries `isAdmin` (unrelated to the Game
+ * 게임 크리에이터 센터" without a second round-trip. Also carries `isAdmin` (unrelated to the Game
  * Creator program itself) since the settings/Game-Creator-Center UI has always needed to know
- * that too, to show admin-only review links alongside the creator's own tools — kept on this one
+ * that too, to show admin-only review links alongside the Game Creator's own tools — kept on this one
  * response rather than a second call. Replaces the old narrower DevMeResponseSchema
  * ({isGameDeveloper, isAdmin}) from the game_developers-only era. */
 export const GameCreatorMeResponseSchema = z.object({

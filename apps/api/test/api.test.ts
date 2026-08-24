@@ -166,8 +166,8 @@ test("public query endpoints reject invalid values instead of silently defaultin
   const progression = await app.request("/api/progression/leaderboard?limit=not-a-number");
   assert.equal(progression.status, 400);
 
-  const creators = await app.request("/api/creators/rankings?gameId=not-a-real-game");
-  assert.equal(creators.status, 400);
+  const streamers = await app.request("/api/streamers/rankings?gameId=not-a-real-game");
+  assert.equal(streamers.status, 400);
 
   const guilds = await app.request("/api/discord/guilds/ranking?period=monthly");
   assert.equal(guilds.status, 400);

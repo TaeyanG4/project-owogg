@@ -24,7 +24,7 @@ export interface GameCreatorAccessAuditEntry {
  * Persistence port for Game Creator upload-permission grants (migration 0024, table renamed by
  * migration 0025 — see that file's comment for why this is a pure rename, no data migration).
  * One row per user who has ever been granted upload access — a missing row means "never a
- * creator", same as a REVOKED row means "was one, no longer".
+ * Game Creator", same as a REVOKED row means "was one, no longer".
  */
 export interface GameCreatorAccessRepository {
   findByUserId(userId: number): Promise<GameCreatorAccessRecord | null>;

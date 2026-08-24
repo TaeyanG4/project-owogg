@@ -45,7 +45,7 @@ test("isHostInitMessage accepts an optional, valid difficultyId — backward com
   assert.equal(isHostInitMessage({ type: "HOST_INIT", difficultyId: "hard" }), true);
   assert.equal(isHostInitMessage({ type: "HOST_INIT", difficultyId: "normal" }), true);
   // The pre-existing shape (no difficultyId at all) must keep validating exactly as before —
-  // every game that doesn't know this field exists (reaction-time, Creator games, ball-dodge)
+  // every game that doesn't know this field exists (reaction-time, Game Creator games, ball-dodge)
   // depends on that.
   assert.equal(isHostInitMessage({ type: "HOST_INIT" }), true);
 });
@@ -80,7 +80,7 @@ test("parseGameToHostMessage accepts each game->host message type", () => {
   assert.deepEqual(parseGameToHostMessage({ type: "GAME_ERROR" }), { type: "GAME_ERROR" });
 });
 
-test("GAME_COMPLETE accepts Creator v1 outcome/progression/metrics facts", () => {
+test("GAME_COMPLETE accepts Game Creator v1 outcome/progression/metrics facts", () => {
   assert.deepEqual(
     parseGameToHostMessage({
       type: "GAME_COMPLETE",

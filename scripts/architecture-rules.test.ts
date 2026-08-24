@@ -198,7 +198,9 @@ test("every import rule carries at least one forbidden specifier and a stated ru
 
 test("D-1 legacy catalog/runtime removals are protected by source-token architecture guards", () => {
   const api = TOKEN_RULES.find((rule) => rule.scope === "apps/api/src");
-  const web = TOKEN_RULES.find((rule) => rule.scope === "apps/web/app");
+  const web = TOKEN_RULES.find(
+    (rule) => rule.scope === "apps/web/app" && rule.tokens.includes("LegacyReactRuntime"),
+  );
   const host = TOKEN_RULES.find((rule) => rule.scope === "apps/web/app/features/game");
   const deploy = TOKEN_RULES.find((rule) => rule.scope === ".github/workflows");
 
@@ -225,7 +227,7 @@ test("D-1 legacy catalog/runtime removals are protected by source-token architec
   assert.ok(deploy?.tokens.includes("systemGameReleaseMap"));
 });
 
-test("E-1 generic canonical authority is protected from old Creator repository composition", () => {
+test("E-1 generic canonical authority is protected from old Game Creator repository composition", () => {
   const api = TOKEN_RULES.find((rule) => rule.scope === "apps/api/src");
   const coreApplication = TOKEN_RULES.find(
     (rule) => rule.scope === "packages/core/src/application",
@@ -235,6 +237,14 @@ test("E-1 generic canonical authority is protected from old Creator repository c
   assert.ok(api?.tokens.includes("creator-games/"));
   assert.ok(coreApplication?.tokens.includes("CreatorGameDefinitionRepository"));
   assert.ok(coreApplication?.tokens.includes("creator-games/"));
+});
+
+test("broadcast-channel modules are guarded against reintroducing bare Creator terminology", () => {
+  const rules = TOKEN_RULES.filter((rule) => rule.rule.startsWith("broadcast-channel"));
+  assert.equal(rules.length, 5);
+  assert.ok(rules.some((rule) => rule.tokens.some((token) => token.includes("CreatorUseCases"))));
+  assert.ok(rules.some((rule) => rule.tokens.includes("creator_profiles")));
+  assert.ok(rules.some((rule) => rule.tokens.includes("/wiki/creator")));
 });
 
 test("E-2 publication convergence guards both callers and keeps generic core publisher-neutral", () => {

@@ -87,7 +87,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: apps/api
-          # Creator provider client IDs/redirect URIs are non-secret and optional — OwOGG must
+          # Streamer provider client IDs/redirect URIs are non-secret and optional — OwOGG must
           # still deploy when some (or all) are unconfigured (`|| ''`). Client secrets/API keys go
           # through `secrets:` below, never `--var`.
           #
@@ -114,7 +114,7 @@ jobs:
             GAME_ORIGIN:${{ vars.GAME_ORIGIN }}
             ADMIN_USER_IDS:${{ vars.ADMIN_USER_IDS || '' }}
             ADMIN_LOGIN_USERNAME:${{ vars.ADMIN_LOGIN_USERNAME || '' }}
-            CREATOR_ENABLED_PROVIDERS:${{ vars.CREATOR_ENABLED_PROVIDERS || '' }}
+            STREAMER_ENABLED_PROVIDERS:${{ vars.STREAMER_ENABLED_PROVIDERS || '' }}
             YOUTUBE_CLIENT_ID:${{ vars.YOUTUBE_CLIENT_ID || '' }}
             YOUTUBE_REDIRECT_URI:${{ vars.YOUTUBE_REDIRECT_URI || '' }}
             TWITCH_CLIENT_ID:${{ vars.TWITCH_CLIENT_ID || '' }}
@@ -128,10 +128,10 @@ jobs:
           # -fails the whole action when a listed secret resolves to an empty string, which is
           # exactly the loud, fail-closed behavior a required secret needs (a Production deploy
           # must not silently ship a Worker missing either one). GAME_SESSION_SECRET signs/verifies
-          # the Game Session tokens Creator score acceptance depends on
+          # the Game Session tokens Game Creator score acceptance depends on
           # (packages/core/src/domain/gameSession.ts) — without it, POST /api/games/:slug/session
           # fails closed with 503 in Production (apps/api/src/routes/games.ts), which is the exact
-          # gap this line closes. The Creator/Admin secrets below are genuinely optional and are
+          # gap this line closes. The Streamer/Admin secrets below are genuinely optional and are
           # uploaded separately (see next step), which is why they're NOT listed here — this list
           # is only for secrets a Production deploy cannot proceed without.
           secrets: |
@@ -141,7 +141,7 @@ jobs:
           DISCORD_CLIENT_SECRET: ${{ secrets.DISCORD_CLIENT_SECRET }}
           GAME_SESSION_SECRET: ${{ secrets.GAME_SESSION_SECRET }}
 
-      - name: Upload optional Creator/Admin secrets (skips any that are unconfigured)
+      - name: Upload optional Streamer/Admin secrets (skips any that are unconfigured)
         working-directory: apps/api
         run: |
           set -e
@@ -178,7 +178,7 @@ jobs:
       - name: Verify API Health & Provenance
         run: pnpm smoke:prod --api-only --sha ${{ github.event.workflow_run.head_sha }}
         env:
-          CREATOR_ENABLED_PROVIDERS: ${{ vars.CREATOR_ENABLED_PROVIDERS || '' }}
+          STREAMER_ENABLED_PROVIDERS: ${{ vars.STREAMER_ENABLED_PROVIDERS || '' }}
 
       - name: Build Web Frontend
         run: pnpm --filter @owogg/web build

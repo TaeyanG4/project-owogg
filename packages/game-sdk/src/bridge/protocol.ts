@@ -19,7 +19,7 @@
  * (rather than a MessagePort) is used at all.
  *
  * `difficultyId` (2026-08-19) is the one deliberate, backward-compatible expansion of this
- * message: optional, so every existing bootstrap that never set it (reaction-time, Creator games,
+ * message: optional, so every existing bootstrap that never set it (reaction-time, Game Creator games,
  * ball-dodge) keeps validating exactly as before — see isHostInitMessage. Only a game with real
  * difficulty tiers (aim-test) reads it; every other standalone game's own bridgeRuntime.ts simply
  * ignores an absent value and falls back to its own default. Never auth/token/API address — the

@@ -16,7 +16,7 @@ export type MergeConfirmResult =
         | "MERGE_CHALLENGE_CONSUMED"
         | "MERGE_CHALLENGE_MISMATCH"
         | "MERGE_PROVIDER_CONFLICT"
-        | "MERGE_CREATOR_CONFLICT"
+        | "MERGE_STREAMER_CONFLICT"
         | "MERGE_ADMIN_CONFLICT"
         | "USER_NOT_FOUND";
     };
@@ -151,14 +151,14 @@ export class AccountMergeUseCases {
       return { ok: false, code: "MERGE_PROVIDER_CONFLICT" };
     }
 
-    // Creator platform ownership is identity-like. If both profiles contain an
+    // Streamer platform ownership is identity-like. If both profiles contain an
     // external account on the same platform, there is no safe way to choose one.
     const integrityConflict = await this.mergeRepo.findMergeIntegrityConflict(
       primaryId,
       secondaryId,
     );
-    if (integrityConflict === "CREATOR_PLATFORM_CONFLICT") {
-      return { ok: false, code: "MERGE_CREATOR_CONFLICT" };
+    if (integrityConflict === "STREAMER_PLATFORM_CONFLICT") {
+      return { ok: false, code: "MERGE_STREAMER_CONFLICT" };
     }
 
     // Atomic Primary-Wins merge: secondary data deleted, secondary OAuth moved to primary,

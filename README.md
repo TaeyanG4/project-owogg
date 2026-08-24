@@ -79,7 +79,7 @@ pnpm --filter @owogg/api dev
 생성하거나 수정하는 절차는 없습니다.
 
 사용자 업로드 흐름은 소스 패키지를 추가하는 과정이 아닙니다. 완성된 standalone ZIP을 Game
-Creator Center에서 올리며, 자세한 규격은 [게임 제작 가이드](docs/GAME_CREATION_GUIDE.md)와
+Game Creator Center에서 올리며, 자세한 규격은 [게임 제작 가이드](docs/GAME_CREATION_GUIDE.md)와
 [업로드 가이드](docs/GAME_UPLOAD_GUIDE.md)를 따릅니다.
 
 ## 검증 명령

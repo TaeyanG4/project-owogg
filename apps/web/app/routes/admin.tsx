@@ -718,7 +718,7 @@ function AdminDashboard({
           </div>
           <h1 className="text-3xl font-black tracking-tight text-text-primary">관리자 센터</h1>
           <p className="mt-2 max-w-xl text-sm leading-relaxed text-text-muted">
-            운영에 필요한 안전한 상태 요약과 Creator 심사 도구를 한곳에서 확인합니다.
+            운영에 필요한 안전한 상태 요약과 스트리머 심사 도구를 한곳에서 확인합니다.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -773,8 +773,8 @@ function AdminDashboard({
           <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="핵심 운영 상태">
             <MetricCard
               icon={<Clock3 className="h-4 w-4" />}
-              label="대기 중 Creator 심사"
-              value={overview.pendingCreatorReviews.toLocaleString()}
+              label="대기 중 스트리머 심사"
+              value={overview.pendingStreamerReviews.toLocaleString()}
               tone="yellow"
             />
             <MetricCard
@@ -802,7 +802,7 @@ function AdminDashboard({
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.15em] text-accent-yellow">
-                    Creator
+                    STREAMER
                   </p>
                   <h2 className="mt-1 text-xl font-black text-text-primary">Featured 수동 심사</h2>
                   <p className="mt-2 text-sm leading-relaxed text-text-muted">
@@ -815,7 +815,7 @@ function AdminDashboard({
               <div className="mt-5 flex flex-wrap items-center gap-3">
                 {can("streamers.review") ? (
                   <Link
-                    to="/admin/creators"
+                    to="/admin/streamers"
                     className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-xs font-bold text-white hover:bg-brand-light focus:outline-none focus:ring-2 focus:ring-brand"
                   >
                     심사 큐 열기 <ArrowRight className="h-4 w-4" />
@@ -826,15 +826,15 @@ function AdminDashboard({
                   </span>
                 )}
                 <span className="text-xs text-text-muted">
-                  대기 {overview.pendingCreatorReviews}건
+                  대기 {overview.pendingStreamerReviews}건
                 </span>
               </div>
             </article>
 
             <article className="rounded-2xl border border-border bg-surface-raised p-5 shadow-lg shadow-black/10">
-              <h2 className="text-sm font-black text-text-primary">Creator Provider 준비 상태</h2>
+              <h2 className="text-sm font-black text-text-primary">Streamer Provider 준비 상태</h2>
               <div className="mt-4 grid grid-cols-2 gap-2">
-                {Object.entries(overview.creatorProviders).map(([provider, configured]) => (
+                {Object.entries(overview.streamerProviders).map(([provider, configured]) => (
                   <div
                     key={provider}
                     className="flex items-center justify-between rounded-xl bg-surface px-3 py-2.5"
@@ -908,7 +908,7 @@ function AdminDashboard({
               </div>
               {can("streamers.review") && (
                 <Link
-                  to="/admin/creators"
+                  to="/admin/streamers"
                   className="text-xs font-bold text-brand-light hover:underline"
                 >
                   전체 심사 도구 <ExternalLink className="ml-1 inline h-3.5 w-3.5" />
@@ -924,7 +924,7 @@ function AdminDashboard({
                 {overview.recentAudits.map((audit, index) => (
                   <div key={`${audit.createdAt}-${index}`} className="rounded-xl bg-surface p-3">
                     <p className="text-[10px] font-bold text-text-muted">
-                      {audit.platform ?? "Creator"}
+                      {audit.platform ?? "Streamer"}
                     </p>
                     <p className="mt-1 text-xs font-bold text-text-primary">{audit.action}</p>
                     <p className="mt-1 text-[10px] text-text-muted">

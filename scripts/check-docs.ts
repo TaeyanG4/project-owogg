@@ -27,7 +27,7 @@ export const INDEXED_DOCUMENTS = [
   "docs/GAME_UPLOAD_GUIDE.md",
   "docs/DISCORD_INTEGRATION.md",
   "docs/DISCORD_BOT_GUIDE.md",
-  "docs/CREATOR_SYSTEM.md",
+  "docs/STREAMER_SYSTEM.md",
   "docs/I18N.md",
   "docs/i18n-content/README.md",
   "docs/MULTIPLAYER_GAME_DESIGN.md",

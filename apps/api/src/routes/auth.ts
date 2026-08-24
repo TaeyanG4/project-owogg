@@ -79,7 +79,7 @@ export type ApiEnv = {
      * closed with 503 rather than signing with an empty/predictable secret) — but Production is
      * NOT allowed to run without it: .github/workflows/deploy.yml lists it as a required Worker
      * secret (`secrets:` on the Deploy API Worker step), which hard-fails the deploy rather than
-     * shipping a Production Worker that would 503 on every Creator result-submission attempt. See
+     * shipping a Production Worker that would 503 on every Game Creator result-submission attempt. See
      * docs/PRODUCTION_INTEGRATIONS.md §5 for the operator-facing setup steps. */
     GAME_SESSION_SECRET?: string;
     GOOGLE_CLIENT_ID?: string;
@@ -118,10 +118,10 @@ export type ApiEnv = {
     SOOP_CLIENT_ID?: string;
     SOOP_CLIENT_SECRET?: string;
     SOOP_REDIRECT_URI?: string;
-    USE_MOCK_CREATOR_PROVIDERS?: string;
-    /** 쉼표로 구분한, 이 배포에서 필수로 기대하는 Creator provider 목록 (예: "YOUTUBE,TWITCH").
+    USE_MOCK_STREAMER_PROVIDERS?: string;
+    /** 쉼표로 구분한, 이 배포에서 필수로 기대하는 Streamer provider 목록 (예: "YOUTUBE,TWITCH").
      * 프로덕션 readiness 게이트(scripts/verify-production.ts)가 사용하며 미설정 시 필수 provider가 없음을 의미. */
-    CREATOR_ENABLED_PROVIDERS?: string;
+    STREAMER_ENABLED_PROVIDERS?: string;
   };
 };
 
@@ -798,7 +798,7 @@ authRouter.post("/merge/confirm", async (c) => {
       MERGE_CHALLENGE_MISMATCH: 403,
       USER_NOT_FOUND: 404,
       MERGE_PROVIDER_CONFLICT: 409,
-      MERGE_CREATOR_CONFLICT: 409,
+      MERGE_STREAMER_CONFLICT: 409,
       MERGE_ADMIN_CONFLICT: 409,
     };
     const messageMap: Record<string, string> = {
@@ -807,8 +807,8 @@ authRouter.post("/merge/confirm", async (c) => {
       MERGE_CHALLENGE_MISMATCH: "통합 대상 계정이 일치하지 않습니다.",
       USER_NOT_FOUND: "통합 대상 계정을 찾을 수 없습니다.",
       MERGE_PROVIDER_CONFLICT: "두 계정 모두 동일 로그인 수단을 사용 중이라 병합할 수 없습니다.",
-      MERGE_CREATOR_CONFLICT:
-        "두 계정이 같은 플랫폼의 서로 다른 Creator 채널을 소유하고 있어 안전하게 병합할 수 없습니다. 먼저 Creator 채널 충돌을 정리해주세요.",
+      MERGE_STREAMER_CONFLICT:
+        "두 계정이 같은 플랫폼의 서로 다른 Streamer 채널을 소유하고 있어 안전하게 병합할 수 없습니다. 먼저 Streamer 채널 충돌을 정리해주세요.",
       MERGE_ADMIN_CONFLICT:
         "통합 대상(Secondary) 계정이 관리자 계정이라 안전하게 병합할 수 없습니다. 관리자에게 문의해 먼저 정리해주세요.",
     };

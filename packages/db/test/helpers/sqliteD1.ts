@@ -133,7 +133,7 @@ BEGIN
   INSERT OR IGNORE INTO games (slug) VALUES (NEW.game_id);
 END;
 
-CREATE TABLE creator_profiles (
+CREATE TABLE streamer_profiles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER UNIQUE NOT NULL,
   status TEXT NOT NULL DEFAULT 'UNVERIFIED',
@@ -144,9 +144,9 @@ CREATE TABLE creator_profiles (
   updated_at TEXT NOT NULL
 );
 
-CREATE TABLE creator_platform_accounts (
+CREATE TABLE streamer_platform_accounts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  creator_id INTEGER NOT NULL,
+  streamer_id INTEGER NOT NULL,
   platform TEXT NOT NULL,
   platform_user_id TEXT NOT NULL,
   channel_name TEXT NOT NULL,

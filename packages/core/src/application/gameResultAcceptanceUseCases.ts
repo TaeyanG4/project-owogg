@@ -1,9 +1,9 @@
 import { verifyGameSession, gameSessionMatches } from "../domain/gameSession.js";
 import {
-  normalizeCreatorResult,
-  type CreatorReportedResult,
-  type NormalizedCreatorResult,
-} from "../domain/creatorResult.js";
+  normalizeGameCreatorResult,
+  type GameCreatorReportedResult,
+  type NormalizedGameCreatorResult,
+} from "../domain/gameCreatorResult.js";
 import { validateDifficultyAgainstDefinition } from "../domain/scoreValidation.js";
 import type { GameSettingsRepository } from "../ports/repositories.js";
 import type { GameResultAcceptanceRepository } from "../ports/gameResultAcceptance.js";
@@ -28,7 +28,7 @@ export type GameResultAcceptResult =
       readonly scoreId: number | null;
       readonly gameId: number;
       readonly slug: string;
-      readonly normalized: NormalizedCreatorResult;
+      readonly normalized: NormalizedGameCreatorResult;
       readonly xpPerCompletion: number;
       readonly achievements: readonly OwoggAchievementDefinition[];
     }
@@ -50,7 +50,7 @@ export class GameResultAcceptanceUseCases {
     token: string;
     secret: string;
     difficulty?: string | undefined;
-    result: CreatorReportedResult;
+    result: GameCreatorReportedResult;
   }): Promise<GameResultAcceptResult> {
     const runtime = await this.runtimeGames.findBySlug(input.slug);
     if (!runtime) return { ok: false, error: "GAME_NOT_AVAILABLE" };
@@ -93,7 +93,7 @@ export class GameResultAcceptanceUseCases {
 
     const manifest = runtime.canonical.creatorManifest;
     if (!manifest) return { ok: false, error: "MANIFEST_NOT_CONFIGURED" };
-    const normalized = normalizeCreatorResult(manifest, input.result);
+    const normalized = normalizeGameCreatorResult(manifest, input.result);
     if (!normalized.valid) {
       return { ok: false, error: "INVALID_RESULT", reason: normalized.reason };
     }

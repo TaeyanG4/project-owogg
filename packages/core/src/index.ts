@@ -14,14 +14,14 @@ export * from "./domain/adminUserQuery.js";
 export * from "./domain/gameCreator.js";
 export * from "./domain/sandboxGames.js";
 export * from "./domain/sandboxGameBundle.js";
-export * from "./domain/creatorManifest.js";
-export * from "./domain/creatorManifestCanonical.js";
-export * from "./domain/creatorResult.js";
+export * from "./domain/gameCreatorManifest.js";
+export * from "./domain/gameCreatorManifestCanonical.js";
+export * from "./domain/gameCreatorResult.js";
 export * from "./domain/contentHash.js";
 export * from "./domain/gameSession.js";
-export * from "./domain/creatorScorePolicy.js";
+export * from "./domain/gameCreatorScorePolicy.js";
 export * from "./ports/repositories.js";
-export * from "./ports/creatorProvider.js";
+export * from "./ports/streamerProvider.js";
 export * from "./ports/adminAuth.js";
 export * from "./ports/adminAccounts.js";
 export * from "./ports/gameCreator.js";
@@ -34,7 +34,7 @@ export * from "./ports/gameAchievements.js";
 // registration, review, and publishing; runtime reads use RuntimeGameRegistry below.
 export * from "./modules/game/domain/gameOwner.js";
 export * from "./modules/game/domain/gameDefinition.js";
-export * from "./modules/game/domain/creatorGameStatus.js";
+export * from "./modules/game/domain/gameCreatorStatus.js";
 export * from "./modules/game/domain/publicGame.js";
 // Unified Game Platform, Stage U-1 (foundation only — see each file's own top doc comment for the
 // exhaustive list of what stays unwired in production by this Stage).
@@ -65,7 +65,7 @@ export * from "./application/discordLinkUseCases.js";
 export * from "./domain/discordGuildPolicy.js";
 export * from "./application/discordGuildUseCases.js";
 export * from "./application/discordGuildXpUseCases.js";
-export * from "./application/creatorUseCases.js";
+export * from "./application/streamerUseCases.js";
 export * from "./application/adminAuthUseCases.js";
 export * from "./application/adminAccountUseCases.js";
 export * from "./application/gameSettingsUseCases.js";

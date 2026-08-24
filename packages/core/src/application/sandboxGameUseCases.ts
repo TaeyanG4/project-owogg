@@ -27,10 +27,10 @@ import {
   type PreparedBundleFile,
 } from "../domain/sandboxGameBundle.js";
 import {
-  CreatorManifestValidationError,
-  extractCreatorManifest,
-} from "../domain/creatorManifest.js";
-import { mapCreatorManifestToCanonical } from "../domain/creatorManifestCanonical.js";
+  GameCreatorManifestValidationError,
+  extractGameCreatorManifest,
+} from "../domain/gameCreatorManifest.js";
+import { mapGameCreatorManifestToCanonical } from "../domain/gameCreatorManifestCanonical.js";
 import { sha256Hex } from "../domain/contentHash.js";
 import {
   computeUserCanonicalScorePatch,
@@ -67,7 +67,7 @@ export type SandboxGameUseCaseError =
   | "MANIFEST_MISSING"
   /** owogg.json is malformed, violates v1, or a new version changes its immutable game slug. */
   | "MANIFEST_INVALID"
-  /** Kept as route-level validation codes for metadata edit APIs. Creator ZIP validation reports
+  /** Kept as route-level validation codes for metadata edit APIs. Game Creator ZIP validation reports
    * MANIFEST_INVALID so callers get one stable manifest error contract. */
   | "INVALID_GENRE"
   /** Metadata edit API compatibility code; ZIP mode validation reports MANIFEST_INVALID. */
@@ -82,7 +82,7 @@ export type SandboxGameUseCaseError =
   /** deleteGame was called on a game that's already soft-deleted — idempotent-failure rather than
    * a silent no-op, so a double-click doesn't look like it succeeded twice. */
   | "ALREADY_DELETED"
-  /** deleteOwnGame (creator self-service) was called on a game with at least one ever-APPROVED
+  /** deleteOwnGame (Game Creator self-service) was called on a game with at least one ever-APPROVED
    * version — self-delete is only for a game that has never been reviewed/approved; past that
    * point only ADMIN/OPERATOR (sandbox_games.delete) may remove it. */
   | "CANNOT_DELETE_APPROVED_GAME"
@@ -129,7 +129,7 @@ function asFailure(err: unknown): never {
 }
 
 function manifestFailure(err: unknown): never {
-  if (err instanceof CreatorManifestValidationError) {
+  if (err instanceof GameCreatorManifestValidationError) {
     throw new SandboxGameUseCaseFailure("MANIFEST_INVALID");
   }
   throw err;
@@ -216,7 +216,7 @@ export class SandboxGameUseCases {
 
     // slugExists is the global D1 identity authority: it includes active/soft-deleted generic game
     // identities and permanent reservations, regardless of publisher. Never consult a static
-    // registry here; a creator slug must be checked against the same namespace every runtime read
+    // registry here; a Game Creator slug must be checked against the same namespace every runtime read
     // uses.
     if (await this.repo.slugExists(slug)) throw new SandboxGameUseCaseFailure("SLUG_TAKEN");
 
@@ -282,7 +282,7 @@ export class SandboxGameUseCases {
 
     const manifest = (() => {
       try {
-        return extractCreatorManifest(prepared.files);
+        return extractGameCreatorManifest(prepared.files);
       } catch (err) {
         return manifestFailure(err);
       }
@@ -342,7 +342,7 @@ export class SandboxGameUseCases {
 
     const manifest = (() => {
       try {
-        return extractCreatorManifest(prepared.files);
+        return extractGameCreatorManifest(prepared.files);
       } catch (err) {
         return manifestFailure(err);
       }
@@ -516,7 +516,7 @@ export class SandboxGameUseCases {
 
     const manifest = (() => {
       try {
-        return extractCreatorManifest(preparedWithMetadata.files);
+        return extractGameCreatorManifest(preparedWithMetadata.files);
       } catch (err) {
         return manifestFailure(err);
       }
@@ -551,9 +551,9 @@ export class SandboxGameUseCases {
       throw new SandboxGameUseCaseFailure("PUBLISH_FAILED");
     }
 
-    let manifest: ReturnType<typeof extractCreatorManifest>;
+    let manifest: ReturnType<typeof extractGameCreatorManifest>;
     try {
-      manifest = extractCreatorManifest(prepared.files);
+      manifest = extractGameCreatorManifest(prepared.files);
     } catch (error) {
       return manifestFailure(error);
     }
@@ -580,7 +580,7 @@ export class SandboxGameUseCases {
         nowIso,
       );
       await this.gameCanonicalRepo.save(
-        mapCreatorManifestToCanonical({
+        mapGameCreatorManifestToCanonical({
           manifest,
           publisherOfficial: false,
           updatedAt: nowIso,
@@ -692,10 +692,10 @@ export class SandboxGameUseCases {
   }
 
   /**
-   * Creator self-service full removal of their OWN game — no permission grant required beyond
+   * Game Creator self-service full removal of their OWN game — no permission grant required beyond
    * ownership, unlike deleteGame(), because this is only reachable while nothing has ever been
    * approved (2026-08-18 product decision — "관리자나 운영자가 승인한게 아니라면 그 전까진 게임
-   * 크리에이터가 지워도 됨"). Once any version reaches APPROVED, self-delete is refused
+   * Game Creator가 지워도 됨"). Once any version reaches APPROVED, self-delete is refused
    * (CANNOT_DELETE_APPROVED_GAME) and only an ADMIN/OPERATOR can remove it from then on via
    * deleteGame(). A genuine hard delete (see SandboxGameRepository.hardDelete) rather than
    * softDelete: nothing here was ever public or reviewed, so there is nothing worth an audit trail

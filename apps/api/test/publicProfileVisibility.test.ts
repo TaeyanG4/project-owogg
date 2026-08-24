@@ -49,7 +49,7 @@ function fakeContainer(user: User): AppContainer {
       getSummary: async () => ({ unlockedCodes: ["FIRST_PLAY"], totalAchievements: 7 }),
     },
     scoreReadUseCases: { getUserBestsFormatted: async () => [] },
-    creatorUseCases: { getCreatorProfileByUserId: async () => null },
+    streamerUseCases: { getStreamerProfileByUserId: async () => null },
     personalizationUseCases: {
       getPersonalizationState: async () => ({
         favoriteGameIds: FAVORITES,

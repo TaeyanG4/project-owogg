@@ -1,17 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  CreatorUseCases,
+  StreamerUseCases,
   FEATURED_POLICY,
-  type CreatorRepository,
-  type CreatorProfile,
-  type CreatorPlatformAccount,
-  type CreatorPlatformType,
-  type CreatorReviewJob,
-  type CreatorReviewRepository,
-  type CreatorChannelMetrics,
-  type CreatorProviderAdapter,
-  type CreatorChannelInfo,
+  type StreamerRepository,
+  type StreamerProfile,
+  type StreamerPlatformAccount,
+  type StreamerPlatformType,
+  type StreamerReviewJob,
+  type StreamerReviewRepository,
+  type StreamerChannelMetrics,
+  type StreamerProviderAdapter,
+  type StreamerChannelInfo,
 } from "../src/index.js";
 
 const NOW_MS = new Date("2026-06-01T00:00:00.000Z").getTime();
@@ -21,33 +21,33 @@ function isoDaysAgo(days: number): string {
   return new Date(NOW_MS - days * 86_400_000).toISOString();
 }
 
-class MemoryReviewRepo implements CreatorReviewRepository {
-  public jobs: CreatorReviewJob[] = [];
+class MemoryReviewRepo implements StreamerReviewRepository {
+  public jobs: StreamerReviewJob[] = [];
   private nextId = 1;
 
-  async findLatestJobByAccountIds(ids: number[]): Promise<CreatorReviewJob | null> {
-    const candidates = this.jobs.filter((j) => ids.includes(j.creatorPlatformAccountId));
+  async findLatestJobByAccountIds(ids: number[]): Promise<StreamerReviewJob | null> {
+    const candidates = this.jobs.filter((j) => ids.includes(j.streamerPlatformAccountId));
     if (candidates.length === 0) return null;
     return candidates.reduce((a, b) => (a.id > b.id ? a : b));
   }
 
-  async findActiveJobByAccountId(id: number): Promise<CreatorReviewJob | null> {
+  async findActiveJobByAccountId(id: number): Promise<StreamerReviewJob | null> {
     return (
       this.jobs.find(
         (j) =>
-          j.creatorPlatformAccountId === id &&
+          j.streamerPlatformAccountId === id &&
           (j.status === "AUTO_REVIEW_PENDING" || j.status === "FAILED_RETRYABLE"),
       ) || null
     );
   }
 
   async createOrResetJob(input: {
-    creatorPlatformAccountId: number;
+    streamerPlatformAccountId: number;
     initialAudience: number | null;
     initialChannelCreatedAt: string | null;
     nextCheckAt: string;
-  }): Promise<CreatorReviewJob> {
-    const existing = await this.findActiveJobByAccountId(input.creatorPlatformAccountId);
+  }): Promise<StreamerReviewJob> {
+    const existing = await this.findActiveJobByAccountId(input.streamerPlatformAccountId);
     if (existing) {
       existing.initialAudience = input.initialAudience;
       existing.initialChannelCreatedAt = input.initialChannelCreatedAt;
@@ -57,9 +57,9 @@ class MemoryReviewRepo implements CreatorReviewRepository {
       existing.updatedAt = NOW_ISO;
       return existing;
     }
-    const job: CreatorReviewJob = {
+    const job: StreamerReviewJob = {
       id: this.nextId++,
-      creatorPlatformAccountId: input.creatorPlatformAccountId,
+      streamerPlatformAccountId: input.streamerPlatformAccountId,
       reviewType: "ACQUISITION",
       status: "AUTO_REVIEW_PENDING",
       initialAudience: input.initialAudience,
@@ -76,20 +76,20 @@ class MemoryReviewRepo implements CreatorReviewRepository {
     return job;
   }
 
-  async findLatestRevalidationJobByAccountId(id: number): Promise<CreatorReviewJob | null> {
+  async findLatestRevalidationJobByAccountId(id: number): Promise<StreamerReviewJob | null> {
     const candidates = this.jobs.filter(
-      (j) => j.creatorPlatformAccountId === id && j.reviewType === "REVALIDATION",
+      (j) => j.streamerPlatformAccountId === id && j.reviewType === "REVALIDATION",
     );
     return candidates.length > 0 ? candidates[candidates.length - 1] : null;
   }
 
   async scheduleRevalidationJob(input: {
-    creatorPlatformAccountId: number;
+    streamerPlatformAccountId: number;
     nextCheckAt: string;
     nowIso: string;
-  }): Promise<CreatorReviewJob> {
+  }): Promise<StreamerReviewJob> {
     const existing = await this.findLatestRevalidationJobByAccountId(
-      input.creatorPlatformAccountId,
+      input.streamerPlatformAccountId,
     );
     if (
       existing &&
@@ -99,9 +99,9 @@ class MemoryReviewRepo implements CreatorReviewRepository {
     ) {
       return existing;
     }
-    const job: CreatorReviewJob = {
+    const job: StreamerReviewJob = {
       id: this.nextId++,
-      creatorPlatformAccountId: input.creatorPlatformAccountId,
+      streamerPlatformAccountId: input.streamerPlatformAccountId,
       reviewType: "REVALIDATION",
       status: "REVALIDATION_PENDING",
       initialAudience: null,
@@ -122,7 +122,7 @@ class MemoryReviewRepo implements CreatorReviewRepository {
     return 0;
   }
 
-  async listDuePendingJobs(limit: number, nowIso: string): Promise<CreatorReviewJob[]> {
+  async listDuePendingJobs(limit: number, nowIso: string): Promise<StreamerReviewJob[]> {
     return this.jobs
       .filter(
         (j) =>
@@ -132,7 +132,7 @@ class MemoryReviewRepo implements CreatorReviewRepository {
       .slice(0, limit);
   }
 
-  async listDueRevalidationJobs(limit: number, nowIso: string): Promise<CreatorReviewJob[]> {
+  async listDueRevalidationJobs(limit: number, nowIso: string): Promise<StreamerReviewJob[]> {
     return this.jobs
       .filter(
         (j) =>
@@ -161,7 +161,7 @@ class MemoryReviewRepo implements CreatorReviewRepository {
 
   async completeJob(
     id: number,
-    status: Exclude<CreatorReviewJob["status"], "AUTO_REVIEW_PENDING" | "FAILED_RETRYABLE">,
+    status: Exclude<StreamerReviewJob["status"], "AUTO_REVIEW_PENDING" | "FAILED_RETRYABLE">,
     completedAt: string,
     reason?: string,
   ): Promise<boolean> {
@@ -199,10 +199,10 @@ class MemoryReviewRepo implements CreatorReviewRepository {
   }
 }
 
-class FakeProvider implements CreatorProviderAdapter {
+class FakeProvider implements StreamerProviderAdapter {
   constructor(
-    public platform: CreatorPlatformType,
-    private metrics?: CreatorChannelMetrics,
+    public platform: StreamerPlatformType,
+    private metrics?: StreamerChannelMetrics,
     private refreshSupported = true,
     private failWith?: string,
   ) {}
@@ -215,7 +215,7 @@ class FakeProvider implements CreatorProviderAdapter {
     return `https://fake/${this.platform}?state=${state}&redirect=${redirectUri}`;
   }
 
-  async verifyOwnershipCode(_code: string, _redirectUri: string): Promise<CreatorChannelInfo> {
+  async verifyOwnershipCode(_code: string, _redirectUri: string): Promise<StreamerChannelInfo> {
     return {
       platform: this.platform,
       platformUserId: "fake_channel",
@@ -232,7 +232,7 @@ class FakeProvider implements CreatorProviderAdapter {
     return this.refreshSupported;
   }
 
-  async fetchChannelMetrics(_platformUserId: string): Promise<CreatorChannelMetrics> {
+  async fetchChannelMetrics(_platformUserId: string): Promise<StreamerChannelMetrics> {
     if (this.failWith) throw new Error(this.failWith);
     if (!this.metrics) {
       return { audienceCount: 15000, channelCreatedAt: isoDaysAgo(400) };
@@ -242,9 +242,9 @@ class FakeProvider implements CreatorProviderAdapter {
 }
 
 function makeAdapters(
-  overrides: Partial<Record<CreatorPlatformType, FakeProvider>> = {},
-): Record<CreatorPlatformType, CreatorProviderAdapter> {
-  const base: Record<CreatorPlatformType, FakeProvider> = {
+  overrides: Partial<Record<StreamerPlatformType, FakeProvider>> = {},
+): Record<StreamerPlatformType, StreamerProviderAdapter> {
+  const base: Record<StreamerPlatformType, FakeProvider> = {
     YOUTUBE: new FakeProvider("YOUTUBE"),
     TWITCH: new FakeProvider("TWITCH"),
     CHZZK: new FakeProvider("CHZZK"),
@@ -253,35 +253,35 @@ function makeAdapters(
   return { ...base, ...overrides };
 }
 
-// Reuse the in-memory creator repo from creatorOwnership tests (minimal duplicate).
-class MemoryCreatorRepo implements CreatorRepository {
-  public profiles = new Map<number, CreatorProfile>();
-  public platformAccounts: CreatorPlatformAccount[] = [];
+// Reuse the in-memory streamer repo from streamerOwnership tests (minimal duplicate).
+class MemoryStreamerRepo implements StreamerRepository {
+  public profiles = new Map<number, StreamerProfile>();
+  public platformAccounts: StreamerPlatformAccount[] = [];
   private nextProfileId = 1;
   private nextAccId = 1;
 
   async findProfileByUserId(
     userId: number,
-  ): Promise<(CreatorProfile & { platformAccounts: CreatorPlatformAccount[] }) | null> {
+  ): Promise<(StreamerProfile & { platformAccounts: StreamerPlatformAccount[] }) | null> {
     const prof = Array.from(this.profiles.values()).find((p) => p.userId === userId);
     if (!prof) return null;
-    const accs = this.platformAccounts.filter((a) => a.creatorId === prof.id);
+    const accs = this.platformAccounts.filter((a) => a.streamerId === prof.id);
     return { ...prof, platformAccounts: accs };
   }
 
   async findProfileById(
-    creatorId: number,
-  ): Promise<(CreatorProfile & { platformAccounts: CreatorPlatformAccount[] }) | null> {
-    const prof = this.profiles.get(creatorId);
+    streamerId: number,
+  ): Promise<(StreamerProfile & { platformAccounts: StreamerPlatformAccount[] }) | null> {
+    const prof = this.profiles.get(streamerId);
     if (!prof) return null;
-    const accs = this.platformAccounts.filter((a) => a.creatorId === creatorId);
+    const accs = this.platformAccounts.filter((a) => a.streamerId === streamerId);
     return { ...prof, platformAccounts: accs };
   }
 
   async findPlatformAccount(
-    platform: CreatorPlatformType,
+    platform: StreamerPlatformType,
     platformUserId: string,
-  ): Promise<CreatorPlatformAccount | null> {
+  ): Promise<StreamerPlatformAccount | null> {
     return (
       this.platformAccounts.find(
         (a) => a.platform === platform && a.platformUserId === platformUserId,
@@ -289,14 +289,16 @@ class MemoryCreatorRepo implements CreatorRepository {
     );
   }
 
-  async findPlatformAccountById(platformAccountId: number): Promise<CreatorPlatformAccount | null> {
+  async findPlatformAccountById(
+    platformAccountId: number,
+  ): Promise<StreamerPlatformAccount | null> {
     return this.platformAccounts.find((a) => a.id === platformAccountId) || null;
   }
 
   async updatePlatformAccountMetrics(
     platformAccountId: number,
     input: { audienceCount: number | null; channelCreatedAt: string | null; syncedAt: string },
-  ): Promise<CreatorPlatformAccount> {
+  ): Promise<StreamerPlatformAccount> {
     const idx = this.platformAccounts.findIndex((a) => a.id === platformAccountId);
     if (idx < 0) throw new Error("platform account not found");
     this.platformAccounts[idx] = {
@@ -314,11 +316,11 @@ class MemoryCreatorRepo implements CreatorRepository {
     status: "UNVERIFIED" | "VERIFIED" | "SUSPENDED";
     featuredStatus?: "NONE" | "FEATURED" | "PARTNER";
     featuredReason?: string | null;
-  }): Promise<CreatorProfile> {
+  }): Promise<StreamerProfile> {
     const now = NOW_ISO;
     const existing = await this.findProfileByUserId(input.userId);
     if (existing) {
-      const updated: CreatorProfile = {
+      const updated: StreamerProfile = {
         ...existing,
         status: input.status,
         featuredStatus: input.featuredStatus ?? existing.featuredStatus,
@@ -334,7 +336,7 @@ class MemoryCreatorRepo implements CreatorRepository {
       this.profiles.set(existing.id, updated);
       return updated;
     }
-    const created: CreatorProfile = {
+    const created: StreamerProfile = {
       id: this.nextProfileId++,
       userId: input.userId,
       status: input.status,
@@ -349,21 +351,21 @@ class MemoryCreatorRepo implements CreatorRepository {
   }
 
   async addPlatformAccount(input: {
-    creatorId: number;
-    platform: CreatorPlatformType;
+    streamerId: number;
+    platform: StreamerPlatformType;
     platformUserId: string;
     channelName: string;
     channelHandle?: string | null;
     channelUrl: string;
     avatarUrl?: string | null;
     verificationStatus?: string;
-  }): Promise<CreatorPlatformAccount> {
+  }): Promise<StreamerPlatformAccount> {
     return this.upsertPlatformAccount(input);
   }
 
   async upsertPlatformAccount(input: {
-    creatorId: number;
-    platform: CreatorPlatformType;
+    streamerId: number;
+    platform: StreamerPlatformType;
     platformUserId: string;
     channelName: string;
     channelHandle?: string | null;
@@ -372,7 +374,7 @@ class MemoryCreatorRepo implements CreatorRepository {
     verificationStatus?: string;
     audienceCount?: number;
     channelCreatedAt?: string | null;
-  }): Promise<CreatorPlatformAccount> {
+  }): Promise<StreamerPlatformAccount> {
     const now = NOW_ISO;
     const existingIdx = this.platformAccounts.findIndex(
       (a) => a.platform === input.platform && a.platformUserId === input.platformUserId,
@@ -380,7 +382,7 @@ class MemoryCreatorRepo implements CreatorRepository {
     if (existingIdx >= 0) {
       this.platformAccounts[existingIdx] = {
         ...this.platformAccounts[existingIdx],
-        creatorId: input.creatorId,
+        streamerId: input.streamerId,
         channelName: input.channelName,
         channelHandle: input.channelHandle ?? null,
         channelUrl: input.channelUrl,
@@ -393,9 +395,9 @@ class MemoryCreatorRepo implements CreatorRepository {
       };
       return this.platformAccounts[existingIdx];
     }
-    const created: CreatorPlatformAccount = {
+    const created: StreamerPlatformAccount = {
       id: this.nextAccId++,
-      creatorId: input.creatorId,
+      streamerId: input.streamerId,
       platform: input.platform,
       platformUserId: input.platformUserId,
       channelName: input.channelName,
@@ -414,24 +416,24 @@ class MemoryCreatorRepo implements CreatorRepository {
     return created;
   }
 
-  async getCreatorRankings(): Promise<{ entries: never[]; total: number }> {
+  async getStreamerRankings(): Promise<{ entries: never[]; total: number }> {
     return { entries: [], total: 0 };
   }
 }
 
 async function setupVerifiedAccount(
-  repo: MemoryCreatorRepo,
+  repo: MemoryStreamerRepo,
   reviewRepo: MemoryReviewRepo,
   userId: number,
   opts: { audienceCount: number; channelCreatedAt: string } = {
     audienceCount: 15000,
     channelCreatedAt: isoDaysAgo(400),
   },
-): Promise<{ useCases: CreatorUseCases; account: CreatorPlatformAccount }> {
-  const useCases = new CreatorUseCases(repo, reviewRepo);
+): Promise<{ useCases: StreamerUseCases; account: StreamerPlatformAccount }> {
+  const useCases = new StreamerUseCases(repo, reviewRepo);
   const profile = await repo.upsertProfile({ userId, status: "VERIFIED" });
   const account = await repo.addPlatformAccount({
-    creatorId: profile.id,
+    streamerId: profile.id,
     platform: "YOUTUBE",
     platformUserId: `yt_${userId}`,
     channelName: `Channel ${userId}`,
@@ -441,7 +443,7 @@ async function setupVerifiedAccount(
   });
   // 소유권 인증 시 createOrResetJob이 생성하는 잡과 동일하게, 예정 시각이 지난 상태로 생성
   await reviewRepo.createOrResetJob({
-    creatorPlatformAccountId: account.id,
+    streamerPlatformAccountId: account.id,
     initialAudience: opts.audienceCount,
     initialChannelCreatedAt: opts.channelCreatedAt,
     nextCheckAt: NOW_ISO,
@@ -450,9 +452,9 @@ async function setupVerifiedAccount(
 }
 
 test("verifyChannelOwnership — qualified snapshot schedules AUTO_REVIEW_PENDING job (never FEATURED)", async () => {
-  const repo = new MemoryCreatorRepo();
+  const repo = new MemoryStreamerRepo();
   const reviewRepo = new MemoryReviewRepo();
-  const useCases = new CreatorUseCases(repo, reviewRepo);
+  const useCases = new StreamerUseCases(repo, reviewRepo);
 
   const res = await useCases.verifyChannelOwnership(101, {
     platform: "YOUTUBE",
@@ -476,7 +478,7 @@ test("verifyChannelOwnership — qualified snapshot schedules AUTO_REVIEW_PENDIN
 });
 
 test("runDueFeaturedReviews — qualified recheck promotes profile to FEATURED and refreshes metrics", async () => {
-  const repo = new MemoryCreatorRepo();
+  const repo = new MemoryStreamerRepo();
   const reviewRepo = new MemoryReviewRepo();
   const { useCases, account } = await setupVerifiedAccount(repo, reviewRepo, 7);
 
@@ -506,7 +508,8 @@ test("runDueFeaturedReviews — qualified recheck promotes profile to FEATURED a
   assert.equal(
     reviewRepo.jobs.find(
       (candidate) =>
-        candidate.creatorPlatformAccountId === account.id && candidate.reviewType === "ACQUISITION",
+        candidate.streamerPlatformAccountId === account.id &&
+        candidate.reviewType === "ACQUISITION",
     )?.status,
     "FEATURED",
   );
@@ -516,7 +519,7 @@ test("runDueFeaturedReviews — qualified recheck promotes profile to FEATURED a
 // featuredPolicy.ts, 운영자 지시 2026-08-14), so a below-auto-threshold audience now routes to
 // MANUAL_REVIEW instead of NOT_ELIGIBLE — nobody is silently rejected during the testing phase.
 test("runDueFeaturedReviews — audience below auto threshold → MANUAL_REVIEW, badge not granted", async () => {
-  const repo = new MemoryCreatorRepo();
+  const repo = new MemoryStreamerRepo();
   const reviewRepo = new MemoryReviewRepo();
   const { useCases, account } = await setupVerifiedAccount(repo, reviewRepo, 8);
 
@@ -539,7 +542,7 @@ test("runDueFeaturedReviews — audience below auto threshold → MANUAL_REVIEW,
 });
 
 test("runDueFeaturedReviews — missing metrics → MANUAL_REVIEW without guessing", async () => {
-  const repo = new MemoryCreatorRepo();
+  const repo = new MemoryStreamerRepo();
   const reviewRepo = new MemoryReviewRepo();
   const { useCases, account } = await setupVerifiedAccount(repo, reviewRepo, 9);
 
@@ -562,7 +565,7 @@ test("runDueFeaturedReviews — missing metrics → MANUAL_REVIEW without guessi
 });
 
 test("runDueFeaturedReviews — unsupported automatic refresh platform → MANUAL_REVIEW", async () => {
-  const repo = new MemoryCreatorRepo();
+  const repo = new MemoryStreamerRepo();
   const reviewRepo = new MemoryReviewRepo();
   const { useCases, account } = await setupVerifiedAccount(repo, reviewRepo, 10);
 
@@ -580,7 +583,7 @@ test("runDueFeaturedReviews — unsupported automatic refresh platform → MANUA
 });
 
 test("runDueFeaturedReviews — single provider failure is isolated and retried as FAILED_RETRYABLE", async () => {
-  const repo = new MemoryCreatorRepo();
+  const repo = new MemoryStreamerRepo();
   const reviewRepo = new MemoryReviewRepo();
   const { useCases, account } = await setupVerifiedAccount(repo, reviewRepo, 11);
 
@@ -605,7 +608,7 @@ test("runDueFeaturedReviews — single provider failure is isolated and retried 
 });
 
 test("runDueFeaturedReviews — retries exhausted → MANUAL_REVIEW", async () => {
-  const repo = new MemoryCreatorRepo();
+  const repo = new MemoryStreamerRepo();
   const reviewRepo = new MemoryReviewRepo();
   const { useCases, account } = await setupVerifiedAccount(repo, reviewRepo, 12);
 
@@ -634,7 +637,7 @@ test("runDueFeaturedReviews — retries exhausted → MANUAL_REVIEW", async () =
 });
 
 test("runDueFeaturedReviews — duplicate run is idempotent (completed jobs are skipped)", async () => {
-  const repo = new MemoryCreatorRepo();
+  const repo = new MemoryStreamerRepo();
   const reviewRepo = new MemoryReviewRepo();
   const { useCases, account } = await setupVerifiedAccount(repo, reviewRepo, 13);
 
@@ -655,12 +658,12 @@ test("runDueFeaturedReviews — duplicate run is idempotent (completed jobs are 
 });
 
 test("runDueFeaturedReviews — unverified account can never become Featured", async () => {
-  const repo = new MemoryCreatorRepo();
+  const repo = new MemoryStreamerRepo();
   const reviewRepo = new MemoryReviewRepo();
-  const useCases = new CreatorUseCases(repo, reviewRepo);
+  const useCases = new StreamerUseCases(repo, reviewRepo);
   const profile = await repo.upsertProfile({ userId: 14, status: "UNVERIFIED" });
   const account = await repo.addPlatformAccount({
-    creatorId: profile.id,
+    streamerId: profile.id,
     platform: "YOUTUBE",
     platformUserId: "yt_14",
     channelName: "Unverified",
@@ -668,7 +671,7 @@ test("runDueFeaturedReviews — unverified account can never become Featured", a
     verificationStatus: "PENDING",
   });
   await reviewRepo.createOrResetJob({
-    creatorPlatformAccountId: account.id,
+    streamerPlatformAccountId: account.id,
     initialAudience: 99999,
     initialChannelCreatedAt: isoDaysAgo(500),
     nextCheckAt: NOW_ISO,
@@ -688,17 +691,17 @@ test("runDueFeaturedReviews — unverified account can never become Featured", a
 });
 
 test("getFeaturedReviewState — returns latest job for profile presentation", async () => {
-  const repo = new MemoryCreatorRepo();
+  const repo = new MemoryStreamerRepo();
   const reviewRepo = new MemoryReviewRepo();
   const { useCases, account } = await setupVerifiedAccount(repo, reviewRepo, 15);
 
   const state = await useCases.getFeaturedReviewState(15);
-  assert.equal(state?.creatorPlatformAccountId, account.id);
+  assert.equal(state?.streamerPlatformAccountId, account.id);
   assert.equal(state?.status, "AUTO_REVIEW_PENDING");
 });
 
 test("Featured processing never touches scores, XP or ranking inputs", async () => {
-  const repo = new MemoryCreatorRepo();
+  const repo = new MemoryStreamerRepo();
   const reviewRepo = new MemoryReviewRepo();
   const { useCases } = await setupVerifiedAccount(repo, reviewRepo, 16);
 
@@ -708,14 +711,14 @@ test("Featured processing never touches scores, XP or ranking inputs", async () 
     batchSize: 10,
   });
 
-  const rankings = await useCases.getCreatorRankings({ mode: "score" });
+  const rankings = await useCases.getStreamerRankings({ mode: "score" });
   assert.equal(rankings.total, 0);
   const profile = await repo.findProfileByUserId(16);
   assert.equal(profile?.featuredStatus, "FEATURED");
 });
 
 async function setupFeaturedForRevalidation(userId: number) {
-  const repo = new MemoryCreatorRepo();
+  const repo = new MemoryStreamerRepo();
   const reviewRepo = new MemoryReviewRepo();
   const { useCases, account } = await setupVerifiedAccount(repo, reviewRepo, userId);
   await useCases.runDueFeaturedReviews({
@@ -724,7 +727,7 @@ async function setupFeaturedForRevalidation(userId: number) {
     batchSize: 10,
   });
   const revalidationJob = reviewRepo.jobs.find(
-    (job) => job.creatorPlatformAccountId === account.id && job.reviewType === "REVALIDATION",
+    (job) => job.streamerPlatformAccountId === account.id && job.reviewType === "REVALIDATION",
   );
   assert.ok(revalidationJob);
   revalidationJob.nextCheckAt = NOW_ISO;
@@ -749,7 +752,7 @@ test("runDueFeaturedRevalidations — fresh audience >= 8,000 retains Featured a
   assert.equal((await repo.findProfileByUserId(30))?.featuredStatus, "FEATURED");
   assert.equal(
     reviewRepo.jobs.filter(
-      (job) => job.creatorPlatformAccountId === account.id && job.reviewType === "REVALIDATION",
+      (job) => job.streamerPlatformAccountId === account.id && job.reviewType === "REVALIDATION",
     ).length,
     2,
   );
@@ -791,7 +794,7 @@ test("runDueFeaturedRevalidations — temporary provider error preserves Feature
   assert.equal((await repo.findProfileByUserId(32))?.featuredStatus, "FEATURED");
   assert.equal(
     reviewRepo.jobs.find(
-      (job) => job.creatorPlatformAccountId === account.id && job.reviewType === "REVALIDATION",
+      (job) => job.streamerPlatformAccountId === account.id && job.reviewType === "REVALIDATION",
     )?.status,
     "REVALIDATION_FAILED_RETRYABLE",
   );
@@ -815,7 +818,7 @@ test("runDueFeaturedRevalidations — unavailable metric routes to manual review
   assert.equal((await repo.findProfileByUserId(33))?.featuredStatus, "FEATURED");
   assert.equal(
     reviewRepo.jobs.find(
-      (job) => job.creatorPlatformAccountId === account.id && job.reviewType === "REVALIDATION",
+      (job) => job.streamerPlatformAccountId === account.id && job.reviewType === "REVALIDATION",
     )?.status,
     "MANUAL_REVIEW",
   );

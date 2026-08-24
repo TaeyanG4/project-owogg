@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   GAME_SESSION_POLICY,
   GameResultAcceptanceUseCases,
-  parseCreatorManifest,
+  parseGameCreatorManifest,
   signGameSession,
   type GameResultAcceptanceRepository,
   type RuntimeGame,
@@ -20,7 +20,7 @@ function runtime(): RuntimeGame {
     ...base,
     canonical: {
       ...base.canonical,
-      creatorManifest: parseCreatorManifest({
+      creatorManifest: parseGameCreatorManifest({
         schemaVersion: 1,
         game: { slug: "result-game", title: "Result", genre: "test", mode: "single" },
         progression: { type: "none" },

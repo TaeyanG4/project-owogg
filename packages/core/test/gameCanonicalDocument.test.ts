@@ -287,7 +287,7 @@ test("current schema requires a strict publisher metadata object", () => {
   );
 });
 
-test("legacy canonical schemas cannot claim a Creator Manifest v1 contract", () => {
+test("legacy canonical schemas cannot claim a Game Creator Manifest v1 contract", () => {
   const raw = JSON.parse(serializeGameCanonicalDocument(genreModeDoc()));
   raw.schemaVersion = 2;
   raw.creatorManifest = {

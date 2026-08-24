@@ -1,6 +1,6 @@
 import type { ScoreConfig } from "@owogg/game-sdk/contracts";
 import type { SandboxGameMetadataInput, SandboxGameRecord } from "../ports/sandboxGames.js";
-import { isCreatorScorePolicyConfigured } from "./creatorScorePolicy.js";
+import { isGameCreatorScorePolicyConfigured } from "./gameCreatorScorePolicy.js";
 import {
   GAME_CANONICAL_SCHEMA_VERSION,
   type GameCanonicalDocument,
@@ -68,7 +68,7 @@ export function computeUserCanonicalScorePatch(
       scoreMin: input.scoreMin !== undefined ? input.scoreMin : existing.min,
       scoreMax: input.scoreMax !== undefined ? input.scoreMax : existing.max,
     };
-    if (!isCreatorScorePolicyConfigured(required)) {
+    if (!isGameCreatorScorePolicyConfigured(required)) {
       return { ok: false, reason: "SCORE_POLICY_WOULD_BECOME_INCOMPLETE" };
     }
     return {
@@ -97,7 +97,7 @@ export function computeUserCanonicalScorePatch(
     scoreMin: input.scoreMin ?? null,
     scoreMax: input.scoreMax ?? null,
   };
-  if (!isCreatorScorePolicyConfigured(required)) {
+  if (!isGameCreatorScorePolicyConfigured(required)) {
     return { ok: false, reason: "AMBIGUOUS_SCORE_POLICY_ACTIVATION" };
   }
   return {
@@ -194,7 +194,7 @@ export function patchUserGameCanonical(
 export function mapUserGameRecordToCanonical(
   record: SandboxGameRecord,
 ): GameCanonicalDocument | null {
-  if (!isCreatorScorePolicyConfigured(record)) return null;
+  if (!isGameCreatorScorePolicyConfigured(record)) return null;
   return {
     schemaVersion: GAME_CANONICAL_SCHEMA_VERSION,
     slug: record.slug,

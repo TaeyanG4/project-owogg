@@ -41,7 +41,7 @@ export default function WikiGamesRankingRoute() {
         <p className="mt-2 text-sm text-text-secondary">
           {t.streamerLinkPrefix}
           <Link
-            to="/wiki/creator/verification"
+            to="/wiki/streamer/verification"
             className="font-bold text-brand-light hover:underline"
           >
             {t.streamerLink}

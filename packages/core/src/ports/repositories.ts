@@ -196,13 +196,13 @@ export interface AccountMergeRepository {
   findMergeChallenge(id: string): Promise<MergeChallenge | null>;
   findPendingMergeChallenge(userA: number, userB: number): Promise<MergeChallenge | null>;
   /**
-   * Returns a conflict when both accounts own external Creator channels on the same
+   * Returns a conflict when both accounts own external Streamer channels on the same
    * platform. The merge must stop before any destructive statement in that case.
    */
   findMergeIntegrityConflict(
     primaryId: number,
     secondaryId: number,
-  ): Promise<"CREATOR_PLATFORM_CONFLICT" | null>;
+  ): Promise<"STREAMER_PLATFORM_CONFLICT" | null>;
   /** Performs the complete Primary-Wins transfer/deletion in one database transaction. */
   mergeAccounts(primaryId: number, secondaryId: number, challengeId: string): Promise<void>;
 }
@@ -494,16 +494,16 @@ export interface DiscordGuildRepository {
   ): Promise<{ totalXp: number; rank: number | null }>;
 }
 
-export type CreatorPlatformType = "YOUTUBE" | "CHZZK" | "SOOP" | "TWITCH";
-export type CreatorStatusType = "UNVERIFIED" | "VERIFIED" | "SUSPENDED";
+export type StreamerPlatformType = "YOUTUBE" | "CHZZK" | "SOOP" | "TWITCH";
+export type StreamerStatusType = "UNVERIFIED" | "VERIFIED" | "SUSPENDED";
 export type FeaturedStatusType = "NONE" | "FEATURED" | "PARTNER";
-export type CreatorReviewType = "ACQUISITION" | "REVALIDATION";
-export type CreatorReviewAction = "APPROVE_FEATURED" | "REJECT_FEATURED" | "KEEP_FOR_REVIEW";
+export type StreamerReviewType = "ACQUISITION" | "REVALIDATION";
+export type StreamerReviewAction = "APPROVE_FEATURED" | "REJECT_FEATURED" | "KEEP_FOR_REVIEW";
 
-export interface CreatorProfile {
+export interface StreamerProfile {
   id: number;
   userId: number;
-  status: CreatorStatusType;
+  status: StreamerStatusType;
   featuredStatus: FeaturedStatusType;
   featuredReason: string | null;
   featuredSince: string | null;
@@ -511,10 +511,10 @@ export interface CreatorProfile {
   updatedAt: string;
 }
 
-export interface CreatorPlatformAccount {
+export interface StreamerPlatformAccount {
   id: number;
-  creatorId: number;
-  platform: CreatorPlatformType;
+  streamerId: number;
+  platform: StreamerPlatformType;
   platformUserId: string;
   channelName: string;
   channelHandle: string | null;
@@ -530,15 +530,15 @@ export interface CreatorPlatformAccount {
   updatedAt: string;
 }
 
-export interface CreatorRankEntry {
+export interface StreamerRankEntry {
   userId: number;
   nickname: string;
   avatarUrl: string | null;
   country: string | null;
-  creatorId: number;
+  streamerId: number;
   featuredStatus: FeaturedStatusType;
   platformAccounts: Array<{
-    platform: CreatorPlatformType;
+    platform: StreamerPlatformType;
     channelName: string;
     channelUrl: string;
     avatarUrl: string | null;
@@ -552,7 +552,7 @@ export interface CreatorRankEntry {
   rank: number;
 }
 
-export type CreatorReviewJobStatus =
+export type StreamerReviewJobStatus =
   | "AUTO_REVIEW_PENDING"
   | "FEATURED"
   | "NOT_ELIGIBLE"
@@ -561,11 +561,11 @@ export type CreatorReviewJobStatus =
   | "REVALIDATION_PENDING"
   | "REVALIDATION_FAILED_RETRYABLE";
 
-export interface CreatorReviewJob {
+export interface StreamerReviewJob {
   id: number;
-  creatorPlatformAccountId: number;
-  reviewType: CreatorReviewType;
-  status: CreatorReviewJobStatus;
+  streamerPlatformAccountId: number;
+  reviewType: StreamerReviewType;
+  status: StreamerReviewJobStatus;
   initialAudience: number | null;
   initialChannelCreatedAt: string | null;
   nextCheckAt: string;
@@ -577,18 +577,18 @@ export interface CreatorReviewJob {
   completedAt: string | null;
 }
 
-export interface CreatorManualReviewItem {
-  job: CreatorReviewJob;
+export interface StreamerManualReviewItem {
+  job: StreamerReviewJob;
   userId: number;
   nickname: string;
-  creatorId: number;
-  creatorStatus: CreatorStatusType;
+  streamerId: number;
+  streamerStatus: StreamerStatusType;
   featuredStatus: FeaturedStatusType;
-  platformAccount: CreatorPlatformAccount;
+  platformAccount: StreamerPlatformAccount;
 }
 
-export interface CreatorReviewMetricSnapshot {
-  platform: CreatorPlatformType;
+export interface StreamerReviewMetricSnapshot {
+  platform: StreamerPlatformType;
   channelName: string;
   channelUrl: string;
   verificationStatus: string;
@@ -597,69 +597,71 @@ export interface CreatorReviewMetricSnapshot {
   metricsSyncedAt: string | null;
 }
 
-export interface CreatorReviewAuditLog {
+export interface StreamerReviewAuditLog {
   id: number;
-  creatorPlatformAccountId: number;
+  streamerPlatformAccountId: number;
   reviewJobId: number | null;
   reviewerUserId: number;
-  action: CreatorReviewAction;
+  action: StreamerReviewAction;
   reason: string;
-  previousStatus: CreatorReviewJobStatus;
-  newStatus: CreatorReviewJobStatus;
-  metricSnapshot: CreatorReviewMetricSnapshot | null;
+  previousStatus: StreamerReviewJobStatus;
+  newStatus: StreamerReviewJobStatus;
+  metricSnapshot: StreamerReviewMetricSnapshot | null;
   createdAt: string;
-  platform?: CreatorPlatformType | undefined;
+  platform?: StreamerPlatformType | undefined;
   channelName?: string | undefined;
 }
 
-export interface CreatorReviewQueueResult {
-  items: CreatorManualReviewItem[];
+export interface StreamerReviewQueueResult {
+  items: StreamerManualReviewItem[];
   total: number;
 }
 
-export interface CreatorReviewAuditResult {
-  entries: CreatorReviewAuditLog[];
+export interface StreamerReviewAuditResult {
+  entries: StreamerReviewAuditLog[];
   total: number;
 }
 
-export type CreatorManualReviewFailureCode =
+export type StreamerManualReviewFailureCode =
   "NOT_FOUND" | "ALREADY_DECIDED" | "OWNERSHIP_NOT_VERIFIED" | "ALREADY_APPLIED" | "INVALID_REASON";
 
-export interface CreatorManualReviewDecisionResult {
+export interface StreamerManualReviewDecisionResult {
   applied: boolean;
-  code?: CreatorManualReviewFailureCode;
-  previousStatus: CreatorReviewJobStatus | null;
-  newStatus: CreatorReviewJobStatus | null;
+  code?: StreamerManualReviewFailureCode;
+  previousStatus: StreamerReviewJobStatus | null;
+  newStatus: StreamerReviewJobStatus | null;
 }
 
-export interface CreatorReviewRepository {
+export interface StreamerReviewRepository {
   /** 가장 최근 심사/재심사 결과 (프로필 단위 프레젠테이션용). */
-  findLatestJobByAccountIds(creatorPlatformAccountIds: number[]): Promise<CreatorReviewJob | null>;
+  findLatestJobByAccountIds(
+    streamerPlatformAccountIds: number[],
+  ): Promise<StreamerReviewJob | null>;
   /** 아직 활성 상태(진행/재시도 대기)인 계정의 잡을 조회. */
-  findActiveJobByAccountId(creatorPlatformAccountId: number): Promise<CreatorReviewJob | null>;
+  findActiveJobByAccountId(streamerPlatformAccountId: number): Promise<StreamerReviewJob | null>;
   /** 계정별 최신 재검증 잡을 조회합니다. */
   findLatestRevalidationJobByAccountId(
-    creatorPlatformAccountId: number,
-  ): Promise<CreatorReviewJob | null>;
+    streamerPlatformAccountId: number,
+  ): Promise<StreamerReviewJob | null>;
   /** 활성 잡이 없으면 신규 생성, 있으면 스냅샷/다음 심사 시각을 리셋(멱등). */
   createOrResetJob(input: {
-    creatorPlatformAccountId: number;
+    streamerPlatformAccountId: number;
     initialAudience: number | null;
     initialChannelCreatedAt: string | null;
     nextCheckAt: string;
-  }): Promise<CreatorReviewJob>;
-  /** 기존 Featured Creator의 14일 재검증 잡을 멱등적으로 예약합니다. */
+  }): Promise<StreamerReviewJob>;
+  /** 기존 Featured Streamer의 14일 재검증 잡을 멱등적으로 예약합니다. */
   scheduleRevalidationJob(input: {
-    creatorPlatformAccountId: number;
+    streamerPlatformAccountId: number;
     nextCheckAt: string;
     nowIso: string;
-  }): Promise<CreatorReviewJob>;
+  }): Promise<StreamerReviewJob>;
   /** 기존 Featured 계정 중 재검증 잡이 없는 계정을 제한된 수만큼 보충합니다. */
   ensureRevalidationJobs(limit: number, nextCheckAt: string, nowIso: string): Promise<number>;
   /** 예정 시각이 지난 진행/재시도 잡을 바운디드 배치로 조회 (unbounded scan 금지). */
-  listDuePendingJobs(limit: number, nowIso: string): Promise<CreatorReviewJob[]>;
+  listDuePendingJobs(limit: number, nowIso: string): Promise<StreamerReviewJob[]>;
   /** 14일 재검증 잡만 조회합니다 (6시간 취득 파이프라인과 분리). */
-  listDueRevalidationJobs(limit: number, nowIso: string): Promise<CreatorReviewJob[]>;
+  listDueRevalidationJobs(limit: number, nowIso: string): Promise<StreamerReviewJob[]>;
   /** 재시도 가능 실패 기록. attempt_count 1 증가. */
   markJobFailed(id: number, error: string, nextCheckAt: string, nowIso: string): Promise<void>;
   /**
@@ -669,7 +671,7 @@ export interface CreatorReviewRepository {
   completeJob(
     id: number,
     status: Exclude<
-      CreatorReviewJobStatus,
+      StreamerReviewJobStatus,
       | "AUTO_REVIEW_PENDING"
       | "FAILED_RETRYABLE"
       | "REVALIDATION_PENDING"
@@ -678,50 +680,50 @@ export interface CreatorReviewRepository {
     completedAt: string,
     reason?: string,
   ): Promise<boolean>;
-  listManualReviewQueue(limit: number, offset: number): Promise<CreatorReviewQueueResult>;
-  listAuditLogs(limit: number, offset: number): Promise<CreatorReviewAuditResult>;
+  listManualReviewQueue(limit: number, offset: number): Promise<StreamerReviewQueueResult>;
+  listAuditLogs(limit: number, offset: number): Promise<StreamerReviewAuditResult>;
   applyManualReviewDecision(input: {
     jobId: number;
     reviewerUserId: number;
-    action: CreatorReviewAction;
+    action: StreamerReviewAction;
     reason: string;
     publicProfileReason: string;
     nextRevalidationAt: string;
     nowIso: string;
-  }): Promise<CreatorManualReviewDecisionResult>;
+  }): Promise<StreamerManualReviewDecisionResult>;
 }
 
-export interface CreatorRepository {
+export interface StreamerRepository {
   findProfileByUserId(
     userId: number,
-  ): Promise<(CreatorProfile & { platformAccounts: CreatorPlatformAccount[] }) | null>;
+  ): Promise<(StreamerProfile & { platformAccounts: StreamerPlatformAccount[] }) | null>;
   findProfileById(
-    creatorId: number,
-  ): Promise<(CreatorProfile & { platformAccounts: CreatorPlatformAccount[] }) | null>;
-  findPlatformAccountById(platformAccountId: number): Promise<CreatorPlatformAccount | null>;
+    streamerId: number,
+  ): Promise<(StreamerProfile & { platformAccounts: StreamerPlatformAccount[] }) | null>;
+  findPlatformAccountById(platformAccountId: number): Promise<StreamerPlatformAccount | null>;
   findPlatformAccount(
-    platform: CreatorPlatformType,
+    platform: StreamerPlatformType,
     platformUserId: string,
-  ): Promise<CreatorPlatformAccount | null>;
+  ): Promise<StreamerPlatformAccount | null>;
   upsertProfile(input: {
     userId: number;
-    status: CreatorStatusType;
+    status: StreamerStatusType;
     featuredStatus?: FeaturedStatusType;
     featuredReason?: string | null;
-  }): Promise<CreatorProfile>;
+  }): Promise<StreamerProfile>;
   addPlatformAccount(input: {
-    creatorId: number;
-    platform: CreatorPlatformType;
+    streamerId: number;
+    platform: StreamerPlatformType;
     platformUserId: string;
     channelName: string;
     channelHandle?: string | null;
     channelUrl: string;
     avatarUrl?: string | null;
     verificationStatus?: string;
-  }): Promise<CreatorPlatformAccount>;
+  }): Promise<StreamerPlatformAccount>;
   upsertPlatformAccount(input: {
-    creatorId: number;
-    platform: CreatorPlatformType;
+    streamerId: number;
+    platform: StreamerPlatformType;
     platformUserId: string;
     channelName: string;
     channelHandle?: string | null;
@@ -730,7 +732,7 @@ export interface CreatorRepository {
     verificationStatus?: string;
     audienceCount?: number;
     channelCreatedAt?: string | null;
-  }): Promise<CreatorPlatformAccount>;
+  }): Promise<StreamerPlatformAccount>;
   /** 스케줄 재심사 성공 시 공식 지표를 갱신하고 metrics_synced_at를 갱신합니다. */
   updatePlatformAccountMetrics(
     platformAccountId: number,
@@ -739,15 +741,15 @@ export interface CreatorRepository {
       channelCreatedAt: string | null;
       syncedAt: string;
     },
-  ): Promise<CreatorPlatformAccount>;
-  getCreatorRankings(options: {
+  ): Promise<StreamerPlatformAccount>;
+  getStreamerRankings(options: {
     mode: "score" | "xp";
     gameId?: string;
     direction?: "asc" | "desc";
-    platform?: CreatorPlatformType;
+    platform?: StreamerPlatformType;
     limit?: number;
     offset?: number;
-  }): Promise<{ entries: CreatorRankEntry[]; total: number }>;
+  }): Promise<{ entries: StreamerRankEntry[]; total: number }>;
 }
 
 /** Live, DB-backed enable/disable override for a game — see migrations/0019_game_settings.sql. */

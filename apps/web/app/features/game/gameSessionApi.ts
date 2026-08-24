@@ -3,7 +3,7 @@ import { apiFetch } from "../../lib/api/client";
 
 /**
  * POST /api/games/:slug/session — issues a short-lived, HMAC-signed Game Session token for a
- * PUBLIC, live Creator game (packages/core/src/domain/gameSession.ts). Requires the caller to
+ * PUBLIC, live Game Creator game (packages/core/src/domain/gameSession.ts). Requires the caller to
  * already be authenticated — the existing owogg_session cookie, sent automatically by apiFetch's
  * credentials: "include", same as every other authenticated client call in this app.
  *

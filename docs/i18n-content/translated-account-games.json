@@ -29,8 +29,8 @@
       "calloutNoMergeBody": " Primary의 점수/XP/진행도만 유지되며, Secondary의 기록은 통합 후 사라집니다 — 반드시 남기고 싶은 계정을 Primary로 선택하세요.",
       "calloutAdminStrong": "Secondary 계정이 관리자 계정이면 통합이 차단됩니다.",
       "calloutAdminBody": " 관리자 권한이 있는 계정을 Secondary로 통합하면 그 권한이 어디로도 옮겨지지 않고 사라질 수 있어, OwOGG는 안전을 위해 이 경우 통합 자체를 막고 운영진의 별도 처리를 요구합니다.",
-      "footerPrefix": "플랫폼 소유권 인증(Creator)이 되어 있는 계정을 통합하는 경우의 규칙은 ",
-      "footerLink": "Creator 채널 소유권 인증",
+      "footerPrefix": "플랫폼 소유권 인증(Streamer)이 되어 있는 계정을 통합하는 경우의 규칙은 ",
+      "footerLink": "Streamer 채널 소유권 인증",
       "footerSuffix": " 문서를 참고하세요."
     },
     "games": {
@@ -59,9 +59,9 @@
       "streamerBodyStrong": "하나 이상",
       "streamerBodySuffix": "의 플랫폼에서 공식 채널 소유권 인증을 완료한 사용자만 노출됩니다. 순위 값은 일반 게임 랭킹/XP 랭킹과 동일한 계산식을 사용하며, 인증한 플랫폼 수는 순위에 영향을 주지 않습니다 — 오른쪽 끝의 플랫폼 아이콘은 필터링·표시 전용입니다.",
       "streamerLinkPrefix": "자세한 인증 방법은 ",
-      "streamerLink": "Creator 채널 소유권 인증",
+      "streamerLink": "Streamer 채널 소유권 인증",
       "streamerLinkSuffix": " 문서를 참고하세요.",
-      "calloutFeatured": "Featured Creator 표시는 랭킹 순위나 XP 계산에 어떠한 영향도 주지 않는 표시 전용 배지입니다.",
+      "calloutFeatured": "Featured Streamer 표시는 랭킹 순위나 XP 계산에 어떠한 영향도 주지 않는 표시 전용 배지입니다.",
       "footerPrefix": "Discord 서버 단위 랭킹은 ",
       "footerLink": "Discord 서버 XP 문서",
       "footerSuffix": "를 참고하세요."
@@ -136,8 +136,8 @@
       "calloutNoMergeBody": " Only the Primary's scores/XP/progress are kept; the Secondary's records are gone after the merge — be sure to choose the account you want to keep as the Primary.",
       "calloutAdminStrong": "The merge is blocked if the Secondary is an administrator account.",
       "calloutAdminBody": " Merging an account that holds admin privileges as the Secondary could make those privileges vanish without transferring anywhere, so for safety OwOGG blocks the merge outright and requires separate handling by staff.",
-      "footerPrefix": "For the rules that apply when merging an account with Creator channel ownership verification, see the ",
-      "footerLink": "Creator channel ownership verification",
+      "footerPrefix": "For the rules that apply when merging an account with Streamer channel ownership verification, see the ",
+      "footerLink": "Streamer channel ownership verification",
       "footerSuffix": " article."
     },
     "games": {
@@ -166,9 +166,9 @@
       "streamerBodyStrong": "at least one",
       "streamerBodySuffix": " of YouTube / CHZZK / SOOP / Twitch appear here. Ranking values use the exact same formula as the regular game/XP rankings, and the number of verified platforms has no effect on position — the platform icons at the right edge are for filtering and display only.",
       "streamerLinkPrefix": "For how to verify, see the ",
-      "streamerLink": "Creator channel ownership verification",
+      "streamerLink": "Streamer channel ownership verification",
       "streamerLinkSuffix": " article.",
-      "calloutFeatured": "The Featured Creator mark is a display-only badge that has no effect whatsoever on ranking position or XP calculation.",
+      "calloutFeatured": "The Featured Streamer mark is a display-only badge that has no effect whatsoever on ranking position or XP calculation.",
       "footerPrefix": "For per-Discord-server rankings, see the ",
       "footerLink": "Discord server XP article",
       "footerSuffix": "."
@@ -243,8 +243,8 @@
       "calloutNoMergeBody": " Primaryのスコア・XP・進行度のみが維持され、Secondaryの記録は統合後に失われます — 必ず残したいアカウントをPrimaryとして選択してください。",
       "calloutAdminStrong": "Secondaryが管理者アカウントの場合、統合はブロックされます。",
       "calloutAdminBody": " 管理者権限を持つアカウントをSecondaryとして統合すると、その権限がどこにも移らずに失われる可能性があるため、OwOGGは安全のためこの場合の統合自体を防ぎ、運営による個別対応を必要とします。",
-      "footerPrefix": "プラットフォーム所有権認証（Creator）済みのアカウントを統合する場合のルールは、",
-      "footerLink": "Creatorチャンネル所有権認証",
+      "footerPrefix": "プラットフォーム所有権認証（Streamer）済みのアカウントを統合する場合のルールは、",
+      "footerLink": "Streamerチャンネル所有権認証",
       "footerSuffix": "のドキュメントをご覧ください。"
     },
     "games": {
@@ -273,9 +273,9 @@
       "streamerBodyStrong": "1つ以上",
       "streamerBodySuffix": "のプラットフォームで公式チャンネル所有権認証を完了したユーザーのみが表示されます。順位の値は通常のゲームランキング・XPランキングと同じ計算式を使用し、認証したプラットフォームの数は順位に影響しません — 右端のプラットフォームアイコンはフィルタリング・表示専用です。",
       "streamerLinkPrefix": "詳しい認証方法は",
-      "streamerLink": "Creatorチャンネル所有権認証",
+      "streamerLink": "Streamerチャンネル所有権認証",
       "streamerLinkSuffix": "のドキュメントをご覧ください。",
-      "calloutFeatured": "Featured Creatorの表示は、ランキング順位やXP計算に一切影響しない表示専用のバッジです。",
+      "calloutFeatured": "Featured Streamerの表示は、ランキング順位やXP計算に一切影響しない表示専用のバッジです。",
       "footerPrefix": "Discordサーバー単位のランキングは",
       "footerLink": "DiscordサーバーXPのドキュメント",
       "footerSuffix": "をご覧ください。"
@@ -350,8 +350,8 @@
       "calloutNoMergeBody": " 仅保留 Primary 的分数/XP/进度，Secondary 的记录在合并后会消失 —— 请务必将想保留的账户选为 Primary。",
       "calloutAdminStrong": "若 Secondary 为管理员账户，合并将被阻止。",
       "calloutAdminBody": " 若将拥有管理员权限的账户作为 Secondary 合并，该权限可能不会转移到任何地方而直接消失，因此出于安全考虑，OwOGG 会直接阻止此类合并，并要求由运营单独处理。",
-      "footerPrefix": "关于合并已完成平台所有权认证（Creator）账户的规则，请参阅",
-      "footerLink": "Creator 频道所有权认证",
+      "footerPrefix": "关于合并已完成平台所有权认证（Streamer）账户的规则，请参阅",
+      "footerLink": "Streamer 频道所有权认证",
       "footerSuffix": "文档。"
     },
     "games": {
@@ -380,9 +380,9 @@
       "streamerBodyStrong": "至少一个",
       "streamerBodySuffix": "平台完成官方频道所有权认证的用户才会显示。名次数值使用与普通游戏排行榜/XP 排行榜完全相同的计算公式，已认证的平台数量不会影响名次 —— 最右侧的平台图标仅用于筛选与展示。",
       "streamerLinkPrefix": "详细的认证方法请参阅",
-      "streamerLink": "Creator 频道所有权认证",
+      "streamerLink": "Streamer 频道所有权认证",
       "streamerLinkSuffix": "文档。",
-      "calloutFeatured": "Featured Creator 标识是仅用于展示的徽章，对排行榜名次和 XP 计算没有任何影响。",
+      "calloutFeatured": "Featured Streamer 标识是仅用于展示的徽章，对排行榜名次和 XP 计算没有任何影响。",
       "footerPrefix": "关于 Discord 服务器维度的排行榜，请参阅",
       "footerLink": "Discord 服务器 XP 文档",
       "footerSuffix": "。"

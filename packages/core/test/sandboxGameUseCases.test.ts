@@ -17,7 +17,7 @@ import type {
 } from "../src/ports/sandboxGames.js";
 import { SANDBOX_GAME_POLICY } from "../src/domain/sandboxGames.js";
 import type { SandboxGameBundleManifest } from "../src/domain/sandboxGameBundle.js";
-import { OWOGG_CREATOR_MANIFEST_FILENAME } from "../src/domain/creatorManifest.js";
+import { OWOGG_GAME_CREATOR_MANIFEST_FILENAME } from "../src/domain/gameCreatorManifest.js";
 import type { GameCanonicalRepository } from "../src/modules/game/ports/gameCanonicalRepository.js";
 import {
   GAME_CANONICAL_SCHEMA_VERSION,
@@ -51,7 +51,7 @@ function creatorManifestBytes(game: Record<string, unknown>): Uint8Array {
 
 const VERSION_BUNDLE: Record<string, Uint8Array> = {
   ...MINIMAL_BUNDLE,
-  [OWOGG_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
+  [OWOGG_GAME_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
     slug: "my-game",
     title: "Game",
     genre: "puzzle",
@@ -508,7 +508,7 @@ test("createGame rejects a duplicate slug", async () => {
 // `slug` carries a raw DB UNIQUE constraint that the soft delete does not lift. findBySlug alone
 // (which excludes deleted rows) would miss this and let the create fall through to a raw,
 // unhandled constraint violation instead of a clean SLUG_TAKEN — this is what actually happened
-// in production when a creator re-registered a slug an admin had just soft-deleted.
+// in production when a Game Creator re-registered a slug an admin had just soft-deleted.
 test("createGame rejects a slug held by a soft-deleted game, instead of crashing on it", async () => {
   const { useCases } = createUseCases();
   const game = await useCases.createGame({
@@ -1350,7 +1350,7 @@ test("updateMetadata: B2-only presentation survives an unrelated metadata patch 
   // real GamePresentation mode; it went unnoticed only because packages/core's typecheck config
   // excludes test/ and this fake never round-tripped the value through a real parser. Stage U-3's
   // generic shadow sync is the first thing that actually validates it (see gameCanonicalDocument
-  // .ts's own doc comment on why the generic schema is stricter than the Creator schema).
+  // .ts's own doc comment on why the generic schema is stricter than the Game Creator schema).
   const presentation = {
     viewport: { mode: "responsive" as const, minWidth: 320, minHeight: 240 },
     fullscreen: { supported: false, recommended: false },
@@ -1702,7 +1702,7 @@ test("a well-compressed but plausible entry (well under the ratio ceiling) is no
   const { useCases, archives } = createUseCases({
     "index.html": bytes("<h1>hi</h1>"),
     "texture.data": bytes("real bytes"),
-    [OWOGG_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
+    [OWOGG_GAME_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
       slug: "my-game",
       title: "Game",
       genre: "puzzle",
@@ -1904,7 +1904,7 @@ test("a publish that fails part-way leaves the version non-READY with a recorded
   const { useCases, storage, repo } = createUseCases({
     "index.html": bytes("<h1>hi</h1>"),
     "Build/game.wasm": bytes("\0asm"),
-    [OWOGG_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
+    [OWOGG_GAME_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
       slug: "my-game",
       title: "Game",
       genre: "puzzle",
@@ -2381,7 +2381,7 @@ test("this is not a lifetime cap: a decided game frees its slot for an unlimited
     });
     archives.entries = {
       ...MINIMAL_BUNDLE,
-      [OWOGG_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
+      [OWOGG_GAME_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
         slug,
         title: "Game",
         genre: "puzzle",
@@ -2422,7 +2422,7 @@ test("this is not a cap on total approved games: multiple already-approved games
     });
     archives.entries = {
       ...MINIMAL_BUNDLE,
-      [OWOGG_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
+      [OWOGG_GAME_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
         slug,
         title: "Game",
         genre: "puzzle",
@@ -2635,7 +2635,7 @@ function manifestEntries(
   const hasLogo = Object.keys(extra).some((path) => path.startsWith("owogg.logo."));
   return {
     ...extra,
-    [OWOGG_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({ mode: "single", ...manifest }),
+    [OWOGG_GAME_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({ mode: "single", ...manifest }),
     ...(hasLogo ? {} : { "owogg.logo.png": bytes("fake-logo-bytes") }),
   };
 }
@@ -2735,7 +2735,7 @@ test("createGameFromBundle surfaces a slug collision as SLUG_TAKEN, same as the 
 test("createGameFromBundle rejects malformed JSON as MANIFEST_INVALID", async () => {
   const { useCases } = createUseCases({
     ...MINIMAL_BUNDLE,
-    [OWOGG_CREATOR_MANIFEST_FILENAME]: bytes("{ not json"),
+    [OWOGG_GAME_CREATOR_MANIFEST_FILENAME]: bytes("{ not json"),
   });
   await assert.rejects(
     () => useCases.createGameFromBundle({ developerUserId: 1, bytes: new ArrayBuffer(10) }),
@@ -2749,7 +2749,7 @@ test("createGameFromBundle rejects a missing mode as INVALID_MODE", async () => 
   const { useCases } = createUseCases({
     ...MINIMAL_BUNDLE,
     "owogg.logo.png": bytes("fake-logo-bytes"),
-    [OWOGG_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
+    [OWOGG_GAME_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
       slug: "ball-dodge",
       title: "공 피하기",
       genre: "action",
@@ -2774,7 +2774,7 @@ test("createGameFromBundle rejects a mode outside single/multi as INVALID_MODE",
 test("createGameFromBundle rejects a bundle with no logo file as LOGO_REQUIRED", async () => {
   const { useCases } = createUseCases({
     ...MINIMAL_BUNDLE,
-    [OWOGG_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
+    [OWOGG_GAME_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
       slug: "ball-dodge",
       title: "공 피하기",
       genre: "action",
@@ -2792,7 +2792,7 @@ test("createGameFromBundle accepts any of the logo extensions (png/jpg/jpeg/webp
     const { useCases } = createUseCases({
       ...MINIMAL_BUNDLE,
       [`owogg.logo.${ext}`]: bytes("fake-logo-bytes"),
-      [OWOGG_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
+      [OWOGG_GAME_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
         slug: `ball-dodge-${ext}`,
         title: "공 피하기",
         genre: "action",
@@ -3038,7 +3038,7 @@ test("purgeGame on an unknown game id is GAME_NOT_FOUND", async () => {
   );
 });
 
-// ── deleteOwnGame (creator self-service) ────────────────────────────────────────
+// ── deleteOwnGame (Game Creator self-service) ───────────────────────────────────
 
 test("deleteOwnGame hard-deletes a never-approved game — findById/findBySlug both return null afterward", async () => {
   const { useCases, repo } = createUseCases();
@@ -3072,7 +3072,7 @@ test("deleteOwnGame frees the slug for immediate reuse, unlike admin's soft-dele
   await useCases.deleteOwnGame({ gameId: game.id, developerUserId: 1 });
 
   // The exact production scenario this fixes: a failed drag-and-drop registration leaves an
-  // orphaned game with no version, blocking the slug — deleteOwnGame must let the creator retry
+  // orphaned game with no version, blocking the slug — deleteOwnGame must let the Game Creator retry
   // with the identical slug.
   const retried = await useCases.createGame({
     slug: "ball-dodge",

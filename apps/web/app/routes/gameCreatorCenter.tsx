@@ -306,7 +306,7 @@ function ManageGamesPanel({
     }
   };
 
-  // Creator self-service full removal — only offered for a game that has never been approved
+  // Game Creator self-service full removal — only offered for a game that has never been approved
   // (liveVersionId === null client-side proxy; the server enforces the real rule and returns
   // CANNOT_DELETE_APPROVED_GAME otherwise). Unlike admin's soft-delete, this is a genuine hard
   // delete, so the slug becomes reusable immediately.
@@ -380,7 +380,7 @@ function ManageGamesPanel({
                       </span>
                     )}
                     {/* A row can only ever reach this list with deletedAt set via the admin's
-                        soft-delete — the creator's own self-delete (deleteOwnGame) is a hard
+                        soft-delete — the Game Creator's own self-delete (deleteOwnGame) is a hard
                         delete that removes the row outright, so it never appears here at all.
                         No need to attribute "by admin" — there is no other case. */}
                     {g.deletedAt && (
@@ -395,9 +395,9 @@ function ManageGamesPanel({
                 </div>
               </div>
               {/* A game an admin has soft-deleted keeps its row (for audit) but is otherwise a
-                  dead end for the creator — no new version can attach to it, and self-delete only
+                  dead end for the Game Creator — no new version can attach to it, and self-delete only
                   ever applied to never-approved games anyway. Showing live-looking action buttons
-                  here previously let a creator "버전 업로드" or re-register the same slug and hit
+                  here previously let a Game Creator "버전 업로드" or re-register the same slug and hit
                   an error with no explanation (2026-08-18). */}
               {!g.deletedAt && (
                 <div className="flex shrink-0 items-center gap-2">

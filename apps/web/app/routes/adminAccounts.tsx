@@ -92,7 +92,7 @@ const PERMISSION_OPTIONS: Array<{
     label: "게임 크리에이터 관리",
     description: "제작 권한과 신청 심사",
   },
-  { value: "streamers.review", label: "Creator 심사", description: "Featured Creator 수동 심사" },
+  { value: "streamers.review", label: "스트리머 심사", description: "Featured Streamer 수동 심사" },
   { value: "system.monitor", label: "운영 모니터링", description: "서비스와 데이터 상태 조회" },
   { value: "system.dev.access", label: "시스템 개발 도구", description: "내부 진단·개발 기능" },
 ];

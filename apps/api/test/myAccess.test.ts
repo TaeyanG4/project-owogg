@@ -9,7 +9,7 @@ import type { D1Database } from "@owogg/db";
 // role/program route guards) use across all three independent axes: Staff Role, Game Creator
 // program, Streamer program. See docs/AUTHORIZATION.md. Backed by real SQLite (same helper
 // packages/db uses) since this route genuinely joins across sessions/admin_accounts/
-// admin_permission_grants/game_creator_access/game_creator_applications/creator_profiles — a
+// admin_permission_grants/game_creator_access/game_creator_applications/streamer_profiles — a
 // hand-rolled query-matching mock across five tables would be more fragile than the real schema.
 
 const FULL_SCHEMA = `
@@ -139,7 +139,7 @@ CREATE TABLE game_creator_applications (
 CREATE UNIQUE INDEX idx_game_creator_applications_one_pending_per_user
   ON game_creator_applications(user_id) WHERE status = 'PENDING';
 
-CREATE TABLE creator_profiles (
+CREATE TABLE streamer_profiles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER UNIQUE NOT NULL,
   status TEXT NOT NULL DEFAULT 'UNVERIFIED',
@@ -150,9 +150,9 @@ CREATE TABLE creator_profiles (
   updated_at TEXT NOT NULL
 );
 
-CREATE TABLE creator_platform_accounts (
+CREATE TABLE streamer_platform_accounts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  creator_id INTEGER NOT NULL,
+  streamer_id INTEGER NOT NULL,
   platform TEXT NOT NULL,
   platform_user_id TEXT NOT NULL,
   channel_name TEXT NOT NULL,
@@ -250,7 +250,7 @@ async function createVerifiedStreamerProfile(db: D1Database, userId: number) {
   const now = new Date().toISOString();
   await db
     .prepare(
-      `INSERT INTO creator_profiles (user_id, status, featured_status, created_at, updated_at)
+      `INSERT INTO streamer_profiles (user_id, status, featured_status, created_at, updated_at)
        VALUES (?, 'VERIFIED', 'NONE', ?, ?)`,
     )
     .bind(userId, now, now)
@@ -466,7 +466,7 @@ test("GET /api/me/access grants implicit Game Creator access to OPERATOR, but no
   assert.equal(moderatorBody.gameCreator.hasAccess, false);
 });
 
-test("GET /api/me/access reflects a VERIFIED Streamer/Creator profile", async () => {
+test("GET /api/me/access reflects a VERIFIED Streamer profile", async () => {
   const db = await createDb();
   const rawToken = "streamer_session";
   const userId = await createUserWithSession(db, rawToken);

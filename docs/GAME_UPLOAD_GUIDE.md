@@ -103,13 +103,13 @@ READY != APPROVED
 - `FAILED`: publication retry 대상일 수 있습니다. 관리자 republish는 원본 source archive와 같은
   version을 사용합니다.
 - `REJECTED`: review 결정이며 publication failure와 다른 축입니다.
-- `WITHDRAWN`: creator가 제출을 철회한 상태입니다.
+- `WITHDRAWN`: Game Creator가 제출을 철회한 상태입니다.
 - `APPROVED`: 승인된 version이지만 실제 public serving에는 live-version/visibility와 generic
   runtime validation도 필요합니다.
 
-## 6. 크리에이터 동작
+## 6. Game Creator 동작
 
-현재 creator API surface에는 다음 동작이 있습니다.
+현재 Game Creator API surface에는 다음 동작이 있습니다.
 
 - `GET /api/dev/me`: access와 application 상태
 - `POST /api/dev/apply`: self-service 신청(현재 policy상 닫힘)
@@ -135,7 +135,8 @@ READY != APPROVED
 
 게임은 `OWOGG.start()`, `OWOGG.event()`, `OWOGG.complete()`, `OWOGG.cancel()`만 호출합니다.
 bundle URL은 version-scoped immutable 경로입니다. `/official-games/*`, release map,
-`CreatorGameHost`, `transitionalCreatorGameResolver`를 요구하는 가이드는 현재 구현과 맞지 않습니다.
+과거 Game Creator 전용 런타임 이름인 `CreatorGameHost`, `transitionalCreatorGameResolver`를 요구하는
+가이드는 현재 구현과 맞지 않습니다.
 
 ## 8. 오류 확인 순서
 
@@ -146,5 +147,5 @@ bundle URL은 version-scoped immutable 경로입니다. `/official-games/*`, rel
 - `503 GAME_BUNDLES_NOT_CONFIGURED`: 해당 환경의 B2 binding 문제이며 bundle 내용 문제가 아님
 - `FAILED`: 관리자 republish 대상인지 publication error 확인
 
-운영자가 수행하는 approve/reject/revoke/republish/live/visibility 조작은 creator가 직접 호출하는
+운영자가 수행하는 approve/reject/revoke/republish/live/visibility 조작은 Game Creator가 직접 호출하는
 API가 아닙니다. 권한 경계는 [Authorization](AUTHORIZATION.md)을 참조하세요.

@@ -3,7 +3,7 @@ import type { PermissionValue, StaffRoleValue } from "@owogg/contracts";
 export type AdminNavigationItemId =
   | "dashboard"
   | "games"
-  | "creator-reviews"
+  | "streamer-reviews"
   | "game-creators"
   | "users"
   | "monitoring"
@@ -55,10 +55,10 @@ export const ADMIN_NAVIGATION_GROUPS: AdminNavigationGroup[] = [
         elevatedOnly: true,
       },
       {
-        id: "creator-reviews",
-        label: "Creator 심사",
-        description: "Featured Creator 수동 심사",
-        path: "/admin/creators",
+        id: "streamer-reviews",
+        label: "스트리머 심사",
+        description: "Featured Streamer 수동 심사",
+        path: "/admin/streamers",
         permissionAny: ["streamers.review"],
         elevatedOnly: true,
       },

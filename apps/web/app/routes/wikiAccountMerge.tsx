@@ -44,7 +44,7 @@ export default function WikiAccountMergeRoute() {
       <p className="text-xs text-text-secondary">
         {t.footerPrefix}
         <Link
-          to="/wiki/creator/verification"
+          to="/wiki/streamer/verification"
           className="font-bold text-brand-light hover:underline"
         >
           {t.footerLink}

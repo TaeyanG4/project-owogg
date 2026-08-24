@@ -48,7 +48,7 @@ export function readB2Config(env: ApiEnv["Bindings"]): BackblazeB2Config | undef
 /**
  * Game-Creator-facing sandbox game routes — powers the Game Creator Center's apply/upload/manage
  * flow. Deliberately gated by plain OwOGG session + active game_creator_access row, NOT the
- * elevated admin step-up session (adminSession.ts) — a creator who isn't also an admin must never
+ * elevated admin step-up session (adminSession.ts) — a Game Creator who isn't also an admin must never
  * be forced through Google step-up + admin password just to upload a game. Admin/operator-only
  * actions (appoint creators, review applications, approve/reject versions, publish) live in
  * adminGameCreators.ts / adminSandboxGames.ts behind requireElevatedAdmin instead.
@@ -211,7 +211,7 @@ devGamesRouter.get("/games", async (c) => {
 });
 
 // POST /api/dev/games/upload — drag-and-drop registration: a single ZIP whose root contains
-// Creator Manifest v1 owogg.json creates the game and its first version in one call,
+// Game Creator Manifest v1 owogg.json creates the game and its first version in one call,
 // instead of the manual "fill in a form, then separately upload" two-step flow. Multipart, field
 // name "bundle" — same shape as /games/:id/versions. Rate limited on the same binding for the same
 // reason (real B2 writes + decompression CPU per call).
@@ -311,10 +311,10 @@ devGamesRouter.get("/games/:id", async (c) => {
   );
 });
 
-// POST /api/dev/games/:id/withdraw — creator self-service withdrawal of a not-yet-decided
+// POST /api/dev/games/:id/withdraw — Game Creator self-service withdrawal of a not-yet-decided
 // submission, releasing the review slot it was holding (see SANDBOX_GAME_POLICY.
 // MAX_CONCURRENT_REVIEW_SLOTS). Owner only — an admin/operator who wants a submission gone uses
-// decideVersion(REJECTED) instead, which is a real decision, not the creator's own withdrawal.
+// decideVersion(REJECTED) instead, which is a real decision, not the Game Creator's own withdrawal.
 devGamesRouter.post("/games/:id/withdraw", async (c) => {
   const session = await resolveDevSession(c);
   if (!session) {
@@ -335,7 +335,7 @@ devGamesRouter.post("/games/:id/withdraw", async (c) => {
   }
 });
 
-// DELETE /api/dev/games/:id — creator self-service full removal of their OWN game, only while it
+// DELETE /api/dev/games/:id — Game Creator self-service full removal of their OWN game, only while it
 // has never been approved (see SandboxGameUseCases.deleteOwnGame). No permission grant needed
 // beyond ownership; once a version is approved, only ADMIN/OPERATOR can remove it from then on
 // (DELETE /api/admin/sandbox-games/:id, sandbox_games.delete permission).

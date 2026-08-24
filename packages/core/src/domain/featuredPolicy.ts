@@ -1,9 +1,9 @@
 /**
- * Featured Creator qualification policy (Phase E2A).
+ * Featured Streamer qualification policy (Phase E2A).
  * Pure domain logic: no D1, Hono, HTTP, or browser dependencies.
  *
  * 개념 구분:
- * - Creator        = OwOGG 공식 API로 검증된 채널 소유권 (creator_profiles.status)
+ * - Streamer        = OwOGG 공식 API로 검증된 채널 소유권 (streamer_profiles.status)
  * - Featured       = OwOGG 기준(공개 채널 지표) 기반 자격 심사 결과 (presentation/filtering only)
  * - OwOGG Partner = 향후 직접 파트너십 (이번 단계 범위 밖)
  *
@@ -16,7 +16,7 @@ export type FeaturedReviewStatus =
 export type InitialFeaturedDecision = "AUTO_REVIEW_PENDING" | "NOT_ELIGIBLE" | "MANUAL_REVIEW";
 export type RecheckFeaturedDecision = "FEATURED" | "NOT_ELIGIBLE" | "MANUAL_REVIEW";
 export type FeaturedRevalidationDecision = "RETAIN_FEATURED" | "REVOKE_FEATURED" | "MANUAL_REVIEW";
-export type CreatorChannelState = "ACTIVE" | "NOT_FOUND" | "REVOKED";
+export type StreamerChannelState = "ACTIVE" | "NOT_FOUND" | "REVOKED";
 
 export const FEATURED_POLICY = {
   /**
@@ -60,12 +60,12 @@ export const FEATURED_POLICY = {
   MAX_BATCH_SIZE: 50,
   /** 기본 스케줄 배치 크기 */
   DEFAULT_BATCH_SIZE: 20,
-  /** 기존 Featured Creator의 보수적 재검증 주기 (E2B v1: 14일) */
+  /** 기존 Featured Streamer의 보수적 재검증 주기 (E2B v1: 14일) */
   REVALIDATION_INTERVAL_MS: 14 * 24 * 60 * 60 * 1000,
   /** 재검증 일시 실패 재시도 주기 */
   REVALIDATION_RETRY_INTERVAL_MS: 6 * 60 * 60 * 1000,
   /**
-   * 향후 E2B: 기존 Featured Creator 재검증 주기는 6시간이 아니라 7~30일 수준이어야 합니다.
+   * 향후 E2B: 기존 Featured Streamer 재검증 주기는 6시간이 아니라 7~30일 수준이어야 합니다.
    * 이 값은 해당 단계에서 사용할 문서화된 기준입니다.
    */
   FUTURE_REVALIDATION_INTERVAL_DAYS_MIN: 7,
@@ -209,7 +209,7 @@ export function evaluateFeaturedRecheck(
   ) {
     return {
       status: "FEATURED",
-      reason: "Featured Creator",
+      reason: "Featured Streamer",
     };
   }
 
@@ -220,7 +220,7 @@ export function evaluateFeaturedRecheck(
 }
 
 /**
- * 기존 Featured Creator의 보수적 재검증 정책.
+ * 기존 Featured Streamer의 보수적 재검증 정책.
  * - 8,000 이상이면 Featured 유지
  * - 8,000 미만이면 Featured 자격 철회
  * - 지표 누락/일시 오류는 배지를 자동 제거하지 않고 수동 심사로 보냅니다.
@@ -228,7 +228,7 @@ export function evaluateFeaturedRecheck(
  */
 export function evaluateFeaturedRevalidation(input: {
   audienceCount: number | null | undefined;
-  channelState?: CreatorChannelState | undefined;
+  channelState?: StreamerChannelState | undefined;
 }): { status: FeaturedRevalidationDecision; reason: string } {
   if (input.channelState === "NOT_FOUND" || input.channelState === "REVOKED") {
     return {

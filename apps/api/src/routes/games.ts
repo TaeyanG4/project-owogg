@@ -29,7 +29,7 @@ import { rateLimit } from "../middleware/rateLimit.js";
 import { readB2Config } from "./devGames.js";
 import type { ApiEnv } from "./auth.js";
 
-// Same local requireAuth as creators.ts/discordGuilds.ts — not shared from auth.ts, matching this
+// Same local requireAuth as streamers.ts/discordGuilds.ts — not shared from auth.ts, matching this
 // codebase's existing per-route-file convention rather than introducing a shared import for it.
 async function requireAuth(
   c: Context<ApiEnv>,
@@ -482,7 +482,7 @@ function gameResultAcceptErrorMessage(error: GameResultAcceptError, reason?: str
   }
 }
 
-// Creator Manifest v1 result acceptance. Tokens stay in the parent host; the iframe reports only
+// Game Creator Manifest v1 result acceptance. Tokens stay in the parent host; the iframe reports only
 // declared facts over MessageChannel, and this endpoint revalidates every fact against B2 canonical.
 gamesRouter.post("/:slug/result", rateLimit({ name: "game-result-accept" }), async (c) => {
   if (!c.env?.DB) return c.text("Not Found", 404);
@@ -594,7 +594,7 @@ gamesRouter.post("/:slug/result", rateLimit({ name: "game-result-accept" }), asy
         new Set([...newlyUnlockedAchievements, ...platformAchievements]),
       );
     } catch (error) {
-      console.error("Creator result progression error:", error);
+      console.error("Game Creator result progression error:", error);
     }
   }
 

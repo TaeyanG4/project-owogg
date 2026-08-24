@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { AdminOverviewResponseSchema, AdminMonitoringResponseSchema } from "@owogg/contracts";
 import { createContainer } from "../container.js";
-import { getCreatorProviderAdapters } from "../infrastructure/creators/index.js";
+import { getStreamerProviderAdapters } from "../infrastructure/streamers/index.js";
 import { isTrustedAdminOrigin } from "../auth/admin.js";
 import {
   requireElevatedAdmin,
@@ -39,13 +39,13 @@ adminRouter.get("/overview", async (c) => {
 
   const container = createContainer(c.env.DB);
   const [reviewData, activeGuildCount] = await Promise.all([
-    container.creatorUseCases.listManualCreatorReviews({ limit: 1, offset: 0 }),
+    container.streamerUseCases.listManualStreamerReviews({ limit: 1, offset: 0 }),
     container.discordGuildRepo.getActiveGuildCount(),
   ]);
-  const adapters = getCreatorProviderAdapters(c.env);
+  const adapters = getStreamerProviderAdapters(c.env);
 
   const response = AdminOverviewResponseSchema.parse({
-    pendingCreatorReviews: reviewData.total,
+    pendingStreamerReviews: reviewData.total,
     recentAudits: reviewData.audits.entries.slice(0, 5).map((audit) => ({
       action: audit.action,
       platform: audit.platform ?? null,
@@ -60,7 +60,7 @@ adminRouter.get("/overview", async (c) => {
       expectedInteractionsEndpoint: `${new URL(c.req.url).origin}/api/discord/interactions`,
       localSubcommands: Object.values(DISCORD_SUBCOMMANDS),
     },
-    creatorProviders: {
+    streamerProviders: {
       YOUTUBE: adapters.YOUTUBE.isConfigured(),
       TWITCH: adapters.TWITCH.isConfigured(),
       CHZZK: adapters.CHZZK.isConfigured(),

@@ -68,8 +68,8 @@ export type RolePermissionUpdateRequest = z.infer<typeof RolePermissionUpdateReq
 
 /**
  * GET /api/me/access — the single call the web app makes to decide what to show in the profile
- * dropdown and which route guards pass, across all three independent axes (Staff Role, Game
- * Creator program, Streamer program). See docs/AUTHORIZATION.md.
+ * dropdown and which route guards pass, across all three independent axes (Staff Role,
+ * Game Creator program, Streamer program). See docs/AUTHORIZATION.md.
  */
 export const MyAccessResponseSchema = z.object({
   staffRole: StaffRoleSchema.nullable(),
@@ -83,8 +83,8 @@ export const MyAccessResponseSchema = z.object({
     applicationStatus: z.enum(["PENDING", "APPROVED", "REJECTED", "WITHDRAWN"]).nullable(),
   }),
   streamer: z.object({
-    /** Mirrors creator_profiles.status === 'VERIFIED' — see domain/gameCreator.ts's sibling doc
-     * comment on why base Streamer status has no separate application/approval step today. */
+    /** Mirrors streamer_profiles.status === 'VERIFIED'. Base Streamer verification is channel
+     * ownership state, independent from the Game Creator application program. */
     isVerified: z.boolean(),
   }),
 });

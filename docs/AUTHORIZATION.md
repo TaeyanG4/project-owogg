@@ -27,11 +27,11 @@ entitlement, permission, game publisher authority는 서로 다른 질문에 답
 | ------------------- | ------------------------------------ | ---------------------------------------------------- |
 | Identity            | 로그인한 사용자가 누구인가?          | user/session/provider identity                       |
 | Staff role          | 운영 조직에서 어떤 역할인가?         | `ADMIN`, `OPERATOR`, `MODERATOR`, `SYSTEM_DEVELOPER` |
-| Program entitlement | 특정 사용자 기능을 쓸 자격이 있는가? | GAME_CREATOR access, creator/streamer profile        |
+| Program entitlement | 특정 사용자 기능을 쓸 자격이 있는가? | GAME_CREATOR access, streamer profile                |
 | Permission          | 이 운영 동작을 실행할 수 있는가?     | role default + individual grant                      |
 | Publisher authority | 이 게임을 누가 publish했는가?        | `{type:"OWOGG"}` 또는 `{type:"USER", userId}`        |
 
-표시 이름, creator 이름, slug, UI label은 어느 권한의 증거도 아닙니다.
+표시 이름, Game Creator 이름, slug, UI label은 어느 권한의 증거도 아닙니다.
 
 ## Identity와 session
 
@@ -153,11 +153,11 @@ OWO_PLUS gate가 아닙니다.
 이 구분 없이 “누구나 신청 가능” 또는 “GAME_CREATOR 프로그램 전체가 비활성”이라고 쓰면 둘 다
 현재 구현과 맞지 않습니다.
 
-## STREAMER/Creator 프로그램
+## STREAMER 프로그램
 
-채널 소유권과 Featured 심사를 다루는 creator/streamer system은 GAME_CREATOR upload entitlement와
+채널 소유권과 Featured 심사를 다루는 streamer system은 GAME_CREATOR upload entitlement와
 다릅니다. 한 사용자가 둘 다 가질 수 있지만 하나가 다른 하나를 암묵적으로 부여하지 않습니다.
-[Creator System](CREATOR_SYSTEM.md)이 채널 검증의 세부 문서입니다.
+[Streamer System](STREAMER_SYSTEM.md)이 채널 검증의 세부 문서입니다.
 
 ## 구독
 
@@ -183,7 +183,7 @@ type GamePublisher = { type: "OWOGG" } | { type: "USER"; userId: number };
 - `USER.userId`는 정확한 OwOGG user identity입니다.
 - slug, title, developer display name, canonical text는 소유권/인가 판정에 사용하지 않습니다.
 - public “공식” 배지는 canonical v2의 `publisher.official` 메타데이터입니다. 이것은 표시값일 뿐
-  권한 원천이 아니며 Creator 요청/manifest가 선택할 수 없습니다.
+  권한 원천이 아니며 Game Creator 요청/manifest가 선택할 수 없습니다.
 - runtime registry는 publisher에 따라 다른 serving 구현을 선택하지 않습니다.
 
 `POST /api/admin/games/upload`만 OWOGG publisher를 생성·갱신할 수 있습니다. deploy workflow와

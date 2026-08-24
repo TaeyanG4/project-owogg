@@ -73,7 +73,7 @@ function asDefinition(manifest: GameManifest, owner: SystemGameOwner): SystemGam
       score: manifest.scoreConfig ?? null,
       leaderboard: manifest.supportsLeaderboard,
       // XP is an operator decision that lives nowhere in GameManifest today (it is applied by
-      // progression rules, and starts at 0 for creator games) — the one field a definition adds
+      // progression rules, and starts at 0 for Game Creator games) — the one field a definition adds
       // rather than carries over.
       xpPerCompletion: 0,
       requiresAuth: manifest.requiresAuth,

@@ -8,8 +8,8 @@ import {
   D1AchievementRepository,
   D1DiscordLinkRepository,
   D1DiscordGuildRepository,
-  D1CreatorRepository,
-  D1CreatorReviewRepository,
+  D1StreamerRepository,
+  D1StreamerReviewRepository,
   D1AdminAuthRepository,
   D1AdminAccountRepository,
   D1GameSettingsRepository,
@@ -43,7 +43,7 @@ import {
   DiscordGuildDirectoryUseCases,
   DiscordGuildManagementUseCases,
   DiscordGuildXpUseCases,
-  CreatorUseCases,
+  StreamerUseCases,
   AdminAuthUseCases,
   AdminAccountUseCases,
   GameSettingsUseCases,
@@ -69,8 +69,8 @@ import {
   type AchievementRepository,
   type DiscordLinkRepository,
   type DiscordGuildRepository,
-  type CreatorRepository,
-  type CreatorReviewRepository,
+  type StreamerRepository,
+  type StreamerReviewRepository,
   type AdminAuthRepository,
   type AdminAccountRepository,
   type GameSettingsRepository,
@@ -103,8 +103,8 @@ export interface AppContainer {
   achievementRepo: AchievementRepository;
   discordLinkRepo: DiscordLinkRepository;
   discordGuildRepo: DiscordGuildRepository;
-  creatorRepo: CreatorRepository;
-  creatorReviewRepo: CreatorReviewRepository;
+  streamerRepo: StreamerRepository;
+  streamerReviewRepo: StreamerReviewRepository;
   adminAuthRepo: AdminAuthRepository;
   adminAccountRepo: AdminAccountRepository;
   gameSettingsRepo: GameSettingsRepository;
@@ -143,7 +143,7 @@ export interface AppContainer {
   discordGuildDirectoryUseCases: DiscordGuildDirectoryUseCases;
   discordGuildManagementUseCases: DiscordGuildManagementUseCases;
   discordGuildXpUseCases: DiscordGuildXpUseCases;
-  creatorUseCases: CreatorUseCases;
+  streamerUseCases: StreamerUseCases;
   adminAuthUseCases: AdminAuthUseCases;
   adminAccountUseCases: AdminAccountUseCases;
   gameSettingsUseCases: GameSettingsUseCases;
@@ -180,8 +180,8 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
   const achievementRepo = new D1AchievementRepository(db);
   const discordLinkRepo = new D1DiscordLinkRepository(db);
   const discordGuildRepo = new D1DiscordGuildRepository(db);
-  const creatorRepo = new D1CreatorRepository(db);
-  const creatorReviewRepo = new D1CreatorReviewRepository(db);
+  const streamerRepo = new D1StreamerRepository(db);
+  const streamerReviewRepo = new D1StreamerReviewRepository(db);
   const adminAuthRepo = new D1AdminAuthRepository(db);
   const adminAccountRepo = new D1AdminAccountRepository(db);
   const gameSettingsRepo = new D1GameSettingsRepository(db);
@@ -242,7 +242,11 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     userRepo,
     publicGameCatalog,
   );
-  const creatorUseCases = new CreatorUseCases(creatorRepo, creatorReviewRepo, publicGameCatalog);
+  const streamerUseCases = new StreamerUseCases(
+    streamerRepo,
+    streamerReviewRepo,
+    publicGameCatalog,
+  );
   const adminAuthUseCases = new AdminAuthUseCases(adminAuthRepo);
   const adminAccountUseCases = new AdminAccountUseCases(adminAccountRepo, adminAuthRepo);
   const gameSettingsUseCases = new GameSettingsUseCases(
@@ -307,8 +311,8 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     achievementRepo,
     discordLinkRepo,
     discordGuildRepo,
-    creatorRepo,
-    creatorReviewRepo,
+    streamerRepo,
+    streamerReviewRepo,
     adminAuthRepo,
     adminAccountRepo,
     gameSettingsRepo,
@@ -340,7 +344,7 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     discordGuildDirectoryUseCases,
     discordGuildManagementUseCases,
     discordGuildXpUseCases,
-    creatorUseCases,
+    streamerUseCases,
     adminAuthUseCases,
     adminAccountUseCases,
     gameSettingsUseCases,
@@ -384,7 +388,7 @@ export async function evaluateAchievementsForUser(
  * Aggregates the public-safe subset of a user's data for the public profile page
  * (GET /api/profile/public/:userId, no auth). Deliberately narrower than everything
  * evaluateAchievementsForUser/the private /profile page can see — never includes email,
- * linked-provider list, or unverified/pending creator platform attempts.
+ * linked-provider list, or unverified/pending streamer platform attempts.
  */
 export async function getPublicProfileData(
   container: AppContainer,
@@ -407,7 +411,7 @@ export async function getPublicProfileData(
   unlockedAchievementCodes: string[];
   totalAchievements: number;
   gameBests: Array<{ gameId: string; score: number; formattedScore: string }>;
-  creatorBadges: Array<{
+  streamerBadges: Array<{
     platform: string;
     channelName: string;
     channelUrl: string;
@@ -425,19 +429,19 @@ export async function getPublicProfileData(
   const showRecentPlays = user.show_recent_plays ?? false;
   const needsPersonalization = isOwner || showFavorites || showRecentPlays;
 
-  const [progress, globalRank, achievements, gameBests, creatorProfile, personalization] =
+  const [progress, globalRank, achievements, gameBests, streamerProfile, personalization] =
     await Promise.all([
       container.progressionUseCases.getProgressionSummary(userId),
       container.progressionUseCases.getGlobalXpRank(userId),
       container.achievementUseCases.getSummary(userId),
       container.scoreReadUseCases.getUserBestsFormatted(userId),
-      container.creatorUseCases.getCreatorProfileByUserId(userId),
+      container.streamerUseCases.getStreamerProfileByUserId(userId),
       needsPersonalization
         ? container.personalizationUseCases.getPersonalizationState(userId)
         : null,
     ]);
 
-  const creatorBadges = (creatorProfile?.platformAccounts ?? [])
+  const streamerBadges = (streamerProfile?.platformAccounts ?? [])
     .filter((a) => a.verificationStatus === "VERIFIED")
     .map((a) => ({
       platform: a.platform,
@@ -459,7 +463,7 @@ export async function getPublicProfileData(
     unlockedAchievementCodes: achievements.unlockedCodes,
     totalAchievements: achievements.totalAchievements,
     gameBests,
-    creatorBadges,
+    streamerBadges,
     favoriteGameIds: isOwner || showFavorites ? (personalization?.favoriteGameIds ?? []) : null,
     recentPlays: isOwner || showRecentPlays ? (personalization?.recentPlays ?? []) : null,
     visibilitySettings: isOwner ? { showFavorites, showRecentPlays } : null,

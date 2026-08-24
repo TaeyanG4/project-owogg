@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ProgressionSummarySchema, AchievementCodeSchema } from "./progression.js";
-import { CreatorPlatformSchema } from "./creator.js";
+import { StreamerPlatformSchema } from "./streamer.js";
 import { RecentPlaySchema } from "./personalization.js";
 
 // Public-facing profile ("/users/:id"). A strict subset of what /api/profile/* and
@@ -14,13 +14,13 @@ export const PublicGameBestSchema = z.object({
 });
 export type PublicGameBest = z.infer<typeof PublicGameBestSchema>;
 
-export const PublicCreatorBadgeSchema = z.object({
-  platform: CreatorPlatformSchema,
+export const PublicStreamerBadgeSchema = z.object({
+  platform: StreamerPlatformSchema,
   channelName: z.string(),
   channelUrl: z.string(),
   channelHandle: z.string().nullable(),
 });
-export type PublicCreatorBadge = z.infer<typeof PublicCreatorBadgeSchema>;
+export type PublicStreamerBadge = z.infer<typeof PublicStreamerBadgeSchema>;
 
 export const PublicProfileResponseSchema = z.object({
   id: z.number(),
@@ -36,7 +36,7 @@ export const PublicProfileResponseSchema = z.object({
   unlockedAchievementCodes: z.array(AchievementCodeSchema),
   totalAchievements: z.number().int().min(0),
   gameBests: z.array(PublicGameBestSchema),
-  creatorBadges: z.array(PublicCreatorBadgeSchema),
+  streamerBadges: z.array(PublicStreamerBadgeSchema),
   /** null = hidden from this viewer — either the owner set it private and the viewer isn't the
    * owner, or (when the viewer IS the owner) there's nothing special here: owners always see
    * their own lists regardless of the privacy flag, so null only ever means "hidden from you". */

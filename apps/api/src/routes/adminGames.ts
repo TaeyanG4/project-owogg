@@ -47,7 +47,7 @@ adminGamesRouter.get("/", async (c) => {
 });
 
 // POST /api/admin/games/upload — publishes a ZIP as an official OWOGG game. Authority comes only
-// from this elevated admin route; no archive field or public creator endpoint can select OWOGG.
+// from this elevated admin route; no archive field or public Game Creator endpoint can select OWOGG.
 adminGamesRouter.post(
   "/upload",
   rateLimit({ name: "game-upload", binding: "GAME_UPLOAD_RATE_LIMITER" }),
@@ -104,7 +104,7 @@ adminGamesRouter.post(
           ? "동일한 slug가 사용자 게임 또는 삭제된 게임에 이미 사용되고 있습니다."
           : error.code === "PUBLISH_FAILED"
             ? "OWOGG 게임을 D1/B2에 게시하지 못했습니다."
-            : "게임 ZIP 또는 owogg.json Creator Manifest v1이 올바르지 않습니다.";
+            : "게임 ZIP 또는 owogg.json Game Creator Manifest v1이 올바르지 않습니다.";
       return c.json({ error: { code: error.code, message } }, status);
     }
   },

@@ -557,7 +557,7 @@ test("hardDelete frees the slug for an immediate re-insert with the same value â
   assert.equal(retried?.slug, "ball-dodge");
 });
 
-// Regression (2026-08-18): production crashed with a raw 500 when a creator re-registered a slug
+// Regression (2026-08-18): production crashed with a raw 500 when a Game Creator re-registered a slug
 // an admin had just soft-deleted â€” findBySlug (deleted_at-filtered) said the slug was free, but
 // the raw UNIQUE constraint on sandbox_games.slug still held the old row, so the INSERT below
 // throws. slugExists is the fix's foundation: it has to agree with the constraint (see it used in
@@ -1358,7 +1358,7 @@ test("Stage A-3: concurrent create by different developers allocates distinct ID
   }
 });
 
-test("0034: Creator reads use generic games/game_versions as the authority", async () => {
+test("0034: Game Creator reads use generic games/game_versions as the authority", async () => {
   const { db, raw } = createSqliteD1(SANDBOX_GAMES_TEST_SCHEMA);
   seedUser(raw, 1, "Dev");
   const repo = new D1SandboxGameRepository(db);

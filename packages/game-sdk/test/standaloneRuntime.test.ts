@@ -71,7 +71,7 @@ test("runtime.emit(game_started) maps to client.started(), nothing else does", (
   assert.deepEqual(calls, ["started"]);
 });
 
-test("runtime.complete forwards Creator result facts and legacy metadata, dropping host-only fields", async () => {
+test("runtime.complete forwards Game Creator result facts and legacy metadata, dropping host-only fields", async () => {
   const { client, completed } = createFakeClient();
   const runtime = createStandaloneBridgeRuntime(client);
 

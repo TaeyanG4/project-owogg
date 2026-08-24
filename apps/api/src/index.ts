@@ -9,11 +9,11 @@ import { profileRouter } from "./routes/profile.js";
 import { discordRouter } from "./routes/discordInteractions.js";
 import { discordLinkRouter } from "./routes/discordLink.js";
 import { discordGuildsRouter } from "./routes/discordGuilds.js";
-import { creatorsRouter } from "./routes/creators.js";
+import { streamersRouter } from "./routes/streamers.js";
 import { adminRouter } from "./routes/admin.js";
 import { adminAuthRouter } from "./routes/adminAuth.js";
 import { adminAccountsRouter } from "./routes/adminAccounts.js";
-import { adminCreatorsRouter } from "./routes/adminCreators.js";
+import { adminStreamersRouter } from "./routes/adminStreamers.js";
 import { adminGamesRouter } from "./routes/adminGames.js";
 import { adminUsersRouter } from "./routes/adminUsers.js";
 import { adminGameCreatorsRouter } from "./routes/adminGameCreators.js";
@@ -24,7 +24,7 @@ import { gameServingRouter, publishedGameAssetsRouter } from "./routes/gameServi
 import { gamesRouter } from "./routes/games.js";
 import { renderRouter } from "./routes/render.js";
 import { createContainer } from "./container.js";
-import { getCreatorProviderAdapters } from "./infrastructure/creators/index.js";
+import { getStreamerProviderAdapters } from "./infrastructure/streamers/index.js";
 import { FEATURED_POLICY } from "@owogg/core";
 import type { ApiEnv } from "./routes/auth.js";
 
@@ -158,11 +158,15 @@ app.route("/api/profile", profileRouter);
 app.route("/api/discord", discordRouter);
 app.route("/api/discord", discordLinkRouter);
 app.route("/api/discord/guilds", discordGuildsRouter);
-app.route("/api/creators", creatorsRouter);
+app.route("/api/streamers", streamersRouter);
+// One-release rolling-deploy alias for the immediately previous Web revision. New code and docs
+// must use `/api/streamers`; remove this alias only after the rollback window closes.
+app.route("/api/creators", streamersRouter);
 app.route("/api/admin", adminRouter);
 app.route("/api/admin", adminAuthRouter);
 app.route("/api/admin", adminAccountsRouter);
-app.route("/api/admin/creators", adminCreatorsRouter);
+app.route("/api/admin/streamers", adminStreamersRouter);
+app.route("/api/admin/creators", adminStreamersRouter);
 app.route("/api/admin/games", adminGamesRouter);
 app.route("/api/admin/users", adminUsersRouter);
 app.route("/api/admin/game-creators", adminGameCreatorsRouter);
@@ -190,7 +194,7 @@ app.onError((err, c) => {
 });
 
 /**
- * Phase E2A/E2B: Featured Creator 취득 심사(6시간)와 기존 Featured 재검증(14일) 스케줄러.
+ * Phase E2A/E2B: Featured Streamer 취득 심사(6시간)와 기존 Featured 재검증(14일) 스케줄러.
  * - 취득 심사와 재검증 잡을 서로 다른 repository query로 바운디드 처리.
  * - 단일 잡/프로바이더 실패가 배치 전체를 막지 않음 (잡 단위 FAILED_RETRYABLE 처리).
  * - 사용자 OAuth 토큰은 저장하지 않으며, 공식 app-level/공개 API만 사용합니다.
@@ -200,30 +204,30 @@ async function scheduledHandler(
   env: ApiEnv["Bindings"],
   ctx: ExecutionContext,
 ): Promise<void> {
-  const adapters = getCreatorProviderAdapters(env);
-  const { creatorUseCases, adminAuthUseCases } = createContainer(env.DB);
+  const adapters = getStreamerProviderAdapters(env);
+  const { streamerUseCases, adminAuthUseCases } = createContainer(env.DB);
 
   const task = (async () => {
     const now = new Date();
-    await creatorUseCases.ensureFeaturedRevalidationJobs({
+    await streamerUseCases.ensureFeaturedRevalidationJobs({
       now,
       batchSize: FEATURED_POLICY.DEFAULT_BATCH_SIZE,
     });
-    const acquisition = await creatorUseCases.runDueFeaturedReviews({
+    const acquisition = await streamerUseCases.runDueFeaturedReviews({
       adapters,
       now,
       batchSize: FEATURED_POLICY.DEFAULT_BATCH_SIZE,
     });
-    const revalidation = await creatorUseCases.runDueFeaturedRevalidations({
+    const revalidation = await streamerUseCases.runDueFeaturedRevalidations({
       adapters,
       now,
       batchSize: FEATURED_POLICY.DEFAULT_BATCH_SIZE,
     });
     console.log(
-      `[creator-review] scheduled run done: acquisitionProcessed=${acquisition.processed} acquisitionFeatured=${acquisition.featured} acquisitionNotEligible=${acquisition.notEligible} acquisitionManualReview=${acquisition.manualReview} acquisitionFailed=${acquisition.failed} revalidationProcessed=${revalidation.processed} retained=${revalidation.retained} revoked=${revalidation.revoked} revalidationManualReview=${revalidation.manualReview} revalidationFailed=${revalidation.failed}`,
+      `[streamer-review] scheduled run done: acquisitionProcessed=${acquisition.processed} acquisitionFeatured=${acquisition.featured} acquisitionNotEligible=${acquisition.notEligible} acquisitionManualReview=${acquisition.manualReview} acquisitionFailed=${acquisition.failed} revalidationProcessed=${revalidation.processed} retained=${revalidation.retained} revoked=${revalidation.revoked} revalidationManualReview=${revalidation.manualReview} revalidationFailed=${revalidation.failed}`,
     );
   })().catch((err) => {
-    console.error("[creator-review] scheduled run crashed:", err);
+    console.error("[streamer-review] scheduled run crashed:", err);
   });
 
   // Bounded, opportunistic cleanup of expired admin step-up challenges/sessions/login-attempt

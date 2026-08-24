@@ -5,7 +5,7 @@ import {
   type GameCompleteMessage,
   type GameEventMessage,
 } from "./protocol.js";
-import type { OwoggCompletionPayload } from "../contracts/creatorManifest.js";
+import type { OwoggCompletionPayload } from "../contracts/gameCreatorManifest.js";
 
 /** The minimal subset of `Window` this file touches — lets a test supply a fake without a DOM.
  * Real callers never pass this; `connectGameBridge()` defaults to the real `window`. */
@@ -17,7 +17,7 @@ export interface GameBridgeWindowLike {
 
 export interface GameBridgeClient {
   /** The `difficultyId` the host's HOST_INIT bootstrap carried, or `undefined` when the host
-   * didn't send one — every existing bootstrap (reaction-time, Creator games, ball-dodge) and
+   * didn't send one — every existing bootstrap (reaction-time, Game Creator games, ball-dodge) and
    * every game with no difficulty tiers. Read once at connect time and never updated after: this
    * protocol has no live-update message, so a host-side difficulty change means a fresh iframe
    * mount (a new HOST_INIT), not a change to an already-connected client — see

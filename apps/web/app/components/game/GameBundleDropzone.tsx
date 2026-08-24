@@ -8,7 +8,7 @@ interface GameBundleDropzoneProps {
   actionLabel?: string;
 }
 
-/** Shared ZIP entry point for Creator and trusted-admin publication.
+/** Shared ZIP entry point for Game Creator and trusted-admin publication.
  *
  * Keeping selection and drag-and-drop behavior in one component prevents the two upload surfaces
  * from drifting. Publisher authority deliberately stays outside this component and is selected by

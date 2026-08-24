@@ -5,7 +5,7 @@ import type { StaffRole } from "./staffRoles.js";
  * packages/db, HTTP wiring lives in apps/api. See docs/AUTHORIZATION.md and
  * docs/GAME_CREATION_GUIDE.md §3.6.
  *
- * GAME_CREATOR is deliberately NOT a Staff Role (see domain/staffRoles.ts) — a game creator is a
+ * GAME_CREATOR is deliberately NOT a Staff Role (see domain/staffRoles.ts) — a Game Creator is a
  * regular OwOGG user approved to use the sandbox game upload/publish pipeline, never an
  * administrator, and never gets a password/Google step-up session. This module's two record
  * types capture the two things that can be true about a user's relationship to the program:
@@ -64,7 +64,7 @@ export function canApplyForGameCreator(): boolean {
  * This does NOT make GAME_CREATOR a Staff Role or fold it into the role tree — it stays a
  * Program/Entitlement whose axis is independent of Staff Role (docs/AUTHORIZATION.md §0). This is
  * simply a policy rule that says "holding one of these three roles also satisfies the Game
- * Creator program's access check," the same way an admin-direct grant or an approved application
+ * Game Creator program's access check," the same way an admin-direct grant or an approved application
  * would — none of those three paths change what GAME_CREATOR *is*.
  *
  * Callers OR this together with the real `game_creator_access` row status — it never replaces

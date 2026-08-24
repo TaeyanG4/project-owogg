@@ -157,7 +157,7 @@ export const GameScoreAcceptResponseSchema = z.object({
 });
 export type GameScoreAcceptResponse = z.infer<typeof GameScoreAcceptResponseSchema>;
 
-const CreatorFactKeySchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/);
+const GameCreatorFactKeySchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/);
 
 export const GameResultAcceptRequestSchema = z
   .object({
@@ -165,8 +165,8 @@ export const GameResultAcceptRequestSchema = z
     outcome: z.enum(["neutral", "success", "failure", "win", "loss", "draw"]).optional(),
     score: z.number().finite().optional(),
     progression: z.object({ value: z.number().finite() }).strict().optional(),
-    metrics: z.record(CreatorFactKeySchema, z.number().finite()).optional(),
-    events: z.record(CreatorFactKeySchema, z.number().int().positive().max(10_000)).optional(),
+    metrics: z.record(GameCreatorFactKeySchema, z.number().finite()).optional(),
+    events: z.record(GameCreatorFactKeySchema, z.number().int().positive().max(10_000)).optional(),
     difficulty: z.string().optional(),
     playToken: z.string().optional(),
   })

@@ -7,8 +7,8 @@
 기준 소스:
 
 - `packages/core/src/domain/sandboxGameBundle.ts`
-- `packages/core/src/domain/creatorManifest.ts`
-- `packages/core/src/domain/creatorResult.ts`
+- `packages/core/src/domain/gameCreatorManifest.ts`
+- `packages/core/src/domain/gameCreatorResult.ts`
 - `packages/core/src/domain/sandboxGames.ts`
 - `packages/core/src/application/gamePublicationService.ts`
 - `packages/core/src/application/sandboxGameUseCases.ts`
@@ -31,7 +31,7 @@ OwOGG에는 두 개의 **입력/control-plane**이 있지만 하나의 productio
 경로가 아닙니다.
 
 공개 “공식” 표시는 `GameCanonicalDocument.publisher.official` 메타데이터입니다. 소유권과 API 인가는
-D1의 서버 관리 관계만 사용하며 canonical/manifest 입력으로 판정하지 않습니다. Creator 경로는
+D1의 서버 관리 관계만 사용하며 canonical/manifest 입력으로 판정하지 않습니다. Game Creator 경로는
 업로드 내용과 무관하게 항상 `official: false`를 기록하고, 관리자 OWOGG endpoint만 `true`를 기록합니다.
 
 ## 1. 게임이 지켜야 하는 runtime 계약
@@ -72,7 +72,7 @@ B2에 기록한 후 D1 live version을 활성화합니다. 같은 화면의 사�
 않습니다.
 
 ZIP에는 `index.html`, `owogg.json`, `owogg.logo.*`가 필요합니다. 관리자와 USER 업로드는 완전히
-동일한 Creator Manifest v1 입력을 사용합니다. publisher와 official 표시는 manifest에 선언할 수
+동일한 Game Creator Manifest v1 입력을 사용합니다. publisher와 official 표시는 manifest에 선언할 수
 없으며, 관리자 endpoint만 서버에서 `OWOGG` 권한을 부여합니다.
 
 같은 화면의 OWOGG 행에는 **완전 삭제**가 있습니다. 이 작업은 `games.moderate`와
@@ -138,14 +138,14 @@ ZIP을 올립니다. 모든 버전에도 유효한 `owogg.json`이 필요하고 
 
 `SANDBOX_GAME_POLICY`가 현재 다음 제한을 강제합니다.
 
-| 항목                            |   제한 |
-| ------------------------------- | -----: |
-| compressed upload               | 20 MiB |
-| extracted bytes                 | 50 MiB |
-| file count                      |    300 |
-| path depth                      |     16 |
-| new-game logo                   |  2 MiB |
-| creator concurrent review slots |      2 |
+| 항목                                 |   제한 |
+| ------------------------------------ | -----: |
+| compressed upload                    | 20 MiB |
+| extracted bytes                      | 50 MiB |
+| file count                           |    300 |
+| path depth                           |     16 |
+| new-game logo                        |  2 MiB |
+| Game Creator concurrent review slots |      2 |
 
 절대 경로, drive path, `..`, 비정상 압축 비율, 누락된 `index.html`은 거부됩니다. publication은
 request-time unzip serving을 하지 않고 검증된 파일을 version prefix에 개별 객체로 기록합니다.
@@ -226,12 +226,12 @@ Web의 `GameHost`는 publisher를 보고 다른 host를 고르지 않습니다. 
 - B2 canonical `owogg.json`의 outcome/score/progression/metric/event 선언과 range
 
 `outOfRange: "reject"` 값은 결과 전체를 거부합니다. `clamp` 값은 보정해 `game_results`에
-`adjusted=true`로 저장하지만 leaderboard, Creator achievement, XP/보상에서는 제외합니다.
+`adjusted=true`로 저장하지만 leaderboard, Game Creator achievement, XP/보상에서는 제외합니다.
 정상 score만 `scores`에 투영되며 leaderboard는 이 서버 승인 점수만 읽습니다.
 
 `games.leaderboard_generation`은 현재 live version의 리더보드 세대입니다. OWOGG 재업로드 또는 USER
 승인/롤포워드/롤백으로 live version ID가 바뀌면 세대가 한 번 증가하고, 이후 승인 점수는 새 세대에
-기록됩니다. 공개 리더보드, 개인 최고 기록, Creator/Discord 게임 랭킹은 현재 세대만 읽으므로 새
+기록됩니다. 공개 리더보드, 개인 최고 기록, Streamer/Discord 게임 랭킹은 현재 세대만 읽으므로 새
 버전의 리더보드는 빈 상태에서 시작합니다. 이전 점수 row는 감사·이력 용도로 남지만 현재 랭킹에는
 노출되지 않습니다. 같은 content/version을 다시 활성화해 live version ID가 바뀌지 않으면 초기화하지
 않습니다. 공개 리더보드의 edge cache는 최대 30초 동안 이전 응답을 보일 수 있습니다.

@@ -7,8 +7,8 @@ import { shouldRenderGameThumbnailImage } from "../components/ui/GameThumbnail";
  * gameCardHref is the pure routing decision GameCard's <Link> renders — extracted specifically so
  * it's testable without a DOM renderer (this suite has none; same honest-scoping call as
  * sandboxGamePlayUrl elsewhere in this test directory). Before this PR, GameCard branched on a
- * `version === "sandbox"` marker to send Creator games to /sandbox-games/:slug instead; these
- * tests pin that the branch is gone and every slug — SYSTEM or Creator — now routes the same way.
+ * `version === "sandbox"` marker to send Game Creator games to /sandbox-games/:slug instead; these
+ * tests pin that the branch is gone and every slug — SYSTEM or GAME_CREATOR — now routes the same way.
  */
 
 test("a SYSTEM game's card routes to /games/:slug — unchanged from before this PR", () => {
@@ -16,7 +16,7 @@ test("a SYSTEM game's card routes to /games/:slug — unchanged from before this
   assert.equal(gameCardHref("memory-test"), "/games/memory-test");
 });
 
-test("a Creator (sandbox) game's card also routes to /games/:slug now, not /sandbox-games/:slug", () => {
+test("a Game Creator (sandbox) game's card also routes to /games/:slug now, not /sandbox-games/:slug", () => {
   assert.equal(gameCardHref("ball-dodge"), "/games/ball-dodge");
 });
 

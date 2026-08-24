@@ -10,7 +10,7 @@
  * public-facing shape this mirrors. A SYSTEM game has a fixed category/tag taxonomy, a fixed set of
  * input methods and a bundled thumbnail asset; a CREATOR game has a free-text genre, a coarser
  * single/multi mode, and a logo served from its own byte endpoint. Forcing both into one
- * optional-everything shape would mean either inventing categories/tags/thumbnail a creator game
+ * optional-everything shape would mean either inventing categories/tags/thumbnail a Game Creator game
  * doesn't have or silently dropping genre/mode from a
  * SYSTEM one. `{@link GameDefinitionCommon}` holds only what both owners genuinely share.
  *
@@ -33,7 +33,7 @@ import type { SandboxGameMode } from "../../../domain/sandboxGames.js";
 /**
  * The half a game's author does NOT get to decide.
  *
- * A creator's `owogg.json` is a validated public runtime contract — registration metadata and
+ * A Game Creator's `owogg.json` is a validated public runtime contract — registration metadata and
  * title and genre"), not policy. Scoring bounds, leaderboard participation, XP and auth
  * requirements are operator decisions, because each of them is directly farmable: XP in particular
  * is capped per game (progression.ts's XP_DAILY_CAP_COMPLETIONS_PER_GAME), so a self-declared
@@ -50,7 +50,7 @@ export interface GamePolicy {
   readonly score: ScoreConfig | null;
   /** Whether accepted submissions appear on a public leaderboard. */
   readonly leaderboard: boolean;
-  /** Server-authoritative XP per accepted completion. Starts at 0 for creator games and is raised
+  /** Server-authoritative XP per accepted completion. Starts at 0 for Game Creator games and is raised
    * only by an operator — see docs/GAME_CREATION_GUIDE.md §3.5. */
   readonly xpPerCompletion: number;
   /** Whether a player must be signed in to play at all (distinct from needing an account to
@@ -124,7 +124,7 @@ export interface CreatorGameDefinition extends GameDefinitionCommon {
   readonly genre: string;
   /** `"single" | "multi"` — sandbox_games' own coarser player-count vocabulary (see
    * domain/sandboxGames.ts's SandboxGameMode), never translated into SYSTEM's richer
-   * `"local-multi" | "online-multi"` distinction, which a Creator submission has no way to
+   * `"local-multi" | "online-multi"` distinction, which a Game Creator submission has no way to
    * declare (OwOGG runs no server-side game-state relay — see
    * docs/GAME_CREATION_GUIDE.md §3.2.2). */
   readonly mode: SandboxGameMode;

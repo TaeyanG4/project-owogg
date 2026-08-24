@@ -20,16 +20,16 @@ npx tsx examples/ball-dodge/verify-zip.mjs
 
 Runs the actual production bundle validators
 (`packages/core/src/domain/sandboxGameBundle.ts`) against the built zip, plus a check that the
-Creator Manifest v1과 Browser API 호출이 bundle에 들어갔는지 확인합니다.
+Game Creator Manifest v1과 Browser API 호출이 bundle에 들어갔는지 확인합니다.
 
 ## Manual E2E
 
 1. Build the zip (above).
 2. Sign in as a developer, open the Game Creator Center, and drag `ball-dodge.zip` onto the
    auto-registration drop zone. This creates the game and its first version through
-   `createGameFromBundle` — the same call any Creator upload makes.
+   `createGameFromBundle` — the same call any Game Creator upload makes.
 3. As an admin, approve the pending version and set the game's visibility to PUBLIC (same review
-   flow as any other Creator game).
+   flow as any other Game Creator game).
 4. Web app에서 `/games/ball-dodge`를 엽니다. Generic public game API가 live version을 해석하고
    `GameHost`가 `IframeRuntime`과 Bridge를 통해 bundle을 실행합니다.
 5. 시작을 눌러 `OWOGG.start()`가 호출되는지 확인합니다.

@@ -152,7 +152,7 @@ jobs:
         run: pnpm smoke:prod --api-only --sha ${{ github.sha }}
         env:
           SMOKE_API_URL: https://api-stg.owogg.com
-          CREATOR_ENABLED_PROVIDERS: ""
+          STREAMER_ENABLED_PROVIDERS: ""
 
       - name: Build Web frontend
         run: pnpm --filter @owogg/web build

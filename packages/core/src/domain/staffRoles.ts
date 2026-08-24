@@ -5,7 +5,7 @@
  * Deliberately a *separate axis* from Program/Entitlement access (see domain/gameCreator.ts's
  * GameCreatorAccess) and from Subscription (no OWO_PLUS system exists in this codebase yet — see
  * that file's canApplyForGameCreator() doc comment). A user's account can be any combination of:
- * one Staff Role (or none), Game Creator access (or not), and Streamer/Creator verification (or
+ * one Staff Role (or none), Game Creator access (or not), and Streamer verification (or
  * not) — see docs/AUTHORIZATION.md for the full picture and the reasoning behind keeping these
  * three axes independent instead of one role tree.
  *
@@ -66,9 +66,9 @@ export const PERMISSIONS = [
   // grant/revoke, and reviewing self-serve applications.
   "game_creators.manage",
 
-  // Streamer/Creator Featured-badge manual review (apps/api/src/routes/adminCreators.ts). Base
+  // Streamer Featured-badge manual review (apps/api/src/routes/adminStreamers.ts). Base
   // Streamer status itself has no review step — see domain/gameCreator.ts's sibling doc comment
-  // on why STREAMER program access is read directly off creator_profiles.status, not a queue.
+  // on why STREAMER program access is read directly off streamer_profiles.status, not a queue.
   "streamers.review",
 
   // Read-only operational dashboards (apps/api/src/routes/admin.ts: /overview, /monitoring).

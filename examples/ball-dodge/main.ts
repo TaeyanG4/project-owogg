@@ -1,4 +1,4 @@
-/** 공 피하기 — dependency-free `window.OWOGG` Creator Manifest v1 integration example. */
+/** 공 피하기 — dependency-free `window.OWOGG` Game Creator Manifest v1 integration example. */
 
 export {};
 

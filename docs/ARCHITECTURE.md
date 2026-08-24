@@ -47,7 +47,7 @@ Browser
 
 ### `apps/web`
 
-- React Router SPA와 catalog/profile/admin/creator UI를 제공합니다.
+- React Router SPA와 catalog/profile/admin/streamer UI를 제공합니다.
 - API 계약을 통해 데이터를 가져오며 D1 repository를 직접 사용하지 않습니다.
 - `GameHost`가 public game, signed game session, 결과/리더보드 흐름을 조정합니다.
 - `IframeRuntime`과 host-side Bridge가 격리된 standalone bundle을 연결합니다.
@@ -109,7 +109,7 @@ USER 게임도 generic tables를 제어 권한 원천으로 사용합니다.
 - `games`: developer 소유권, review slot, 편집 가능한 control-plane metadata, visibility
 - `game_versions`: 원본 archive/publication 사실과 심사 상태, reviewer/reason
 - `sandbox_games`, `sandbox_game_versions`: 이전 Worker를 위한 임시 호환 미러(별도 모델 아님)
-- creator 프로그램 자격, review queue, audit trail, approve/reject/revoke/republish
+- Game Creator 프로그램 자격, review queue, audit trail, approve/reject/revoke/republish
 - 사용자별 동시 심사 slot 최대 2개
 
 Migration trigger와 repository compatibility write가 롤링 배포 중 구 Worker와 generic authority를
@@ -173,7 +173,8 @@ bootstrap이 Web build보다 먼저 실행되므로 배포된 카탈로그와 bu
 - `pnpm docs:check`: 상대 Markdown 링크, 인덱스, migration metadata 검사
 - `pnpm typecheck:scripts`와 `pnpm test:scripts`: scripts 자체의 타입과 테스트 검사
 
-`StaticGameRegistry` runtime authority, `CreatorGameHost`, `transitionalCreatorGameResolver`,
+`StaticGameRegistry` runtime authority와 예전 Game Creator 계열 이름인 `CreatorGameHost`,
+`transitionalCreatorGameResolver`,
 publisher별 runtime 선택, `/official-games` serving, release-map publication은 현재 구조가 아닙니다.
 다만 이 이름을 금지하는 negative architecture guard는 의도적인 회귀 방지이므로 유지합니다.
 

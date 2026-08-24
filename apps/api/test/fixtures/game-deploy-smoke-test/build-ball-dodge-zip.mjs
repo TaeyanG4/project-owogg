@@ -15,7 +15,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const srcDir = join(here, "ball-dodge");
 const outFile = join(here, "ball-dodge.zip");
 
-// owogg.json Creator Manifest v1 + owogg.logo.svg let the fixture double as a worked
+// owogg.json Game Creator Manifest v1 + owogg.logo.svg let the fixture double as a worked
 // example of the drag-and-drop auto-registration path (see docs/GAME_CREATION_GUIDE.md §3.6.2) —
 // dropping this zip straight onto the Game Creator Center registers "ball-dodge", both fields
 // being required on every registration since 2026-08-18.

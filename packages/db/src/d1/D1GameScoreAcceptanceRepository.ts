@@ -2,7 +2,7 @@ import type { GameScoreAcceptanceRepository } from "@owogg/core";
 import type { D1Database } from "./D1UserRepository.js";
 
 /**
- * Generic replacement for the Creator-only acceptance adapter. Migration 0032 points
+ * Generic replacement for the old Game Creator-only acceptance adapter. Migration 0032 points
  * game_attempt_consumptions at `games`/`game_versions`, so OWOGG and USER attempts share this
  * exact transaction. The final SELECT is gated by the score INSERT's `changes()` result and
  * returns the stable score row id without a second, non-atomic lookup.

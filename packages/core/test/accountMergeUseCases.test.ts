@@ -26,11 +26,11 @@ class FixtureState {
   xpEvents: { id: number; userId: number }[] = [];
   progress = new Map<number, { totalXp: number; eligibleCompletions: number }>();
   achievements = new Map<number, Set<string>>();
-  creatorConflict = false;
-  creatorProfileOwner: number | null = null;
-  creatorSettings = new Map<number, string>();
-  creatorReviewJobAccountIds: number[] = [];
-  creatorAuditAccountIds: number[] = [];
+  streamerConflict = false;
+  streamerProfileOwner: number | null = null;
+  streamerSettings = new Map<number, string>();
+  streamerReviewJobAccountIds: number[] = [];
+  streamerAuditAccountIds: number[] = [];
   guildManagers: { guildId: string; userId: number }[] = [];
   guildOwners: { guildId: string; userId: number }[] = [];
   guildXpEvents: { guildId: string; userId: number; sourceXpEventId: number }[] = [];
@@ -202,8 +202,8 @@ class FixtureMergeRepo implements AccountMergeRepository {
     }
     return null;
   }
-  async findMergeIntegrityConflict(): Promise<"CREATOR_PLATFORM_CONFLICT" | null> {
-    return this.s.creatorConflict ? "CREATOR_PLATFORM_CONFLICT" : null;
+  async findMergeIntegrityConflict(): Promise<"STREAMER_PLATFORM_CONFLICT" | null> {
+    return this.s.streamerConflict ? "STREAMER_PLATFORM_CONFLICT" : null;
   }
   async consumeMergeChallenge(id: string): Promise<void> {
     const ch = this.s.challenges.get(id);
@@ -238,12 +238,12 @@ class FixtureMergeRepo implements AccountMergeRepository {
     for (const context of this.s.playContexts) {
       if (context.userId === secondaryId) context.userId = primaryId;
     }
-    if (this.s.creatorProfileOwner === secondaryId) this.s.creatorProfileOwner = primaryId;
-    if (!this.s.creatorSettings.has(primaryId) && this.s.creatorSettings.has(secondaryId)) {
-      this.s.creatorSettings.set(primaryId, this.s.creatorSettings.get(secondaryId)!);
+    if (this.s.streamerProfileOwner === secondaryId) this.s.streamerProfileOwner = primaryId;
+    if (!this.s.streamerSettings.has(primaryId) && this.s.streamerSettings.has(secondaryId)) {
+      this.s.streamerSettings.set(primaryId, this.s.streamerSettings.get(secondaryId)!);
     }
-    this.s.creatorSettings.delete(secondaryId);
-    this.s.creatorReviewJobAccountIds = this.s.creatorReviewJobAccountIds.filter(
+    this.s.streamerSettings.delete(secondaryId);
+    this.s.streamerReviewJobAccountIds = this.s.streamerReviewJobAccountIds.filter(
       (accountId) => accountId > 0,
     );
     // 2. move secondary oauth_accounts to primary
@@ -426,13 +426,13 @@ test("confirmMerge keeping B (reverse) keeps B data and deletes A data", async (
   assert.deepEqual(providers, ["discord", "google"]);
 });
 
-test("conflicting Creator platform ownership blocks merge before destructive work", async () => {
+test("conflicting Streamer platform ownership blocks merge before destructive work", async () => {
   const { state, useCases, userA, userB, challengeId } = await setupTwoAccounts();
-  state.creatorConflict = true;
+  state.streamerConflict = true;
 
   const result = await useCases.confirmMerge(challengeId, userA.id, userA.id);
 
-  assert.deepEqual(result, { ok: false, code: "MERGE_CREATOR_CONFLICT" });
+  assert.deepEqual(result, { ok: false, code: "MERGE_STREAMER_CONFLICT" });
   assert.ok(state.users.has(userA.id));
   assert.ok(state.users.has(userB.id));
   assert.equal(state.scores.length, 2);
@@ -472,22 +472,22 @@ test("merge is allowed when the PRIMARY (kept) account is the administrator — 
   assert.equal(result.ok, true);
 });
 
-test("conflict-free Creator ownership transfers with review and audit identity intact", async () => {
+test("conflict-free Streamer ownership transfers with review and audit identity intact", async () => {
   const { state, useCases, userA, userB, challengeId } = await setupTwoAccounts();
-  state.creatorProfileOwner = userB.id;
-  state.creatorSettings.set(userA.id, "primary presentation");
-  state.creatorSettings.set(userB.id, "secondary presentation");
-  state.creatorReviewJobAccountIds.push(7001);
-  state.creatorAuditAccountIds.push(7001);
+  state.streamerProfileOwner = userB.id;
+  state.streamerSettings.set(userA.id, "primary presentation");
+  state.streamerSettings.set(userB.id, "secondary presentation");
+  state.streamerReviewJobAccountIds.push(7001);
+  state.streamerAuditAccountIds.push(7001);
 
   const result = await useCases.confirmMerge(challengeId, userA.id, userA.id);
 
   assert.equal(result.ok, true);
-  assert.equal(state.creatorProfileOwner, userA.id);
-  assert.equal(state.creatorSettings.get(userA.id), "primary presentation");
-  assert.equal(state.creatorSettings.has(userB.id), false);
-  assert.deepEqual(state.creatorReviewJobAccountIds, [7001]);
-  assert.deepEqual(state.creatorAuditAccountIds, [7001]);
+  assert.equal(state.streamerProfileOwner, userA.id);
+  assert.equal(state.streamerSettings.get(userA.id), "primary presentation");
+  assert.equal(state.streamerSettings.has(userB.id), false);
+  assert.deepEqual(state.streamerReviewJobAccountIds, [7001]);
+  assert.deepEqual(state.streamerAuditAccountIds, [7001]);
 });
 
 test("confirmMerge challenge is consumed after a successful merge", async () => {

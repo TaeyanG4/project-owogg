@@ -13,7 +13,7 @@ _최근 갱신: 2026-08-14 — 게임 카탈로그 콘텐츠(제목/설명/태�
 
 | 파일                                                 | 상태                                           | 내용                                                                                                                                                     |
 | ---------------------------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `translated-creator.json`                            | ✅ 번역 완료, 코드 연결됨                      | Creator 개요/인증/Featured 3페이지, 4개 언어 전체                                                                                                        |
+| `translated-streamer.json`                           | ✅ 번역 완료, 코드 연결됨                      | Streamer 개요/인증/Featured 3페이지, 4개 언어 전체                                                                                                       |
 | `translated-account-games.json`                      | ✅ 번역 완료, 코드 연결됨                      | Account/AccountMerge/Games/GamesRanking/GamesXp/GettingStarted 6페이지, 4개 언어 전체                                                                    |
 | `01-wiki-discord.json` + `.en-US`/`.ja-JP`/`.zh-CN`  | ✅ 번역 완료, 코드 연결됨                      | 위키 Discord 섹션 7페이지(Overview/Install/AccountLink/ServerRegistration/Commands/Xp/Troubleshooting), 4개 언어 전체                                    |
 | `03-terms-privacy.json` + `.en-US`/`.ja-JP`/`.zh-CN` | ✅ 번역 완료, 코드 연결됨 (`dict.legal`)       | 이용약관·개인정보처리방침 전문. `/terms`, `/privacy` 라우트가 `dict.legal.terms`/`dict.legal.privacy`를 사용.                                            |
@@ -41,7 +41,7 @@ manifest 위에 오버레이합니다(항목이 없으면 manifest의 한국어 
 
 ## 위키 본문 다국어화 진행률
 
-**16/16페이지 완료** (Getting Started 1 + Account 2 + Games 3 + Creator 3 + Discord 7). 위키 본문
+**16/16페이지 완료** (Getting Started 1 + Account 2 + Games 3 + Streamer 3 + Discord 7). 위키 본문
 다국어화(Task #7)는 완료되었습니다.
 
 ## 최신화(드리프트) 상태
