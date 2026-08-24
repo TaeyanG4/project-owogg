@@ -422,9 +422,13 @@ export class D1SandboxGameRepository implements SandboxGameRepository {
     await this.db.batch([
       this.db
         .prepare(
-          `UPDATE games SET live_version_id = ?, updated_at = ? WHERE id = ? AND publisher_type = 'USER'`,
+          `UPDATE games
+           SET leaderboard_generation = leaderboard_generation +
+                 CASE WHEN live_version_id IS NOT ? THEN 1 ELSE 0 END,
+               live_version_id = ?, updated_at = ?
+           WHERE id = ? AND publisher_type = 'USER'`,
         )
-        .bind(versionId, nowIso, id),
+        .bind(versionId, versionId, nowIso, id),
       this.db
         .prepare(`UPDATE sandbox_games SET live_version_id = ?, updated_at = ? WHERE id = ?`)
         .bind(versionId, nowIso, id),

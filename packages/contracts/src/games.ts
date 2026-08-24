@@ -120,6 +120,15 @@ export const AdminOfficialGameUploadResponseSchema = z.object({
 });
 export type AdminOfficialGameUploadResponse = z.infer<typeof AdminOfficialGameUploadResponseSchema>;
 
+export const AdminOfficialGameDeleteResponseSchema = z.object({
+  gameId: z.number().int().positive(),
+  slug: z.string().min(1),
+  deletedVersionCount: z.number().int().nonnegative(),
+  deletedObjectCount: z.number().int().nonnegative(),
+  deletedAt: z.string().min(1),
+});
+export type AdminOfficialGameDeleteResponse = z.infer<typeof AdminOfficialGameDeleteResponseSchema>;
+
 /** POST /api/games/:slug/session — short-lived parent-side Game Session token. */
 export const GameSessionResponseSchema = z.object({
   token: z.string(),

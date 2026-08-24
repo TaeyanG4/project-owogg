@@ -24,6 +24,7 @@ import {
   D1GameVersionRepository,
   D1GameAssetRepository,
   D1OfficialGameUploadRepository,
+  D1OfficialGameLifecycleRepository,
   BackblazeB2GameBundleRepository,
   UnconfiguredGameBundleRepository,
   B2GameCanonicalRepository,
@@ -50,6 +51,7 @@ import {
   GameCreatorUseCases,
   SandboxGameUseCases,
   OfficialGameUploadUseCases,
+  OfficialGameLifecycleUseCases,
   GameScoreAcceptanceUseCases,
   GameResultAcceptanceUseCases,
   GameAchievementUseCases,
@@ -149,6 +151,7 @@ export interface AppContainer {
   gameCreatorUseCases: GameCreatorUseCases;
   sandboxGameUseCases: SandboxGameUseCases;
   officialGameUploadUseCases: OfficialGameUploadUseCases;
+  officialGameLifecycleUseCases: OfficialGameLifecycleUseCases;
   gameScoreAcceptanceUseCases: GameScoreAcceptanceUseCases;
   gameResultAcceptanceUseCases: GameResultAcceptanceUseCases;
   gameAchievementUseCases: GameAchievementUseCases;
@@ -193,6 +196,7 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
   const gameVersionRepo = new D1GameVersionRepository(db);
   const gameAssetRepo = new D1GameAssetRepository(db);
   const officialGameUploadRepo = new D1OfficialGameUploadRepository(db);
+  const officialGameLifecycleRepo = new D1OfficialGameLifecycleRepository(db);
   const gameBundleStorageRepo: GameBundleStorageRepository = b2Config
     ? new BackblazeB2GameBundleRepository(b2Config)
     : new UnconfiguredGameBundleRepository();
@@ -274,6 +278,12 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     gameCanonicalRepo,
     officialGamePublicationService,
   );
+  const officialGameLifecycleUseCases = new OfficialGameLifecycleUseCases(
+    officialGameLifecycleRepo,
+    gameBundleStorageRepo,
+    gameCanonicalRepo,
+    officialGamePublicationService,
+  );
   const gameScoreAcceptanceUseCases = new GameScoreAcceptanceUseCases(
     runtimeGameRegistry,
     runtimeGameAvailability,
@@ -338,6 +348,7 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     gameCreatorUseCases,
     sandboxGameUseCases,
     officialGameUploadUseCases,
+    officialGameLifecycleUseCases,
     gameScoreAcceptanceUseCases,
     gameResultAcceptanceUseCases,
     gameAchievementUseCases,

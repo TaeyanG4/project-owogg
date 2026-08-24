@@ -64,6 +64,11 @@ function stateRepository(): GameVersionPublicationRepository & {
       this.states.push("FAILED");
       this.failure = reason;
     },
+    async markGarbageCollected(target, marker) {
+      assert.deepEqual(target, TARGET);
+      this.states.push("GARBAGE_COLLECTED");
+      this.failure = marker;
+    },
   };
 }
 

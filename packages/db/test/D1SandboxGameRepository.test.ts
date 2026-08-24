@@ -76,6 +76,42 @@ test("createVersion then decideVersion(APPROVED) + setLiveVersion lets visibilit
   assert.equal(published.visibility, "PUBLIC");
 });
 
+test("USER live-version changes advance leaderboard generation exactly once per distinct version", async () => {
+  const { db, raw } = createSqliteD1(SANDBOX_GAMES_TEST_SCHEMA);
+  seedUser(raw, 1, "Dev");
+  const repo = new D1SandboxGameRepository(db);
+  const game = await seedGame(repo);
+  const now = new Date().toISOString();
+  const createApproved = async (suffix: string) => {
+    const version = await repo.createVersion({
+      gameId: game.id,
+      objectKey: `k-${suffix}`,
+      contentHash: `h-${suffix}`,
+      bundleBytes: 1,
+      nowIso: now,
+    });
+    await repo.decideVersion(version.id, "APPROVED", 99, null, now);
+    return version;
+  };
+
+  const v1 = await createApproved("1");
+  await repo.setLiveVersion(game.id, v1.id, now);
+  await repo.setLiveVersion(game.id, v1.id, now);
+  assert.equal(
+    raw.prepare("SELECT leaderboard_generation FROM games WHERE id = ?").get(game.id)
+      ?.leaderboard_generation,
+    1,
+  );
+
+  const v2 = await createApproved("2");
+  await repo.setLiveVersion(game.id, v2.id, now);
+  assert.equal(
+    raw.prepare("SELECT leaderboard_generation FROM games WHERE id = ?").get(game.id)
+      ?.leaderboard_generation,
+    2,
+  );
+});
+
 test("revokeVersionApproval reverts status to PENDING_REVIEW and clears the review fields", async () => {
   const { db, raw } = createSqliteD1(SANDBOX_GAMES_TEST_SCHEMA);
   seedUser(raw, 1, "Dev");

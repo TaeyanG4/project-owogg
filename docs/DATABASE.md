@@ -4,7 +4,7 @@
 
 마지막 검증: 2026-08-24
 
-최신 마이그레이션: `0035_creator_manifest_results.sql`
+최신 마이그레이션: `0036_official_game_lifecycle.sql`
 
 기준 소스:
 
@@ -15,7 +15,7 @@
 - `.github/workflows/deploy.yml`
 
 Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 권한 원천입니다. 이 문서는
-현재 `0000_initial_schema.sql`부터 `0035_creator_manifest_results.sql`까지의 역할을 설명합니다.
+현재 `0000_initial_schema.sql`부터 `0036_official_game_lifecycle.sql`까지의 역할을 설명합니다.
 
 ## 마이그레이션 범위
 
@@ -34,6 +34,7 @@ Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 
 | `0033`        | generic `game_assets`, USER logo convergence                             |
 | `0034`        | USER control/review 필드의 generic authority 전환과 구 Worker 호환 미러  |
 | `0035`        | Creator Manifest v1 결과 원장, score projection, 게임별 도전과제 해금    |
+| `0036`        | live-version 리더보드 세대와 OWOGG 완전 삭제 감사 로그                   |
 
 기존 migration은 변경, squash, 삭제하지 않습니다. 프로덕션 배포는 API보다 먼저
 `pnpm d1:migrate:prod`를 실행합니다.
@@ -62,11 +63,17 @@ Generic game identity의 권한 원천입니다.
 - USER publisher의 relational `publisher_user_id`
 - visibility와 soft-deletion 상태
 - 현재 `live_version_id`
+- 현재 live version에 종속된 `leaderboard_generation`
 - USER control-plane metadata와 review slot
 
 DB trigger는 live version이 같은 game의 `game_versions` row를 가리키도록 강제합니다. OWOGG
 publisher authority는 서버/배포 과정이 기록하는 relational fact이며 이름이나 slug로 추론하지
 않습니다.
+
+`live_version_id`가 다른 version으로 바뀔 때만 `leaderboard_generation`이 증가합니다. `scores` row도
+승인 시점의 동일 generation을 저장하며 공개·개인·Creator·Discord 게임 랭킹 쿼리는 현재 game
+generation과 일치하는 row만 읽습니다. 따라서 version rollout은 과거 score를 물리 삭제하지 않고도
+현재 leaderboard를 초기화합니다.
 
 ### `game_versions`
 
@@ -93,6 +100,13 @@ Publisher-neutral bundle identity와 publication 사실을 저장합니다.
 제외합니다. 랭킹이 활성화된 유효 score만 기존 `scores` 테이블에 `result_id`로 연결된 projection을
 생성합니다. `user_game_achievements`는 이 결과 원장을 기반으로 게임별 manifest achievement를
 멱등 해금합니다.
+
+### `official_game_deletion_audit_log`
+
+OWOGG 공식 게임 완전 삭제의 game ID, slug, 관리자, version/object 수와 시각을 identity 삭제 뒤에도
+보존하는 append-only 기록입니다. 실제 삭제는 먼저 OWOGG row를 PRIVATE/soft-deleted 상태로 격리하고
+B2를 멱등 정리한 다음, exact `(game_id, slug, publisher_type)` 조건으로 D1을 purge합니다. USER row는
+이 경로의 조건을 만족할 수 없습니다.
 
 ## USER 제어 영역과 호환 테이블
 

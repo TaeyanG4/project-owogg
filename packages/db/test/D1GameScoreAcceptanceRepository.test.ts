@@ -14,6 +14,7 @@ CREATE TABLE games (
   visibility TEXT NOT NULL,
   live_version_id INTEGER,
   deleted_at TEXT,
+  leaderboard_generation INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -41,7 +42,8 @@ CREATE TABLE scores (
   game_id TEXT NOT NULL,
   score REAL NOT NULL,
   difficulty TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  leaderboard_generation INTEGER NOT NULL DEFAULT 0
 );
 `;
 
@@ -78,6 +80,7 @@ function seed(raw: import("node:sqlite").DatabaseSync) {
 test("generic acceptance returns the stable score id and rejects a replay atomically", async () => {
   const { db, raw } = createSqliteD1(SCHEMA);
   seed(raw);
+  raw.prepare("UPDATE games SET leaderboard_generation = 3 WHERE id = 9").run();
   const repo = new D1GameScoreAcceptanceRepository(db);
 
   const first = await repo.acceptScore(input());
@@ -89,6 +92,10 @@ test("generic acceptance returns the stable score id and rejects a replay atomic
   assert.equal(
     (raw.prepare("SELECT COUNT(*) AS count FROM scores").get() as { count: number }).count,
     1,
+  );
+  assert.equal(
+    raw.prepare("SELECT leaderboard_generation FROM scores").get()?.leaderboard_generation,
+    3,
   );
 });
 

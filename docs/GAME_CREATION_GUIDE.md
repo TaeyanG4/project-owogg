@@ -75,6 +75,21 @@ ZIP에는 `index.html`, `owogg.json`, `owogg.logo.*`가 필요합니다. 관리�
 동일한 Creator Manifest v1 입력을 사용합니다. publisher와 official 표시는 manifest에 선언할 수
 없으며, 관리자 endpoint만 서버에서 `OWOGG` 권한을 부여합니다.
 
+같은 화면의 OWOGG 행에는 **완전 삭제**가 있습니다. 이 작업은 `games.moderate`와
+`sandbox_games.delete` 권한을 모두 요구하고, 입력한 slug가 정확히 일치할 때만 실행됩니다. 서버는
+먼저 D1 identity를 PRIVATE/삭제 상태로 격리해 플레이와 새 결과를 차단한 뒤 다음 순서로 정리합니다.
+
+```text
+D1 quarantine
+→ B2 version files + manifest + source ZIP + logo + canonical delete
+→ D1 score/result/achievement/personalization/control rows purge
+→ slug release
+```
+
+B2 삭제는 없는 object를 성공으로 취급하고 version별 GC marker를 기록하므로 일부 정리 뒤 실패해도
+같은 요청을 재시도할 수 있습니다. 성공 후 같은 slug를 새 OWOGG identity로 다시 ZIP 등록할 수
+있습니다. 기존에 획득한 global/guild XP는 사용자 보상이므로 회수하지 않습니다.
+
 ## 3. USER bundle 등록
 
 ### 3.1 새 게임 ZIP
@@ -213,6 +228,13 @@ Web의 `GameHost`는 publisher를 보고 다른 host를 고르지 않습니다. 
 `outOfRange: "reject"` 값은 결과 전체를 거부합니다. `clamp` 값은 보정해 `game_results`에
 `adjusted=true`로 저장하지만 leaderboard, Creator achievement, XP/보상에서는 제외합니다.
 정상 score만 `scores`에 투영되며 leaderboard는 이 서버 승인 점수만 읽습니다.
+
+`games.leaderboard_generation`은 현재 live version의 리더보드 세대입니다. OWOGG 재업로드 또는 USER
+승인/롤포워드/롤백으로 live version ID가 바뀌면 세대가 한 번 증가하고, 이후 승인 점수는 새 세대에
+기록됩니다. 공개 리더보드, 개인 최고 기록, Creator/Discord 게임 랭킹은 현재 세대만 읽으므로 새
+버전의 리더보드는 빈 상태에서 시작합니다. 이전 점수 row는 감사·이력 용도로 남지만 현재 랭킹에는
+노출되지 않습니다. 같은 content/version을 다시 활성화해 live version ID가 바뀌지 않으면 초기화하지
+않습니다. 공개 리더보드의 edge cache는 최대 30초 동안 이전 응답을 보일 수 있습니다.
 
 ## 7. 제출 전 점검
 

@@ -10,10 +10,60 @@ test("generic production migrations avoid Cloudflare-incompatible TEMP table DDL
     "0033_generic_game_assets.sql",
     "0034_unified_game_control_plane.sql",
     "0035_creator_manifest_results.sql",
+    "0036_official_game_lifecycle.sql",
   ]) {
     const sql = fs.readFileSync(new URL(`../migrations/${filename}`, import.meta.url), "utf8");
     assert.doesNotMatch(sql, /\bCREATE\s+TEMP(?:ORARY)?\s+TABLE\b/i, filename);
   }
+});
+
+test("full production migration chain applies through 0036 with lifecycle schema and triggers", () => {
+  const { raw } = createSqliteD1("");
+  const migrationUrl = new URL("../migrations/", import.meta.url);
+  const filenames = fs
+    .readdirSync(migrationUrl)
+    .filter((filename) => filename.endsWith(".sql"))
+    .sort();
+  for (const filename of filenames) {
+    raw.exec(fs.readFileSync(new URL(filename, migrationUrl), "utf8"));
+  }
+
+  const gameColumns = raw.prepare("PRAGMA table_info(games)").all() as Array<{ name: string }>;
+  const scoreColumns = raw.prepare("PRAGMA table_info(scores)").all() as Array<{ name: string }>;
+  assert.ok(gameColumns.some((column) => column.name === "leaderboard_generation"));
+  assert.ok(scoreColumns.some((column) => column.name === "leaderboard_generation"));
+  assert.ok(
+    raw
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'official_game_deletion_audit_log'",
+      )
+      .get(),
+  );
+  const updateTrigger = raw
+    .prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_sandbox_games_after_update'",
+    )
+    .get() as { sql: string };
+  assert.match(updateTrigger.sql, /leaderboard_generation/);
+
+  raw
+    .prepare(
+      `INSERT INTO games
+         (slug, publisher_type, publisher_user_id, visibility, created_at, updated_at,
+          leaderboard_generation)
+       VALUES ('rolling-official', 'OWOGG', NULL, 'PRIVATE', 'now', 'now', 4)`,
+    )
+    .run();
+  raw.prepare("INSERT INTO users (nickname) VALUES ('rolling-player')").run();
+  raw
+    .prepare(
+      "INSERT INTO scores (user_id, game_id, score) VALUES (last_insert_rowid(), 'rolling-official', 123)",
+    )
+    .run();
+  const rollingScore = raw
+    .prepare("SELECT leaderboard_generation FROM scores WHERE game_id = 'rolling-official'")
+    .get() as { leaderboard_generation: number };
+  assert.equal(rollingScore.leaderboard_generation, 4);
 });
 
 test("0032 migrates one-use attempts to generic identity/version foreign keys", () => {

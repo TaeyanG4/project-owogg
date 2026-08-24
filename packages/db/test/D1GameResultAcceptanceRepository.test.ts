@@ -6,7 +6,13 @@ import { createSqliteD1 } from "./helpers/sqliteD1.js";
 const SCHEMA = `
 PRAGMA foreign_keys = ON;
 CREATE TABLE users (id INTEGER PRIMARY KEY, nickname TEXT NOT NULL);
-CREATE TABLE games (id INTEGER PRIMARY KEY, slug TEXT NOT NULL UNIQUE);
+CREATE TABLE games (
+  id INTEGER PRIMARY KEY,
+  slug TEXT NOT NULL UNIQUE,
+  live_version_id INTEGER,
+  deleted_at TEXT,
+  leaderboard_generation INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE game_versions (
   id INTEGER PRIMARY KEY,
   game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE
@@ -45,7 +51,8 @@ CREATE TABLE scores (
   score REAL NOT NULL,
   difficulty TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  result_id INTEGER REFERENCES game_results(id) ON DELETE SET NULL
+  result_id INTEGER REFERENCES game_results(id) ON DELETE SET NULL,
+  leaderboard_generation INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX idx_scores_result_id ON scores(result_id) WHERE result_id IS NOT NULL;
 `;
@@ -85,13 +92,16 @@ function input(overrides: Record<string, unknown> = {}) {
 function setup() {
   const context = createSqliteD1(SCHEMA);
   context.raw.prepare("INSERT INTO users (id, nickname) VALUES (1, 'player')").run();
-  context.raw.prepare("INSERT INTO games (id, slug) VALUES (9, 'creator-game')").run();
+  context.raw
+    .prepare("INSERT INTO games (id, slug, live_version_id) VALUES (9, 'creator-game', 5)")
+    .run();
   context.raw.prepare("INSERT INTO game_versions (id, game_id) VALUES (5, 9)").run();
   return context;
 }
 
 test("result acceptance atomically stores one result and its leaderboard projection", async () => {
   const { db, raw } = setup();
+  raw.prepare("UPDATE games SET leaderboard_generation = 4 WHERE id = 9").run();
   const repo = new D1GameResultAcceptanceRepository(db);
 
   const first = await repo.acceptResult(input());
@@ -105,12 +115,16 @@ test("result acceptance atomically stores one result and its leaderboard project
     (raw.prepare("SELECT COUNT(*) AS count FROM game_results").get() as { count: number }).count,
     1,
   );
-  const score = raw.prepare("SELECT score, result_id FROM scores").get() as {
+  const score = raw
+    .prepare("SELECT score, result_id, leaderboard_generation FROM scores")
+    .get() as {
     score: number;
     result_id: number;
+    leaderboard_generation: number;
   };
   assert.equal(score.score, 42.3);
   assert.equal(score.result_id, first.resultId);
+  assert.equal(score.leaderboard_generation, 4);
 });
 
 test("scoreless or adjusted results remain in the ledger without a score projection", async () => {

@@ -60,6 +60,30 @@ export interface OfficialGameUploadRepository extends GameVersionPublicationRepo
   }): Promise<void>;
 }
 
+export interface OfficialGameDeletionPlan {
+  readonly gameId: number;
+  readonly slug: string;
+  readonly versions: readonly GameVersion[];
+  readonly assetObjectKeys: readonly string[];
+}
+
+/** Destructive OWOGG lifecycle boundary. The first operation quarantines the identity before any
+ * cross-store deletion; the final operation is allowed only for that quarantined OWOGG row. */
+export interface OfficialGameLifecycleRepository {
+  prepareDeletion(input: {
+    slug: string;
+    nowIso: string;
+  }): Promise<OfficialGameDeletionPlan | null>;
+  purgeDeletion(input: {
+    gameId: number;
+    slug: string;
+    actorAdminId: number;
+    versionCount: number;
+    objectCount: number;
+    nowIso: string;
+  }): Promise<void>;
+}
+
 export interface OfficialGameUploadResult {
   readonly gameId: number;
   readonly versionId: number;
@@ -68,6 +92,27 @@ export interface OfficialGameUploadResult {
   readonly publisherName: "OWOGG";
   readonly reusedReadyVersion: boolean;
   readonly publishedAt: string;
+}
+
+export const OFFICIAL_GAME_DELETE_FAILURES = [
+  "GAME_NOT_FOUND",
+  "STORAGE_DELETE_FAILED",
+  "DATABASE_DELETE_FAILED",
+] as const;
+export type OfficialGameDeleteFailureCode = (typeof OFFICIAL_GAME_DELETE_FAILURES)[number];
+
+export class OfficialGameDeleteFailure extends Error {
+  constructor(public readonly code: OfficialGameDeleteFailureCode) {
+    super(code);
+  }
+}
+
+export interface OfficialGameDeleteResult {
+  readonly gameId: number;
+  readonly slug: string;
+  readonly deletedVersionCount: number;
+  readonly deletedObjectCount: number;
+  readonly deletedAt: string;
 }
 
 async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
@@ -199,6 +244,81 @@ export class OfficialGameUploadUseCases {
       publisherName: "OWOGG",
       reusedReadyVersion,
       publishedAt: nowIso,
+    };
+  }
+}
+
+/** Permanently removes an OWOGG game from both B2 and D1 so the same slug can be registered as a
+ * new identity. D1 quarantine happens first, making play and score submission fail closed while
+ * B2 cleanup runs. Every storage delete is idempotent, so a partial failure is safe to retry. */
+export class OfficialGameLifecycleUseCases {
+  constructor(
+    private readonly repository: OfficialGameLifecycleRepository,
+    private readonly storage: GameBundleStorageRepository,
+    private readonly canonicals: GameCanonicalRepository,
+    private readonly publication: GamePublicationService,
+  ) {}
+
+  async deleteGame(input: {
+    slug: string;
+    actorAdminId: number;
+  }): Promise<OfficialGameDeleteResult> {
+    const nowIso = new Date().toISOString();
+    let plan: OfficialGameDeletionPlan | null;
+    try {
+      plan = await this.repository.prepareDeletion({ slug: input.slug, nowIso });
+    } catch {
+      throw new OfficialGameDeleteFailure("DATABASE_DELETE_FAILED");
+    }
+    if (!plan) throw new OfficialGameDeleteFailure("GAME_NOT_FOUND");
+
+    let deletedObjectCount = 0;
+    try {
+      for (const version of plan.versions) {
+        deletedObjectCount += await this.publication.deletePublishedVersion({
+          gameId: plan.gameId,
+          versionId: version.id,
+          contentHash: version.contentHash,
+          manifestKey: version.manifestKey,
+          sourceObjectKey: version.objectKey,
+          publishStatus: version.publishStatus,
+          publishError: version.publishError,
+        });
+      }
+
+      for (const sourceObjectKey of new Set(plan.versions.map((version) => version.objectKey))) {
+        await this.storage.deleteObject(sourceObjectKey);
+        deletedObjectCount++;
+      }
+      for (const assetObjectKey of new Set(plan.assetObjectKeys)) {
+        await this.storage.deleteObject(assetObjectKey);
+        deletedObjectCount++;
+      }
+      await this.canonicals.delete(plan.slug);
+      deletedObjectCount++;
+    } catch {
+      throw new OfficialGameDeleteFailure("STORAGE_DELETE_FAILED");
+    }
+
+    try {
+      await this.repository.purgeDeletion({
+        gameId: plan.gameId,
+        slug: plan.slug,
+        actorAdminId: input.actorAdminId,
+        versionCount: plan.versions.length,
+        objectCount: deletedObjectCount,
+        nowIso,
+      });
+    } catch {
+      throw new OfficialGameDeleteFailure("DATABASE_DELETE_FAILED");
+    }
+
+    return {
+      gameId: plan.gameId,
+      slug: plan.slug,
+      deletedVersionCount: plan.versions.length,
+      deletedObjectCount,
+      deletedAt: nowIso,
     };
   }
 }

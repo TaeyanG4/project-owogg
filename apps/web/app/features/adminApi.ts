@@ -14,6 +14,7 @@ import {
   AdminAccountAuditListResponseSchema,
   AdminGameListResponseSchema,
   AdminGameToggleResponseSchema,
+  AdminOfficialGameDeleteResponseSchema,
   AdminOfficialGameUploadResponseSchema,
   AdminUserSearchResponseSchema,
   AdminUserDetailResponseSchema,
@@ -43,6 +44,11 @@ import { ApiClientError } from "../lib/api/errors";
 
 const AdminLogoutResponseSchema = z.object({ success: z.boolean() });
 const AdminSuccessResponseSchema = z.object({ success: z.boolean() });
+export const ADMIN_SESSION_CHANGED_EVENT = "owogg:admin-session-changed";
+
+function notifyAdminSessionChanged() {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(ADMIN_SESSION_CHANGED_EVENT));
+}
 const AdminAccountSummaryOnCreateSchema = z.object({
   id: z.number(),
   userId: z.number(),
@@ -75,41 +81,49 @@ export function postAdminGoogleStepUp(credential: string) {
   });
 }
 
-export function postAdminLogin(username: string, password: string) {
-  return apiFetch("/api/admin/auth/login", AdminLoginResponseSchema, {
+export async function postAdminLogin(username: string, password: string) {
+  const result = await apiFetch("/api/admin/auth/login", AdminLoginResponseSchema, {
     method: "POST",
     body: JSON.stringify({ username, password }),
   });
+  notifyAdminSessionChanged();
+  return result;
 }
 
-export function postAdminLogout() {
-  return apiFetch("/api/admin/auth/logout", AdminLogoutResponseSchema, {
+export async function postAdminLogout() {
+  const result = await apiFetch("/api/admin/auth/logout", AdminLogoutResponseSchema, {
     method: "POST",
   });
+  notifyAdminSessionChanged();
+  return result;
 }
 
-export function postAdminBootstrap(input: {
+export async function postAdminBootstrap(input: {
   username: string;
   password: string;
   passwordConfirm: string;
 }) {
   const body = AdminBootstrapRequestSchema.parse(input);
-  return apiFetch("/api/admin/bootstrap", AdminBootstrapResponseSchema, {
+  const result = await apiFetch("/api/admin/bootstrap", AdminBootstrapResponseSchema, {
     method: "POST",
     body: JSON.stringify(body),
   });
+  notifyAdminSessionChanged();
+  return result;
 }
 
-export function postAdminPasswordChange(input: {
+export async function postAdminPasswordChange(input: {
   currentPassword: string;
   newPassword: string;
   newPasswordConfirm: string;
 }) {
   const body = AdminPasswordChangeRequestSchema.parse(input);
-  return apiFetch("/api/admin/settings/password", AdminPasswordChangeResponseSchema, {
+  const result = await apiFetch("/api/admin/settings/password", AdminPasswordChangeResponseSchema, {
     method: "POST",
     body: JSON.stringify(body),
   });
+  notifyAdminSessionChanged();
+  return result;
 }
 
 export function fetchAdminAccounts() {
@@ -221,6 +235,14 @@ export async function uploadOfficialGame(file: File) {
     });
   }
   return AdminOfficialGameUploadResponseSchema.parse(await res.json());
+}
+
+export function deleteOfficialGame(gameId: string) {
+  return apiFetch(
+    `/api/admin/games/${encodeURIComponent(gameId)}`,
+    AdminOfficialGameDeleteResponseSchema,
+    { method: "DELETE" },
+  );
 }
 
 export interface AdminUserListParams {

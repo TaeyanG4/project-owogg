@@ -57,11 +57,14 @@ export class D1GameResultAcceptanceRepository implements GameResultAcceptanceRep
       this.db
         .prepare(
           `INSERT INTO scores (
-             user_id, nickname, avatar_url, game_id, score, difficulty, created_at, result_id
+             user_id, nickname, avatar_url, game_id, score, difficulty, created_at, result_id,
+             leaderboard_generation
            )
-           SELECT ?, ?, ?, ?, gr.normalized_score, ?, ?, gr.id
+           SELECT ?, ?, ?, ?, gr.normalized_score, ?, ?, gr.id, g.leaderboard_generation
            FROM game_results gr
+           JOIN games g ON g.id = gr.game_id AND g.live_version_id = gr.version_id
            WHERE gr.attempt_id = ?
+             AND g.deleted_at IS NULL
              AND gr.reward_eligible = 1
              AND gr.normalized_score IS NOT NULL
              AND ? = 1
