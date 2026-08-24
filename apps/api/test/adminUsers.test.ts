@@ -27,7 +27,11 @@ const SEEDED_ROLE_PERMISSIONS: Record<string, string[]> = {
 // admin_permission_grants lookup returns the SAME row regardless of which user_id was bound, so
 // this mock is only safe for tests where the acting session's own user_id is what's under test —
 // it must not be used for scenarios needing a *different* managed role for the target user.
-function createAdminDb(userId: number, managedAccount?: { role: string; grants?: string[] }) {
+function createAdminDb(
+  userId: number,
+  managedAccount?: { role: string; grants?: string[] },
+  targetModerationStatus?: "ACTIVE" | "SUSPENDED" | "BANNED",
+) {
   function statement(query: string) {
     let values: unknown[] = [];
     return {
@@ -78,6 +82,21 @@ function createAdminDb(userId: number, managedAccount?: { role: string; grants?:
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
             password_changed_at: new Date().toISOString(),
+          } as T;
+        }
+        if (query.includes("SELECT * FROM user_moderation WHERE user_id = ?")) {
+          if (!targetModerationStatus || targetModerationStatus === "ACTIVE") return null;
+          return {
+            user_id: Number(values[0]),
+            status: targetModerationStatus,
+            suspended_until:
+              targetModerationStatus === "SUSPENDED"
+                ? new Date(Date.now() + 7 * 86_400_000).toISOString()
+                : null,
+            score_submission_blocked: 0,
+            reason: "test moderation",
+            updated_by_admin_id: 99,
+            updated_at: new Date().toISOString(),
           } as T;
         }
         return null;
@@ -199,7 +218,7 @@ test("POST /api/admin/users/:userId/suspend is denied for non-admin", async () =
         Origin: "http://localhost:5173",
       },
       body: JSON.stringify({
-        suspendedUntil: new Date(Date.now() + 86400000).toISOString(),
+        durationDays: 7,
         reason: "test",
       }),
     },
@@ -225,7 +244,7 @@ test("POST /api/admin/users/:userId/suspend rejects an unknown user with USER_NO
         Origin: "http://localhost:5173",
       },
       body: JSON.stringify({
-        suspendedUntil: new Date(Date.now() + 86400000).toISOString(),
+        durationDays: 30,
         reason: "test",
       }),
     },
@@ -248,7 +267,7 @@ test("POST /api/admin/users/:userId/suspend on a protected (ADMIN_USER_IDS) admi
         Origin: "http://localhost:5173",
       },
       body: JSON.stringify({
-        suspendedUntil: new Date(Date.now() + 86400000).toISOString(),
+        durationDays: 180,
         reason: "test",
       }),
     },
@@ -336,6 +355,58 @@ test("POST /api/admin/users/:userId/suspend reaches body validation for a manage
     { DB: mock.db, ...LOCALHOST_ENV } as any,
   );
   assert.equal(res.status, 400);
+});
+
+test("POST /api/admin/users/:userId/suspend rejects durations outside 7/30/180", async () => {
+  const mock = createAdminDb(1, { role: "MODERATOR" });
+  const res = await app.request(
+    "/api/admin/users/1/suspend",
+    {
+      method: "POST",
+      headers: {
+        Cookie: "owogg_session=valid_session; owogg_admin_session=admin_session_valid_token",
+        "Content-Type": "application/json",
+        Origin: "http://localhost:5173",
+      },
+      body: JSON.stringify({ durationDays: 1, reason: "test" }),
+    },
+    { DB: mock.db, ...LOCALHOST_ENV } as any,
+  );
+  assert.equal(res.status, 400);
+  const body = (await res.json()) as { error: { code: string } };
+  assert.equal(body.error.code, "INVALID_REQUEST");
+});
+
+test("POST /api/admin/users/:userId/unsuspend requires users.ban when the target is BANNED", async () => {
+  const mock = createAdminDb(1, { role: "MODERATOR" }, "BANNED");
+  const res = await app.request(
+    "/api/admin/users/2/unsuspend",
+    {
+      method: "POST",
+      headers: {
+        Cookie: "owogg_session=valid_session; owogg_admin_session=admin_session_valid_token",
+        Origin: "http://localhost:5173",
+      },
+    },
+    { DB: mock.db, ...LOCALHOST_ENV } as any,
+  );
+  assert.equal(res.status, 403);
+});
+
+test("POST /api/admin/users/:userId/unsuspend accepts users.suspend for a SUSPENDED target", async () => {
+  const mock = createAdminDb(1, { role: "MODERATOR" }, "SUSPENDED");
+  const res = await app.request(
+    "/api/admin/users/2/unsuspend",
+    {
+      method: "POST",
+      headers: {
+        Cookie: "owogg_session=valid_session; owogg_admin_session=admin_session_valid_token",
+        Origin: "http://localhost:5173",
+      },
+    },
+    { DB: mock.db, ...LOCALHOST_ENV } as any,
+  );
+  assert.equal(res.status, 404, "permission passed; the mock target user does not exist");
 });
 
 test("GET /api/admin/users is reachable for a managed SYSTEM_DEVELOPER individually granted users.view", async () => {

@@ -39,6 +39,7 @@ import {
   type AdminAccountStatusValue,
   type AdminUserPeriod,
   type AdminUserSort,
+  type UserSuspensionDurationDays,
   type SandboxGameMetadataUpdateRequest,
   type SandboxGameVisibility,
 } from "@owogg/contracts";
@@ -301,10 +302,14 @@ export function fetchAdminUserDetail(userId: number) {
   return apiFetch(`/api/admin/users/${userId}`, AdminUserDetailResponseSchema);
 }
 
-export function postSuspendUser(userId: number, suspendedUntil: string, reason: string) {
+export function postSuspendUser(
+  userId: number,
+  durationDays: UserSuspensionDurationDays,
+  reason: string,
+) {
   return apiFetch(`/api/admin/users/${userId}/suspend`, UserModerationRecordSchema, {
     method: "POST",
-    body: JSON.stringify({ suspendedUntil, reason }),
+    body: JSON.stringify({ durationDays, reason }),
   });
 }
 

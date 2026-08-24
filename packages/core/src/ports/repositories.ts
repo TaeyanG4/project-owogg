@@ -784,6 +784,7 @@ export interface GamePlayCount {
  * repositories here it's called directly from the route rather than through a UseCases layer,
  * matching how admin.ts's existing `/overview` route already calls discordGuildRepo directly. */
 export type UserModerationStatus = "ACTIVE" | "SUSPENDED" | "BANNED";
+export type UserSuspensionDurationDays = 7 | 30 | 180;
 
 export type UserModerationAction =
   | "SUSPENDED"
@@ -855,6 +856,7 @@ export interface UserModerationRepository {
     userId: number,
     adminId: number,
     suspendedUntil: string,
+    durationDays: UserSuspensionDurationDays,
     reason: string,
   ): Promise<UserModerationRecord>;
   banUser(userId: number, adminId: number, reason: string): Promise<UserModerationRecord>;

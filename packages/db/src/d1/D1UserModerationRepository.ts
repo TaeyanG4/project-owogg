@@ -4,17 +4,35 @@ import type {
   UserModerationAuditEntry,
   UserModerationAction,
   UserModerationStatus,
+  UserSuspensionDurationDays,
   AdminUserSearchOptions,
   AdminUserSearchPage,
 } from "@owogg/core";
 import { resolveAdminUserPeriodStart } from "@owogg/core";
 import type { D1Database } from "./D1UserRepository.js";
 
+function effectiveModerationState(row: Record<string, unknown>): {
+  status: UserModerationStatus;
+  suspendedUntil: string | null;
+} {
+  const storedStatus = String(row.status ?? "ACTIVE") as UserModerationStatus;
+  const suspendedUntil = row.suspended_until ? String(row.suspended_until) : null;
+  if (
+    storedStatus === "SUSPENDED" &&
+    suspendedUntil !== null &&
+    suspendedUntil <= new Date().toISOString()
+  ) {
+    return { status: "ACTIVE", suspendedUntil: null };
+  }
+  return { status: storedStatus, suspendedUntil };
+}
+
 function mapModerationRow(row: Record<string, unknown>): UserModerationRecord {
+  const effective = effectiveModerationState(row);
   return {
     userId: Number(row.user_id),
-    status: String(row.status) as UserModerationStatus,
-    suspendedUntil: row.suspended_until ? String(row.suspended_until) : null,
+    status: effective.status,
+    suspendedUntil: effective.suspendedUntil,
     scoreSubmissionBlocked: Number(row.score_submission_blocked) === 1,
     reason: row.reason ? String(row.reason) : null,
     updatedByAdminId: row.updated_by_admin_id === null ? null : Number(row.updated_by_admin_id),
@@ -139,15 +157,18 @@ export class D1UserModerationRepository implements UserModerationRepository {
 
     return {
       total,
-      users: (res.results || []).map((row) => ({
-        id: Number(row.id),
-        nickname: String(row.nickname),
-        email: row.email ? String(row.email) : null,
-        createdAt: String(row.created_at),
-        moderationStatus: (row.status ? String(row.status) : "ACTIVE") as UserModerationStatus,
-        suspendedUntil: row.suspended_until ? String(row.suspended_until) : null,
-        scoreSubmissionBlocked: Number(row.score_submission_blocked ?? 0) === 1,
-      })),
+      users: (res.results || []).map((row) => {
+        const effective = effectiveModerationState(row);
+        return {
+          id: Number(row.id),
+          nickname: String(row.nickname),
+          email: row.email ? String(row.email) : null,
+          createdAt: String(row.created_at),
+          moderationStatus: effective.status,
+          suspendedUntil: effective.suspendedUntil,
+          scoreSubmissionBlocked: Number(row.score_submission_blocked ?? 0) === 1,
+        };
+      }),
     };
   }
 
@@ -163,24 +184,30 @@ export class D1UserModerationRepository implements UserModerationRepository {
     userId: number,
     adminId: number,
     suspendedUntil: string,
+    durationDays: UserSuspensionDurationDays,
     reason: string,
   ): Promise<UserModerationRecord> {
+    const existing = await this.getModeration(userId);
     const record = await this.upsertModeration(userId, {
       status: "SUSPENDED",
       suspendedUntil,
-      scoreSubmissionBlocked: false,
+      scoreSubmissionBlocked: existing?.scoreSubmissionBlocked ?? false,
       reason,
       adminId,
     });
-    await this.writeAudit(userId, adminId, "SUSPENDED", reason, { suspendedUntil });
+    await this.writeAudit(userId, adminId, "SUSPENDED", reason, {
+      durationDays,
+      suspendedUntil,
+    });
     return record;
   }
 
   async banUser(userId: number, adminId: number, reason: string): Promise<UserModerationRecord> {
+    const existing = await this.getModeration(userId);
     const record = await this.upsertModeration(userId, {
       status: "BANNED",
       suspendedUntil: null,
-      scoreSubmissionBlocked: false,
+      scoreSubmissionBlocked: existing?.scoreSubmissionBlocked ?? false,
       reason,
       adminId,
     });

@@ -16,6 +16,7 @@ import {
   UserX,
 } from "lucide-react";
 import { useAuth } from "../features/auth";
+import { fetchMyAccess } from "../features/myAccess";
 import {
   fetchAdminUserList,
   fetchAdminUserDetail,
@@ -32,6 +33,8 @@ import type {
   AdminUserDetailResponse,
   AdminUserPeriod,
   AdminUserSort,
+  PermissionValue,
+  UserSuspensionDurationDays,
 } from "@owogg/contracts";
 import { ApiClientError } from "../lib/api";
 
@@ -54,12 +57,12 @@ const STATUS_STYLE: Record<string, string> = {
 const STATUS_LABEL: Record<string, string> = {
   ACTIVE: "정상",
   SUSPENDED: "정지",
-  BANNED: "영구정지",
+  BANNED: "영구 밴",
 };
 
 const ACTION_LABEL: Record<string, string> = {
   SUSPENDED: "임시정지",
-  BANNED: "영구정지",
+  BANNED: "영구 밴",
   UNSUSPENDED: "정지 해제",
   SCORE_SUBMISSION_BLOCKED: "점수 제출 차단",
   SCORE_SUBMISSION_UNBLOCKED: "점수 제출 차단 해제",
@@ -78,6 +81,19 @@ const SORT_OPTIONS: { value: AdminUserSort; label: string }[] = [
   { value: "createdAt_desc", label: "최근 가입일순" },
   { value: "createdAt_asc", label: "최초 가입일순" },
 ];
+
+const SUSPENSION_OPTIONS: { value: UserSuspensionDurationDays; label: string }[] = [
+  { value: 7, label: "7일" },
+  { value: 30, label: "30일" },
+  { value: 180, label: "180일" },
+];
+
+function formatModerationDate(value: string): string {
+  return new Intl.DateTimeFormat("ko-KR", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
 
 export default function AdminUsersRoute() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
@@ -98,6 +114,7 @@ export default function AdminUsersRoute() {
   const [error, setError] = useState<string | null>(null);
   const [accessDenied, setAccessDenied] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [permissions, setPermissions] = useState<PermissionValue[]>([]);
 
   const listParams: AdminUserListParams = {
     query: activeQuery || undefined,
@@ -133,6 +150,13 @@ export default function AdminUsersRoute() {
     void loadList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, isAuthenticated, activeQuery, period, sort, page]);
+
+  useEffect(() => {
+    if (authLoading || !isAuthenticated) return;
+    void fetchMyAccess()
+      .then((access) => setPermissions(access.permissions))
+      .catch(() => setPermissions([]));
+  }, [authLoading, isAuthenticated]);
 
   const handleSearchSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -373,7 +397,12 @@ export default function AdminUsersRoute() {
       {loadingDetail && <PageMessage small>사용자 정보를 불러오는 중...</PageMessage>}
 
       {detail && !loadingDetail && (
-        <UserDetailPanel detail={detail} busy={busy} runAction={runAction} />
+        <UserDetailPanel
+          detail={detail}
+          busy={busy}
+          permissions={permissions}
+          runAction={runAction}
+        />
       )}
     </div>
   );
@@ -399,13 +428,15 @@ function AdminBadge() {
 function UserDetailPanel({
   detail,
   busy,
+  permissions,
   runAction,
 }: {
   detail: AdminUserDetailResponse;
   busy: boolean;
+  permissions: PermissionValue[];
   runAction: (action: () => Promise<unknown>) => Promise<void>;
 }) {
-  const [suspendDays, setSuspendDays] = useState(7);
+  const [suspendDays, setSuspendDays] = useState<UserSuspensionDurationDays>(7);
   const [suspendReason, setSuspendReason] = useState("");
   const [banReason, setBanReason] = useState("");
   const [scoreBlockReason, setScoreBlockReason] = useState("");
@@ -414,6 +445,10 @@ function UserDetailPanel({
   const m = detail.moderation;
   const status = m?.status ?? "ACTIVE";
   const scoreBlocked = m?.scoreSubmissionBlocked ?? false;
+  const canSuspend = permissions.includes("users.suspend");
+  const canBan = permissions.includes("users.ban");
+  const canModerateScores = permissions.includes("users.score_moderation");
+  const canLiftCurrentStatus = status === "BANNED" ? canBan : canSuspend;
 
   return (
     <div className="flex flex-col gap-6 rounded-2xl border border-border bg-surface-raised p-6">
@@ -441,7 +476,7 @@ function UserDetailPanel({
         {status === "SUSPENDED" && m?.suspendedUntil && (
           <p className="mt-1.5 flex items-center gap-1 text-[11px] text-accent-yellow">
             <Clock className="h-3 w-3" />
-            {m.suspendedUntil}까지 정지
+            {formatModerationDate(m.suspendedUntil)}까지 정지
           </p>
         )}
       </div>
@@ -464,90 +499,112 @@ function UserDetailPanel({
         {/* Suspend / Ban / Unsuspend */}
         <div className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-4">
           <h3 className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wide text-text-primary">
-            <UserX className="h-3.5 w-3.5" /> 계정 정지
+            <UserX className="h-3.5 w-3.5" /> 계정 정지 및 밴
           </h3>
 
           {detail.isProtectedAdmin ? (
             <div className="flex items-start gap-2 rounded-lg border border-brand/30 bg-brand/5 p-3 text-[11px] text-text-secondary">
               <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-light" />
               <span>
-                이 계정은 OwOGG 관리자입니다. 관리자 계정은 정지/영구정지 대상에서 제외되며,
+                이 계정은 OwOGG 관리자입니다. 관리자 계정은 정지/영구 밴 대상에서 제외되며,
                 서버에서도 동일하게 거부됩니다.
               </span>
             </div>
           ) : status === "ACTIVE" ? (
             <>
-              <div className="space-y-3">
-                <p className="text-[11px] font-bold text-text-muted">임시정지</p>
-                <LabeledField label="정지 기간" htmlFor="suspend-days">
-                  <select
-                    id="suspend-days"
-                    value={suspendDays}
-                    onChange={(e) => setSuspendDays(Number(e.target.value))}
-                    className="w-full rounded-lg border border-border bg-surface-raised px-2.5 py-2 text-xs text-text-primary"
-                  >
-                    <option value={1}>1일</option>
-                    <option value={3}>3일</option>
-                    <option value={7}>7일</option>
-                    <option value={30}>30일</option>
-                  </select>
-                </LabeledField>
-                <LabeledField label="정지 사유 (필수)" htmlFor="suspend-reason">
-                  <input
-                    id="suspend-reason"
-                    type="text"
-                    placeholder="예: 어뷰징 신고 접수"
-                    value={suspendReason}
-                    onChange={(e) => setSuspendReason(e.target.value)}
-                    className="w-full rounded-lg border border-border bg-surface-raised px-3 py-2 text-xs text-text-primary outline-none focus:ring-2 focus:ring-brand"
+              {canSuspend && (
+                <div className="space-y-3">
+                  <p className="text-[11px] font-bold text-text-muted">임시정지</p>
+                  <LabeledField label="정지 기간" htmlFor="suspend-days">
+                    <select
+                      id="suspend-days"
+                      value={suspendDays}
+                      onChange={(e) =>
+                        setSuspendDays(Number(e.target.value) as UserSuspensionDurationDays)
+                      }
+                      className="w-full rounded-lg border border-border bg-surface-raised px-2.5 py-2 text-xs text-text-primary"
+                    >
+                      {SUSPENSION_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </LabeledField>
+                  <LabeledField label="정지 사유 (필수)" htmlFor="suspend-reason">
+                    <input
+                      id="suspend-reason"
+                      type="text"
+                      placeholder="예: 어뷰징 신고 접수"
+                      value={suspendReason}
+                      onChange={(e) => setSuspendReason(e.target.value)}
+                      className="w-full rounded-lg border border-border bg-surface-raised px-3 py-2 text-xs text-text-primary outline-none focus:ring-2 focus:ring-brand"
+                    />
+                  </LabeledField>
+                  <ActionButton
+                    label="임시정지 적용"
+                    icon={<Clock className="h-3.5 w-3.5" />}
+                    disabled={busy || !suspendReason.trim()}
+                    tone="yellow"
+                    onClick={() =>
+                      void runAction(() => postSuspendUser(detail.id, suspendDays, suspendReason))
+                    }
                   />
-                </LabeledField>
-                <ActionButton
-                  label="임시정지 적용"
-                  icon={<Clock className="h-3.5 w-3.5" />}
-                  disabled={busy || !suspendReason.trim()}
-                  tone="yellow"
-                  onClick={() =>
-                    void runAction(() =>
-                      postSuspendUser(
-                        detail.id,
-                        new Date(Date.now() + suspendDays * 86400000).toISOString(),
-                        suspendReason,
-                      ),
-                    )
-                  }
-                />
-              </div>
+                </div>
+              )}
 
-              <div className="space-y-3 border-t border-border/60 pt-3">
-                <p className="text-[11px] font-bold text-text-muted">영구정지</p>
-                <LabeledField label="영구정지 사유 (필수)" htmlFor="ban-reason">
-                  <input
-                    id="ban-reason"
-                    type="text"
-                    placeholder="예: 반복 어뷰징 확인"
-                    value={banReason}
-                    onChange={(e) => setBanReason(e.target.value)}
-                    className="w-full rounded-lg border border-border bg-surface-raised px-3 py-2 text-xs text-text-primary outline-none focus:ring-2 focus:ring-brand"
+              {canBan && (
+                <div className="space-y-3 border-t border-border/60 pt-3">
+                  <p className="text-[11px] font-bold text-text-muted">영구 밴</p>
+                  <LabeledField label="영구 밴 사유 (필수)" htmlFor="ban-reason">
+                    <input
+                      id="ban-reason"
+                      type="text"
+                      placeholder="예: 반복 어뷰징 확인"
+                      value={banReason}
+                      onChange={(e) => setBanReason(e.target.value)}
+                      className="w-full rounded-lg border border-border bg-surface-raised px-3 py-2 text-xs text-text-primary outline-none focus:ring-2 focus:ring-brand"
+                    />
+                  </LabeledField>
+                  <ActionButton
+                    label="영구 밴 적용"
+                    icon={<Ban className="h-3.5 w-3.5" />}
+                    disabled={busy || !banReason.trim()}
+                    tone="red"
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          `${detail.nickname} #${detail.id} 계정을 영구 밴하시겠습니까? 기존 로그인 세션이 즉시 종료됩니다.`,
+                        )
+                      ) {
+                        return;
+                      }
+                      void runAction(() => postBanUser(detail.id, banReason));
+                    }}
                   />
-                </LabeledField>
-                <ActionButton
-                  label="영구정지 적용"
-                  icon={<Ban className="h-3.5 w-3.5" />}
-                  disabled={busy || !banReason.trim()}
-                  tone="red"
-                  onClick={() => void runAction(() => postBanUser(detail.id, banReason))}
-                />
-              </div>
+                </div>
+              )}
+
+              {!canSuspend && !canBan && (
+                <p className="rounded-lg border border-border bg-surface-raised p-3 text-[11px] text-text-muted">
+                  이 계정은 조회만 가능합니다. 임시정지 또는 영구 밴 권한이 필요합니다.
+                </p>
+              )}
             </>
-          ) : (
+          ) : canLiftCurrentStatus ? (
             <ActionButton
-              label="정지/밴 해제"
+              label={status === "BANNED" ? "밴 해제" : "정지 해제"}
               icon={<ShieldCheck className="h-3.5 w-3.5" />}
               disabled={busy}
               tone="green"
               onClick={() => void runAction(() => postUnsuspendUser(detail.id))}
             />
+          ) : (
+            <p className="rounded-lg border border-border bg-surface-raised p-3 text-[11px] text-text-muted">
+              {status === "BANNED"
+                ? "밴 해제에는 영구 밴 권한이 필요합니다."
+                : "정지 해제 권한이 없습니다."}
+            </p>
           )}
         </div>
 
@@ -557,73 +614,81 @@ function UserDetailPanel({
             점수 관리
           </h3>
 
-          <div className="space-y-3">
-            <p className="text-[11px] font-bold text-text-muted">점수 제출 차단</p>
-            {!scoreBlocked ? (
-              <>
-                <LabeledField label="차단 사유 (필수)" htmlFor="score-block-reason">
+          {!canModerateScores ? (
+            <p className="rounded-lg border border-border bg-surface-raised p-3 text-[11px] text-text-muted">
+              점수 조치 권한이 없어 현재 상태만 조회할 수 있습니다.
+            </p>
+          ) : (
+            <>
+              <div className="space-y-3">
+                <p className="text-[11px] font-bold text-text-muted">점수 제출 차단</p>
+                {!scoreBlocked ? (
+                  <>
+                    <LabeledField label="차단 사유 (필수)" htmlFor="score-block-reason">
+                      <input
+                        id="score-block-reason"
+                        type="text"
+                        placeholder="예: 비정상 점수 패턴"
+                        value={scoreBlockReason}
+                        onChange={(e) => setScoreBlockReason(e.target.value)}
+                        className="w-full rounded-lg border border-border bg-surface-raised px-3 py-2 text-xs text-text-primary outline-none focus:ring-2 focus:ring-brand"
+                      />
+                    </LabeledField>
+                    <ActionButton
+                      label="점수 제출 차단 (로그인은 유지)"
+                      disabled={busy || !scoreBlockReason.trim()}
+                      tone="yellow"
+                      onClick={() =>
+                        void runAction(() =>
+                          postScoreSubmissionBlock(detail.id, true, scoreBlockReason),
+                        )
+                      }
+                    />
+                  </>
+                ) : (
+                  <ActionButton
+                    label="점수 제출 차단 해제"
+                    disabled={busy}
+                    tone="green"
+                    onClick={() =>
+                      void runAction(() => postScoreSubmissionBlock(detail.id, false, null))
+                    }
+                  />
+                )}
+              </div>
+
+              <div className="space-y-3 border-t border-border/60 pt-3">
+                <p className="text-[11px] font-bold text-text-muted">점수 초기화</p>
+                <LabeledField label="초기화 사유 (필수)" htmlFor="reset-reason">
                   <input
-                    id="score-block-reason"
+                    id="reset-reason"
                     type="text"
-                    placeholder="예: 비정상 점수 패턴"
-                    value={scoreBlockReason}
-                    onChange={(e) => setScoreBlockReason(e.target.value)}
+                    placeholder="예: 확인된 부정 점수 삭제"
+                    value={resetReason}
+                    onChange={(e) => setResetReason(e.target.value)}
                     className="w-full rounded-lg border border-border bg-surface-raised px-3 py-2 text-xs text-text-primary outline-none focus:ring-2 focus:ring-brand"
                   />
                 </LabeledField>
                 <ActionButton
-                  label="점수 제출 차단 (로그인은 유지)"
-                  disabled={busy || !scoreBlockReason.trim()}
-                  tone="yellow"
-                  onClick={() =>
-                    void runAction(() =>
-                      postScoreSubmissionBlock(detail.id, true, scoreBlockReason),
-                    )
-                  }
+                  label="이 유저 점수 전체 초기화"
+                  icon={<Trash2 className="h-3.5 w-3.5" />}
+                  disabled={busy || !resetReason.trim()}
+                  tone="red"
+                  onClick={() => void runAction(() => postResetUserScores(detail.id, resetReason))}
                 />
-              </>
-            ) : (
-              <ActionButton
-                label="점수 제출 차단 해제"
-                disabled={busy}
-                tone="green"
-                onClick={() =>
-                  void runAction(() => postScoreSubmissionBlock(detail.id, false, null))
-                }
-              />
-            )}
-          </div>
-
-          <div className="space-y-3 border-t border-border/60 pt-3">
-            <p className="text-[11px] font-bold text-text-muted">점수 초기화</p>
-            <LabeledField label="초기화 사유 (필수)" htmlFor="reset-reason">
-              <input
-                id="reset-reason"
-                type="text"
-                placeholder="예: 확인된 부정 점수 삭제"
-                value={resetReason}
-                onChange={(e) => setResetReason(e.target.value)}
-                className="w-full rounded-lg border border-border bg-surface-raised px-3 py-2 text-xs text-text-primary outline-none focus:ring-2 focus:ring-brand"
-              />
-            </LabeledField>
-            <ActionButton
-              label="이 유저 점수 전체 초기화"
-              icon={<Trash2 className="h-3.5 w-3.5" />}
-              disabled={busy || !resetReason.trim()}
-              tone="red"
-              onClick={() => void runAction(() => postResetUserScores(detail.id, resetReason))}
-            />
-            <p className="text-[10px] leading-relaxed text-text-muted">
-              초기화된 점수는 소프트 삭제되어 아래 버튼으로 즉시 복구할 수 있습니다.
-            </p>
-            <ActionButton
-              label="최근 초기화된 점수 복구"
-              icon={<RotateCcw className="h-3.5 w-3.5" />}
-              disabled={busy}
-              tone="neutral"
-              onClick={() => void runAction(() => postRestoreUserScores(detail.id))}
-            />
-          </div>
+                <p className="text-[10px] leading-relaxed text-text-muted">
+                  초기화된 점수는 소프트 삭제되어 아래 버튼으로 즉시 복구할 수 있습니다.
+                </p>
+                <ActionButton
+                  label="최근 초기화된 점수 복구"
+                  icon={<RotateCcw className="h-3.5 w-3.5" />}
+                  disabled={busy}
+                  tone="neutral"
+                  onClick={() => void runAction(() => postRestoreUserScores(detail.id))}
+                />
+              </div>
+            </>
+          )}
         </div>
       </div>
 

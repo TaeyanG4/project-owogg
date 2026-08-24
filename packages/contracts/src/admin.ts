@@ -225,6 +225,15 @@ export type AdminPaginationQuery = z.infer<typeof AdminPaginationQuerySchema>;
 
 export const UserModerationStatusSchema = z.enum(["ACTIVE", "SUSPENDED", "BANNED"]);
 
+/** Temporary account suspensions are deliberately limited to operator-approved presets. The
+ * API calculates the expiry itself so a client cannot submit an arbitrary timestamp. */
+export const UserSuspensionDurationDaysSchema = z.union([
+  z.literal(7),
+  z.literal(30),
+  z.literal(180),
+]);
+export type UserSuspensionDurationDays = z.infer<typeof UserSuspensionDurationDaysSchema>;
+
 /** "createdAt_desc" = 최근 가입일순 (newest first, default). "createdAt_asc" = 최초 가입일순
  * (oldest/earliest first). */
 export const AdminUserSortSchema = z.enum(["createdAt_desc", "createdAt_asc"]);
@@ -316,13 +325,13 @@ export const AdminUserDetailResponseSchema = z.object({
 export type AdminUserDetailResponse = z.infer<typeof AdminUserDetailResponseSchema>;
 
 export const AdminSuspendUserRequestSchema = z.object({
-  suspendedUntil: z.string(),
-  reason: z.string().min(1),
+  durationDays: UserSuspensionDurationDaysSchema,
+  reason: z.string().trim().min(1),
 });
 export type AdminSuspendUserRequest = z.infer<typeof AdminSuspendUserRequestSchema>;
 
 export const AdminBanUserRequestSchema = z.object({
-  reason: z.string().min(1),
+  reason: z.string().trim().min(1),
 });
 export type AdminBanUserRequest = z.infer<typeof AdminBanUserRequestSchema>;
 

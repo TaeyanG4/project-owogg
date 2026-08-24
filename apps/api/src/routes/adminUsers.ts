@@ -40,13 +40,13 @@ adminUsersRouter.use("*", async (c, next) => {
 const FAILURE_STATUS: Record<UserModerationUseCaseFailure["code"], number> = {
   USER_NOT_FOUND: 404,
   REASON_REQUIRED: 400,
-  SUSPENDED_UNTIL_MUST_BE_FUTURE: 400,
+  INVALID_SUSPENSION_DURATION: 400,
 };
 
 const FAILURE_MESSAGE: Record<UserModerationUseCaseFailure["code"], string> = {
   USER_NOT_FOUND: "존재하지 않는 사용자입니다.",
   REASON_REQUIRED: "사유를 입력해야 합니다.",
-  SUSPENDED_UNTIL_MUST_BE_FUTURE: "정지 해제 시각은 현재 시각 이후여야 합니다.",
+  INVALID_SUSPENSION_DURATION: "임시정지는 7일, 30일, 180일 중 하나여야 합니다.",
 };
 
 /** Maps a UserModerationUseCaseFailure to `{ body, status }` for `c.json(body, status)` — every
@@ -175,7 +175,8 @@ adminUsersRouter.get("/:userId", async (c) => {
   return c.json(response, 200);
 });
 
-// POST /api/admin/users/:userId/suspend — temporary, blocks login until suspendedUntil.
+// POST /api/admin/users/:userId/suspend — temporary, blocks login for a server-calculated
+// 7/30/180-day window. Clients never choose an arbitrary expiry timestamp.
 adminUsersRouter.post("/:userId/suspend", async (c) => {
   const admin = await requireElevatedAdmin(c);
   if (isElevatedAdminResponse(admin)) return admin;
@@ -187,7 +188,12 @@ adminUsersRouter.post("/:userId/suspend", async (c) => {
   const parsed = AdminSuspendUserRequestSchema.safeParse(body);
   if (!parsed.success) {
     return c.json(
-      { error: { code: "INVALID_REQUEST", message: "suspendedUntil, reason이 필요합니다." } },
+      {
+        error: {
+          code: "INVALID_REQUEST",
+          message: "durationDays(7, 30, 180)와 reason이 필요합니다.",
+        },
+      },
       400,
     );
   }
@@ -204,7 +210,7 @@ adminUsersRouter.post("/:userId/suspend", async (c) => {
     const record = await container.userModerationUseCases.suspendUser(
       userId,
       admin.userId,
-      parsed.data.suspendedUntil,
+      parsed.data.durationDays,
       parsed.data.reason,
     );
     return c.json(UserModerationRecordSchema.parse(record), 200);
@@ -250,15 +256,22 @@ adminUsersRouter.post("/:userId/ban", async (c) => {
 });
 
 // POST /api/admin/users/:userId/unsuspend — lifts SUSPENDED or BANNED back to ACTIVE early.
+// Unbanning requires users.ban; users.suspend alone must never be enough to reverse a stronger
+// action that the actor was not allowed to apply.
 adminUsersRouter.post("/:userId/unsuspend", async (c) => {
   const admin = await requireElevatedAdmin(c);
   if (isElevatedAdminResponse(admin)) return admin;
-  const denied = requirePermission(admin, "users.suspend");
-  if (denied) return denied;
 
   const userId = Number(c.req.param("userId"));
+  const { userModerationUseCases } = createContainer(c.env.DB);
+  const moderation = await userModerationUseCases.getModeration(userId);
+  const denied = requirePermission(
+    admin,
+    moderation?.status === "BANNED" ? "users.ban" : "users.suspend",
+  );
+  if (denied) return denied;
+
   try {
-    const { userModerationUseCases } = createContainer(c.env.DB);
     const record = await userModerationUseCases.unsuspendUser(userId, admin.userId);
     return c.json(UserModerationRecordSchema.parse(record), 200);
   } catch (err) {

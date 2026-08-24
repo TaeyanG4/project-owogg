@@ -13,7 +13,7 @@ import type {
 } from "../src/ports/repositories.js";
 
 // Minimal in-memory fakes — this suite exercises the *application-level invariants* (reason
-// required, suspendedUntil must be in the future, unknown-user rejection, and the
+// required, duration must be one of the approved presets, unknown-user rejection, and the
 // suspend/ban → session-revocation side effect), not SQL — see
 // packages/db/test/D1UserModerationRepository.test.ts for the real-SQLite coverage.
 
@@ -39,7 +39,7 @@ function createFakeModerationRepo(): UserModerationRepository & {
     async getModeration(userId) {
       return records.get(userId) ?? null;
     },
-    async suspendUser(userId, adminId, suspendedUntil, reason) {
+    async suspendUser(userId, adminId, suspendedUntil, _durationDays, reason) {
       const record: UserModerationRecord = {
         userId,
         status: "SUSPENDED",
@@ -166,18 +166,18 @@ function createFakeUserRepo(existingIds: number[]): UserRepository {
   };
 }
 
-function createUseCases(existingUserIds: number[]) {
+function createUseCases(existingUserIds: number[], now = new Date("2026-08-24T00:00:00.000Z")) {
   const moderationRepo = createFakeModerationRepo();
   const sessionRepo = createFakeSessionRepo();
   const userRepo = createFakeUserRepo(existingUserIds);
-  const useCases = new UserModerationUseCases(moderationRepo, sessionRepo, userRepo);
+  const useCases = new UserModerationUseCases(moderationRepo, sessionRepo, userRepo, () => now);
   return { useCases, moderationRepo, sessionRepo, userRepo };
 }
 
 test("suspendUser rejects an unknown user with USER_NOT_FOUND", async () => {
   const { useCases } = createUseCases([]);
   await assert.rejects(
-    () => useCases.suspendUser(1, 99, new Date(Date.now() + 86400000).toISOString(), "abuse"),
+    () => useCases.suspendUser(1, 99, 7, "abuse"),
     (err: unknown) => err instanceof UserModerationUseCaseFailure && err.code === "USER_NOT_FOUND",
   );
 });
@@ -185,24 +185,35 @@ test("suspendUser rejects an unknown user with USER_NOT_FOUND", async () => {
 test("suspendUser rejects an empty/whitespace-only reason", async () => {
   const { useCases } = createUseCases([1]);
   await assert.rejects(
-    () => useCases.suspendUser(1, 99, new Date(Date.now() + 86400000).toISOString(), "   "),
+    () => useCases.suspendUser(1, 99, 7, "   "),
     (err: unknown) => err instanceof UserModerationUseCaseFailure && err.code === "REASON_REQUIRED",
   );
 });
 
-test("suspendUser rejects a suspendedUntil that isn't in the future", async () => {
+test("suspendUser rejects a duration outside the 7/30/180-day policy", async () => {
   const { useCases } = createUseCases([1]);
-  const past = new Date(Date.now() - 1000).toISOString();
   await assert.rejects(
-    () => useCases.suspendUser(1, 99, past, "abuse"),
+    () => useCases.suspendUser(1, 99, 1 as 7, "abuse"),
     (err: unknown) =>
-      err instanceof UserModerationUseCaseFailure && err.code === "SUSPENDED_UNTIL_MUST_BE_FUTURE",
+      err instanceof UserModerationUseCaseFailure && err.code === "INVALID_SUSPENSION_DURATION",
   );
+});
+
+test("suspendUser calculates the expiry on the server for every approved duration", async () => {
+  const now = new Date("2026-08-24T00:00:00.000Z");
+  for (const durationDays of [7, 30, 180] as const) {
+    const { useCases } = createUseCases([1], now);
+    const record = await useCases.suspendUser(1, 99, durationDays, "policy violation");
+    assert.equal(
+      record.suspendedUntil,
+      new Date(now.getTime() + durationDays * 86_400_000).toISOString(),
+    );
+  }
 });
 
 test("suspendUser and banUser both revoke the user's existing sessions", async () => {
   const { useCases, sessionRepo } = createUseCases([1, 2]);
-  await useCases.suspendUser(1, 99, new Date(Date.now() + 86400000).toISOString(), "abuse");
+  await useCases.suspendUser(1, 99, 7, "abuse");
   await useCases.banUser(2, 99, "cheating");
 
   assert.deepEqual(sessionRepo.revokedUserIds, [1, 2]);

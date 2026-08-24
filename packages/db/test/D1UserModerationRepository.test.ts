@@ -111,7 +111,7 @@ test("suspendUser sets status/suspendedUntil and writes a SUSPENDED audit entry"
   const repo = new D1UserModerationRepository(db);
   const until = new Date(Date.now() + 86400000).toISOString();
 
-  const record = await repo.suspendUser(1, 99, until, "abuse report");
+  const record = await repo.suspendUser(1, 99, until, 7, "abuse report");
   assert.equal(record.status, "SUSPENDED");
   assert.equal(record.suspendedUntil, until);
   assert.equal(record.updatedByAdminId, 99);
@@ -120,6 +120,28 @@ test("suspendUser sets status/suspendedUntil and writes a SUSPENDED audit entry"
   assert.equal(audit.length, 1);
   assert.equal(audit[0]?.action, "SUSPENDED");
   assert.equal(audit[0]?.reason, "abuse report");
+  assert.deepEqual(audit[0]?.metadata, { durationDays: 7, suspendedUntil: until });
+});
+
+test("expired temporary suspensions are projected as ACTIVE in detail and list results", async () => {
+  const { db, raw } = createSqliteD1(USER_MODERATION_TEST_SCHEMA);
+  seedUser(raw, 1, "Expired");
+  raw
+    .prepare(
+      `INSERT INTO user_moderation
+       (user_id, status, suspended_until, score_submission_blocked, reason, updated_at)
+       VALUES (1, 'SUSPENDED', '2000-01-01T00:00:00.000Z', 0, 'old reason', ?)`,
+    )
+    .run(new Date().toISOString());
+  const repo = new D1UserModerationRepository(db);
+
+  const detail = await repo.getModeration(1);
+  assert.equal(detail?.status, "ACTIVE");
+  assert.equal(detail?.suspendedUntil, null);
+
+  const { users } = await repo.searchUsers({ ...defaultOptions, query: "Expired" });
+  assert.equal(users[0]?.moderationStatus, "ACTIVE");
+  assert.equal(users[0]?.suspendedUntil, null);
 });
 
 test("banUser sets status=BANNED with no suspendedUntil", async () => {
@@ -133,6 +155,25 @@ test("banUser sets status=BANNED with no suspendedUntil", async () => {
 
   const audit = await repo.getAuditLog(1);
   assert.equal(audit[0]?.action, "BANNED");
+});
+
+test("suspendUser and banUser preserve an independent score-submission block", async () => {
+  const { db, raw } = createSqliteD1(USER_MODERATION_TEST_SCHEMA);
+  seedUser(raw, 1, "Preserved");
+  const repo = new D1UserModerationRepository(db);
+  await repo.setScoreSubmissionBlocked(1, 99, true, "score abuse");
+
+  const suspended = await repo.suspendUser(
+    1,
+    99,
+    new Date(Date.now() + 7 * 86_400_000).toISOString(),
+    7,
+    "account abuse",
+  );
+  assert.equal(suspended.scoreSubmissionBlocked, true);
+
+  const banned = await repo.banUser(1, 99, "repeated account abuse");
+  assert.equal(banned.scoreSubmissionBlocked, true);
 });
 
 test("unsuspendUser clears status back to ACTIVE but preserves an independent score-submission block", async () => {

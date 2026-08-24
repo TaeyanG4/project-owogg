@@ -2,6 +2,7 @@ import type {
   UserModerationRepository,
   UserModerationRecord,
   UserModerationAuditEntry,
+  UserSuspensionDurationDays,
   AdminUserSearchOptions,
   AdminUserSearchPage,
   SessionRepository,
@@ -9,7 +10,10 @@ import type {
 } from "../ports/repositories.js";
 
 export type UserModerationUseCaseError =
-  "USER_NOT_FOUND" | "REASON_REQUIRED" | "SUSPENDED_UNTIL_MUST_BE_FUTURE";
+  "USER_NOT_FOUND" | "REASON_REQUIRED" | "INVALID_SUSPENSION_DURATION";
+
+export const USER_SUSPENSION_DURATION_DAYS = [7, 30, 180] as const;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export class UserModerationUseCaseFailure extends Error {
   constructor(public readonly code: UserModerationUseCaseError) {
@@ -37,6 +41,7 @@ export class UserModerationUseCases {
     private moderationRepo: UserModerationRepository,
     private sessionRepo: SessionRepository,
     private userRepo: UserRepository,
+    private now: () => Date = () => new Date(),
   ) {}
 
   async searchUsers(options: AdminUserSearchOptions): Promise<AdminUserSearchPage> {
@@ -59,19 +64,21 @@ export class UserModerationUseCases {
   async suspendUser(
     userId: number,
     adminId: number,
-    suspendedUntil: string,
+    durationDays: UserSuspensionDurationDays,
     reason: string,
   ): Promise<UserModerationRecord> {
     await this.assertUserExists(userId);
     const trimmedReason = requireReason(reason);
-    if (!(new Date(suspendedUntil).getTime() > Date.now())) {
-      throw new UserModerationUseCaseFailure("SUSPENDED_UNTIL_MUST_BE_FUTURE");
+    if (!(USER_SUSPENSION_DURATION_DAYS as readonly number[]).includes(durationDays)) {
+      throw new UserModerationUseCaseFailure("INVALID_SUSPENSION_DURATION");
     }
+    const suspendedUntil = new Date(this.now().getTime() + durationDays * DAY_MS).toISOString();
 
     const record = await this.moderationRepo.suspendUser(
       userId,
       adminId,
       suspendedUntil,
+      durationDays,
       trimmedReason,
     );
     await this.sessionRepo.deleteAllSessionsForUser(userId);

@@ -91,6 +91,11 @@ roles.manage
 | `system.monitor`                      |   yes    |    no     |       yes        |
 | `system.dev.access`                   |    no    |    no     |       yes        |
 
+`users.suspend`는 `/admin/users`에서 서버가 계산하는 `7일`·`30일`·`180일` 임시정지와 조기
+해제를 허용합니다. `users.ban`은 자동 만료되지 않는 영구 밴과 해제를 허용합니다. 두 조치는
+기존 로그인 세션을 즉시 폐기하며 Protected `ADMIN`에는 적용할 수 없습니다. 세부 운영 규칙과
+감사 로그는 [`ADMIN_GUIDE.md`](ADMIN_GUIDE.md) §5를 따릅니다.
+
 ADMIN은 역할 정책을 쓰지 않고 `PERMISSIONS` 전체를 보유합니다. `roles.manage`도 ADMIN의
 암묵적 권한으로만 성립합니다. 역할 정책 조회·수정 API는 활성 managed ADMIN만 사용할 수 있고,
 변경은 `ROLE_PERMISSIONS_UPDATED` 감사 로그에 남습니다.
