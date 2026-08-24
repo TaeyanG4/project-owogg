@@ -13,6 +13,7 @@
 - `packages/db/src/storage/`
 - `apps/api/src/container.ts`
 - `.github/workflows/deploy.yml`
+- [`ERD.md`](ERD.md) — 도메인별 관계도와 전체 물리 테이블·호환 뷰 사전
 
 Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 권한 원천입니다. 이 문서는
 현재 `0000_initial_schema.sql`부터 `0039_streamer_terminology.sql`까지의 역할을 설명합니다.
@@ -189,8 +190,9 @@ D1 migration이 새 Worker보다 먼저 실행되는 동안 이전 Worker가 깨
 - **Streamer**: streamer profile, platform account, metrics, verification/review
 - **Operations**: game kill switch, moderation, monitoring indexes, staff/program entitlement
 
-정확한 column, index, foreign key, trigger는 해당 migration과 `packages/db/src/d1` query를
-확인해야 합니다. 이 문서는 SQL 원문을 복제하지 않습니다.
+관계와 전체 물리 테이블·호환 뷰 사전은 [D1 ERD](ERD.md)를 확인합니다. 정확한 column, index,
+foreign key, trigger는 해당 migration과 `packages/db/src/d1` query를 확인해야 합니다. 이 문서는 SQL
+원문을 복제하지 않습니다.
 
 ## runtime 읽기 조합
 

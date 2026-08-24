@@ -4,9 +4,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, test } from "node:test";
 import {
+  collectMigrationSchemaObjects,
   findMarkdownFiles,
   latestMigrationFilename,
   validateDocumentationIndex,
+  validateErdSchemaMetadata,
   validateMigrationMetadata,
   validateRelativeMarkdownLinks,
 } from "./check-docs.js";
@@ -96,4 +98,78 @@ test("database metadata follows the latest migration filename", () => {
         "최신 마이그레이션 metadata는 0001_first.sql이며, 실제 최신 파일은 0010_latest.sql입니다.",
     },
   ]);
+});
+
+test("migration schema projection follows create, drop and table rename order", () => {
+  const root = createRepository();
+  write(
+    root,
+    "packages/db/migrations/0001_first.sql",
+    `
+      CREATE TABLE users (id INTEGER PRIMARY KEY);
+      CREATE TABLE obsolete (id INTEGER PRIMARY KEY);
+      CREATE VIEW old_users AS SELECT * FROM users;
+    `,
+  );
+  write(
+    root,
+    "packages/db/migrations/0002_latest.sql",
+    `
+      -- CREATE TABLE comment_only (id INTEGER);
+      DROP TABLE obsolete;
+      ALTER TABLE users RENAME TO accounts;
+      DROP VIEW IF EXISTS old_users;
+      CREATE VIEW users AS SELECT * FROM accounts;
+      CREATE TABLE _migration_guard (must_be_zero INTEGER);
+      DROP TABLE _migration_guard;
+    `,
+  );
+
+  assert.deepEqual(collectMigrationSchemaObjects(path.join(root, "packages", "db", "migrations")), {
+    tables: ["accounts"],
+    views: ["users"],
+  });
+});
+
+test("ERD metadata and catalogs must match the final migration schema", () => {
+  const root = createRepository();
+  write(root, "packages/db/migrations/0001_first.sql", "CREATE TABLE users (id INTEGER);\n");
+  write(
+    root,
+    "packages/db/migrations/0002_latest.sql",
+    "CREATE TABLE sessions (id TEXT);\nCREATE VIEW current_users AS SELECT * FROM users;\n",
+  );
+  write(
+    root,
+    "docs/ERD.md",
+    `
+최신 마이그레이션: \`0002_latest.sql\`
+스키마 요약: 물리 테이블 \`2\`, 롤링 배포 호환 뷰 \`1\`
+<!-- ERD_TABLE_CATALOG_START -->
+| 테이블 | 설명 |
+| --- | --- |
+| \`sessions\` | sessions |
+| \`users\` | users |
+<!-- ERD_TABLE_CATALOG_END -->
+<!-- ERD_VIEW_CATALOG_START -->
+| 뷰 | 설명 |
+| --- | --- |
+| \`current_users\` | users view |
+<!-- ERD_VIEW_CATALOG_END -->
+`,
+  );
+
+  assert.deepEqual(validateErdSchemaMetadata(root), []);
+
+  write(
+    root,
+    "packages/db/migrations/0003_new.sql",
+    "DROP VIEW current_users;\nCREATE TABLE audit_log (id INTEGER);\n",
+  );
+  const issues = validateErdSchemaMetadata(root);
+  assert.equal(issues.length, 4);
+  assert.match(issues[0]?.message ?? "", /0003_new\.sql/);
+  assert.match(issues[1]?.message ?? "", /audit_log/);
+  assert.match(issues[2]?.message ?? "", /current_users/);
+  assert.match(issues[3]?.message ?? "", /3\/0/);
 });

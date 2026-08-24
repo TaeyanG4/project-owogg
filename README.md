@@ -85,7 +85,7 @@ Game Creator Center에서 올리며, 자세한 규격은 [게임 제작 가이�
 ## 검증 명령
 
 ```bash
-pnpm docs:check          # 상대 Markdown 링크, 문서 인덱스, 최신 migration 메타데이터
+pnpm docs:check          # 링크·문서 인덱스·migration 메타데이터·ERD schema drift
 pnpm staging:preflight   # Staging target tuple과 Production fallback 부재 검증
 pnpm format:check
 pnpm architecture:check # 레이어 및 제거된 런타임의 재도입 방지
@@ -116,7 +116,8 @@ staging 기준 작업 브랜치 → 로컬 검증 → staging push
 ```
 
 수동 프로덕션 쓰기나 배포는 일반 개발 절차가 아닙니다. 데이터 구조는
-[Database](docs/DATABASE.md), 권한 모델은 [Authorization](docs/AUTHORIZATION.md), 격리된 배포 절차는
+[Database](docs/DATABASE.md), 관계도는 [D1 ERD](docs/ERD.md), 권한 모델은
+[Authorization](docs/AUTHORIZATION.md), 격리된 배포 절차는
 [Staging runbook](docs/STAGING.md)을 참조하세요.
 
 ## 라이선스
