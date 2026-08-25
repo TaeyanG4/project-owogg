@@ -3,8 +3,11 @@ import assert from "node:assert/strict";
 import {
   GAME_SESSION_POLICY,
   GameScoreAcceptanceUseCases,
+  MultiplayerLegacyFlowGate,
   signGameSession,
   type GameScoreAcceptanceRepository,
+  type MultiplayerProfileRecord,
+  type MultiplayerProfileRepository,
   type RuntimeGame,
   type RuntimeGameAvailability,
   type RuntimeGameRegistry,
@@ -17,11 +20,16 @@ function runtimeGame(slug = "reaction-time"): RuntimeGame {
   return runtimeGameFixture(slug);
 }
 
-function createUseCases(runtime: RuntimeGame) {
+function createUseCases(
+  runtime: RuntimeGame,
+  findProfile: () => Promise<MultiplayerProfileRecord | null> = async () => null,
+) {
   const consumed = new Set<string>();
   let nextScoreId = 100;
+  let writes = 0;
   const repo: GameScoreAcceptanceRepository = {
     async acceptScore(input) {
+      writes += 1;
       if (consumed.has(input.attemptId)) return { accepted: false, scoreId: null };
       consumed.add(input.attemptId);
       return { accepted: true, scoreId: nextScoreId++ };
@@ -45,8 +53,12 @@ function createUseCases(runtime: RuntimeGame) {
       return [];
     },
   };
+  const gate = new MultiplayerLegacyFlowGate({
+    findEnabledForExactVersion: findProfile,
+  } as unknown as MultiplayerProfileRepository);
   return {
-    useCases: new GameScoreAcceptanceUseCases(registry, availability, settings, repo),
+    useCases: new GameScoreAcceptanceUseCases(registry, availability, gate, settings, repo),
+    writes: () => writes,
   };
 }
 
@@ -105,4 +117,50 @@ test("difficulty is bound to the signed token and cannot be changed at acceptanc
     difficulty: "hard",
   });
   assert.deepEqual(result, { ok: false, error: "CONTEXT_MISMATCH" });
+});
+
+test("enabled exact-version multiplayer authority blocks score normalization and token handling", async () => {
+  const runtime = runtimeGame();
+  const { useCases, writes } = createUseCases(
+    runtime,
+    async () =>
+      ({
+        profile: {
+          gameId: runtime.identity.id,
+          gameVersionId: runtime.liveVersion.id,
+          enabled: true,
+        },
+      }) as MultiplayerProfileRecord,
+  );
+
+  const result = await useCases.accept({
+    slug: runtime.identity.slug,
+    userId: 7,
+    nickname: "player",
+    avatarUrl: null,
+    token: "deliberately-invalid",
+    secret: SECRET,
+    score: 999_999,
+  });
+  assert.deepEqual(result, { ok: false, error: "MULTIPLAYER_MANAGED" });
+  assert.equal(writes(), 0);
+});
+
+test("profile authority failure fails closed instead of reopening the client score path", async () => {
+  const runtime = runtimeGame();
+  const { useCases, writes } = createUseCases(runtime, async () => {
+    throw new Error("D1 unavailable");
+  });
+
+  const result = await useCases.accept({
+    slug: runtime.identity.slug,
+    userId: 7,
+    nickname: "player",
+    avatarUrl: null,
+    token: "deliberately-invalid",
+    secret: SECRET,
+    score: 1,
+  });
+  assert.deepEqual(result, { ok: false, error: "MULTIPLAYER_AUTHORITY_UNAVAILABLE" });
+  assert.equal(writes(), 0);
 });

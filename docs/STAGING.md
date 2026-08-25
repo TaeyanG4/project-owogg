@@ -83,8 +83,8 @@ Staging에서 반드시 남길 릴리스 증거는 대상 commit SHA/tree, CI ru
 gitignored CI 전용 `apps/api/wrangler.staging.generated.jsonc`를 만듭니다. 이후 모든 원격 D1 명령은
 그 파일과 `--remote --env staging --x-provision=false --x-auto-create=false`를 함께 사용합니다.
 
-Staging rate-limit namespace는 `91001`, `91002`이고 Production의 `1001`, `1002`와 다릅니다.
-namespace ID는 Cloudflare 계정 전체 범위이므로 첫 배포 전에 `91001`, `91002`가 다른 Worker에서
+Staging rate-limit namespace는 `91001`, `91002`, `91003`이고 Production의 `1001`, `1002`, `1003`과
+다릅니다. namespace ID는 Cloudflare 계정 전체 범위이므로 첫 배포 전에 세 ID가 다른 Worker에서
 사용되지 않는지 운영자가 확인해야 합니다.
 
 ## 2. GitHub Environment `staging`
@@ -94,44 +94,53 @@ Repository-level Production 값에 기대지 않습니다. 아래 항목은 GitH
 
 ### Variables
 
-| 이름                           | 값/조건                                                        |
-| ------------------------------ | -------------------------------------------------------------- |
-| `FRONTEND_URL`                 | `https://stg.owogg.com`                                        |
-| `GAME_ORIGIN`                  | `https://play-stg.owogg.com`                                   |
-| `GOOGLE_CLIENT_ID`             | Staging Google OAuth client ID                                 |
-| `VITE_API_URL`                 | `https://api-stg.owogg.com`                                    |
-| `VITE_GAME_ORIGIN`             | `https://play-stg.owogg.com`                                   |
-| `VITE_GOOGLE_CLIENT_ID`        | `GOOGLE_CLIENT_ID`와 정확히 동일                               |
-| `DISCORD_CLIENT_ID`            | Staging Discord application ID                                 |
-| `DISCORD_COMMAND_SYNC_ENABLED` | 반드시 `false`                                                 |
-| `DISCORD_INSTALL_URL`          | 위 `DISCORD_CLIENT_ID`를 쓰는 Discord HTTPS 설치 URL           |
-| `DISCORD_PUBLIC_KEY`           | Staging Discord application의 64자리 hex public key            |
-| `DISCORD_REDIRECT_URI`         | `https://api-stg.owogg.com/api/auth/discord/callback`          |
-| `DISCORD_TEST_GUILD_ID`        | Staging 명령을 등록할 숫자 guild ID                            |
-| `STAGING_D1_DATABASE_ID`       | 운영자가 확인한 `owogg-d1-staging` UUID                        |
-| `STAGING_ADMIN_USER_IDS`       | 최초에는 빈 값, 로그인 후 확인한 Staging user ID를 쉼표로 구분 |
-| `STAGING_WEB_SMOKE_ENABLED`    | Access service token 준비 전 `false`, 준비 후 `true`           |
+| 이름                                 | 값/조건                                                        |
+| ------------------------------------ | -------------------------------------------------------------- |
+| `FRONTEND_URL`                       | `https://stg.owogg.com`                                        |
+| `GAME_ORIGIN`                        | `https://play-stg.owogg.com`                                   |
+| `GOOGLE_CLIENT_ID`                   | Staging Google OAuth client ID                                 |
+| `VITE_API_URL`                       | `https://api-stg.owogg.com`                                    |
+| `VITE_GAME_ORIGIN`                   | `https://play-stg.owogg.com`                                   |
+| `VITE_GOOGLE_CLIENT_ID`              | `GOOGLE_CLIENT_ID`와 정확히 동일                               |
+| `DISCORD_CLIENT_ID`                  | Staging Discord application ID                                 |
+| `DISCORD_COMMAND_SYNC_ENABLED`       | 반드시 `false`                                                 |
+| `DISCORD_INSTALL_URL`                | 위 `DISCORD_CLIENT_ID`를 쓰는 Discord HTTPS 설치 URL           |
+| `DISCORD_PUBLIC_KEY`                 | Staging Discord application의 64자리 hex public key            |
+| `DISCORD_REDIRECT_URI`               | `https://api-stg.owogg.com/api/auth/discord/callback`          |
+| `DISCORD_TEST_GUILD_ID`              | Staging 명령을 등록할 숫자 guild ID                            |
+| `MULTIPLAYER_TICKET_KEY_ID`          | 1~32자 URL-safe 키 버전 ID(예: `staging_2026_08_a`)            |
+| `MULTIPLAYER_TICKET_PREVIOUS_KEY_ID` | 최초에는 빈 값, 명시적 키 회전 중에만 직전 키 ID               |
+| `STAGING_D1_DATABASE_ID`             | 운영자가 확인한 `owogg-d1-staging` UUID                        |
+| `STAGING_ADMIN_USER_IDS`             | 최초에는 빈 값, 로그인 후 확인한 Staging user ID를 쉼표로 구분 |
+| `STAGING_WEB_SMOKE_ENABLED`          | Access service token 준비 전 `false`, 준비 후 `true`           |
 
 ### Secrets
 
-| 이름                      | 용도/조건                                            |
-| ------------------------- | ---------------------------------------------------- |
-| `CLOUDFLARE_ACCOUNT_ID`   | CI와 Worker/D1 조회·배포                             |
-| `CLOUDFLARE_API_TOKEN`    | 필요한 Staging 리소스만 다루는 최소 권한 token       |
-| `B2_BUCKET_NAME`          | 반드시 `owogg-game-bundles-staging`                  |
-| `B2_ENDPOINT`             | Staging B2 S3 endpoint                               |
-| `B2_REGION`               | Staging B2 region                                    |
-| `B2_KEY_ID`               | Staging 버킷 범위 제한 key                           |
-| `B2_APPLICATION_KEY`      | Staging 버킷 범위 제한 secret                        |
-| `DISCORD_BOT_TOKEN`       | 테스트 guild 명령 등록용, Worker에는 업로드하지 않음 |
-| `DISCORD_CLIENT_SECRET`   | API Worker runtime secret                            |
-| `GAME_SESSION_SECRET`     | API Worker runtime secret                            |
-| `CF_ACCESS_CLIENT_ID`     | Web smoke 활성화 시 필요한 Access service token      |
-| `CF_ACCESS_CLIENT_SECRET` | Web smoke 활성화 시 필요한 Access service token      |
+| 이름                                 | 용도/조건                                            |
+| ------------------------------------ | ---------------------------------------------------- |
+| `CLOUDFLARE_ACCOUNT_ID`              | CI와 Worker/D1 조회·배포                             |
+| `CLOUDFLARE_API_TOKEN`               | 필요한 Staging 리소스만 다루는 최소 권한 token       |
+| `B2_BUCKET_NAME`                     | 반드시 `owogg-game-bundles-staging`                  |
+| `B2_ENDPOINT`                        | Staging B2 S3 endpoint                               |
+| `B2_REGION`                          | Staging B2 region                                    |
+| `B2_KEY_ID`                          | Staging 버킷 범위 제한 key                           |
+| `B2_APPLICATION_KEY`                 | Staging 버킷 범위 제한 secret                        |
+| `DISCORD_BOT_TOKEN`                  | 테스트 guild 명령 등록용, Worker에는 업로드하지 않음 |
+| `DISCORD_CLIENT_SECRET`              | API Worker runtime secret                            |
+| `GAME_SESSION_SECRET`                | API Worker runtime secret                            |
+| `MULTIPLAYER_TICKET_SECRET`          | Staging 전용 32바이트 이상 무작위 HMAC secret        |
+| `MULTIPLAYER_TICKET_PREVIOUS_SECRET` | 최초에는 미등록, 키 회전 중에만 직전 secret          |
+| `CF_ACCESS_CLIENT_ID`                | Web smoke 활성화 시 필요한 Access service token      |
+| `CF_ACCESS_CLIENT_SECRET`            | Web smoke 활성화 시 필요한 Access service token      |
 
 Staging workflow에 generic `ADMIN_USER_IDS`, Streamer provider 설정, Repository-level Production
 secret/variable을 추가하지 않습니다. `DISCORD_COMMAND_SYNC_ENABLED`는 항상 `false`이고 배포는
 `discord:commands:register:guild`만 호출합니다.
+
+멀티플레이 티켓 secret은 `GAME_SESSION_SECRET` 또는 Production 키와 재사용하지 않습니다. 회전할 때는
+현재 활성 pair를 `PREVIOUS` pair로 옮기고 새 활성 pair를 함께 등록한 뒤 배포합니다. 새 배포 검증과
+최대 티켓 유효시간·clock skew 65초가 모두 지난 뒤 `PREVIOUS` pair를 비우며, 누락되거나 한쪽만 등록된
+pair는 preflight에서 배포를 중단합니다.
 
 `staging` Environment에는 generic `ADMIN_USER_IDS`를 만들지 않고 `STAGING_ADMIN_USER_IDS`만 둡니다.
 GitHub의 `vars.ADMIN_USER_IDS` 표현식은 Environment에 같은 이름이 없으면 Production이 사용하는
@@ -152,7 +161,8 @@ Staging 통합 검증이 끝나면 검증한 `staging` tree를 대상으로 `sta
 1. URL, OAuth/Discord pairing, B2 버킷, D1 UUID, Wrangler route, 빈 Cron, 필수 secret을 검증합니다.
 2. Cloudflare custom-domain 할당을 읽기 전용으로 조회하고 충돌하면 DNS를 바꾸지 않고 실패합니다.
 3. 원격 D1 target을 읽기 전용으로 확인하고 CI 전용 설정을 만든 뒤 migration을 적용합니다.
-4. API Worker를 배포하고 runtime에 필요한 7개 secret만 업로드합니다.
+4. API Worker를 배포하고 runtime에 필요한 8개 필수 secret과, 키 회전 중에만 직전 티켓 secret을
+   업로드합니다.
 5. API health/provenance를 확인합니다. 기존 게임은 Staging D1/B2에서 유지되며 deploy가 Git source로
    다시 빌드·발행하거나 live version을 변경하지 않습니다.
 6. Web Worker를 빌드·배포합니다.

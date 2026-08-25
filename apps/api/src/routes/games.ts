@@ -261,6 +261,25 @@ gamesRouter.post("/:slug/session", rateLimit({ name: "game-session" }), async (c
     );
   }
 
+  const legacyFlow = await container.multiplayerLegacyFlowGate.evaluate(
+    runtime.identity.id,
+    runtime.liveVersion.id,
+  );
+  if (!legacyFlow.allowed) {
+    const unavailable = legacyFlow.error === "MULTIPLAYER_AUTHORITY_UNAVAILABLE";
+    return c.json(
+      {
+        error: {
+          code: legacyFlow.error,
+          message: unavailable
+            ? "멀티플레이 권한 상태를 확인할 수 없습니다. 잠시 후 다시 시도해주세요."
+            : "이 게임 버전은 서버 관리형 멀티플레이 세션만 지원합니다.",
+        },
+      },
+      unavailable ? 503 : 409,
+    );
+  }
+
   const rawBody = await c.req.json().catch(() => ({}));
   const difficulty = validateDifficultyAgainstDefinition(
     runtime.canonical.difficulty,
@@ -300,12 +319,16 @@ gamesRouter.post("/:slug/session", rateLimit({ name: "game-session" }), async (c
 
 // ── Generic score acceptance ─────────────────────────────────────────────────
 
-function gameScoreAcceptErrorStatus(error: GameScoreAcceptError): 400 | 401 | 404 | 409 {
+function gameScoreAcceptErrorStatus(error: GameScoreAcceptError): 400 | 401 | 404 | 409 | 503 {
   switch (error) {
     case "GAME_NOT_AVAILABLE":
       return 404;
     case "GAME_DISABLED":
       return 400;
+    case "MULTIPLAYER_MANAGED":
+      return 409;
+    case "MULTIPLAYER_AUTHORITY_UNAVAILABLE":
+      return 503;
     case "INVALID_TOKEN":
     case "CONTEXT_MISMATCH":
       return 401;
@@ -330,6 +353,10 @@ function gameScoreAcceptErrorMessage(error: GameScoreAcceptError, reason?: strin
       return "이 게임은 아직 점수 제출을 지원하지 않습니다.";
     case "GAME_DISABLED":
       return "현재 비활성화된 게임입니다.";
+    case "MULTIPLAYER_MANAGED":
+      return "이 게임 버전의 점수는 서버가 확정한 멀티플레이 결과로만 기록됩니다.";
+    case "MULTIPLAYER_AUTHORITY_UNAVAILABLE":
+      return "멀티플레이 권한 상태를 확인할 수 없습니다. 잠시 후 다시 시도해주세요.";
     case "INVALID_DIFFICULTY":
       return reason || "유효하지 않은 난이도입니다.";
     case "INVALID_SCORE":
@@ -465,7 +492,7 @@ gamesRouter.post("/:slug/score", rateLimit({ name: "game-score-accept" }), async
   );
 });
 
-function gameResultAcceptErrorStatus(error: GameResultAcceptError): 400 | 401 | 404 | 409 {
+function gameResultAcceptErrorStatus(error: GameResultAcceptError): 400 | 401 | 404 | 409 | 503 {
   switch (error) {
     case "GAME_NOT_AVAILABLE":
       return 404;
@@ -474,6 +501,10 @@ function gameResultAcceptErrorStatus(error: GameResultAcceptError): 400 | 401 | 
       return 401;
     case "ALREADY_CONSUMED":
       return 409;
+    case "MULTIPLAYER_MANAGED":
+      return 409;
+    case "MULTIPLAYER_AUTHORITY_UNAVAILABLE":
+      return 503;
     case "GAME_DISABLED":
     case "MANIFEST_NOT_CONFIGURED":
     case "INVALID_DIFFICULTY":
@@ -488,6 +519,10 @@ function gameResultAcceptErrorMessage(error: GameResultAcceptError, reason?: str
       return "게임을 찾을 수 없습니다.";
     case "GAME_DISABLED":
       return "현재 비활성화된 게임입니다.";
+    case "MULTIPLAYER_MANAGED":
+      return "이 게임 버전의 결과는 서버가 확정한 멀티플레이 결과로만 기록됩니다.";
+    case "MULTIPLAYER_AUTHORITY_UNAVAILABLE":
+      return "멀티플레이 권한 상태를 확인할 수 없습니다. 잠시 후 다시 시도해주세요.";
     case "INVALID_TOKEN":
       return "게임 세션이 유효하지 않거나 만료되었습니다.";
     case "CONTEXT_MISMATCH":

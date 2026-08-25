@@ -5,11 +5,12 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
-    "dev": "wrangler dev src/index.ts",
-    "deploy": "wrangler deploy --minify src/index.ts",
+    "dev": "wrangler dev src/worker.ts",
+    "deploy": "wrangler deploy --minify src/worker.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
-    "test": "node --experimental-sqlite --import tsx --test test/**/*.test.ts"
+    "test": "node --experimental-sqlite --import tsx --test test/**/*.test.ts && pnpm test:workers",
+    "test:workers": "vitest run --config vitest.workers.config.ts"
   },
   "dependencies": {
     "@owogg/contracts": "workspace:*",
@@ -24,10 +25,12 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.0.0",
     "@cloudflare/workers-types": "^4.20241230.0",
     "@types/node": "^22.13.4",
     "tsx": "^4.23.12",
     "typescript": "^5.8.0",
+    "vitest": "4.1.0",
     "wrangler": "^4.121.0"
   }
 }

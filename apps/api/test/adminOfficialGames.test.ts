@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { hashSessionToken } from "@owogg/db";
-import { app } from "../src/index.js";
+import { app } from "../src/app.js";
 
 const OWOGG_SESSION_RAW_TOKEN = "valid_session";
 const ADMIN_SESSION_RAW_TOKEN = "admin_session_valid_token";

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
-import { app } from "../src/index.js";
+import { app } from "../src/app.js";
 
 function toHex(buf: Buffer | Uint8Array): string {
   return Buffer.from(buf).toString("hex");

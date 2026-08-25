@@ -17,6 +17,8 @@ export type MergeConfirmResult =
         | "MERGE_CHALLENGE_MISMATCH"
         | "MERGE_PROVIDER_CONFLICT"
         | "MERGE_STREAMER_CONFLICT"
+        | "MERGE_MULTIPLAYER_CONFLICT"
+        | "MERGE_GAME_CREATOR_CONFLICT"
         | "MERGE_ADMIN_CONFLICT"
         | "USER_NOT_FOUND";
     };
@@ -159,6 +161,12 @@ export class AccountMergeUseCases {
     );
     if (integrityConflict === "STREAMER_PLATFORM_CONFLICT") {
       return { ok: false, code: "MERGE_STREAMER_CONFLICT" };
+    }
+    if (integrityConflict === "MULTIPLAYER_PARTICIPATION_CONFLICT") {
+      return { ok: false, code: "MERGE_MULTIPLAYER_CONFLICT" };
+    }
+    if (integrityConflict === "GAME_CREATOR_REVIEW_CONFLICT") {
+      return { ok: false, code: "MERGE_GAME_CREATOR_CONFLICT" };
     }
 
     // Atomic Primary-Wins merge: secondary data deleted, secondary OAuth moved to primary,

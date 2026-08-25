@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { zipSync, strToU8 } from "fflate";
-import { app } from "../src/index.js";
+import { app } from "../src/app.js";
 import { SANDBOX_GAME_POLICY } from "@owogg/core";
 
 /**

@@ -38,8 +38,7 @@ function createMockD1(): {
     [2, { id: 2, nickname: "Bob", avatar_url: null }],
   ]);
   let nextEventId = 1;
-
-  const todayStr = () => new Date().toISOString().slice(0, 10);
+  let lastChanges = 0;
 
   const db: D1Database = {
     prepare(query: string) {
@@ -53,32 +52,9 @@ function createMockD1(): {
           if (query.includes("FROM xp_events") && query.includes("source_type = ? AND source_id")) {
             const [sourceType, sourceId] = bound as [string, string];
             const found = xpEvents.find(
-              (e) => e.source_type === sourceType && e.source_id === sourceId,
+              (event) => event.source_type === sourceType && event.source_id === sourceId,
             );
-            return found ? ({ id: found.id } as unknown as T) : null;
-          }
-          // Daily-cap count. The production query bounds created_at with a half-open ISO range
-          // (index-usable) rather than date(created_at) = date('now'); this branch mirrors that
-          // range so the mock stays faithful to the real comparison. Day-boundary semantics are
-          // additionally verified against a real SQLite engine in
-          // D1ProgressionRepositoryDailyCap.test.ts — a substring-matching mock like this one
-          // cannot meaningfully prove them.
-          if (query.includes("created_at >= ?") && query.includes("created_at < ?")) {
-            const [userId, gameId, startOfDay, startOfNextDay] = bound as [
-              number,
-              string,
-              string,
-              string,
-            ];
-            const count = xpEvents.filter(
-              (e) =>
-                e.user_id === userId &&
-                e.game_id === gameId &&
-                e.amount > 0 &&
-                e.created_at >= startOfDay &&
-                e.created_at < startOfNextDay,
-            ).length;
-            return { count } as unknown as T;
+            return found ? ({ id: found.id, amount: found.amount } as unknown as T) : null;
           }
           if (query.startsWith("SELECT user_id, total_xp, eligible_completions")) {
             const [userId] = bound as [number];
@@ -88,7 +64,7 @@ function createMockD1(): {
           if (query.includes("COUNT(*) as ahead")) {
             const [totalXp] = bound as [number];
             const ahead = Array.from(userProgress.values()).filter(
-              (p) => p.total_xp > totalXp,
+              (progress) => progress.total_xp > totalXp,
             ).length;
             return { ahead } as unknown as T;
           }
@@ -98,13 +74,13 @@ function createMockD1(): {
           if (query.includes("JOIN users")) {
             const [limit] = bound as [number];
             const rows = Array.from(userProgress.values())
-              .sort((a, b) => b.total_xp - a.total_xp || a.user_id - b.user_id)
+              .sort((left, right) => right.total_xp - left.total_xp || left.user_id - right.user_id)
               .slice(0, limit)
-              .map((p) => ({
-                user_id: p.user_id,
-                nickname: users.get(p.user_id)?.nickname ?? "Unknown",
-                avatar_url: users.get(p.user_id)?.avatar_url ?? null,
-                total_xp: p.total_xp,
+              .map((progress) => ({
+                user_id: progress.user_id,
+                nickname: users.get(progress.user_id)?.nickname ?? "Unknown",
+                avatar_url: users.get(progress.user_id)?.avatar_url ?? null,
+                total_xp: progress.total_xp,
               }));
             return { results: rows as unknown as T[] };
           }
@@ -112,68 +88,103 @@ function createMockD1(): {
         },
         async run(): Promise<{ success: boolean; meta?: { changes?: number } }> {
           if (query.startsWith("INSERT INTO xp_events")) {
-            const [userId, amount, reason, sourceType, sourceId, gameId, createdAt] = bound as [
+            const [
+              userId,
+              capUserId,
+              capGameId,
+              startOfDay,
+              startOfNextDay,
+              dailyCap,
+              xpPerCompletion,
+              sourceType,
+              sourceId,
+              gameId,
+              createdAt,
+            ] = bound as [
               number,
               number,
               string,
               string,
               string,
-              string | null,
+              number,
+              number,
+              string,
+              string,
+              string,
               string,
             ];
             const conflict = xpEvents.some(
-              (e) => e.source_type === sourceType && e.source_id === sourceId,
+              (event) => event.source_type === sourceType && event.source_id === sourceId,
             );
             if (conflict) {
+              lastChanges = 0;
               return { success: true, meta: { changes: 0 } };
             }
+            const awardedToday = xpEvents.filter(
+              (event) =>
+                event.user_id === capUserId &&
+                event.game_id === capGameId &&
+                event.amount > 0 &&
+                event.created_at >= startOfDay &&
+                event.created_at < startOfNextDay,
+            ).length;
             xpEvents.push({
               id: nextEventId++,
               user_id: userId,
-              amount,
-              reason,
+              amount: awardedToday < dailyCap ? xpPerCompletion : 0,
+              reason: "GAME_COMPLETION",
               source_type: sourceType,
               source_id: sourceId,
               game_id: gameId,
               created_at: createdAt,
             });
+            lastChanges = 1;
             return { success: true, meta: { changes: 1 } };
           }
 
           if (query.startsWith("INSERT INTO user_progress")) {
-            const [userId, xpAwarded, updatedAt] = bound as [number, number, string];
-            const existing = userProgress.get(userId);
-            if (existing) {
-              userProgress.set(userId, {
-                user_id: userId,
-                total_xp: existing.total_xp + xpAwarded,
-                eligible_completions: existing.eligible_completions + 1,
-                updated_at: updatedAt,
-              });
-            } else {
-              userProgress.set(userId, {
-                user_id: userId,
-                total_xp: xpAwarded,
-                eligible_completions: 1,
-                updated_at: updatedAt,
-              });
+            const previousStatementChanged = lastChanges;
+            const [userId, updatedAt, sourceType, sourceId] = bound as [
+              number,
+              string,
+              string,
+              string,
+            ];
+            if (previousStatementChanged !== 1) {
+              lastChanges = 0;
+              return { success: true, meta: { changes: 0 } };
             }
+            const event = xpEvents.find(
+              (candidate) =>
+                candidate.source_type === sourceType && candidate.source_id === sourceId,
+            );
+            if (!event) throw new Error("mock xp event missing");
+            const existing = userProgress.get(userId);
+            userProgress.set(userId, {
+              user_id: userId,
+              total_xp: (existing?.total_xp ?? 0) + event.amount,
+              eligible_completions: (existing?.eligible_completions ?? 0) + 1,
+              updated_at: updatedAt,
+            });
+            lastChanges = 1;
             return { success: true, meta: { changes: 1 } };
           }
 
-          return { success: true };
+          lastChanges = 0;
+          return { success: true, meta: { changes: 0 } };
         },
       };
       return stmt as unknown as ReturnType<D1Database["prepare"]>;
     },
-    async batch() {
-      return [];
+    async batch(statements) {
+      const results = [];
+      for (const statement of statements) results.push(await statement.run());
+      return results;
     },
   };
 
   return { db, xpEvents, userProgress };
 }
-
 test("recordGameCompletion awards XP and records the completion on first attempt", async () => {
   const { db } = createMockD1();
   const repo = new D1ProgressionRepository(db);

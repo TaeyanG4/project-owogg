@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import worker from "../src/index.js";
+import { scheduledHandler } from "../src/app.js";
 
 function createReviewDb() {
   const accountRow = {
@@ -199,7 +199,7 @@ test("scheduled handler — processes a due Featured review end-to-end (mock pro
   const origLog = console.log;
   console.log = (...args: unknown[]) => logs.push(args.join(" "));
   try {
-    await worker.scheduled(controller, env as any, ctx);
+    await scheduledHandler(controller, env as any, ctx);
     if (pending) await pending;
   } finally {
     console.log = origLog;
@@ -245,7 +245,7 @@ test("scheduled handler — no-op when no jobs are due", async () => {
   const origLog = console.log;
   console.log = (...args: unknown[]) => logs.push(args.join(" "));
   try {
-    await worker.scheduled(controller, env as any, ctx);
+    await scheduledHandler(controller, env as any, ctx);
     if (pending) await pending;
   } finally {
     console.log = origLog;

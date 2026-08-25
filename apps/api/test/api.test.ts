@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { app } from "../src/index.js";
+import { app } from "../src/app.js";
 import { AuthMeResponseSchema, PersonalBestResponseSchema } from "@owogg/contracts";
 
 test("GET / returns 200 OK with service info", async () => {

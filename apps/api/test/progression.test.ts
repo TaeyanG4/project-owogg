@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { app } from "../src/index.js";
+import { app } from "../src/app.js";
 
 test("GET /api/progression/me returns 401 Unauthenticated without a session", async () => {
   const res = await app.request("http://localhost/api/progression/me");

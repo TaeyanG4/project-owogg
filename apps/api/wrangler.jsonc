@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "owogg-api",
-  "main": "src/index.ts",
+  "main": "src/worker.ts",
   "compatibility_date": "2026-08-12",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
@@ -11,7 +11,7 @@
   // check) was already in place, but this worker was never actually bound to the hostname, so
   // every request to it hit DNS with nothing behind the name (ERR_NAME_NOT_RESOLVED) rather than
   // reaching gameServingRouter (mounted at /play on this same worker, app.route("/play", ...) in
-  // index.ts). Same worker as api.owogg.com, just a second custom domain on it -- Cloudflare
+  // app.ts). Same worker as api.owogg.com, just a second custom domain on it -- Cloudflare
   // provisions the DNS record for a custom_domain route automatically on deploy, same as
   // api.owogg.com's did.
   "routes": [
@@ -26,8 +26,29 @@
       "migrations_dir": "../../packages/db/migrations",
     },
   ],
+  // Environment-local self binding. The outer Worker validates the browser request and signed
+  // ticket before resolving an object id; the DO receives no raw bearer token.
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MULTIPLAYER_INSTANCES",
+        "class_name": "MultiplayerInstanceObject",
+      },
+    ],
+  },
+  // Declarative class lifecycle is the current Wrangler replacement for legacy migrations.
+  // Every new namespace is SQLite-backed; applying this to a remote environment is an explicit
+  // operator stop point even while MULTIPLAYER_ENABLED remains false.
+  "exports": {
+    "MultiplayerInstanceObject": {
+      "type": "durable-object",
+      "storage": "sqlite",
+    },
+  },
   "vars": {
     "COMMIT_SHA": "dev",
+    "MULTIPLAYER_ENABLED": "false",
+    "MULTIPLAYER_SOCKET_ORIGIN": "https://api.owogg.com",
   },
   // Capacity protection for write endpoints (see src/middleware/rateLimit.ts). 30 submissions
   // per 60s per session is far above human play — the shortest game round is 30 seconds — but
@@ -53,6 +74,11 @@
       "name": "GAME_UPLOAD_RATE_LIMITER",
       "namespace_id": "1002",
       "simple": { "limit": 2, "period": 60 },
+    },
+    {
+      "name": "MULTIPLAYER_RATE_LIMITER",
+      "namespace_id": "1003",
+      "simple": { "limit": 10, "period": 60 },
     },
   ],
   "triggers": {
@@ -82,7 +108,24 @@
           "migrations_dir": "../../packages/db/migrations",
         },
       ],
-      // Account-wide namespaces intentionally distinct from Production's 1001/1002.
+      // Durable Object bindings are non-inheritable Wrangler configuration. Repeating the
+      // environment-local self binding here guarantees Staging and Production never share a
+      // namespace even though they export the same class name.
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "MULTIPLAYER_INSTANCES",
+            "class_name": "MultiplayerInstanceObject",
+          },
+        ],
+      },
+      "exports": {
+        "MultiplayerInstanceObject": {
+          "type": "durable-object",
+          "storage": "sqlite",
+        },
+      },
+      // Account-wide namespaces intentionally distinct from Production's 1001/1002/1003.
       "ratelimits": [
         {
           "name": "RATE_LIMITER",
@@ -94,9 +137,16 @@
           "namespace_id": "91002",
           "simple": { "limit": 2, "period": 60 },
         },
+        {
+          "name": "MULTIPLAYER_RATE_LIMITER",
+          "namespace_id": "91003",
+          "simple": { "limit": 10, "period": 60 },
+        },
       ],
       "vars": {
         "COMMIT_SHA": "dev",
+        "MULTIPLAYER_ENABLED": "false",
+        "MULTIPLAYER_SOCKET_ORIGIN": "https://api-stg.owogg.com",
       },
       // Empty is deliberate. Omitting this would not remove a previously configured Cron.
       "triggers": {

@@ -1,3 +1,8 @@
+import type {
+  HostToGameMultiplayerMessage,
+  MultiInitMessage,
+} from "../bridge/multiplayerProtocol.js";
+
 /** Public, engine-neutral OWOGG Game Creator Manifest v1 contract. */
 
 export const OWOGG_GAME_CREATOR_MANIFEST_SCHEMA_URL =
@@ -121,9 +126,31 @@ export interface OwoggCompletionPayload {
   readonly metrics?: Readonly<Record<string, number>> | undefined;
 }
 
+export interface OwoggMultiplayerActionRequest {
+  readonly expectedRevision: number;
+  readonly payload: unknown;
+  /** Optional retry-stable id. The browser API creates a cryptographic UUID when omitted. */
+  readonly clientActionId?: string | undefined;
+}
+
+export type OwoggMultiplayerMessage = Exclude<HostToGameMultiplayerMessage, MultiInitMessage>;
+
+export interface OwoggMultiplayerBrowserApi {
+  /** Sanitized parent bootstrap; `null` until an online multiplayer host connects. */
+  readonly bootstrap: MultiInitMessage | null;
+  ready(): boolean;
+  /** Returns the idempotency id when accepted, or `null` when invalid/closed. */
+  action(request: OwoggMultiplayerActionRequest): string | null;
+  input(payload: unknown): boolean;
+  leave(): void;
+  subscribe(listener: (message: OwoggMultiplayerMessage) => void): () => void;
+}
+
 export interface OwoggBrowserApi {
   start(): void;
   event(name: string, data?: unknown): void;
   complete(result?: OwoggCompletionPayload): void;
   cancel(): void;
+  /** Stable managed-online API. It remains inert for single/local game sessions. */
+  readonly multiplayer: OwoggMultiplayerBrowserApi;
 }

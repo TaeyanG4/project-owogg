@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { app } from "../src/index.js";
+import { app } from "../src/app.js";
 import { hashSessionToken } from "@owogg/db";
 import { createSqliteD1 } from "../../../packages/db/test/helpers/sqliteD1.js";
 import type { D1Database } from "@owogg/db";

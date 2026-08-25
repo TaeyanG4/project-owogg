@@ -1,5 +1,10 @@
 # 1:1 멀티플레이어 반응 대결 설계안 (MULTIPLAYER_GAME_DESIGN)
 
+> **역사적 제안 / 구현 기준 아님:** 이 문서는 초기 Reaction Duel 아이디어를 보존합니다. 현재
+> 멀티플레이 구현 범위, 서버 권위, ticket, 결과·XP, Creator, M0~M6 Gate의 단일 계획은
+> [`MULTIPLAYER_PLATFORM.md`](MULTIPLAYER_PLATFORM.md)를 따릅니다. 특히 이 문서의 client click
+> timestamp 신뢰, `Room` 중심 모델과 기존 play token 재사용 전제는 구현 근거로 사용하지 않습니다.
+
 이 문서는 Cloudflare Durable Objects 및 WebSocket Hibernation 기반의 1:1 실시간 반응속도
 대결(Reaction Duel) 기술 설계안을 정의합니다.
 

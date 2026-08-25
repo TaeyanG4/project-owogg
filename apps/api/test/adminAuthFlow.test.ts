@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, createSign, type KeyObject } from "node:crypto";
-import { app } from "../src/index.js";
+import { app } from "../src/app.js";
 import { clearGoogleJwksCache } from "../src/infrastructure/oauth/google.ts";
 import { createSqliteD1 } from "../../../packages/db/test/helpers/sqliteD1.js";
 

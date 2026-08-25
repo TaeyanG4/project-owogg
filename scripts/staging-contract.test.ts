@@ -57,15 +57,25 @@ function validStagingEnvironment(): Record<string, string> {
     DISCORD_BOT_TOKEN: "bot-token",
     DISCORD_CLIENT_SECRET: "discord-secret",
     GAME_SESSION_SECRET: "session-secret",
+    MULTIPLAYER_TICKET_KEY_ID: "staging_2026_08_a",
+    MULTIPLAYER_TICKET_SECRET: "m".repeat(32),
   };
 }
 
-test("Wrangler Staging environments are isolated from Production routes, D1, rate limits and Cron", () => {
+test("Wrangler Staging environments isolate routes, D1, rate limits, Durable Objects and Cron", () => {
   const api = parseJsonc<WranglerConfig>(apiWranglerText);
   const web = parseJsonc<WranglerConfig>(webWranglerText);
   assert.deepEqual(validateWranglerStagingContracts(api, web), []);
   assert.deepEqual(api.env?.staging?.triggers?.crons, []);
   assert.notEqual(api.env?.staging?.d1_databases?.[0]?.database_id, PRODUCTION.d1Id);
+  assert.deepEqual(api.durable_objects?.bindings, [
+    { name: "MULTIPLAYER_INSTANCES", class_name: "MultiplayerInstanceObject" },
+  ]);
+  assert.deepEqual(api.env?.staging?.durable_objects?.bindings, [
+    { name: "MULTIPLAYER_INSTANCES", class_name: "MultiplayerInstanceObject" },
+  ]);
+  assert.equal(api.vars?.MULTIPLAYER_ENABLED, "false");
+  assert.equal(api.env?.staging?.vars?.MULTIPLAYER_ENABLED, "false");
 });
 
 test("Staging environment preflight accepts only the exact isolated target tuple", () => {
@@ -83,6 +93,39 @@ test("Staging environment preflight accepts only the exact isolated target tuple
   assert.match(errors, /B2_BUCKET_NAME/);
   assert.match(errors, /Production D1/);
   assert.match(errors, /DISCORD_COMMAND_SYNC_ENABLED/);
+});
+
+test("Staging multiplayer ticket keys are strong, paired and rotation-safe", () => {
+  assert.match(
+    validateStagingEnvironment({
+      ...validStagingEnvironment(),
+      MULTIPLAYER_TICKET_SECRET: "too-short",
+    }).join("\n"),
+    /at least 32 UTF-8 bytes/,
+  );
+  assert.match(
+    validateStagingEnvironment({
+      ...validStagingEnvironment(),
+      MULTIPLAYER_TICKET_PREVIOUS_KEY_ID: "staging_2026_07_z",
+    }).join("\n"),
+    /must be configured together/,
+  );
+  assert.deepEqual(
+    validateStagingEnvironment({
+      ...validStagingEnvironment(),
+      MULTIPLAYER_TICKET_PREVIOUS_KEY_ID: "staging_2026_07_z",
+      MULTIPLAYER_TICKET_PREVIOUS_SECRET: "p".repeat(32),
+    }),
+    [],
+  );
+  assert.match(
+    validateStagingEnvironment({
+      ...validStagingEnvironment(),
+      MULTIPLAYER_TICKET_PREVIOUS_KEY_ID: "staging_2026_08_a",
+      MULTIPLAYER_TICKET_PREVIOUS_SECRET: "p".repeat(32),
+    }).join("\n"),
+    /key IDs must differ/,
+  );
 });
 
 test("Staging Web smoke requires both Cloudflare Access service-token values when enabled", () => {
@@ -187,4 +230,9 @@ test("Staging workflow is push-after-CI only and contains no Production variable
     /owogg-d1-staging --remote --env staging --config apps\/api\/wrangler\.staging\.generated\.jsonc --x-provision=false --x-auto-create=false/,
   );
   assert.match(deploy, /STAGING_ADMIN_USER_IDS/);
+  assert.match(deploy, /MULTIPLAYER_ENABLED:false/);
+  assert.match(deploy, /MULTIPLAYER_SOCKET_ORIGIN:https:\/\/api-stg\.owogg\.com/);
+  assert.match(deploy, /MULTIPLAYER_TICKET_KEY_ID:\$\{\{ vars\.MULTIPLAYER_TICKET_KEY_ID \}\}/);
+  assert.match(deploy, /put_secret MULTIPLAYER_TICKET_SECRET/);
+  assert.match(deploy, /put_optional_secret MULTIPLAYER_TICKET_PREVIOUS_SECRET/);
 });

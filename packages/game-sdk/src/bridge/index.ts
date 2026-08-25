@@ -11,6 +11,8 @@
  */
 
 export * from "./protocol.js";
+export * from "./multiplayerProtocol.js";
+export * from "./multiplayerClient.js";
 export * from "./client.js";
 export * from "./standaloneRuntime.js";
 export * from "./browserApiSource.js";

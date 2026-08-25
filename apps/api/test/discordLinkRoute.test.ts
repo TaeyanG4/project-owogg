@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { app } from "../src/index.js";
+import { app } from "../src/app.js";
 
 test("GET /api/discord/link/preview without a token returns 400", async () => {
   const res = await app.request("http://localhost/api/discord/link/preview", undefined, {

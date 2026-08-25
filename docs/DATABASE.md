@@ -4,7 +4,7 @@
 
 마지막 검증: 2026-08-25
 
-최신 마이그레이션: `0040_public_game_engagement.sql`
+최신 마이그레이션: `0041_multiplayer_foundation.sql`
 
 기준 소스:
 
@@ -16,7 +16,7 @@
 - [`ERD.md`](ERD.md) — 도메인별 관계도와 전체 물리 테이블·호환 뷰 사전
 
 Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 권한 원천입니다. 이 문서는
-현재 `0000_initial_schema.sql`부터 `0040_public_game_engagement.sql`까지의 역할을 설명합니다.
+현재 `0000_initial_schema.sql`부터 `0041_multiplayer_foundation.sql`까지의 역할을 설명합니다.
 
 ## 마이그레이션 범위
 
@@ -40,6 +40,7 @@ Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 
 | `0038`        | 관리자 역할별 기능 권한 정책과 통합 관리자 센터 접근                       |
 | `0039`        | 방송 채널 도메인의 `streamer_*` 명명 전환과 롤링 배포 호환 계층            |
 | `0040`        | 공개 게임별 고유 플레이·현재 북마크 집계를 위한 game-first covering index  |
+| `0041`        | exact-version 멀티 profile, instance/match 원장, reward outbox와 lease     |
 
 기존 migration은 변경, squash, 삭제하지 않습니다. 프로덕션 배포는 API보다 먼저
 `pnpm d1:migrate:prod`를 실행합니다.
@@ -112,6 +113,44 @@ OWOGG 공식 게임 완전 삭제의 game ID, slug, 관리자, version/object �
 보존하는 append-only 기록입니다. 실제 삭제는 먼저 OWOGG row를 PRIVATE/soft-deleted 상태로 격리하고
 B2를 멱등 정리한 다음, exact `(game_id, slug, publisher_type)` 조건으로 D1을 purge합니다. USER row는
 이 경로의 조건을 만족할 수 없습니다.
+
+## Multiplayer foundation
+
+`0041`은 멀티플레이를 자동 활성화하지 않는 additive control-plane schema입니다. 게임별 live 상태와
+tick은 한 instance에 대응하는 Durable Object가 소유하고, D1은 다음의 장기 권한 사실만 저장합니다.
+
+- `multiplayer_profile_requests`: Creator가 exact USER-owned version에 제출한 canonical request JSON,
+  SHA-256과 단일 CAS 관리자 결정
+- `multiplayer_profiles`: 서버가 해석한 immutable M1/M2 profile revision; exact READY version당
+  enabled revision은 최대 하나
+- `multiplayer_instances`, `multiplayer_participants`, `multiplayer_invites`: idempotent 생성, 정원,
+  membership, generation과 hash-only invite 원장
+- `multiplayer_matches`, `multiplayer_match_players`, `multiplayer_match_actions`: server-authoritative
+  lifecycle, canonical 참가자 결과와 M1 action idempotency 원장
+- `multiplayer_reward_outbox`: committed eligible player와 approved reward policy에 묶인 exactly-once
+  전달 원장
+- `game_version_leases`: 실행 중 instance가 사용하는 exact bundle의 삭제를 막는 lease
+- `multiplayer_instance_admin_actions`: operation ID로 멱등 처리한 강제 종료의 append-only 관리자
+  감사 원장
+
+Profile semantic column은 update할 수 없고 변경 시 새 `profile_revision`을 만든다. Creator request는
+manifest 권한이 아니며 USER publisher identity, approved request hash, READY/APPROVED exact version을
+DB trigger가 다시 확인한다. Instance 생성도 현재 live READY version과 enabled profile snapshot이
+일치해야 한다. Profile을 disable하면 기존 참가자의 reconnect는 유지하지만 신규 join/rejoin/invite는
+거절한다. 만료 sweep은 lobby뿐 아니라 STARTING/ACTIVE/CLOSING instance도 `EXPIRED`로 바꾸고 match,
+invite와 lease를 같은 terminal trigger에서 정리한다.
+
+Match는 `PENDING → ACTIVE → FINALIZING → COMMITTED` 순서를 건너뛸 수 없고 모든 player result가
+committed되기 전에는 최종 commit할 수 없다. Reward row는 finalizing/committed match의 committed
+eligible player에 대해서만 생성된다. iframe의 `GAME_COMPLETE`, score, XP 주장은 이 원장에 쓸 수
+없다.
+
+계정 병합은 같은 instance/match에 두 후보 계정이 함께 존재하는지와 두 Creator 계정의 review slot
+충돌을 먼저 검사한다. 충돌이 없을 때 Creator access, USER game publisher와 multiplayer request owner를
+Primary로 옮기고 participant `user_id`를 바꾸면 match player, action과 reward outbox가
+`ON UPDATE CASCADE`로 함께 이동한다. 사용자 직접 삭제는 장기 multiplayer identity의 `RESTRICT` FK가
+fail-closed로 막는다. 삭제/익명화 정책이나 공식 게임 purge는 active instance/match/lease를 먼저
+종료하고 감사 정책을 적용해야 하며, FK나 immutable ledger trigger를 우회하지 않는다.
 
 ## USER 제어 영역과 호환 테이블
 

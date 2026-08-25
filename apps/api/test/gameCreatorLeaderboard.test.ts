@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { app } from "../src/index.js";
+import { app } from "../src/app.js";
 import { GAME_CANONICAL_SCHEMA_VERSION, type GameCanonicalDocument } from "@owogg/core";
 
 // GET /api/scores/:gameId now resolves every publisher through the generic runtime projection.

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { app } from "../src/index.js";
+import { app } from "../src/app.js";
 import { hashSessionToken } from "@owogg/db";
 
 // Auth-gating + routing/schema-wiring smoke tests for /api/admin/users. The underlying business

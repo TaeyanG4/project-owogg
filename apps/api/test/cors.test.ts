@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { app } from "../src/index.js";
+import { app } from "../src/app.js";
 
 // Regression coverage for the 2026-08-18 production bug: the app-level cors() middleware's
 // allowMethods list was missing "PATCH", so every PATCH route in the API (admin sandbox-game

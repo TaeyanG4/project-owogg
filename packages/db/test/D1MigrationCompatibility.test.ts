@@ -14,13 +14,15 @@ test("generic production migrations avoid Cloudflare-incompatible TEMP table DDL
     "0037_user_profile_identity.sql",
     "0038_admin_role_permissions.sql",
     "0039_streamer_terminology.sql",
+    "0040_public_game_engagement.sql",
+    "0041_multiplayer_foundation.sql",
   ]) {
     const sql = fs.readFileSync(new URL(`../migrations/${filename}`, import.meta.url), "utf8");
     assert.doesNotMatch(sql, /\bCREATE\s+TEMP(?:ORARY)?\s+TABLE\b/i, filename);
   }
 });
 
-test("full production migration chain applies through 0039 with Streamer compatibility schema", () => {
+test("full production migration chain applies through 0041 with multiplayer and Streamer compatibility schema", () => {
   const { raw } = createSqliteD1("");
   const migrationUrl = new URL("../migrations/", import.meta.url);
   const filenames = fs

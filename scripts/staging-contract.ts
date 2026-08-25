@@ -44,6 +44,17 @@ export interface WranglerRateLimit {
   namespace_id?: string;
 }
 
+export interface WranglerDurableObjectBinding {
+  name?: string;
+  class_name?: string;
+  script_name?: string;
+}
+
+export interface WranglerExport {
+  type?: string;
+  storage?: string;
+}
+
 export interface WranglerEnvironment {
   name?: string;
   workers_dev?: boolean;
@@ -51,6 +62,8 @@ export interface WranglerEnvironment {
   routes?: WranglerRoute[];
   d1_databases?: WranglerD1Database[];
   ratelimits?: WranglerRateLimit[];
+  durable_objects?: { bindings?: WranglerDurableObjectBinding[] };
+  exports?: Record<string, WranglerExport>;
   triggers?: { crons?: string[] };
   vars?: Record<string, string>;
 }
@@ -200,14 +213,59 @@ export function validateWranglerStagingContracts(
   const stagingNamespaces = (apiStaging.ratelimits ?? [])
     .map((binding) => binding.namespace_id)
     .filter((value): value is string => Boolean(value));
-  if (stagingNamespaces.length !== 2 || new Set(stagingNamespaces).size !== 2) {
-    errors.push("Staging must have two distinct rate-limit namespaces");
+  const expectedRateLimitBindings = [
+    "RATE_LIMITER",
+    "GAME_UPLOAD_RATE_LIMITER",
+    "MULTIPLAYER_RATE_LIMITER",
+  ];
+  const productionRateLimitNames = (api.ratelimits ?? [])
+    .map((binding) => binding.name)
+    .filter((value): value is string => Boolean(value));
+  const stagingRateLimitNames = (apiStaging.ratelimits ?? [])
+    .map((binding) => binding.name)
+    .filter((value): value is string => Boolean(value));
+  if (!sameMembers(productionRateLimitNames, expectedRateLimitBindings)) {
+    errors.push("Production API rate-limit bindings do not match the required set");
+  }
+  if (!sameMembers(stagingRateLimitNames, expectedRateLimitBindings)) {
+    errors.push("Staging API rate-limit bindings do not match the required set");
+  }
+  if (stagingNamespaces.length !== 3 || new Set(stagingNamespaces).size !== 3) {
+    errors.push("Staging must have three distinct rate-limit namespaces");
   }
   for (const namespace of stagingNamespaces) {
     if (productionNamespaces.has(namespace)) {
       errors.push(`Staging rate-limit namespace overlaps Production: ${namespace}`);
     }
   }
+
+  const validateMultiplayerRuntime = (
+    label: "Production" | "Staging",
+    environment: WranglerEnvironment,
+    expectedOrigin: string,
+  ): void => {
+    const bindings = environment.durable_objects?.bindings ?? [];
+    if (
+      bindings.length !== 1 ||
+      bindings[0]?.name !== "MULTIPLAYER_INSTANCES" ||
+      bindings[0]?.class_name !== "MultiplayerInstanceObject" ||
+      bindings[0]?.script_name !== undefined
+    ) {
+      errors.push(`${label} multiplayer Durable Object must be an environment-local self binding`);
+    }
+    const exported = environment.exports?.MultiplayerInstanceObject;
+    if (exported?.type !== "durable-object" || exported.storage !== "sqlite") {
+      errors.push(`${label} MultiplayerInstanceObject must be exported with SQLite storage`);
+    }
+    if (environment.vars?.MULTIPLAYER_ENABLED !== "false") {
+      errors.push(`${label} multiplayer must remain feature-disabled in committed config`);
+    }
+    if (environment.vars?.MULTIPLAYER_SOCKET_ORIGIN !== expectedOrigin) {
+      errors.push(`${label} multiplayer socket origin does not match its API environment`);
+    }
+  };
+  validateMultiplayerRuntime("Production", api, PRODUCTION.apiUrl);
+  validateMultiplayerRuntime("Staging", apiStaging, STAGING.apiUrl);
 
   return errors;
 }
@@ -250,6 +308,8 @@ export function validateStagingEnvironment(env: Environment): string[] {
   const discordTestGuildId = required(env, "DISCORD_TEST_GUILD_ID", errors);
   const discordInstallUrl = required(env, "DISCORD_INSTALL_URL", errors);
   const d1Id = required(env, "STAGING_D1_DATABASE_ID", errors);
+  const multiplayerTicketKeyId = required(env, "MULTIPLAYER_TICKET_KEY_ID", errors);
+  const multiplayerTicketSecret = required(env, "MULTIPLAYER_TICKET_SECRET", errors);
 
   if (frontendUrl !== STAGING.frontendUrl)
     errors.push(`FRONTEND_URL must equal ${STAGING.frontendUrl}`);
@@ -280,6 +340,36 @@ export function validateStagingEnvironment(env: Environment): string[] {
     errors.push("STAGING_D1_DATABASE_ID must be the operator-provided UUID, not a placeholder");
   }
   if (d1Id === PRODUCTION.d1Id) errors.push("Staging D1 ID must not equal Production D1 ID");
+
+  if (!/^[A-Za-z0-9_-]{1,32}$/.test(multiplayerTicketKeyId)) {
+    errors.push("MULTIPLAYER_TICKET_KEY_ID must be 1-32 URL-safe characters");
+  }
+  if (env.MULTIPLAYER_TICKET_SECRET !== multiplayerTicketSecret) {
+    errors.push("MULTIPLAYER_TICKET_SECRET must not have surrounding whitespace");
+  }
+  if (new TextEncoder().encode(multiplayerTicketSecret).byteLength < 32) {
+    errors.push("MULTIPLAYER_TICKET_SECRET must be at least 32 UTF-8 bytes");
+  }
+
+  const previousTicketKeyId = env.MULTIPLAYER_TICKET_PREVIOUS_KEY_ID?.trim() ?? "";
+  const previousTicketSecret = env.MULTIPLAYER_TICKET_PREVIOUS_SECRET?.trim() ?? "";
+  if (Boolean(previousTicketKeyId) !== Boolean(previousTicketSecret)) {
+    errors.push(
+      "MULTIPLAYER_TICKET_PREVIOUS_KEY_ID and MULTIPLAYER_TICKET_PREVIOUS_SECRET must be configured together",
+    );
+  }
+  if (previousTicketKeyId && !/^[A-Za-z0-9_-]{1,32}$/.test(previousTicketKeyId)) {
+    errors.push("MULTIPLAYER_TICKET_PREVIOUS_KEY_ID must be 1-32 URL-safe characters");
+  }
+  if (previousTicketSecret && env.MULTIPLAYER_TICKET_PREVIOUS_SECRET !== previousTicketSecret) {
+    errors.push("MULTIPLAYER_TICKET_PREVIOUS_SECRET must not have surrounding whitespace");
+  }
+  if (previousTicketSecret && new TextEncoder().encode(previousTicketSecret).byteLength < 32) {
+    errors.push("MULTIPLAYER_TICKET_PREVIOUS_SECRET must be at least 32 UTF-8 bytes");
+  }
+  if (previousTicketKeyId && previousTicketKeyId === multiplayerTicketKeyId) {
+    errors.push("active and previous multiplayer ticket key IDs must differ");
+  }
 
   const adminIds = env.STAGING_ADMIN_USER_IDS?.trim() ?? "";
   if (adminIds && !adminIds.split(",").every((id) => /^[1-9]\d*$/.test(id.trim()))) {

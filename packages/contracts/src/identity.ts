@@ -8,6 +8,8 @@ export const AccountErrorCodeSchema = z.enum([
   "MERGE_CHALLENGE_EXPIRED",
   "MERGE_PROVIDER_CONFLICT",
   "MERGE_STREAMER_CONFLICT",
+  "MERGE_MULTIPLAYER_CONFLICT",
+  "MERGE_GAME_CREATOR_CONFLICT",
   // Discord bot /owogg link challenge (packages/contracts/src/discord.ts)
   "LINK_CHALLENGE_EXPIRED",
   "LINK_CHALLENGE_CONSUMED",

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { zipSync, strToU8, unzipSync } from "fflate";
-import { app } from "../src/index.js";
+import { app } from "../src/app.js";
 
 // Public game delivery: /play/:slug (mutable live-version resolver) and
 // /games/:gameId/:versionId/* (immutable published assets). These drive the real Hono app with

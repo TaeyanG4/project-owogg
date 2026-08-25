@@ -7,10 +7,13 @@ import type { GameSettingsRepository } from "../ports/repositories.js";
 import type { GameScoreAcceptanceRepository } from "../ports/gameScoreAcceptance.js";
 import type { RuntimeGameRegistry } from "../modules/game/ports/runtimeGameRegistry.js";
 import type { RuntimeGameAvailability } from "./runtimeGameAvailability.js";
+import type { MultiplayerLegacyFlowGate } from "./multiplayerLegacyFlowGate.js";
 
 export type GameScoreAcceptError =
   | "GAME_NOT_AVAILABLE"
   | "GAME_DISABLED"
+  | "MULTIPLAYER_MANAGED"
+  | "MULTIPLAYER_AUTHORITY_UNAVAILABLE"
   | "INVALID_TOKEN"
   | "CONTEXT_MISMATCH"
   | "SCORE_POLICY_NOT_CONFIGURED"
@@ -38,6 +41,7 @@ export class GameScoreAcceptanceUseCases {
   constructor(
     private readonly runtimeGames: RuntimeGameRegistry,
     private readonly availability: RuntimeGameAvailability,
+    private readonly multiplayerLegacyFlow: MultiplayerLegacyFlowGate,
     private readonly settings: Pick<GameSettingsRepository, "getDisabledGameIds">,
     private readonly acceptanceRepo: GameScoreAcceptanceRepository,
   ) {}
@@ -63,6 +67,12 @@ export class GameScoreAcceptanceUseCases {
     if (!(await this.availability.isVersionServable(runtime.identity.id, runtime.liveVersion.id))) {
       return { ok: false, error: "GAME_NOT_AVAILABLE" };
     }
+
+    const legacyFlow = await this.multiplayerLegacyFlow.evaluate(
+      runtime.identity.id,
+      runtime.liveVersion.id,
+    );
+    if (!legacyFlow.allowed) return { ok: false, error: legacyFlow.error };
 
     const verified = await verifyGameSession(input.token, input.secret);
     if (!verified.ok) return { ok: false, error: "INVALID_TOKEN" };

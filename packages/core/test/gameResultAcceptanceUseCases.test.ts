@@ -3,9 +3,12 @@ import assert from "node:assert/strict";
 import {
   GAME_SESSION_POLICY,
   GameResultAcceptanceUseCases,
+  MultiplayerLegacyFlowGate,
   parseGameCreatorManifest,
   signGameSession,
   type GameResultAcceptanceRepository,
+  type MultiplayerProfileRecord,
+  type MultiplayerProfileRepository,
   type RuntimeGame,
   type RuntimeGameAvailability,
   type RuntimeGameRegistry,
@@ -51,7 +54,10 @@ async function sessionToken(game: RuntimeGame, attemptId = crypto.randomUUID()) 
   );
 }
 
-function setup(game: RuntimeGame) {
+function setup(
+  game: RuntimeGame,
+  findProfile: () => Promise<MultiplayerProfileRecord | null> = async () => null,
+) {
   const consumed = new Set<string>();
   const repository: GameResultAcceptanceRepository = {
     async acceptResult(input) {
@@ -73,9 +79,13 @@ function setup(game: RuntimeGame) {
   const availability = {
     isVersionServable: async () => true,
   } as unknown as RuntimeGameAvailability;
+  const gate = new MultiplayerLegacyFlowGate({
+    findEnabledForExactVersion: findProfile,
+  } as unknown as MultiplayerProfileRepository);
   return new GameResultAcceptanceUseCases(
     registry,
     availability,
+    gate,
     { getDisabledGameIds: async () => [] },
     repository,
   );
@@ -118,4 +128,47 @@ test("clamped score is accepted as adjusted but produces no leaderboard score id
     assert.equal(accepted.normalized.rewardEligible, false);
     assert.equal(accepted.scoreId, null);
   }
+});
+
+test("enabled multiplayer profile rejects iframe-authored result before token and manifest parsing", async () => {
+  const game = runtime();
+  const useCases = setup(
+    game,
+    async () =>
+      ({
+        profile: {
+          gameId: game.identity.id,
+          gameVersionId: game.liveVersion.id,
+          enabled: true,
+        },
+      }) as MultiplayerProfileRecord,
+  );
+
+  const result = await useCases.accept({
+    slug: game.identity.slug,
+    userId: 7,
+    nickname: "player",
+    avatarUrl: null,
+    token: "deliberately-invalid",
+    secret: SECRET,
+    result: { score: 100 },
+  });
+  assert.deepEqual(result, { ok: false, error: "MULTIPLAYER_MANAGED" });
+});
+
+test("result flow fails closed when multiplayer profile authority cannot be read", async () => {
+  const game = runtime();
+  const useCases = setup(game, async () => {
+    throw new Error("D1 unavailable");
+  });
+  const result = await useCases.accept({
+    slug: game.identity.slug,
+    userId: 7,
+    nickname: "player",
+    avatarUrl: null,
+    token: "deliberately-invalid",
+    secret: SECRET,
+    result: { score: 50 },
+  });
+  assert.deepEqual(result, { ok: false, error: "MULTIPLAYER_AUTHORITY_UNAVAILABLE" });
 });

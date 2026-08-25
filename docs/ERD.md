@@ -4,9 +4,9 @@
 
 마지막 검증: 2026-08-25
 
-최신 마이그레이션: `0040_public_game_engagement.sql`
+최신 마이그레이션: `0041_multiplayer_foundation.sql`
 
-스키마 요약: 물리 테이블 `44`, 롤링 배포 호환 뷰 `4`
+스키마 요약: 물리 테이블 `55`, 롤링 배포 호환 뷰 `4`
 
 기준 소스:
 
@@ -15,7 +15,7 @@
 - `apps/api/src/container.ts`
 - [데이터베이스 기준 문서](DATABASE.md)
 
-이 문서는 `0000_initial_schema.sql`부터 `0040_public_game_engagement.sql`까지를 빈 SQLite에
+이 문서는 `0000_initial_schema.sql`부터 `0041_multiplayer_foundation.sql`까지를 빈 SQLite에
 순서대로 적용한 **최종 D1 schema**를 기준으로 합니다. migration SQL이 유일한 schema 권한
 원천이며, 이 문서는 관계 탐색과 운영 이해를 위한 투영입니다.
 
@@ -242,7 +242,141 @@ TEXT slug이며 현재 `games.slug`와 논리적으로 연결됩니다. `scores.
 않습니다. `game_slug_reservations`도 USER 호환 identity 수렴 기간의 slug 불변식을 유지하는 논리
 테이블입니다.
 
-## 3. XP, 도전과제와 개인화
+## 3. Multiplayer control plane과 canonical match
+
+```mermaid
+erDiagram
+  users {
+    INTEGER id PK
+  }
+  admin_accounts {
+    INTEGER id PK
+  }
+  games {
+    INTEGER id PK
+    INTEGER live_version_id
+  }
+  game_versions {
+    INTEGER id PK
+    INTEGER game_id FK
+  }
+  multiplayer_profile_requests {
+    INTEGER id PK
+    INTEGER game_id FK
+    INTEGER game_version_id FK
+    INTEGER requested_by_user_id FK
+    TEXT request_hash
+    TEXT status
+  }
+  multiplayer_profiles {
+    INTEGER id PK
+    INTEGER source_request_id FK
+    INTEGER game_id FK
+    INTEGER game_version_id FK
+    INTEGER profile_revision
+    TEXT resolved_class
+    INTEGER enabled
+  }
+  multiplayer_instance_admin_actions {
+    TEXT operation_id PK
+    TEXT instance_id
+    INTEGER expected_generation
+    INTEGER admin_account_id FK
+    TEXT action
+    TEXT reason_code
+  }
+  multiplayer_instances {
+    TEXT id PK
+    INTEGER created_by_user_id FK
+    INTEGER game_version_id FK
+    INTEGER profile_id FK
+    TEXT status
+    INTEGER generation
+  }
+  multiplayer_participants {
+    TEXT id PK
+    TEXT instance_id FK
+    INTEGER user_id FK
+    TEXT status
+  }
+  multiplayer_invites {
+    INTEGER id PK
+    TEXT instance_id FK
+    TEXT token_hash UK
+  }
+  multiplayer_matches {
+    TEXT id PK
+    TEXT instance_id FK
+    INTEGER profile_id FK
+    INTEGER generation
+    TEXT status
+  }
+  multiplayer_match_players {
+    TEXT match_id PK, FK
+    INTEGER user_id PK, FK
+    TEXT participant_id FK
+    TEXT result_status
+  }
+  multiplayer_match_actions {
+    INTEGER id PK
+    TEXT match_id FK
+    INTEGER user_id FK
+    TEXT client_action_id
+  }
+  multiplayer_reward_outbox {
+    INTEGER id PK
+    TEXT match_id FK
+    INTEGER user_id FK
+    TEXT source_id UK
+    TEXT status
+  }
+  game_version_leases {
+    INTEGER id PK
+    INTEGER game_version_id FK
+    TEXT instance_id FK
+    TEXT status
+  }
+
+  games ||--o{ multiplayer_profile_requests : exact_game
+  game_versions ||--o| multiplayer_profile_requests : exact_version_request
+  users o|--o{ multiplayer_profile_requests : submits
+  admin_accounts o|--o{ multiplayer_profile_requests : reviews
+  multiplayer_profile_requests o|--o{ multiplayer_profiles : resolves
+  games ||--o{ multiplayer_profiles : approves
+  game_versions ||--o{ multiplayer_profiles : pins
+  users ||--o{ multiplayer_instances : creates
+  multiplayer_profiles ||--o{ multiplayer_instances : snapshots
+  multiplayer_instances ||--o{ multiplayer_participants : contains
+  users ||--o{ multiplayer_participants : joins
+  multiplayer_instances ||--o{ multiplayer_invites : issues
+  multiplayer_instances ||--o{ multiplayer_matches : generations
+  multiplayer_profiles ||--o{ multiplayer_matches : governs
+  multiplayer_matches ||--o{ multiplayer_match_players : commits
+  multiplayer_participants ||--o{ multiplayer_match_players : projects
+  multiplayer_matches ||--o{ multiplayer_match_actions : deduplicates
+  multiplayer_participants ||--o{ multiplayer_match_actions : acts
+  multiplayer_match_players ||--o{ multiplayer_reward_outbox : rewards
+  game_versions ||--o{ game_version_leases : retains
+  multiplayer_instances ||--o| game_version_leases : owns
+  admin_accounts o|--o{ multiplayer_instance_admin_actions : acts
+  multiplayer_instances ||--o{ multiplayer_instance_admin_actions : audited_by_id
+```
+
+Creator request는 권한이 아니며 exact USER publisher/version과 관리자 결정을 trigger가 확인합니다.
+Profile semantic은 revision 단위로 immutable하고 exact READY version당 enabled row는 최대 하나입니다.
+Instance의 live simulation state는 D1이 아니라 한 Durable Object가 소유합니다.
+
+Match action은 `(match, user, client_action_id)`로 멱등이고 canonical player result 전체가 committed되기
+전에는 match를 `COMMITTED`로 바꿀 수 없습니다. reward outbox는 committed eligible player와 profile
+policy에 묶입니다. active `game_version_leases`가 있으면 해당 bundle version 삭제가 거절됩니다.
+`multiplayer_instance_admin_actions`는 operation ID로 강제 종료 replay를 식별하며 update/delete가
+금지된 감사 원장입니다.
+
+계정 병합은 충돌 preflight 뒤 participant의 `user_id`를 변경하며 match player/action/outbox가
+`ON UPDATE CASCADE`로 함께 이동합니다. terminal result/action payload/source semantics는 trigger가
+계속 immutable하게 유지합니다.
+
+## 4. XP, 도전과제와 개인화
 
 ```mermaid
 erDiagram
@@ -295,7 +429,7 @@ favorites와 recent plays의 game key 역시 기존 TEXT slug 계약을 유지�
 북마크 사용자 수입니다. `0040`은 공개 카탈로그 집계가 user-first PK 전체를 훑지 않도록 두 테이블에
 `(game_id, user_id)` covering index를 추가하며 새 물리 테이블은 만들지 않습니다.
 
-## 4. Discord 길드와 XP 귀속
+## 5. Discord 길드와 XP 귀속
 
 ```mermaid
 erDiagram
@@ -355,7 +489,7 @@ erDiagram
 없습니다. `discord_guild_xp_events.source_xp_event_id`의 unique 제약은 하나의 XP 사건이 둘 이상의
 길드에 중복 귀속되는 것을 막습니다.
 
-## 5. Streamer 채널 검증과 심사
+## 6. Streamer 채널 검증과 심사
 
 ```mermaid
 erDiagram
@@ -400,7 +534,7 @@ Streamer 감사 원장은 append-only이며 reviewer/account/job 삭제나 정�
 논리 참조를 사용합니다. `creator_profiles`, `creator_platform_accounts`, `creator_review_jobs`,
 `creator_review_audit_log`는 이 네 물리 테이블을 가리키는 롤링 배포 호환 뷰입니다.
 
-## 6. USER 게임 롤링 배포 호환 미러
+## 7. USER 게임 롤링 배포 호환 미러
 
 ```mermaid
 erDiagram
@@ -499,8 +633,19 @@ D1 콘솔에서 직접 수정하면 감사 로그와 두 저장소의 일관성�
 | `game_results`                           | Result          | `owogg.json` 계약으로 검증된 완료 사실 원장                |
 | `game_settings`                          | Operations      | TEXT slug 기반 게임 enable/disable override                |
 | `game_slug_reservations`                 | Game Platform   | USER 호환 identity의 slug 선점 불변식                      |
+| `game_version_leases`                    | Multiplayer     | active instance의 exact bundle version 보존 lease          |
 | `game_versions`                          | Game Platform   | 공통 immutable bundle version과 publish/review 상태        |
 | `games`                                  | Game Platform   | OWOGG/USER 공통 identity, 소유권, visibility, live pointer |
+| `multiplayer_instances`                  | Multiplayer     | exact profile/version instance와 lifecycle generation      |
+| `multiplayer_instance_admin_actions`     | Multiplayer     | 멱등 관리자 강제 종료 append-only 감사 원장                |
+| `multiplayer_invites`                    | Multiplayer     | 원문 없이 hash만 저장하는 제한 사용 invite                 |
+| `multiplayer_match_actions`              | Multiplayer     | client action ID/payload hash 기반 멱등 action 원장        |
+| `multiplayer_match_players`              | Multiplayer     | match별 canonical 참가자 결과와 reward eligibility         |
+| `multiplayer_matches`                    | Multiplayer     | generation별 authoritative finalization 상태               |
+| `multiplayer_participants`               | Multiplayer     | instance membership, seat, role와 connection generation    |
+| `multiplayer_profile_requests`           | Multiplayer     | Creator exact-version 요청과 관리자 심사 결정              |
+| `multiplayer_profiles`                   | Multiplayer     | 서버 승인 immutable runtime profile revision               |
+| `multiplayer_reward_outbox`              | Multiplayer     | committed 결과 기반 exactly-once reward 전달 원장          |
 | `oauth_accounts`                         | Identity        | Google/Discord provider identity와 avatar 후보             |
 | `official_game_deletion_audit_log`       | Operations      | 부모 삭제 뒤에도 남는 OWOGG 완전 삭제 감사 원장            |
 | `sandbox_game_review_audit_log`          | Compatibility   | 직전 USER 게임 심사 계약의 append-only 호환 감사           |
@@ -547,6 +692,9 @@ D1 콘솔에서 직접 수정하면 감사 로그와 두 저장소의 일관성�
   forward-cycle live pointer처럼 삭제 후 보존 또는 배포 호환이 우선인 관계입니다.
 - audit table에는 API update/delete 경로를 만들지 않으며 주요 원장은 trigger로 변경·삭제를
   거부합니다.
+- 멀티플레이 사용자 FK는 active/canonical 원장을 임의로 지우지 않도록 제한합니다. 계정 병합은
+  충돌 preflight와 participant 기준 `ON UPDATE CASCADE`를 사용하고, 삭제·게임 purge는 instance,
+  match와 exact-version lease를 먼저 terminal 상태로 전환합니다.
 
 ## 문서 갱신 절차
 

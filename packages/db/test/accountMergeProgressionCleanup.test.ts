@@ -13,6 +13,7 @@ function createMockD1(seed: {
   userProgress: { user_id: number }[];
   userAchievements: { user_id: number }[];
   streamerConflict?: boolean;
+  multiplayerConflict?: boolean;
 }): { db: D1Database; deletedFrom: Record<string, number[]>; batchCalls: number } {
   const deletedFrom: Record<string, number[]> = {
     scores: [],
@@ -24,6 +25,7 @@ function createMockD1(seed: {
     discord_guild_xp_events: [],
     discord_guild_managers: [],
     streamer_profiles: [],
+    game_creator_access: [],
     sessions: [],
     users: [],
   };
@@ -39,6 +41,9 @@ function createMockD1(seed: {
         },
         async first() {
           if (seed.streamerConflict && query.includes("streamer_platform_accounts")) {
+            return { conflict: 1 };
+          }
+          if (seed.multiplayerConflict && query.includes("multiplayer_participants")) {
             return { conflict: 1 };
           }
           return null;
@@ -110,5 +115,21 @@ test("mergeAccounts blocks Streamer platform conflicts before opening the destru
   const repo = new D1AccountMergeRepository(db);
 
   await assert.rejects(() => repo.mergeAccounts(1, 2, "merge-1"), /STREAMER_PLATFORM_CONFLICT/);
+  assert.equal(batchCalls, 0);
+});
+
+test("mergeAccounts blocks multiplayer conflicts before opening the destructive batch", async () => {
+  const { db, batchCalls } = createMockD1({
+    xpEvents: [],
+    userProgress: [],
+    userAchievements: [],
+    multiplayerConflict: true,
+  });
+  const repo = new D1AccountMergeRepository(db);
+
+  await assert.rejects(
+    () => repo.mergeAccounts(1, 2, "merge-1"),
+    /MULTIPLAYER_PARTICIPATION_CONFLICT/,
+  );
   assert.equal(batchCalls, 0);
 });

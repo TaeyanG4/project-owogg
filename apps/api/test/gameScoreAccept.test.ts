@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { app } from "../src/index.js";
+import { app } from "../src/app.js";
 import { signGameSession, type GameSessionPayload } from "@owogg/core";
 
 /**
@@ -90,6 +90,11 @@ function createDb(options: {
   } = options;
   const consumedAttemptIds = new Set(preConsumedAttemptIds);
   const scores: FakeScoreRow[] = [];
+  const xpEvents = new Map<string, { id: number; amount: number }>();
+  const userProgress = new Map<
+    number,
+    { user_id: number; total_xp: number; eligible_completions: number; updated_at: string }
+  >();
 
   function statement(query: string) {
     let values: unknown[] = [];
@@ -116,6 +121,14 @@ function createDb(options: {
             updated_at: new Date().toISOString(),
             score_submission_blocked: scoreSubmissionBlocked ? 1 : 0,
           } as T;
+        }
+
+        if (query.includes("FROM xp_events WHERE source_type = ? AND source_id = ?")) {
+          return (xpEvents.get(`${String(values[0])}:${String(values[1])}`) ?? null) as T | null;
+        }
+
+        if (query.includes("FROM user_progress WHERE user_id = ?")) {
+          return (userProgress.get(Number(values[0])) ?? null) as T | null;
         }
 
         const wantsGameBySlug = query.includes("FROM games WHERE slug");
@@ -177,6 +190,36 @@ function createDb(options: {
       // be one atomic unit rather than two independent writes.
       async batch(statements: Array<ReturnType<typeof statement>>) {
         const [attemptStmt, scoreStmt] = statements;
+        if (attemptStmt?.query.includes("INSERT INTO xp_events")) {
+          const userIdBound = Number(attemptStmt.values[0]);
+          const xpAmount = Number(attemptStmt.values[6]);
+          const sourceType = String(attemptStmt.values[7]);
+          const sourceId = String(attemptStmt.values[8]);
+          const createdAt = String(attemptStmt.values[10]);
+          const key = `${sourceType}:${sourceId}`;
+          const inserted = xpEvents.has(key) ? 0 : 1;
+          if (inserted === 1) {
+            xpEvents.set(key, { id: xpEvents.size + 1, amount: xpAmount });
+            const previous = userProgress.get(userIdBound);
+            userProgress.set(userIdBound, {
+              user_id: userIdBound,
+              total_xp: (previous?.total_xp ?? 0) + xpAmount,
+              eligible_completions: (previous?.eligible_completions ?? 0) + 1,
+              updated_at: createdAt,
+            });
+          }
+          return statements.map(() => ({
+            success: true,
+            meta: { changes: inserted, rows_written: inserted },
+          }));
+        }
+
+        if (!attemptStmt?.query.includes("game_attempt_consumptions")) {
+          return statements.map(() => ({
+            success: true,
+            meta: { changes: 0, rows_written: 0 },
+          }));
+        }
         const attemptId = attemptStmt?.values[0] as string;
         let attemptChanges = 0;
         if (attemptId !== undefined && !consumedAttemptIds.has(attemptId)) {

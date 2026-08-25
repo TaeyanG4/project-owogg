@@ -101,8 +101,13 @@ export class D1AccountMergeRepository implements AccountMergeRepository {
   async findMergeIntegrityConflict(
     primaryId: number,
     secondaryId: number,
-  ): Promise<"STREAMER_PLATFORM_CONFLICT" | null> {
-    const row = await this.db
+  ): Promise<
+    | "STREAMER_PLATFORM_CONFLICT"
+    | "MULTIPLAYER_PARTICIPATION_CONFLICT"
+    | "GAME_CREATOR_REVIEW_CONFLICT"
+    | null
+  > {
+    const streamerRow = await this.db
       .prepare(
         `SELECT 1
          FROM streamer_platform_accounts secondary_account
@@ -119,7 +124,92 @@ export class D1AccountMergeRepository implements AccountMergeRepository {
       .bind(primaryId, secondaryId)
       .first();
 
-    return row ? "STREAMER_PLATFORM_CONFLICT" : null;
+    if (streamerRow) return "STREAMER_PLATFORM_CONFLICT";
+
+    const creatorReviewRow = await this.db
+      .prepare(
+        `SELECT 1
+         WHERE (
+           SELECT COUNT(*)
+           FROM games game
+           WHERE game.publisher_type = 'USER'
+             AND game.publisher_user_id IN (?, ?)
+             AND game.review_slot IS NOT NULL
+         ) > 2
+         OR EXISTS (
+           SELECT 1
+           FROM games primary_game
+           JOIN games secondary_game
+             ON secondary_game.review_slot = primary_game.review_slot
+           WHERE primary_game.publisher_type = 'USER'
+             AND secondary_game.publisher_type = 'USER'
+             AND primary_game.publisher_user_id = ?
+             AND secondary_game.publisher_user_id = ?
+             AND primary_game.review_slot IS NOT NULL
+         )
+         LIMIT 1`,
+      )
+      .bind(primaryId, secondaryId, primaryId, secondaryId)
+      .first();
+    if (creatorReviewRow) return "GAME_CREATOR_REVIEW_CONFLICT";
+
+    const multiplayerRow = await this.db
+      .prepare(
+        `SELECT 1
+         WHERE EXISTS (
+           SELECT 1 FROM multiplayer_participants
+           WHERE user_id = ? AND status IN ('JOINED', 'READY')
+         )
+         OR EXISTS (
+           SELECT 1 FROM multiplayer_instances
+           WHERE created_by_user_id = ?
+             AND status NOT IN ('CLOSED', 'ABORTED', 'EXPIRED')
+         )
+         OR EXISTS (
+           SELECT 1 FROM multiplayer_reward_outbox
+           WHERE user_id = ? AND status = 'PROCESSING'
+         )
+         OR EXISTS (
+           SELECT 1
+           FROM multiplayer_participants primary_participant
+           JOIN multiplayer_participants secondary_participant
+             ON secondary_participant.instance_id = primary_participant.instance_id
+           WHERE primary_participant.user_id = ?
+             AND secondary_participant.user_id = ?
+         )
+         OR EXISTS (
+           SELECT 1
+           FROM multiplayer_match_players primary_player
+           JOIN multiplayer_match_players secondary_player
+             ON secondary_player.match_id = primary_player.match_id
+           WHERE primary_player.user_id = ?
+             AND secondary_player.user_id = ?
+         )
+         OR EXISTS (
+           SELECT 1
+           FROM multiplayer_instances primary_instance
+           JOIN multiplayer_instances secondary_instance
+             ON secondary_instance.create_idempotency_hash =
+                primary_instance.create_idempotency_hash
+           WHERE primary_instance.created_by_user_id = ?
+             AND secondary_instance.created_by_user_id = ?
+         )
+         LIMIT 1`,
+      )
+      .bind(
+        secondaryId,
+        secondaryId,
+        secondaryId,
+        primaryId,
+        secondaryId,
+        primaryId,
+        secondaryId,
+        primaryId,
+        secondaryId,
+      )
+      .first();
+
+    return multiplayerRow ? "MULTIPLAYER_PARTICIPATION_CONFLICT" : null;
   }
 
   async mergeAccounts(primaryId: number, secondaryId: number, challengeId: string): Promise<void> {
@@ -198,6 +288,56 @@ export class D1AccountMergeRepository implements AccountMergeRepository {
         .bind(primaryId, secondaryId, primaryId),
       this.db
         .prepare(`UPDATE oauth_accounts SET user_id = ? WHERE user_id = ?`)
+        .bind(primaryId, secondaryId),
+      // Game Creator authority is identity-like. Preserve Secondary's access only when Primary
+      // has none, then move every USER-owned game through the legacy control-plane table so its
+      // convergence trigger updates generic `games` in the same transaction.
+      this.db
+        .prepare(
+          `DELETE FROM game_creator_access
+           WHERE user_id = ?
+             AND EXISTS (SELECT 1 FROM game_creator_access WHERE user_id = ?)`,
+        )
+        .bind(secondaryId, primaryId),
+      this.db
+        .prepare(
+          `UPDATE game_creator_access SET user_id = ?, updated_at = datetime('now')
+           WHERE user_id = ?
+             AND NOT EXISTS (SELECT 1 FROM game_creator_access WHERE user_id = ?)`,
+        )
+        .bind(primaryId, secondaryId, primaryId),
+      this.db
+        .prepare(`UPDATE sandbox_games SET developer_user_id = ? WHERE developer_user_id = ?`)
+        .bind(primaryId, secondaryId),
+      // Defensive convergence for a generic USER row that has no legacy control-plane row.
+      this.db
+        .prepare(
+          `UPDATE games SET publisher_user_id = ?
+           WHERE publisher_type = 'USER' AND publisher_user_id = ?
+             AND NOT EXISTS (SELECT 1 FROM sandbox_games WHERE sandbox_games.id = games.id)`,
+        )
+        .bind(primaryId, secondaryId),
+      this.db
+        .prepare(
+          `UPDATE multiplayer_profile_requests
+           SET requested_by_user_id = ?
+           WHERE requested_by_user_id = ?`,
+        )
+        .bind(primaryId, secondaryId),
+      this.db
+        .prepare(
+          `UPDATE multiplayer_instances
+           SET created_by_user_id = ?
+           WHERE created_by_user_id = ?`,
+        )
+        .bind(primaryId, secondaryId),
+      this.db
+        .prepare(`UPDATE multiplayer_participants SET user_id = ? WHERE user_id = ?`)
+        .bind(primaryId, secondaryId),
+      this.db
+        .prepare(
+          `UPDATE multiplayer_invites SET created_by_user_id = ? WHERE created_by_user_id = ?`,
+        )
         .bind(primaryId, secondaryId),
     ];
     statements.push(

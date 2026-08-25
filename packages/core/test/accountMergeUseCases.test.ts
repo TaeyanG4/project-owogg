@@ -27,6 +27,8 @@ class FixtureState {
   progress = new Map<number, { totalXp: number; eligibleCompletions: number }>();
   achievements = new Map<number, Set<string>>();
   streamerConflict = false;
+  multiplayerConflict = false;
+  gameCreatorReviewConflict = false;
   streamerProfileOwner: number | null = null;
   streamerSettings = new Map<number, string>();
   streamerReviewJobAccountIds: number[] = [];
@@ -202,8 +204,15 @@ class FixtureMergeRepo implements AccountMergeRepository {
     }
     return null;
   }
-  async findMergeIntegrityConflict(): Promise<"STREAMER_PLATFORM_CONFLICT" | null> {
-    return this.s.streamerConflict ? "STREAMER_PLATFORM_CONFLICT" : null;
+  async findMergeIntegrityConflict(): Promise<
+    | "STREAMER_PLATFORM_CONFLICT"
+    | "MULTIPLAYER_PARTICIPATION_CONFLICT"
+    | "GAME_CREATOR_REVIEW_CONFLICT"
+    | null
+  > {
+    if (this.s.streamerConflict) return "STREAMER_PLATFORM_CONFLICT";
+    if (this.s.gameCreatorReviewConflict) return "GAME_CREATOR_REVIEW_CONFLICT";
+    return this.s.multiplayerConflict ? "MULTIPLAYER_PARTICIPATION_CONFLICT" : null;
   }
   async consumeMergeChallenge(id: string): Promise<void> {
     const ch = this.s.challenges.get(id);
@@ -436,6 +445,31 @@ test("conflicting Streamer platform ownership blocks merge before destructive wo
   assert.ok(state.users.has(userA.id));
   assert.ok(state.users.has(userB.id));
   assert.equal(state.scores.length, 2);
+  assert.equal(state.challenges.get(challengeId)?.consumedAt, null);
+});
+
+test("active or overlapping multiplayer participation blocks merge before destructive work", async () => {
+  const { state, useCases, userA, userB, challengeId } = await setupTwoAccounts();
+  state.multiplayerConflict = true;
+
+  const result = await useCases.confirmMerge(challengeId, userA.id, userA.id);
+
+  assert.deepEqual(result, { ok: false, code: "MERGE_MULTIPLAYER_CONFLICT" });
+  assert.ok(state.users.has(userA.id));
+  assert.ok(state.users.has(userB.id));
+  assert.equal(state.scores.length, 2);
+  assert.equal(state.challenges.get(challengeId)?.consumedAt, null);
+});
+
+test("conflicting Game Creator review slots block merge before ownership transfer", async () => {
+  const { state, useCases, userA, userB, challengeId } = await setupTwoAccounts();
+  state.gameCreatorReviewConflict = true;
+
+  const result = await useCases.confirmMerge(challengeId, userA.id, userA.id);
+
+  assert.deepEqual(result, { ok: false, code: "MERGE_GAME_CREATOR_CONFLICT" });
+  assert.ok(state.users.has(userA.id));
+  assert.ok(state.users.has(userB.id));
   assert.equal(state.challenges.get(challengeId)?.consumedAt, null);
 });
 

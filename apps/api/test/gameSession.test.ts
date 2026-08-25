@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { app } from "../src/index.js";
+import { app } from "../src/app.js";
 import { verifyGameSession, gameSessionMatches } from "@owogg/core";
 
 // POST /api/games/:slug/session — the route-layer half of the Game Session prerequisite (the
@@ -22,8 +22,20 @@ interface FakeVersion {
   game_id: number;
 }
 
-function createDb(options: { userId?: number; game?: FakeGame; version?: FakeVersion }) {
-  const { userId = 7, game, version } = options;
+function createDb(options: {
+  userId?: number;
+  game?: FakeGame;
+  version?: FakeVersion;
+  multiplayerProfile?: boolean;
+  multiplayerProfileReadFails?: boolean;
+}) {
+  const {
+    userId = 7,
+    game,
+    version,
+    multiplayerProfile = false,
+    multiplayerProfileReadFails = false,
+  } = options;
   function statement(query: string) {
     let values: unknown[] = [];
     return {
@@ -32,6 +44,49 @@ function createDb(options: { userId?: number; game?: FakeGame; version?: FakeVer
         return this;
       },
       async first<T>() {
+        if (query.includes("FROM multiplayer_profiles profile")) {
+          if (multiplayerProfileReadFails) throw new Error("multiplayer authority unavailable");
+          if (!multiplayerProfile || values[0] !== game?.id || values[1] !== version?.id) {
+            return null;
+          }
+          const now = new Date().toISOString();
+          return {
+            id: 100,
+            source_request_id: null,
+            source_request_hash: null,
+            profile_version: 1,
+            game_id: game.id,
+            game_version_id: version.id,
+            profile_revision: 1,
+            protocol_version: 1,
+            resolved_class: "M1",
+            simulation_model: "turn",
+            runtime_backend: "durable-object",
+            ruleset_key: "official:omok",
+            ruleset_revision: 1,
+            resolved_config_json: '{"boardSize":15,"winLength":5}',
+            lifecycle: "match",
+            persistence: "match",
+            latency_profile: "relaxed",
+            reconnect_policy: "resume",
+            min_players: 2,
+            max_players: 2,
+            allowed_visibility_json: '["PUBLIC"]',
+            allowed_join_policies_json: '["OPEN"]',
+            max_action_bytes: 1024,
+            max_state_bytes: 8192,
+            action_rate_limit: 5,
+            reward_policy_id: null,
+            enabled: 1,
+            created_by_admin_id: 1,
+            approved_at: now,
+            disabled_at: null,
+            disabled_reason_code: null,
+            disabled_by_admin_id: null,
+            updated_at: now,
+          } as T;
+        }
+
         // Session lookup — same query shape/fixture as devGames.test.ts's createDb.
         if (query.includes("JOIN users u ON s.user_id = u.id")) {
           return {
@@ -282,6 +337,46 @@ test("issues the same generic session shape for an OWOGG identity", async () => 
     },
     { userId: 7, gameId: OFFICIAL_GAME.id, versionId: OFFICIAL_VERSION.id },
   );
+});
+
+test("enabled exact-version multiplayer profile blocks generic session issuance", async () => {
+  const { db } = createDb({
+    userId: 7,
+    game: OFFICIAL_GAME,
+    version: OFFICIAL_VERSION,
+    multiplayerProfile: true,
+  });
+  const res = await requestSession(
+    "/api/games/reaction-time/session",
+    db,
+    {
+      method: "POST",
+      headers: { ...AUTH_HEADERS, "Content-Type": "application/json" },
+      body: JSON.stringify({ difficulty: 123 }),
+    },
+    { GAME_SESSION_SECRET: SESSION_SECRET },
+  );
+
+  assert.equal(res.status, 409);
+  assert.equal((await res.json()).error.code, "MULTIPLAYER_MANAGED");
+});
+
+test("multiplayer profile read failure returns 503 instead of falling back to a generic session", async () => {
+  const { db } = createDb({
+    userId: 7,
+    game: OFFICIAL_GAME,
+    version: OFFICIAL_VERSION,
+    multiplayerProfileReadFails: true,
+  });
+  const res = await requestSession(
+    "/api/games/reaction-time/session",
+    db,
+    { method: "POST", headers: AUTH_HEADERS },
+    { GAME_SESSION_SECRET: SESSION_SECRET },
+  );
+
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).error.code, "MULTIPLAYER_AUTHORITY_UNAVAILABLE");
 });
 
 test("a token issued here is rejected under a different secret — the signature is real, not decorative", async () => {

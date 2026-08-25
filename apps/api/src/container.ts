@@ -27,6 +27,10 @@ import {
   D1OfficialGameLifecycleRepository,
   D1AdminGameCatalogRepository,
   D1PublicGameMetricsRepository,
+  D1MultiplayerProfileRepository,
+  D1MultiplayerProfileRequestRepository,
+  D1MultiplayerInstanceRepository,
+  D1MultiplayerMatchRepository,
   BackblazeB2GameBundleRepository,
   UnconfiguredGameBundleRepository,
   B2GameCanonicalRepository,
@@ -63,6 +67,8 @@ import {
   AvailableRuntimeGameCatalog,
   PublicGameMetricsUseCases,
   RuntimeGameAvailability,
+  MultiplayerAdmissionUseCases,
+  MultiplayerLegacyFlowGate,
   type UserRepository,
   type SessionRepository,
   type ScoreRepository,
@@ -92,6 +98,10 @@ import {
   type GameAssetRepository,
   type RuntimeGameRegistry,
   type PublicGameCatalog,
+  type MultiplayerProfileRepository,
+  type MultiplayerProfileRequestRepository,
+  type MultiplayerInstanceRepository,
+  type MultiplayerMatchRepository,
 } from "@owogg/core";
 import type { D1Database } from "@cloudflare/workers-types";
 import { FflateBundleArchiveReader } from "./infrastructure/games/FflateBundleArchiveReader.js";
@@ -134,6 +144,14 @@ export interface AppContainer {
   runtimeGameRegistry: RuntimeGameRegistry;
   runtimeGameAvailability: RuntimeGameAvailability;
   publicGameCatalog: PublicGameCatalog;
+  /** Multiplayer control-plane authority. Routes remain closed until Phase 2 admission and
+   * ticket use cases are wired; exposing these repositories here does not itself expose APIs. */
+  multiplayerProfileRepo: MultiplayerProfileRepository;
+  multiplayerProfileRequestRepo: MultiplayerProfileRequestRepository;
+  multiplayerInstanceRepo: MultiplayerInstanceRepository;
+  multiplayerMatchRepo: MultiplayerMatchRepository;
+  multiplayerAdmissionUseCases: MultiplayerAdmissionUseCases;
+  multiplayerLegacyFlowGate: MultiplayerLegacyFlowGate;
   publicGameMetricsUseCases: PublicGameMetricsUseCases;
   scoreReadUseCases: GenericScoreReadUseCases;
   personalizationUseCases: PersonalizationUseCases;
@@ -191,6 +209,15 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
   const gameSettingsRepo = new D1GameSettingsRepository(db);
   const adminGameCatalogRepo = new D1AdminGameCatalogRepository(db);
   const publicGameMetricsRepo = new D1PublicGameMetricsRepository(db);
+  const multiplayerProfileRepo = new D1MultiplayerProfileRepository(db);
+  const multiplayerProfileRequestRepo = new D1MultiplayerProfileRequestRepository(db);
+  const multiplayerInstanceRepo = new D1MultiplayerInstanceRepository(db);
+  const multiplayerMatchRepo = new D1MultiplayerMatchRepository(db);
+  const multiplayerAdmissionUseCases = new MultiplayerAdmissionUseCases({
+    instances: multiplayerInstanceRepo,
+    profiles: multiplayerProfileRepo,
+  });
+  const multiplayerLegacyFlowGate = new MultiplayerLegacyFlowGate(multiplayerProfileRepo);
   const adminMonitoringRepo = new D1AdminMonitoringRepository(db);
   const userModerationRepo = new D1UserModerationRepository(db);
   const gameCreatorRepo = new D1GameCreatorRepository(db);
@@ -302,12 +329,14 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
   const gameScoreAcceptanceUseCases = new GameScoreAcceptanceUseCases(
     runtimeGameRegistry,
     runtimeGameAvailability,
+    multiplayerLegacyFlowGate,
     gameSettingsRepo,
     gameScoreAcceptanceRepo,
   );
   const gameResultAcceptanceUseCases = new GameResultAcceptanceUseCases(
     runtimeGameRegistry,
     runtimeGameAvailability,
+    multiplayerLegacyFlowGate,
     gameSettingsRepo,
     gameResultAcceptanceRepo,
   );
@@ -343,6 +372,12 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     runtimeGameRegistry,
     runtimeGameAvailability,
     publicGameCatalog,
+    multiplayerProfileRepo,
+    multiplayerProfileRequestRepo,
+    multiplayerInstanceRepo,
+    multiplayerMatchRepo,
+    multiplayerAdmissionUseCases,
+    multiplayerLegacyFlowGate,
     publicGameMetricsUseCases,
     scoreReadUseCases,
     personalizationUseCases,

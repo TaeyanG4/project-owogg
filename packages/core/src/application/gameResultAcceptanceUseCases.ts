@@ -9,11 +9,14 @@ import type { GameSettingsRepository } from "../ports/repositories.js";
 import type { GameResultAcceptanceRepository } from "../ports/gameResultAcceptance.js";
 import type { RuntimeGameRegistry } from "../modules/game/ports/runtimeGameRegistry.js";
 import type { RuntimeGameAvailability } from "./runtimeGameAvailability.js";
+import type { MultiplayerLegacyFlowGate } from "./multiplayerLegacyFlowGate.js";
 import type { OwoggAchievementDefinition } from "@owogg/game-sdk/contracts";
 
 export type GameResultAcceptError =
   | "GAME_NOT_AVAILABLE"
   | "GAME_DISABLED"
+  | "MULTIPLAYER_MANAGED"
+  | "MULTIPLAYER_AUTHORITY_UNAVAILABLE"
   | "INVALID_TOKEN"
   | "CONTEXT_MISMATCH"
   | "MANIFEST_NOT_CONFIGURED"
@@ -38,6 +41,7 @@ export class GameResultAcceptanceUseCases {
   constructor(
     private readonly runtimeGames: RuntimeGameRegistry,
     private readonly availability: RuntimeGameAvailability,
+    private readonly multiplayerLegacyFlow: MultiplayerLegacyFlowGate,
     private readonly settings: Pick<GameSettingsRepository, "getDisabledGameIds">,
     private readonly acceptanceRepo: GameResultAcceptanceRepository,
   ) {}
@@ -60,6 +64,12 @@ export class GameResultAcceptanceUseCases {
     if (!(await this.availability.isVersionServable(runtime.identity.id, runtime.liveVersion.id))) {
       return { ok: false, error: "GAME_NOT_AVAILABLE" };
     }
+
+    const legacyFlow = await this.multiplayerLegacyFlow.evaluate(
+      runtime.identity.id,
+      runtime.liveVersion.id,
+    );
+    if (!legacyFlow.allowed) return { ok: false, error: legacyFlow.error };
 
     const verified = await verifyGameSession(input.token, input.secret);
     if (!verified.ok) return { ok: false, error: "INVALID_TOKEN" };

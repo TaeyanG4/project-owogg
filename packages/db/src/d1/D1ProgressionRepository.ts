@@ -17,12 +17,10 @@ export class D1ProgressionRepository implements ProgressionRepository {
     xpPerCompletion: number;
     dailyCapPerGame: number;
   }): Promise<RecordCompletionOutcome> {
-    // Idempotency guard: one source event (e.g. one `scores` row) produces at most one
-    // xp_events row. Checked up-front so a replay is a true no-op with no side effects.
     const existing = await this.db
-      .prepare(`SELECT id FROM xp_events WHERE source_type = ? AND source_id = ?`)
+      .prepare(`SELECT id, amount FROM xp_events WHERE source_type = ? AND source_id = ?`)
       .bind(input.sourceType, input.sourceId)
-      .first<{ id: number }>();
+      .first<{ id: number; amount: number }>();
 
     if (existing) {
       const progress = await this.getUserProgress(input.userId);
@@ -35,96 +33,94 @@ export class D1ProgressionRepository implements ProgressionRepository {
       };
     }
 
-    // Daily anti-farming cap: count XP-awarding completions already recorded today (UTC)
-    // for this user + game. Beyond the cap, the completion is still recorded (amount 0)
-    // so achievement progress keeps advancing, but no further XP is granted.
-    //
-    // Expressed as a half-open range on created_at rather than `date(created_at) = date('now')`.
-    // Wrapping the column in a function makes it unusable as an index key, so the old form could
-    // only use idx_xp_events_user_game_created for its (user_id, game_id) prefix and then had to
-    // evaluate date() on every one of that user's historical rows for the game — cost grew with
-    // the player's lifetime history, on the single most latency-sensitive write in the app. The
-    // range form seeks straight to today's slice. This is a pure index-usability change: every
-    // row is written by the INSERT below with an explicit ISO-8601 UTC `created_at`, which sorts
-    // lexicographically in the same order as chronologically, so the two forms select identically.
-    const startOfUtcDay = `${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`;
-    const startOfNextUtcDay = `${new Date(Date.now() + 86400000).toISOString().slice(0, 10)}T00:00:00.000Z`;
+    const now = new Date();
+    const createdAt = now.toISOString();
+    const startOfUtcDay = createdAt.slice(0, 10) + "T00:00:00.000Z";
+    const startOfNextUtcDay =
+      new Date(now.getTime() + 86400000).toISOString().slice(0, 10) + "T00:00:00.000Z";
 
-    const todayCountRow = await this.db
-      .prepare(
-        `SELECT COUNT(*) as count FROM xp_events
-         WHERE user_id = ? AND game_id = ? AND amount > 0
-           AND created_at >= ? AND created_at < ?`,
-      )
-      .bind(input.userId, input.gameId, startOfUtcDay, startOfNextUtcDay)
-      .first<{ count: number }>();
+    // D1 batch is one SQLite transaction. The cap is calculated inside the INSERT after this
+    // writer reaches its serialized transaction position. The aggregate SELECT is gated by
+    // changes() from that immediately preceding INSERT, so a duplicate cannot advance progress
+    // and an aggregate failure rolls the xp_events insert back too.
+    const batchResults = await this.db.batch([
+      this.db
+        .prepare(
+          `INSERT INTO xp_events (
+             user_id, amount, reason, source_type, source_id, game_id, created_at
+           ) VALUES (
+             ?,
+             CASE WHEN (
+               SELECT COUNT(*) FROM xp_events
+               WHERE user_id = ? AND game_id = ? AND amount > 0
+                 AND created_at >= ? AND created_at < ?
+             ) < ? THEN ? ELSE 0 END,
+             'GAME_COMPLETION', ?, ?, ?, ?
+           )
+           ON CONFLICT(source_type, source_id) DO NOTHING`,
+        )
+        .bind(
+          input.userId,
+          input.userId,
+          input.gameId,
+          startOfUtcDay,
+          startOfNextUtcDay,
+          input.dailyCapPerGame,
+          input.xpPerCompletion,
+          input.sourceType,
+          input.sourceId,
+          input.gameId,
+          createdAt,
+        ),
+      this.db
+        .prepare(
+          `INSERT INTO user_progress (user_id, total_xp, eligible_completions, updated_at)
+           SELECT ?, event.amount, 1, ?
+           FROM xp_events event
+           WHERE event.source_type = ? AND event.source_id = ? AND changes() = 1
+           ON CONFLICT(user_id) DO UPDATE SET
+             total_xp = total_xp + excluded.total_xp,
+             eligible_completions = eligible_completions + 1,
+             updated_at = excluded.updated_at`,
+        )
+        .bind(input.userId, createdAt, input.sourceType, input.sourceId),
+    ]);
 
-    const todayCount = Number(todayCountRow?.count ?? 0);
-    const underCap = todayCount < input.dailyCapPerGame;
-    const xpAwarded = underCap ? input.xpPerCompletion : 0;
-    const createdAt = new Date().toISOString();
+    const insertedCount = batchResults[0]?.meta?.rows_written ?? batchResults[0]?.meta?.changes;
+    if (insertedCount !== 0 && insertedCount !== 1) {
+      throw new Error("D1 progression write metadata is missing or invalid");
+    }
 
-    const insertResult = await this.db
-      .prepare(
-        `INSERT INTO xp_events (user_id, amount, reason, source_type, source_id, game_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(source_type, source_id) DO NOTHING`,
-      )
-      .bind(
-        input.userId,
-        xpAwarded,
-        "GAME_COMPLETION",
-        input.sourceType,
-        input.sourceId,
-        input.gameId,
-        createdAt,
-      )
-      .run();
+    const [progress, createdEvent] = await Promise.all([
+      this.getUserProgress(input.userId),
+      this.db
+        .prepare(`SELECT id, amount FROM xp_events WHERE source_type = ? AND source_id = ?`)
+        .bind(input.sourceType, input.sourceId)
+        .first<{ id: number; amount: number }>(),
+    ]);
+    if (!createdEvent) {
+      throw new Error("D1 progression event is missing after atomic write");
+    }
 
-    // Defense-in-depth against the narrow race between the up-front SELECT check and this
-    // INSERT: if the D1 runtime reports the conflict clause actually skipped the write
-    // (meta.changes === 0), a concurrent call already recorded this source event — treat
-    // as duplicate and skip the aggregate update entirely. When meta is unavailable (e.g.
-    // in simplified test doubles), fall back to trusting the up-front SELECT check.
-    const insertedRow = insertResult.meta?.changes !== 0;
-
-    if (!insertedRow) {
-      const progress = await this.getUserProgress(input.userId);
+    if (insertedCount === 0) {
       return {
         duplicate: true,
         xpAwarded: 0,
         totalXp: progress?.total_xp ?? 0,
         eligibleCompletions: progress?.eligible_completions ?? 0,
+        xpEventId: Number(createdEvent.id),
       };
     }
 
-    await this.db
-      .prepare(
-        `INSERT INTO user_progress (user_id, total_xp, eligible_completions, updated_at)
-         VALUES (?, ?, 1, ?)
-         ON CONFLICT(user_id) DO UPDATE SET
-           total_xp = total_xp + excluded.total_xp,
-           eligible_completions = eligible_completions + 1,
-           updated_at = excluded.updated_at`,
-      )
-      .bind(input.userId, xpAwarded, createdAt)
-      .run();
-
-    const progress = await this.getUserProgress(input.userId);
-    const createdEvent = await this.db
-      .prepare(`SELECT id FROM xp_events WHERE source_type = ? AND source_id = ?`)
-      .bind(input.sourceType, input.sourceId)
-      .first<{ id: number }>();
-
+    const xpAwarded = Number(createdEvent.amount);
     return {
       duplicate: false,
       xpAwarded,
       totalXp: progress?.total_xp ?? xpAwarded,
       eligibleCompletions: progress?.eligible_completions ?? 1,
-      xpEventId: createdEvent ? Number(createdEvent.id) : undefined,
+      xpEventId: Number(createdEvent.id),
     };
   }
-
   async getUserProgress(userId: number): Promise<UserProgress | null> {
     const row = await this.db
       .prepare(

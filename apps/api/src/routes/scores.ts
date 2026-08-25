@@ -12,7 +12,7 @@ import type { ApiEnv } from "./auth.js";
 
 export const scoresRouter = new Hono<ApiEnv>();
 
-function scoreAcceptErrorStatus(error: GameScoreAcceptError): 400 | 401 | 404 | 409 {
+function scoreAcceptErrorStatus(error: GameScoreAcceptError): 400 | 401 | 404 | 409 | 503 {
   switch (error) {
     case "GAME_NOT_AVAILABLE":
       return 404;
@@ -21,6 +21,10 @@ function scoreAcceptErrorStatus(error: GameScoreAcceptError): 400 | 401 | 404 | 
       return 401;
     case "ALREADY_CONSUMED":
       return 409;
+    case "MULTIPLAYER_MANAGED":
+      return 409;
+    case "MULTIPLAYER_AUTHORITY_UNAVAILABLE":
+      return 503;
     default:
       return 400;
   }
@@ -32,6 +36,10 @@ function scoreAcceptErrorMessage(error: GameScoreAcceptError, reason?: string): 
       return "게임을 찾을 수 없습니다.";
     case "GAME_DISABLED":
       return "현재 비활성화된 게임입니다.";
+    case "MULTIPLAYER_MANAGED":
+      return "이 게임 버전의 점수는 서버가 확정한 멀티플레이 결과로만 기록됩니다.";
+    case "MULTIPLAYER_AUTHORITY_UNAVAILABLE":
+      return "멀티플레이 권한 상태를 확인할 수 없습니다. 잠시 후 다시 시도해주세요.";
     case "INVALID_TOKEN":
       return "게임 세션이 유효하지 않거나 만료되었습니다.";
     case "CONTEXT_MISMATCH":

@@ -196,13 +196,18 @@ export interface AccountMergeRepository {
   findMergeChallenge(id: string): Promise<MergeChallenge | null>;
   findPendingMergeChallenge(userA: number, userB: number): Promise<MergeChallenge | null>;
   /**
-   * Returns a conflict when both accounts own external Streamer channels on the same
-   * platform. The merge must stop before any destructive statement in that case.
+   * Returns a conflict when Streamer identities collide or when the secondary account has
+   * active/conflicting multiplayer identity. The merge stops before destructive work.
    */
   findMergeIntegrityConflict(
     primaryId: number,
     secondaryId: number,
-  ): Promise<"STREAMER_PLATFORM_CONFLICT" | null>;
+  ): Promise<
+    | "STREAMER_PLATFORM_CONFLICT"
+    | "MULTIPLAYER_PARTICIPATION_CONFLICT"
+    | "GAME_CREATOR_REVIEW_CONFLICT"
+    | null
+  >;
   /** Performs the complete Primary-Wins transfer/deletion in one database transaction. */
   mergeAccounts(primaryId: number, secondaryId: number, challengeId: string): Promise<void>;
 }

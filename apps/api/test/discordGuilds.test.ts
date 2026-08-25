@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { app } from "../src/index.js";
+import { app } from "../src/app.js";
 
 test("GET /api/discord/guilds/search returns 200 and search results structure", async () => {
   const mockEnv = {

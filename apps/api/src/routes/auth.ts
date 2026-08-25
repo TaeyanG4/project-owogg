@@ -82,6 +82,22 @@ export type ApiEnv = {
      * shipping a Production Worker that would 503 on every Game Creator result-submission attempt. See
      * docs/PRODUCTION_INTEGRATIONS.md §5 for the operator-facing setup steps. */
     GAME_SESSION_SECRET?: string;
+    /** Master kill switch. Only the exact string "true" opens multiplayer admission. */
+    MULTIPLAYER_ENABLED?: string;
+    /** Dedicated HMAC key material for short-lived WebSocket join tickets. */
+    MULTIPLAYER_TICKET_KEY_ID?: string;
+    MULTIPLAYER_TICKET_SECRET?: string;
+    /** Optional one-key verification overlap for rotation; both values must be present together. */
+    MULTIPLAYER_TICKET_PREVIOUS_KEY_ID?: string;
+    MULTIPLAYER_TICKET_PREVIOUS_SECRET?: string;
+    /** Exact API Worker origin used for the multiplayer WebSocket handshake. */
+    MULTIPLAYER_SOCKET_ORIGIN?: string;
+    /** Environment-local self binding. Optional in types so disabled/unconfigured previews boot. */
+    MULTIPLAYER_INSTANCES?: DurableObjectNamespace;
+    /** Dedicated connect/ticket abuse limiter. Required whenever multiplayer is enabled. */
+    MULTIPLAYER_RATE_LIMITER?: {
+      limit(options: { key: string }): Promise<{ success: boolean }>;
+    };
     GOOGLE_CLIENT_ID?: string;
     DISCORD_CLIENT_ID?: string;
     DISCORD_CLIENT_SECRET?: string;
@@ -799,6 +815,8 @@ authRouter.post("/merge/confirm", async (c) => {
       USER_NOT_FOUND: 404,
       MERGE_PROVIDER_CONFLICT: 409,
       MERGE_STREAMER_CONFLICT: 409,
+      MERGE_MULTIPLAYER_CONFLICT: 409,
+      MERGE_GAME_CREATOR_CONFLICT: 409,
       MERGE_ADMIN_CONFLICT: 409,
     };
     const messageMap: Record<string, string> = {
@@ -809,6 +827,10 @@ authRouter.post("/merge/confirm", async (c) => {
       MERGE_PROVIDER_CONFLICT: "두 계정 모두 동일 로그인 수단을 사용 중이라 병합할 수 없습니다.",
       MERGE_STREAMER_CONFLICT:
         "두 계정이 같은 플랫폼의 서로 다른 Streamer 채널을 소유하고 있어 안전하게 병합할 수 없습니다. 먼저 Streamer 채널 충돌을 정리해주세요.",
+      MERGE_MULTIPLAYER_CONFLICT:
+        "진행 중이거나 서로 충돌하는 멀티플레이 기록이 있어 안전하게 병합할 수 없습니다.",
+      MERGE_GAME_CREATOR_CONFLICT:
+        "두 계정의 게임 심사 슬롯이 충돌합니다. 진행 중인 게임 심사를 먼저 완료하거나 철회해주세요.",
       MERGE_ADMIN_CONFLICT:
         "통합 대상(Secondary) 계정이 관리자 계정이라 안전하게 병합할 수 없습니다. 관리자에게 문의해 먼저 정리해주세요.",
     };

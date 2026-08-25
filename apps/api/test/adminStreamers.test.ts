@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { app } from "../src/index.js";
+import { app } from "../src/app.js";
 import { hashSessionToken } from "@owogg/db";
 
 // Every test in this file authenticates with these two fixed raw tokens; the mock DB below
