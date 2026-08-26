@@ -27,7 +27,7 @@ export interface AuthContextValue {
   isLoginModalOpen: boolean;
   openLoginModal: () => void;
   closeLoginModal: () => void;
-  loginWithGoogle: () => void;
+  loginWithGoogleCredential: (credential: string) => Promise<void>;
   loginWithDiscord: () => void;
   logout: () => void;
   clearError: () => void;
@@ -136,72 +136,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
   const clearError = () => setError(null);
 
-  const loginWithGoogle = useCallback(() => {
+  const loginWithGoogleCredential = useCallback(async (credential: string) => {
     setError(null);
-
-    const clientId =
-      providerStatus.google.clientId ||
-      (typeof window !== "undefined"
-        ? ((import.meta as unknown as { env?: { VITE_GOOGLE_CLIENT_ID?: string } }).env
-            ?.VITE_GOOGLE_CLIENT_ID ?? "")
-        : "");
-
-    if (providerStatus.availability !== "ready") {
-      setError("로그인 서버 상태를 확인하고 있습니다. 잠시 후 다시 시도해주세요.");
+    if (!credential) {
+      setError("Google 로그인 응답이 비어 있습니다. 다시 시도해주세요.");
       return;
     }
-
-    if (!clientId || !providerStatus.google.configured) {
-      setError("Google 로그인이 아직 설정되지 않았습니다.");
-      return;
+    try {
+      setIsLoading(true);
+      const loggedInUser = await loginGoogle(credential);
+      setUser(loggedInUser);
+      setIsLoginModalOpen(false);
+      setError(null);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Google 로그인에 실패했습니다. 다시 시도해주세요.",
+      );
+    } finally {
+      setIsLoading(false);
     }
-
-    if (!window.google?.accounts?.id) {
-      setError("Google 로그인 스크립트가 로드되지 않았습니다. 페이지를 새로고침해주세요.");
-      return;
-    }
-
-    const googleAuth = window.google.accounts.id;
-
-    googleAuth.initialize({
-      client_id: clientId,
-      callback: async (response: { credential: string }) => {
-        try {
-          setIsLoading(true);
-          const loggedInUser = await loginGoogle(response.credential);
-          setUser(loggedInUser);
-          setIsLoginModalOpen(false);
-          setError(null);
-        } catch (err) {
-          setError(
-            err instanceof Error ? err.message : "Google 로그인에 실패했습니다. 다시 시도해주세요.",
-          );
-        } finally {
-          setIsLoading(false);
-        }
-      },
-      auto_select: false,
-      cancel_on_tap_outside: true,
-    });
-
-    googleAuth.prompt((notification) => {
-      if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-        const tempDiv = document.createElement("div");
-        tempDiv.style.position = "fixed";
-        tempDiv.style.top = "-9999px";
-        document.body.appendChild(tempDiv);
-        googleAuth.renderButton(tempDiv, {
-          type: "icon",
-          size: "large",
-        });
-        const btn = tempDiv.querySelector("div[role=button]") as HTMLElement | null;
-        if (btn) {
-          btn.click();
-        }
-        setTimeout(() => document.body.removeChild(tempDiv), 5000);
-      }
-    });
-  }, [providerStatus]);
+  }, []);
 
   const loginWithDiscord = useCallback(() => {
     setError(null);
@@ -234,7 +188,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isLoginModalOpen,
         openLoginModal,
         closeLoginModal,
-        loginWithGoogle,
+        loginWithGoogleCredential,
         loginWithDiscord,
         logout,
         clearError,
