@@ -53,6 +53,9 @@ export interface GameFrameProps {
    * below carries its own `overflow-hidden` specifically so that box never contributes scrollable
    * overflow beyond the (smaller) displayed surface. */
   iframeStyle?: React.CSSProperties | undefined;
+  /** Multiplayer owns reconnect and reload semantics outside the sandbox, so it can hide the
+   * generic manual reload affordance that would otherwise create a second connection. */
+  showReloadControl?: boolean | undefined;
   /** Fires once per iframe `load` event, after GameFrame's own loading-overlay state is cleared —
    * the hook a runtime (see runtime/IframeRuntime.tsx) uses to establish the Game Bridge once the
    * framed document actually exists to receive it. Receives the
@@ -83,6 +86,7 @@ export function GameFrame({
   frameClassName,
   frameStyle,
   iframeStyle,
+  showReloadControl = true,
   onFrameLoad,
 }: GameFrameProps) {
   const [started, setStarted] = useState(autoStart);
@@ -156,13 +160,15 @@ export function GameFrame({
           onLoad={handleLoad}
         />
       </div>
-      <button
-        type="button"
-        onClick={reload}
-        className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold text-text-muted hover:text-text-primary"
-      >
-        다시 시작
-      </button>
+      {showReloadControl && (
+        <button
+          type="button"
+          onClick={reload}
+          className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold text-text-muted hover:text-text-primary"
+        >
+          다시 시작
+        </button>
+      )}
     </div>
   );
 }

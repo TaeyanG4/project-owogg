@@ -26,6 +26,7 @@ import {
   type OmokTerminalResult,
 } from "@owogg/core";
 import type { D1Database } from "@cloudflare/workers-types";
+import { MULTIPLAYER_HEARTBEAT_REQUEST, MULTIPLAYER_HEARTBEAT_RESPONSE } from "@owogg/contracts";
 import { createContainer, type AppContainer } from "../container.js";
 import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
@@ -179,6 +180,12 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
   ) {
     super(state, env);
     this.container = createContainer(env.DB);
+    state.setWebSocketAutoResponse(
+      new WebSocketRequestResponsePair(
+        MULTIPLAYER_HEARTBEAT_REQUEST,
+        MULTIPLAYER_HEARTBEAT_RESPONSE,
+      ),
+    );
     state.blockConcurrencyWhile(async () => {
       state.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS runtime_meta (

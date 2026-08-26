@@ -4,7 +4,7 @@
 
 마지막 검증: 2026-08-27
 
-기준 브랜치: `feature/multiplayer-omok` (base: `staging`)
+기준 브랜치: `staging` (구현은 최신 `staging` 기반 `feature/*`/`fix/*` 브랜치)
 
 이 문서는 OwOGG 멀티플레이 플랫폼의 구현 범위, 보안 불변식, 단계별 완료 조건과 운영 Gate를
 추적하는 단일 계획 문서입니다. 현재 구현 사실은 코드, D1 migration, Wrangler 설정과 배포
@@ -828,6 +828,15 @@ Staging 상태(2026-08-27): `official-omok` exact version을 D1/B2에 게시했�
 활성화 응답은 D1의 인덱스 유지 비용까지 포함하는 `rows_written`을 단일 행 변경 수로 오인해 거짓
 충돌을 반환했으며, 판정 기준을 `changes` 우선으로 수정하고 인덱스 포함 메타데이터 회귀 테스트와
 전체 `pnpm verify`를 통과했다. 수정본 Staging 재배포와 실제 무랭킹·두 사용자 acceptance가 남아 있다.
+
+후속 로컬 수정(2026-08-27): 방 코드와 초대 링크 복사를 분리하고 전체 링크 붙여넣기 시 코드·토큰을
+자동 인식하도록 했다. `INVITE_ONLY` 방의 public code는 locator일 뿐 입장 권한이 아니므로 code-only
+입장은 계속 거부한다. 15초 parent heartbeat는 Durable Object auto-response로 처리해 idle instance를
+깨우지 않으며, 일시적 단절에는 최대 3회의 제한적 자동 재연결을 적용했다. official 오목 bundle은
+iframe 내부 스크롤을 제거하고 반응형 보드 프레임·격자 끝선·화점 5개를 정리했다. 대상 테스트와
+전체 `pnpm verify`, 1280×720·390×844·390×600 시각 QA는 통과했으나 이 tree는 아직 Staging에
+반영하지 않았다. 코드 배포 뒤 갱신된 official 오목 ZIP을 D1/B2에 새 exact version으로 게시하고
+프로필 재확인 후 두 사용자 acceptance를 다시 수행한다.
 
 완료 Gate: 동시/중복 action으로 corruption이 없고 iframe이 결과·업적·XP를 위조할 수 없다.
 

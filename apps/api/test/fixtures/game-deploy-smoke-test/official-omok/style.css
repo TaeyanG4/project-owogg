@@ -19,13 +19,14 @@
 html,
 body {
   width: 100%;
-  min-height: 100%;
+  height: 100%;
   margin: 0;
-  overflow-x: hidden;
+  overflow: hidden;
 }
 
 body {
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
   background:
     radial-gradient(circle at 15% 10%, rgba(124, 58, 237, 0.2), transparent 34rem),
     radial-gradient(circle at 90% 80%, rgba(14, 165, 233, 0.13), transparent 30rem), #08090d;
@@ -37,12 +38,15 @@ button {
 
 .shell {
   width: min(100%, 860px);
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
   margin: 0 auto;
-  padding: clamp(18px, 4vw, 38px);
+  padding: clamp(16px, min(3vw, 3vh), 30px);
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: clamp(10px, 1.6vh, 16px);
+  overflow: hidden;
 }
 
 .game-header,
@@ -128,38 +132,43 @@ h1 {
 .board-wrap {
   width: 100%;
   flex: 1;
+  min-height: 0;
   display: grid;
   place-items: center;
+  overflow: hidden;
 }
 
 .board {
-  --board-padding: clamp(12px, 2.6vw, 22px);
-  width: min(100%, 690px, calc(100vh - 190px));
+  --board-padding: clamp(12px, 2.2vw, 20px);
+  width: min(100%, 680px, calc(100dvh - 240px));
+  max-height: 100%;
   aspect-ratio: 1;
+  position: relative;
   display: grid;
   grid-template-columns: repeat(15, 1fr);
   grid-template-rows: repeat(15, 1fr);
   padding: var(--board-padding);
-  border: 3px solid #8c5c25;
-  border-radius: 20px;
-  background-color: #d89a48;
+  border: 2px solid #5f3917;
+  border-radius: 14px;
+  overflow: hidden;
+  isolation: isolate;
+  background-color: #dda34f;
   background-image:
-    linear-gradient(rgba(64, 37, 15, 0.65) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(64, 37, 15, 0.65) 1px, transparent 1px),
-    radial-gradient(circle at 30% 20%, #f0bd70, transparent 55%);
-  background-size:
-    calc((100% - (2 * var(--board-padding))) / 15) calc((100% - (2 * var(--board-padding))) / 15),
-    calc((100% - (2 * var(--board-padding))) / 15) calc((100% - (2 * var(--board-padding))) / 15),
-    100% 100%;
-  background-position:
-    calc(var(--board-padding) + ((100% - (2 * var(--board-padding))) / 30))
-      calc(var(--board-padding) + ((100% - (2 * var(--board-padding))) / 30)),
-    calc(var(--board-padding) + ((100% - (2 * var(--board-padding))) / 30))
-      calc(var(--board-padding) + ((100% - (2 * var(--board-padding))) / 30)),
-    0 0;
+    radial-gradient(circle at 28% 18%, rgba(255, 219, 150, 0.72), transparent 38%),
+    repeating-linear-gradient(
+      2deg,
+      rgba(111, 61, 18, 0.08) 0,
+      rgba(111, 61, 18, 0.08) 1px,
+      transparent 1px,
+      transparent 9px
+    ),
+    linear-gradient(135deg, #efbd6b 0%, #d99a44 52%, #c98534 100%);
   box-shadow:
-    0 28px 80px rgba(0, 0, 0, 0.46),
-    inset 0 0 28px rgba(91, 49, 12, 0.26);
+    0 0 0 5px #a56a2c,
+    0 0 0 7px #4f2c11,
+    0 24px 68px rgba(0, 0, 0, 0.48),
+    inset 0 0 0 2px rgba(255, 221, 155, 0.38),
+    inset 0 0 30px rgba(91, 49, 12, 0.2);
 }
 
 .intersection {
@@ -169,20 +178,58 @@ h1 {
   margin: 0;
   padding: 0;
   border: 0;
-  border-radius: 50%;
   background: transparent;
   cursor: default;
   z-index: 1;
 }
 
-.intersection:not(:disabled):hover::before,
-.intersection:not(:disabled):focus-visible::before {
+.intersection::before,
+.intersection::after {
   content: "";
   position: absolute;
-  inset: 18%;
-  border: 2px solid rgba(255, 255, 255, 0.7);
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.18);
+  z-index: 0;
+  background: rgba(72, 40, 14, 0.72);
+  pointer-events: none;
+}
+
+.intersection::before {
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+}
+
+.intersection::after {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+}
+
+.intersection.edge-left::before {
+  left: 50%;
+}
+
+.intersection.edge-right::before {
+  right: 50%;
+}
+
+.intersection.edge-top::after {
+  top: 50%;
+}
+
+.intersection.edge-bottom::after {
+  bottom: 50%;
+}
+
+.intersection:not(:disabled):hover,
+.intersection:not(:disabled):focus-visible {
+  background: radial-gradient(
+    circle at center,
+    rgba(255, 255, 255, 0.24) 0 24%,
+    rgba(255, 255, 255, 0.72) 25% 28%,
+    transparent 30%
+  );
 }
 
 .intersection:not(:disabled) {
@@ -190,15 +237,30 @@ h1 {
 }
 
 .intersection:focus-visible {
-  outline: 2px solid #7c3aed;
-  outline-offset: 2px;
+  outline: 2px solid #8b5cf6;
+  outline-offset: -2px;
+}
+
+.star-point {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: clamp(5px, 0.7vw, 8px);
+  height: clamp(5px, 0.7vw, 8px);
+  border-radius: 50%;
+  background: #4f2b0e;
+  box-shadow: 0 1px 2px rgba(255, 225, 165, 0.24);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 1;
 }
 
 .piece {
   position: absolute;
-  inset: 9%;
+  inset: 8%;
   border-radius: 50%;
   pointer-events: none;
+  z-index: 3;
   box-shadow: 0 4px 8px rgba(45, 24, 8, 0.45);
 }
 
@@ -234,7 +296,7 @@ footer {
 
 @media (max-width: 620px) {
   .shell {
-    padding: 14px;
+    padding: 12px;
     gap: 11px;
   }
 
@@ -259,7 +321,31 @@ footer {
   }
 
   .board {
-    width: min(100%, calc(100vh - 225px));
-    min-width: 290px;
+    width: min(100%, calc(100dvh - 255px));
+  }
+}
+
+@media (max-height: 700px) {
+  .shell {
+    padding-block: 10px;
+    gap: 8px;
+  }
+
+  .eyebrow,
+  footer {
+    display: none;
+  }
+
+  h1 {
+    font-size: clamp(21px, 4vh, 30px);
+  }
+
+  .status-card {
+    min-height: 46px;
+    padding: 9px 13px;
+  }
+
+  .board {
+    width: min(100%, 620px, calc(100dvh - 150px));
   }
 }

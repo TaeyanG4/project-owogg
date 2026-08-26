@@ -46,6 +46,11 @@ function errorMessage(error: unknown): string {
     : "멀티플레이 요청을 처리하지 못했습니다.";
 }
 
+const PUBLIC_ROOM_CODE_PATTERN = /^[A-Za-z0-9_-]{12,64}$/;
+const INVITE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
+const INVITE_REQUIRED_MESSAGE =
+  "이 게임은 초대 전용입니다. 호스트가 보낸 초대 링크를 붙여넣어 주세요.";
+
 /** Keeps the invite credential in parent UI only while producing the one-click URL another player
  * can open. The fragment is never sent in an HTTP request, so the sandbox, origin server, CDN,
  * and access logs receive neither this URL credential nor the token. */
@@ -82,6 +87,37 @@ export function readMultiplayerRoomShareValue(pageUrl: string): {
   } catch {
     return { publicCode: "", inviteToken: "" };
   }
+}
+
+/** Accepts the safe one-click URL (or the two-line non-URL fallback) without ever putting the
+ * invite credential into an HTTP query. A plain public room code intentionally returns null: it
+ * locates a room but does not authorize entry to an INVITE_ONLY room. */
+export function parseMultiplayerRoomJoinValue(value: string): {
+  readonly publicCode: string;
+  readonly inviteToken: string;
+} | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const shared = readMultiplayerRoomShareValue(trimmed);
+  if (
+    PUBLIC_ROOM_CODE_PATTERN.test(shared.publicCode) &&
+    INVITE_TOKEN_PATTERN.test(shared.inviteToken)
+  ) {
+    return shared;
+  }
+
+  const [publicCode, inviteToken, ...rest] = trimmed.split(/\s+/);
+  if (
+    rest.length === 0 &&
+    publicCode !== undefined &&
+    inviteToken !== undefined &&
+    PUBLIC_ROOM_CODE_PATTERN.test(publicCode) &&
+    INVITE_TOKEN_PATTERN.test(inviteToken)
+  ) {
+    return { publicCode, inviteToken };
+  }
+  return null;
 }
 
 export function stripMultiplayerRoomCredentials(pageUrl: string): string {
@@ -183,6 +219,34 @@ export function MultiplayerGameSurface({
     setInviteToken(sharedRoom.inviteToken);
   }, [gameSlug]);
 
+  const inviteRequired =
+    availability !== "LOADING" &&
+    availability !== "ERROR" &&
+    availability.status === "AVAILABLE" &&
+    availability.profile.allowedJoinPolicies.every((policy) => policy === "INVITE_ONLY");
+
+  const updateJoinEntry = useCallback((value: string) => {
+    const parsed = parseMultiplayerRoomJoinValue(value);
+    if (parsed) {
+      setPublicCode(parsed.publicCode);
+      setInviteToken(parsed.inviteToken);
+      setError(null);
+      return;
+    }
+    setPublicCode(value);
+  }, []);
+
+  const updateInviteEntry = useCallback((value: string) => {
+    const parsed = parseMultiplayerRoomJoinValue(value);
+    if (parsed) {
+      setPublicCode(parsed.publicCode);
+      setInviteToken(parsed.inviteToken);
+      setError(null);
+      return;
+    }
+    setInviteToken(value);
+  }, []);
+
   const createRoom = useCallback(async () => {
     if (
       availability === "LOADING" ||
@@ -221,14 +285,22 @@ export function MultiplayerGameSurface({
   }, [availability, gameSlug, joinPolicy, visibility]);
 
   const joinRoom = useCallback(async () => {
+    const normalizedPublicCode = publicCode.trim();
+    const normalizedInviteToken = inviteToken.trim();
+    if (inviteRequired && normalizedInviteToken.length === 0) {
+      setError(INVITE_REQUIRED_MESSAGE);
+      return;
+    }
     setBusy("JOIN");
     setError(null);
     try {
       const joined = await joinMultiplayerRoom({
-        publicCode: publicCode.trim(),
-        inviteToken: inviteToken.trim() || null,
+        publicCode: normalizedPublicCode,
+        inviteToken: normalizedInviteToken || null,
       });
-      setShareValue(roomShareValue(joined.instance.publicCode));
+      // Consumed one-use invites are not re-shareable. Only the room creator keeps the freshly
+      // issued invite link; a joined participant can still copy the public room locator.
+      setShareValue(undefined);
       setRoom(joined);
       if (typeof window !== "undefined") {
         window.history.replaceState(
@@ -242,7 +314,7 @@ export function MultiplayerGameSurface({
     } finally {
       setBusy(null);
     }
-  }, [inviteToken, publicCode]);
+  }, [inviteRequired, inviteToken, publicCode]);
 
   if (
     availability !== "LOADING" &&
@@ -319,7 +391,11 @@ export function MultiplayerGameSurface({
                 >
                   {available?.profile.allowedVisibility.map((value) => (
                     <option key={value} value={value}>
-                      {value}
+                      {value === "PRIVATE"
+                        ? "비공개"
+                        : value === "UNLISTED"
+                          ? "링크 공개"
+                          : "전체 공개"}
                     </option>
                   ))}
                 </select>
@@ -333,7 +409,7 @@ export function MultiplayerGameSurface({
                 >
                   {available?.profile.allowedJoinPolicies.map((value) => (
                     <option key={value} value={value}>
-                      {value}
+                      {value === "INVITE_ONLY" ? "초대 전용" : "코드로 참가"}
                     </option>
                   ))}
                 </select>
@@ -354,24 +430,41 @@ export function MultiplayerGameSurface({
               <span className="h-px flex-1 bg-border" />
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              <input
-                value={publicCode}
-                onChange={(event) => setPublicCode(event.target.value)}
-                placeholder="방 코드"
-                autoComplete="off"
-                className="rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-text-primary"
-              />
-              <input
-                value={inviteToken}
-                onChange={(event) => setInviteToken(event.target.value)}
-                placeholder="초대 토큰 (선택)"
-                autoComplete="off"
-                className="rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-text-primary"
-              />
+              <label className="text-xs font-bold text-text-secondary">
+                초대 링크 또는 방 코드
+                <input
+                  value={publicCode}
+                  onChange={(event) => updateJoinEntry(event.target.value)}
+                  placeholder="초대 링크를 붙여넣으세요"
+                  autoComplete="off"
+                  className="mt-1.5 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-text-primary"
+                />
+              </label>
+              <label className="text-xs font-bold text-text-secondary">
+                초대 토큰{inviteRequired ? " (필수)" : ""}
+                <input
+                  value={inviteToken}
+                  onChange={(event) => updateInviteEntry(event.target.value)}
+                  placeholder={
+                    inviteRequired ? "링크를 붙여넣으면 자동 입력" : "초대 전용 방에서 사용"
+                  }
+                  autoComplete="off"
+                  className="mt-1.5 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-text-primary"
+                />
+              </label>
             </div>
+            <p className="mt-2 text-xs leading-relaxed text-text-muted">
+              {inviteRequired
+                ? "방 코드는 방을 찾는 값이며 입장 권한이 아닙니다. 호스트가 보낸 초대 링크 전체를 붙여넣으면 코드와 토큰이 자동으로 입력됩니다."
+                : "초대 링크 전체를 붙여넣으면 방 코드와 초대 토큰을 자동으로 인식합니다."}
+            </p>
             <button
               type="button"
-              disabled={busy !== null || publicCode.trim().length === 0}
+              disabled={
+                busy !== null ||
+                publicCode.trim().length === 0 ||
+                (inviteRequired && inviteToken.trim().length === 0)
+              }
               onClick={() => void joinRoom()}
               className="mt-3 w-full cursor-pointer rounded-xl border border-border py-3 text-sm font-black text-text-primary hover:bg-surface-overlay disabled:cursor-not-allowed disabled:opacity-50"
             >

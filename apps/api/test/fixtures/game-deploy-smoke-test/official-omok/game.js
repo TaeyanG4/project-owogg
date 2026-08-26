@@ -79,6 +79,16 @@
     );
   }
 
+  function isStarCoordinate(x, y) {
+    return (
+      (x === 3 && y === 3) ||
+      (x === 11 && y === 3) ||
+      (x === 7 && y === 7) ||
+      (x === 3 && y === 11) ||
+      (x === 11 && y === 11)
+    );
+  }
+
   function renderStoneBadge() {
     const marker = stoneBadge.querySelector(".stone");
     marker.className = "stone";
@@ -143,6 +153,12 @@
           ? `${y + 1}행 ${x + 1}열 빈 자리`
           : `${y + 1}행 ${x + 1}열 ${value === "B" ? "흑돌" : "백돌"}`,
       );
+      if (isStarCoordinate(x, y)) {
+        const star = document.createElement("span");
+        star.className = "star-point";
+        star.setAttribute("aria-hidden", "true");
+        cell.appendChild(star);
+      }
       if (value === ".") continue;
       const piece = document.createElement("span");
       piece.className = `piece ${value === "B" ? "black" : "white"}`;
@@ -240,7 +256,13 @@
       const cell = document.createElement("button");
       cell.type = "button";
       cell.className = "intersection";
+      if (x === 0) cell.classList.add("edge-left");
+      if (x === BOARD_SIZE - 1) cell.classList.add("edge-right");
+      if (y === 0) cell.classList.add("edge-top");
+      if (y === BOARD_SIZE - 1) cell.classList.add("edge-bottom");
       cell.setAttribute("role", "gridcell");
+      cell.setAttribute("aria-rowindex", String(y + 1));
+      cell.setAttribute("aria-colindex", String(x + 1));
       cell.addEventListener("click", function () {
         tryMove(x, y);
       });

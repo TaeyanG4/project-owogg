@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { MultiInitMessage } from "@owogg/game-sdk/bridge";
+import { MULTIPLAYER_HEARTBEAT_REQUEST, MULTIPLAYER_HEARTBEAT_RESPONSE } from "@owogg/contracts";
 import {
   createMultiplayerBridgeHost,
   type MultiplayerBridgeIframeWindowLike,
@@ -193,6 +194,50 @@ test("queues bounded game messages while connecting and flushes in order on open
     ],
   );
   host.close();
+  gamePort.close();
+});
+
+test("idle heartbeat stays parent-only and is cancelled with the bridge", async () => {
+  const iframe = createIframeHarness();
+  const socket = createSocketHarness();
+  let heartbeat: (() => void) | undefined;
+  let intervalMs = 0;
+  let cleared = false;
+  let drops = 0;
+  const timer = setInterval(() => undefined, 60_000);
+  const host = createMultiplayerBridgeHost(
+    iframe.windowLike,
+    socket.socket,
+    BOOTSTRAP,
+    { onProtocolDrop: () => (drops += 1) },
+    {
+      setInterval(callback, delay) {
+        heartbeat = callback;
+        intervalMs = delay;
+        return timer;
+      },
+      clearInterval(handle) {
+        assert.equal(handle, timer);
+        clearInterval(handle);
+        cleared = true;
+      },
+    },
+  );
+  const gamePort = iframe.capture().port;
+  const received: unknown[] = [];
+  gamePort.onmessage = (event) => received.push(event.data);
+
+  assert.equal(intervalMs, 15_000);
+  assert.ok(heartbeat);
+  heartbeat();
+  assert.deepEqual(socket.sent, [MULTIPLAYER_HEARTBEAT_REQUEST]);
+  socket.message(MULTIPLAYER_HEARTBEAT_RESPONSE);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(received, []);
+  assert.equal(drops, 0);
+
+  host.close();
+  assert.equal(cleared, true);
   gamePort.close();
 });
 

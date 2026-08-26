@@ -3,7 +3,20 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MultiplayerConnectionOverlay } from "../features/game/runtime/MultiplayerConnectionOverlay";
-import { multiplayerTerminalLabel } from "../features/game/runtime/MultiplayerIframeRuntime";
+import {
+  multiplayerReconnectDelay,
+  multiplayerTerminalLabel,
+} from "../features/game/runtime/MultiplayerIframeRuntime";
+
+test("only transient disconnects receive a bounded automatic reconnect schedule", () => {
+  assert.equal(multiplayerReconnectDelay("NETWORK_LOST", 0), 750);
+  assert.equal(multiplayerReconnectDelay("SERVER_UNAVAILABLE", 1), 1_500);
+  assert.equal(multiplayerReconnectDelay("AUTH_EXPIRED", 2), 3_000);
+  assert.equal(multiplayerReconnectDelay("NETWORK_LOST", 3), null);
+  assert.equal(multiplayerReconnectDelay("REPLACED_BY_NEW_CONNECTION", 0), null);
+  assert.equal(multiplayerReconnectDelay("SLOW_CONSUMER", 0), null);
+  assert.equal(multiplayerReconnectDelay("LEFT", 0), null);
+});
 
 test("canonical Omok result is projected to the viewer without rendering raw terminal fields", () => {
   assert.equal(multiplayerTerminalLabel({ kind: "WIN", winnerSeatIndex: 0 }, 0), "승리");

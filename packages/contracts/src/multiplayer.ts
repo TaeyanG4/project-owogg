@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+/** Exact text frames handled by the Durable Object WebSocket auto-response path. They contain no
+ * identity or credential and keep an idle browser connection alive without waking a hibernated
+ * game instance. */
+export const MULTIPLAYER_HEARTBEAT_REQUEST = "owogg.multiplayer.heartbeat.v1";
+export const MULTIPLAYER_HEARTBEAT_RESPONSE = "owogg.multiplayer.heartbeat-ack.v1";
+
 const OpaqueIdSchema = z.string().regex(/^[A-Za-z0-9_-]{8,128}$/);
 const StableIdentifierSchema = z.string().regex(/^[a-z0-9][a-z0-9._:/-]{0,95}$/);
 const GameSlugSchema = z

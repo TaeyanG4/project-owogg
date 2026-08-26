@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildMultiplayerRoomShareValue,
+  parseMultiplayerRoomJoinValue,
   readMultiplayerRoomShareValue,
   stripMultiplayerRoomCredentials,
 } from "../features/game/runtime/MultiplayerGameSurface";
+import { multiplayerRoomClipboardValue } from "../features/game/runtime/MultiplayerIframeRuntime";
 
 test("multiplayer room share link keeps code and invite out of HTTP query data", () => {
   const result = buildMultiplayerRoomShareValue(
@@ -54,4 +56,32 @@ test("share parsing prefers fragments, supports legacy query links, and strips c
     buildMultiplayerRoomShareValue("", "ROOMCODE1234", "invite-token"),
     "ROOMCODE1234\ninvite-token",
   );
+});
+
+test("pasting an invite link fills both credentials while a public code alone stays non-authorizing", () => {
+  const inviteLink = buildMultiplayerRoomShareValue(
+    "https://stg.owogg.com/games/official-omok",
+    "ROOMCODE1234",
+    "invite_token_12345678901234567890",
+  );
+  assert.deepEqual(parseMultiplayerRoomJoinValue(inviteLink), {
+    publicCode: "ROOMCODE1234",
+    inviteToken: "invite_token_12345678901234567890",
+  });
+  assert.deepEqual(
+    parseMultiplayerRoomJoinValue("ROOMCODE1234\ninvite_token_12345678901234567890"),
+    {
+      publicCode: "ROOMCODE1234",
+      inviteToken: "invite_token_12345678901234567890",
+    },
+  );
+  assert.equal(parseMultiplayerRoomJoinValue("ROOMCODE1234"), null);
+});
+
+test("room-code and invite-link clipboard actions never substitute for each other", () => {
+  const inviteLink =
+    "https://stg.owogg.com/games/official-omok#room=ROOMCODE1234&invite=invite_token_12345678901234567890";
+  assert.equal(multiplayerRoomClipboardValue("CODE", "ROOMCODE1234", inviteLink), "ROOMCODE1234");
+  assert.equal(multiplayerRoomClipboardValue("LINK", "ROOMCODE1234", inviteLink), inviteLink);
+  assert.equal(multiplayerRoomClipboardValue("LINK", "ROOMCODE1234"), null);
 });

@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { applyD1Migrations, evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { beforeAll, test } from "vitest";
+import { MULTIPLAYER_HEARTBEAT_REQUEST, MULTIPLAYER_HEARTBEAT_RESPONSE } from "@owogg/contracts";
 import {
   OMOK_ACTION_LEDGER_SCHEMA_VERSION,
   MULTIPLAYER_TICKET_AUDIENCE,
@@ -209,6 +210,20 @@ async function nextMessage(socket: WebSocket, label = "WebSocket message"): Prom
         } catch (error) {
           reject(error);
         }
+      },
+      { once: true },
+    );
+  });
+}
+
+async function nextRawMessage(socket: WebSocket, label = "raw WebSocket message"): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`timed out waiting for ${label}`)), 2_000);
+    socket.addEventListener(
+      "message",
+      (event) => {
+        clearTimeout(timeout);
+        resolve(String(event.data));
       },
       { once: true },
     );
@@ -464,6 +479,9 @@ test("SQLite DO consumes one nonce and persists only minimal connection authorit
     generation: 1,
     connectionGeneration: 1,
   });
+  const heartbeat = nextRawMessage(socket, "hibernation heartbeat response");
+  socket.send(MULTIPLAYER_HEARTBEAT_REQUEST);
+  await expect(heartbeat).resolves.toBe(MULTIPLAYER_HEARTBEAT_RESPONSE);
 
   const stub = env.MULTIPLAYER_INSTANCES.get(env.MULTIPLAYER_INSTANCES.idFromName(instanceId));
   const replay = await stub.fetch(internalRequest(ticketClaims));

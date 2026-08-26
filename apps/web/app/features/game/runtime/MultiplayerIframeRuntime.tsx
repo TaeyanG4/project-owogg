@@ -27,6 +27,29 @@ export function multiplayerTerminalLabel(result: unknown, viewerSeatIndex: numbe
   return "경기 종료";
 }
 
+export function multiplayerRoomClipboardValue(
+  kind: "CODE" | "LINK",
+  publicCode: string,
+  shareValue?: string,
+): string | null {
+  return kind === "CODE" ? publicCode : (shareValue ?? null);
+}
+
+type MultiplayerDisconnectCode = Extract<
+  MultiplayerParentConnectionState,
+  { readonly status: "DISCONNECTED" }
+>["code"];
+
+export function multiplayerReconnectDelay(
+  code: MultiplayerDisconnectCode,
+  attemptsCompleted: number,
+): number | null {
+  if (code !== "NETWORK_LOST" && code !== "SERVER_UNAVAILABLE" && code !== "AUTH_EXPIRED") {
+    return null;
+  }
+  return [750, 1_500, 3_000][attemptsCompleted] ?? null;
+}
+
 export interface MultiplayerIframeRuntimeProps {
   readonly src: string;
   readonly title: string;
@@ -62,14 +85,20 @@ export function MultiplayerIframeRuntime({
     room.participant.connectionGeneration,
   );
   const [retryKey, setRetryKey] = useState(0);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"CODE" | "LINK" | null>(null);
   const [leaving, setLeaving] = useState(false);
   const bridgeRef = useRef<MultiplayerBridgeHost | null>(null);
   const transportRef = useRef<MultiplayerParentTransport | null>(null);
   const openAttemptRef = useRef(0);
+  const reconnectAttemptRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const closeCurrent = useCallback(() => {
     openAttemptRef.current += 1;
+    if (reconnectTimerRef.current !== null) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
     bridgeRef.current?.close();
     bridgeRef.current = null;
     const transport = transportRef.current;
@@ -92,8 +121,35 @@ export function MultiplayerIframeRuntime({
     closeCurrent();
     setConnectionGeneration(room.participant.connectionGeneration);
     setConnectionState({ status: "CONNECTING" });
+    reconnectAttemptRef.current = 0;
     setRetryKey(0);
   }, [closeCurrent, room.instance.id, room.participant.connectionGeneration]);
+
+  const handleConnectionState = useCallback(
+    (nextState: MultiplayerParentConnectionState) => {
+      if (nextState.status === "CONNECTED") {
+        reconnectAttemptRef.current = 0;
+        setConnectionState(nextState);
+        return;
+      }
+      if (nextState.status === "DISCONNECTED") {
+        const delay = multiplayerReconnectDelay(nextState.code, reconnectAttemptRef.current);
+        if (delay !== null) {
+          reconnectAttemptRef.current += 1;
+          setConnectionState({ status: "CONNECTING" });
+          if (reconnectTimerRef.current !== null) clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = setTimeout(() => {
+            reconnectTimerRef.current = null;
+            closeCurrent();
+            setRetryKey((current) => current + 1);
+          }, delay);
+          return;
+        }
+      }
+      setConnectionState(nextState);
+    },
+    [closeCurrent],
+  );
 
   const handleFrameLoad = useCallback(
     (iframe: HTMLIFrameElement) => {
@@ -119,12 +175,12 @@ export function MultiplayerIframeRuntime({
             contentWindow,
             transport.socket,
             transport.bootstrap,
-            { onConnectionState: setConnectionState },
+            { onConnectionState: handleConnectionState },
           );
         })
         .catch((error: unknown) => {
           if (openAttempt !== openAttemptRef.current) return;
-          setConnectionState({
+          handleConnectionState({
             status: "DISCONNECTED",
             code:
               error instanceof MultiplayerTransportError && error.code === "TICKET_EXPIRED"
@@ -133,11 +189,12 @@ export function MultiplayerIframeRuntime({
           });
         });
     },
-    [closeCurrent, connectionGeneration, room.instance.id],
+    [closeCurrent, connectionGeneration, handleConnectionState, room.instance.id],
   );
 
   const retry = useCallback(() => {
     closeCurrent();
+    reconnectAttemptRef.current = 0;
     setConnectionState({ status: "CONNECTING" });
     setRetryKey((current) => current + 1);
   }, [closeCurrent]);
@@ -161,15 +218,20 @@ export function MultiplayerIframeRuntime({
     }
   }, [closeCurrent, connectionState.status, onExit, room.instance.generation, room.instance.id]);
 
-  const copyRoom = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(shareValue ?? room.instance.publicCode);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2_000);
-    } catch {
-      setCopied(false);
-    }
-  }, [room.instance.publicCode, shareValue]);
+  const copyRoom = useCallback(
+    async (kind: "CODE" | "LINK") => {
+      const value = multiplayerRoomClipboardValue(kind, room.instance.publicCode, shareValue);
+      if (value === null) return;
+      try {
+        await navigator.clipboard.writeText(value);
+        setCopied(kind);
+        window.setTimeout(() => setCopied(null), 2_000);
+      } catch {
+        setCopied(null);
+      }
+    },
+    [room.instance.publicCode, shareValue],
+  );
 
   const canonicalResult =
     connectionState.status === "TERMINAL_COMMITTED" ? (
@@ -194,16 +256,26 @@ export function MultiplayerIframeRuntime({
         frameStyle={frameStyle}
         iframeStyle={iframeStyle}
         onFrameLoad={handleFrameLoad}
+        showReloadControl={false}
       />
-      <div className="absolute left-3 top-3 z-30 flex items-center gap-2 rounded-full border border-white/15 bg-black/70 px-3 py-1.5 text-xs font-bold text-white backdrop-blur">
-        <span>방 코드 {room.instance.publicCode}</span>
+      <div className="absolute left-3 top-3 z-30 flex max-w-[calc(100%_-_5.5rem)] flex-wrap items-center gap-2 rounded-2xl border border-white/15 bg-black/75 px-3 py-2 text-xs font-bold text-white shadow-lg backdrop-blur">
+        <span className="whitespace-nowrap">방 코드 {room.instance.publicCode}</span>
         <button
           type="button"
-          onClick={() => void copyRoom()}
+          onClick={() => void copyRoom("CODE")}
           className="cursor-pointer rounded-full border border-white/20 px-2 py-0.5 text-[11px] hover:bg-white/10"
         >
-          {copied ? "복사됨" : "복사"}
+          {copied === "CODE" ? "코드 복사됨" : "코드 복사"}
         </button>
+        {shareValue && (
+          <button
+            type="button"
+            onClick={() => void copyRoom("LINK")}
+            className="cursor-pointer rounded-full border border-brand/50 px-2 py-0.5 text-[11px] text-brand-light hover:bg-brand/15"
+          >
+            {copied === "LINK" ? "링크 복사됨" : "초대 링크 복사"}
+          </button>
+        )}
         <button
           type="button"
           disabled={leaving}

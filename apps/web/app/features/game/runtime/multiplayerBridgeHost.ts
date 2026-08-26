@@ -8,6 +8,7 @@ import {
   type MultiplayerAbortCode,
   type MultiplayerDisconnectCode,
 } from "@owogg/game-sdk/bridge";
+import { MULTIPLAYER_HEARTBEAT_REQUEST, MULTIPLAYER_HEARTBEAT_RESPONSE } from "@owogg/contracts";
 
 export interface MultiplayerBridgeIframeWindowLike {
   postMessage(message: unknown, targetOrigin: string, transfer: Transferable[]): void;
@@ -57,9 +58,18 @@ export interface MultiplayerBridgeHost {
   close(): void;
 }
 
+export interface MultiplayerBridgeHostDependencies {
+  readonly setInterval?: (
+    callback: () => void,
+    intervalMs: number,
+  ) => ReturnType<typeof setInterval>;
+  readonly clearInterval?: (handle: ReturnType<typeof setInterval>) => void;
+}
+
 const SOCKET_CONNECTING = 0;
 const SOCKET_OPEN = 1;
 const MAX_QUEUED_GAME_MESSAGES = 32;
+const HEARTBEAT_INTERVAL_MS = 15_000;
 const textEncoder = new TextEncoder();
 
 function hasServerSequence(
@@ -87,6 +97,7 @@ export function createMultiplayerBridgeHost(
   socket: MultiplayerBridgeSocketLike,
   bootstrapInput: MultiInitMessage,
   callbacks: MultiplayerBridgeHostCallbacks = {},
+  dependencies: MultiplayerBridgeHostDependencies = {},
 ): MultiplayerBridgeHost {
   const parsedBootstrap = parseHostToGameMultiplayerMessage(bootstrapInput);
   if (!parsedBootstrap || parsedBootstrap.type !== "MULTI_INIT") {
@@ -104,6 +115,8 @@ export function createMultiplayerBridgeHost(
   let lastClientSeq = 0;
   let lastServerSeq = -1;
   let lastConnectionGeneration = 0;
+  const scheduleInterval = dependencies.setInterval ?? setInterval;
+  const cancelInterval = dependencies.clearInterval ?? clearInterval;
 
   function notifyDrop(direction: "GAME_TO_HOST" | "SERVER_TO_HOST") {
     callbacks.onProtocolDrop?.(direction);
@@ -142,6 +155,15 @@ export function createMultiplayerBridgeHost(
       }
     }
   }
+
+  const heartbeatTimer = scheduleInterval(() => {
+    if (closed || socket.readyState !== SOCKET_OPEN) return;
+    try {
+      socket.send(MULTIPLAYER_HEARTBEAT_REQUEST);
+    } catch {
+      notifyDrop("GAME_TO_HOST");
+    }
+  }, HEARTBEAT_INTERVAL_MS);
 
   channel.port1.onmessage = (event: MessageEvent) => {
     if (closed) return;
@@ -184,6 +206,7 @@ export function createMultiplayerBridgeHost(
       notifyDrop("SERVER_TO_HOST");
       return;
     }
+    if (event.data === MULTIPLAYER_HEARTBEAT_RESPONSE) return;
     let decoded: unknown;
     try {
       decoded = JSON.parse(event.data);
@@ -272,6 +295,7 @@ export function createMultiplayerBridgeHost(
     close() {
       if (closed) return;
       closed = true;
+      cancelInterval(heartbeatTimer);
       queuedGameMessages.length = 0;
       channel.port1.onmessage = null;
       channel.port1.close();
