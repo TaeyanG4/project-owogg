@@ -123,11 +123,11 @@ jobs:
             CHZZK_REDIRECT_URI:${{ vars.CHZZK_REDIRECT_URI || '' }}
             SOOP_CLIENT_ID:${{ vars.SOOP_CLIENT_ID || '' }}
             SOOP_REDIRECT_URI:${{ vars.SOOP_REDIRECT_URI || '' }}
-          # DISCORD_CLIENT_SECRET and GAME_SESSION_SECRET are always expected to be configured —
-          # both go through this list specifically because wrangler-action's `secrets:` input hard
+          # Google, Discord and Game Session secrets are always expected to be configured. They go
+          # through this list because wrangler-action's `secrets:` input hard
           # -fails the whole action when a listed secret resolves to an empty string, which is
           # exactly the loud, fail-closed behavior a required secret needs (a Production deploy
-          # must not silently ship a Worker missing either one). GAME_SESSION_SECRET signs/verifies
+          # must not silently ship a Worker missing any of them). GAME_SESSION_SECRET signs/verifies
           # the Game Session tokens Game Creator score acceptance depends on
           # (packages/core/src/domain/gameSession.ts) — without it, POST /api/games/:slug/session
           # fails closed with 503 in Production (apps/api/src/routes/games.ts), which is the exact
@@ -135,9 +135,11 @@ jobs:
           # uploaded separately (see next step), which is why they're NOT listed here — this list
           # is only for secrets a Production deploy cannot proceed without.
           secrets: |
+            GOOGLE_CLIENT_SECRET
             DISCORD_CLIENT_SECRET
             GAME_SESSION_SECRET
         env:
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           DISCORD_CLIENT_SECRET: ${{ secrets.DISCORD_CLIENT_SECRET }}
           GAME_SESSION_SECRET: ${{ secrets.GAME_SESSION_SECRET }}
 

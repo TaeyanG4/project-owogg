@@ -5,7 +5,11 @@ import {
   buildDiscordAuthorizeUrl,
   exchangeDiscordCode,
 } from "../src/infrastructure/oauth/discord.js";
-import { verifyGoogleToken, clearGoogleJwksCache } from "../src/infrastructure/oauth/google.ts";
+import {
+  exchangeGoogleAuthorizationCode,
+  verifyGoogleToken,
+  clearGoogleJwksCache,
+} from "../src/infrastructure/oauth/google.ts";
 
 test("buildDiscordAuthorizeUrl constructs correct Discord OAuth URL", () => {
   const url = buildDiscordAuthorizeUrl({
@@ -37,6 +41,84 @@ test("exchangeDiscordCode handles token exchange failure gracefully", async () =
 
     assert.equal(res.valid, false);
     assert.equal(res.reason, "Failed to exchange code for token");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("exchangeGoogleAuthorizationCode sends the exact popup grant and returns only the ID token", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedUrl = "";
+  let capturedInit: RequestInit | undefined;
+  try {
+    globalThis.fetch = (async (input: URL | RequestInfo, init?: RequestInit) => {
+      capturedUrl = typeof input === "string" ? input : input.toString();
+      capturedInit = init;
+      return new Response(
+        JSON.stringify({
+          access_token: "must-not-leave-the-exchange-boundary",
+          refresh_token: "must-not-be-retained",
+          id_token: "signed-google-id-token",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const result = await exchangeGoogleAuthorizationCode({
+      code: "one-time-browser-code",
+      clientId: "client.apps.googleusercontent.com",
+      clientSecret: "server-only-secret",
+      redirectUri: "https://stg.owogg.com",
+    });
+
+    assert.equal(capturedUrl, "https://oauth2.googleapis.com/token");
+    assert.equal(capturedInit?.method, "POST");
+    const form = new URLSearchParams(String(capturedInit?.body));
+    assert.deepEqual(Object.fromEntries(form), {
+      code: "one-time-browser-code",
+      client_id: "client.apps.googleusercontent.com",
+      client_secret: "server-only-secret",
+      redirect_uri: "https://stg.owogg.com",
+      grant_type: "authorization_code",
+    });
+    assert.deepEqual(result, { valid: true, idToken: "signed-google-id-token" });
+    assert.equal("accessToken" in result, false);
+    assert.equal("refreshToken" in result, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("exchangeGoogleAuthorizationCode fails closed on rejection or a missing ID token", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = (async () => new Response("invalid_grant", { status: 400 })) as typeof fetch;
+    const rejected = await exchangeGoogleAuthorizationCode({
+      code: "rejected",
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      redirectUri: "https://stg.owogg.com",
+    });
+    assert.deepEqual(rejected, {
+      valid: false,
+      reason: "Google authorization code exchange failed",
+    });
+
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ access_token: "ignored" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })) as typeof fetch;
+    const missingIdToken = await exchangeGoogleAuthorizationCode({
+      code: "no-id-token",
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      redirectUri: "https://stg.owogg.com",
+    });
+    assert.deepEqual(missingIdToken, {
+      valid: false,
+      reason: "Google token response did not contain an ID token",
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }

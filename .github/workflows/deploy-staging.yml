@@ -32,6 +32,7 @@ jobs:
           FRONTEND_URL: ${{ vars.FRONTEND_URL }}
           GAME_ORIGIN: ${{ vars.GAME_ORIGIN }}
           GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           VITE_API_URL: ${{ vars.VITE_API_URL }}
           VITE_GAME_ORIGIN: ${{ vars.VITE_GAME_ORIGIN }}
           VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
@@ -123,7 +124,7 @@ jobs:
             MULTIPLAYER_TICKET_KEY_ID:${{ vars.MULTIPLAYER_TICKET_KEY_ID }}
             MULTIPLAYER_TICKET_PREVIOUS_KEY_ID:${{ vars.MULTIPLAYER_TICKET_PREVIOUS_KEY_ID || '' }}
 
-      # These eight values are required Worker runtime secrets. The optional previous ticket key
+      # These values are required Worker runtime secrets. The optional previous ticket key
       # is uploaded only during an explicit rotation overlap. Cloudflare CI credentials and the
       # Discord Bot Token are intentionally absent: they must remain CI-only.
       - name: Upload required API runtime secrets
@@ -148,6 +149,7 @@ jobs:
             fi
           }
           put_secret DISCORD_CLIENT_SECRET "$DISCORD_CLIENT_SECRET"
+          put_secret GOOGLE_CLIENT_SECRET "$GOOGLE_CLIENT_SECRET"
           put_secret GAME_SESSION_SECRET "$GAME_SESSION_SECRET"
           put_secret MULTIPLAYER_TICKET_SECRET "$MULTIPLAYER_TICKET_SECRET"
           put_optional_secret MULTIPLAYER_TICKET_PREVIOUS_SECRET "$MULTIPLAYER_TICKET_PREVIOUS_SECRET"
@@ -160,6 +162,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           DISCORD_CLIENT_SECRET: ${{ secrets.DISCORD_CLIENT_SECRET }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GAME_SESSION_SECRET: ${{ secrets.GAME_SESSION_SECRET }}
           MULTIPLAYER_TICKET_SECRET: ${{ secrets.MULTIPLAYER_TICKET_SECRET }}
           MULTIPLAYER_TICKET_PREVIOUS_SECRET: ${{ secrets.MULTIPLAYER_TICKET_PREVIOUS_SECRET }}

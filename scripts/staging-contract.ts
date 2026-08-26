@@ -301,6 +301,7 @@ export function validateStagingEnvironment(env: Environment): string[] {
   const viteGameOrigin = required(env, "VITE_GAME_ORIGIN", errors);
   const b2Bucket = required(env, "B2_BUCKET_NAME", errors);
   const googleClientId = required(env, "GOOGLE_CLIENT_ID", errors);
+  const googleClientSecret = required(env, "GOOGLE_CLIENT_SECRET", errors);
   const viteGoogleClientId = required(env, "VITE_GOOGLE_CLIENT_ID", errors);
   const discordClientId = required(env, "DISCORD_CLIENT_ID", errors);
   const discordRedirectUri = required(env, "DISCORD_REDIRECT_URI", errors);
@@ -321,6 +322,9 @@ export function validateStagingEnvironment(env: Environment): string[] {
   if (b2Bucket !== STAGING.b2Bucket) errors.push(`B2_BUCKET_NAME must equal ${STAGING.b2Bucket}`);
   if (googleClientId !== viteGoogleClientId) {
     errors.push("GOOGLE_CLIENT_ID must equal VITE_GOOGLE_CLIENT_ID");
+  }
+  if (env.GOOGLE_CLIENT_SECRET !== googleClientSecret) {
+    errors.push("GOOGLE_CLIENT_SECRET must not have surrounding whitespace");
   }
   if ((env.DISCORD_COMMAND_SYNC_ENABLED ?? "").trim() !== "false") {
     errors.push("DISCORD_COMMAND_SYNC_ENABLED must be exactly false in Staging");

@@ -50,6 +50,24 @@ test("CORS preflight still advertises the other standard methods (no regression 
   }
 });
 
+test("Google popup code preflight allows X-Requested-With", async () => {
+  const res = await app.request(
+    "/api/auth/google/code",
+    {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://stg.owogg.com",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "Content-Type, X-Requested-With",
+      },
+    },
+    { FRONTEND_URL: "https://stg.owogg.com" } as any,
+  );
+  assert.equal(res.status, 204);
+  const allowed = res.headers.get("Access-Control-Allow-Headers") ?? "";
+  assert.match(allowed, /X-Requested-With/i);
+});
+
 test("Staging CORS never echoes the Production origin as trusted", async () => {
   const res = await app.request(
     "/api/profile",

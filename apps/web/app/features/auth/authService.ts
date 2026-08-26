@@ -61,10 +61,13 @@ export async function fetchCurrentUser(): Promise<AuthUser | null> {
   }
 }
 
-export async function loginGoogle(credential: string): Promise<AuthUser> {
-  const data: AuthMeResponse = await apiFetch("/api/auth/google", AuthMeResponseSchema, {
+export async function loginGoogleCode(code: string): Promise<AuthUser> {
+  const data: AuthMeResponse = await apiFetch("/api/auth/google/code", AuthMeResponseSchema, {
     method: "POST",
-    body: JSON.stringify({ credential }),
+    headers: {
+      "X-Requested-With": "XmlHttpRequest",
+    },
+    body: JSON.stringify({ code }),
   });
   if (data.authenticated && data.user) {
     return data.user;

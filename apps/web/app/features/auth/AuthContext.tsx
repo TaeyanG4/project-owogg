@@ -12,7 +12,7 @@ import {
   type ProviderStatus,
   fetchCurrentUser,
   fetchProviderStatus,
-  loginGoogle,
+  loginGoogleCode,
   getDiscordLoginUrl,
   logoutFromServer,
 } from "./authService.js";
@@ -27,7 +27,7 @@ export interface AuthContextValue {
   isLoginModalOpen: boolean;
   openLoginModal: () => void;
   closeLoginModal: () => void;
-  loginWithGoogleCredential: (credential: string) => Promise<void>;
+  loginWithGoogleCode: (code: string) => Promise<void>;
   loginWithDiscord: () => void;
   logout: () => void;
   clearError: () => void;
@@ -55,6 +55,23 @@ declare global {
           ) => void;
           renderButton: (element: HTMLElement, config: Record<string, unknown>) => void;
           revoke: (hint: string, callback: () => void) => void;
+        };
+        oauth2?: {
+          initCodeClient: (config: {
+            client_id: string;
+            scope: string;
+            ux_mode?: "popup" | "redirect";
+            include_granted_scopes?: boolean;
+            select_account?: boolean;
+            callback: (response: {
+              code?: string;
+              error?: string;
+              error_description?: string;
+            }) => void;
+            error_callback?: (error: {
+              type: "popup_failed_to_open" | "popup_closed" | "unknown";
+            }) => void;
+          }) => { requestCode: () => void };
         };
       };
     };
@@ -136,15 +153,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
   const clearError = () => setError(null);
 
-  const loginWithGoogleCredential = useCallback(async (credential: string) => {
+  const loginWithGoogleCode = useCallback(async (code: string) => {
     setError(null);
-    if (!credential) {
+    if (!code) {
       setError("Google 로그인 응답이 비어 있습니다. 다시 시도해주세요.");
       return;
     }
     try {
       setIsLoading(true);
-      const loggedInUser = await loginGoogle(credential);
+      const loggedInUser = await loginGoogleCode(code);
       setUser(loggedInUser);
       setIsLoginModalOpen(false);
       setError(null);
@@ -188,7 +205,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isLoginModalOpen,
         openLoginModal,
         closeLoginModal,
-        loginWithGoogleCredential,
+        loginWithGoogleCode,
         loginWithDiscord,
         logout,
         clearError,

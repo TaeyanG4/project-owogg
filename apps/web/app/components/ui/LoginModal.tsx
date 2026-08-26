@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, ShieldCheck, Loader2, AlertCircle } from "lucide-react";
 import { useAuth } from "../../features/auth";
 import { useI18n } from "../../features/i18n/I18nContext";
@@ -7,32 +7,30 @@ export function LoginModal() {
   const {
     isLoginModalOpen,
     closeLoginModal,
-    loginWithGoogleCredential,
+    loginWithGoogleCode,
     loginWithDiscord,
     providerStatus,
     error,
     clearError,
     refreshUser,
   } = useAuth();
-  const { dict, locale } = useI18n();
+  const { dict } = useI18n();
 
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isDiscordLoading, setIsDiscordLoading] = useState(false);
-  const [googleButtonReady, setGoogleButtonReady] = useState(false);
+  const [googleCodeClientReady, setGoogleCodeClientReady] = useState(false);
   const [googleButtonError, setGoogleButtonError] = useState<string | null>(null);
-  const googleButtonContainerRef = useRef<HTMLDivElement>(null);
+  const googleCodeClientRef = useRef<{ requestCode: () => void } | null>(null);
 
-  const googleClientId = useMemo(
-    () =>
-      providerStatus.google.clientId ||
-      ((import.meta as unknown as { env?: { VITE_GOOGLE_CLIENT_ID?: string } }).env
-        ?.VITE_GOOGLE_CLIENT_ID ??
-        ""),
-    [providerStatus.google.clientId],
-  );
+  const googleClientId =
+    providerStatus.google.clientId ||
+    ((import.meta as unknown as { env?: { VITE_GOOGLE_CLIENT_ID?: string } }).env
+      ?.VITE_GOOGLE_CLIENT_ID ??
+      "");
 
   useEffect(() => {
-    setGoogleButtonReady(false);
+    googleCodeClientRef.current = null;
+    setGoogleCodeClientReady(false);
     setGoogleButtonError(null);
     if (
       !isLoginModalOpen ||
@@ -45,87 +43,86 @@ export function LoginModal() {
 
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let resizeObserver: ResizeObserver | undefined;
-    let renderedWidth = 0;
 
-    const tryRender = (attemptsLeft: number) => {
+    const tryInitialize = (attemptsLeft: number) => {
       if (cancelled) return;
-      const googleAuth = window.google?.accounts?.id;
-      if (!googleAuth || !googleButtonContainerRef.current) {
+      const googleOAuth = window.google?.accounts?.oauth2;
+      if (!googleOAuth) {
         if (attemptsLeft <= 0) {
           setGoogleButtonError(
-            "Google 로그인 버튼을 불러오지 못했습니다. 페이지를 새로고침해주세요.",
+            "Google 로그인 기능을 불러오지 못했습니다. 페이지를 새로고침해주세요.",
           );
           return;
         }
-        timer = setTimeout(() => tryRender(attemptsLeft - 1), 150);
+        timer = setTimeout(() => tryInitialize(attemptsLeft - 1), 150);
         return;
       }
 
-      const container = googleButtonContainerRef.current;
-      const availableWidth = Math.floor(container.getBoundingClientRect().width);
-      if (availableWidth <= 0) {
-        if (attemptsLeft <= 0) {
-          setGoogleButtonError(
-            "Google 로그인 버튼 영역을 계산하지 못했습니다. 페이지를 새로고침해주세요.",
-          );
-          return;
-        }
-        timer = setTimeout(() => tryRender(attemptsLeft - 1), 150);
-        return;
-      }
-
-      googleAuth.initialize({
-        client_id: googleClientId,
-        callback: (response: { credential: string }) => {
-          setIsGoogleLoading(true);
-          void loginWithGoogleCredential(response.credential).finally(() => {
-            if (!cancelled) setIsGoogleLoading(false);
-          });
-        },
-        auto_select: false,
-        cancel_on_tap_outside: true,
-      });
-
-      const renderGoogleButton = () => {
-        const buttonWidth = Math.min(400, Math.floor(container.getBoundingClientRect().width));
-        if (cancelled || buttonWidth <= 0 || buttonWidth === renderedWidth) return;
-        renderedWidth = buttonWidth;
-        container.replaceChildren();
-        googleAuth.renderButton(container, {
-          type: "standard",
-          theme: "outline",
-          size: "large",
-          text: "signin_with",
-          shape: "pill",
-          logo_alignment: "left",
-          width: String(buttonWidth),
-          locale,
+      try {
+        googleCodeClientRef.current = googleOAuth.initCodeClient({
+          client_id: googleClientId,
+          scope: "openid email profile",
+          ux_mode: "popup",
+          include_granted_scopes: false,
+          select_account: true,
+          callback: (response) => {
+            if (cancelled) return;
+            if (response.error || !response.code) {
+              setIsGoogleLoading(false);
+              setGoogleButtonError("Google 인증 응답을 확인하지 못했습니다. 다시 시도해주세요.");
+              return;
+            }
+            void loginWithGoogleCode(response.code).finally(() => {
+              if (!cancelled) setIsGoogleLoading(false);
+            });
+          },
+          error_callback: (popupError) => {
+            if (cancelled) return;
+            setIsGoogleLoading(false);
+            if (popupError.type !== "popup_closed") {
+              setGoogleButtonError(
+                popupError.type === "popup_failed_to_open"
+                  ? "Google 로그인 팝업을 열지 못했습니다. 팝업 차단 설정을 확인해주세요."
+                  : "Google 로그인을 시작하지 못했습니다. 다시 시도해주세요.",
+              );
+            }
+          },
         });
-        setGoogleButtonReady(true);
-      };
-
-      renderGoogleButton();
-      resizeObserver = new ResizeObserver(renderGoogleButton);
-      resizeObserver.observe(container);
+        setGoogleCodeClientReady(true);
+      } catch {
+        setGoogleButtonError(
+          "Google 로그인 기능을 초기화하지 못했습니다. 페이지를 새로고침해주세요.",
+        );
+      }
     };
 
-    tryRender(60);
+    tryInitialize(60);
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
-      resizeObserver?.disconnect();
+      googleCodeClientRef.current = null;
     };
   }, [
     googleClientId,
     isLoginModalOpen,
-    locale,
-    loginWithGoogleCredential,
+    loginWithGoogleCode,
     providerStatus.availability,
     providerStatus.google.configured,
   ]);
 
   if (!isLoginModalOpen) return null;
+
+  const handleGoogleLogin = () => {
+    if (isGoogleLoading || isDiscordLoading || !googleCodeClientRef.current) return;
+    setGoogleButtonError(null);
+    setIsGoogleLoading(true);
+    try {
+      googleCodeClientRef.current.requestCode();
+    } catch {
+      setIsGoogleLoading(false);
+      setGoogleButtonError("Google 로그인을 시작하지 못했습니다. 다시 시도해주세요.");
+    }
+  };
 
   const handleDiscordLogin = () => {
     if (isGoogleLoading || isDiscordLoading) return;
@@ -195,20 +192,43 @@ export function LoginModal() {
 
           {/* Google Login Button */}
           <div className="flex flex-col gap-1 w-full">
-            <div className="relative flex min-h-10 w-full items-center justify-center overflow-hidden rounded-full">
-              <div
-                ref={googleButtonContainerRef}
-                className={googleButtonReady && !isDiscordLoading ? "w-full" : "invisible w-full"}
-              />
-              {providerStatus.availability === "ready" &&
-                providerStatus.google.configured &&
-                (!googleButtonReady || isGoogleLoading || isDiscordLoading) && (
-                  <div className="absolute inset-0 flex items-center justify-center gap-2 rounded-full bg-white text-xs font-bold text-slate-600">
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                    <span>{dict.loginModal.googleLoading}</span>
-                  </div>
-                )}
-            </div>
+            <button
+              onClick={handleGoogleLogin}
+              disabled={
+                isGoogleLoading ||
+                isDiscordLoading ||
+                !googleCodeClientReady ||
+                providerStatus.availability !== "ready" ||
+                !providerStatus.google.configured
+              }
+              className="flex items-center justify-center gap-3 w-full py-4 px-4 bg-white hover:bg-slate-100 text-slate-900 font-extrabold rounded-2xl transition-all shadow-lg hover:scale-[1.02] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+            >
+              {isGoogleLoading ? (
+                <Loader2 className="w-5 h-5 animate-spin text-slate-500" />
+              ) : (
+                <svg className="w-5 h-5" viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    fill="#4285F4"
+                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                  />
+                </svg>
+              )}
+              <span>
+                {isGoogleLoading ? dict.loginModal.googleLoading : dict.loginModal.googleButton}
+              </span>
+            </button>
             {googleButtonError && (
               <span className="text-[11px] text-accent-red text-center font-semibold">
                 {googleButtonError}
@@ -231,7 +251,7 @@ export function LoginModal() {
                 providerStatus.availability !== "ready" ||
                 !providerStatus.discord.configured
               }
-              className="flex h-10 w-full items-center justify-center gap-3 rounded-full bg-[#5865F2] px-4 text-sm font-bold text-white shadow-sm transition-colors hover:bg-[#4752C4] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center justify-center gap-3 w-full py-4 px-4 bg-[#5865F2] hover:bg-[#4752C4] text-white font-extrabold rounded-2xl transition-all shadow-lg hover:scale-[1.02] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
             >
               {isDiscordLoading ? (
                 <Loader2 className="w-5 h-5 animate-spin" />

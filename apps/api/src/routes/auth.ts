@@ -3,7 +3,11 @@ import type { Context } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { createContainer } from "../container.js";
 import type { D1Database } from "@cloudflare/workers-types";
-import { verifyGoogleToken } from "../infrastructure/oauth/google.js";
+import {
+  exchangeGoogleAuthorizationCode,
+  verifyGoogleToken,
+  type GoogleUserProfile,
+} from "../infrastructure/oauth/google.js";
 import {
   buildDiscordAuthorizeUrl,
   exchangeDiscordCode,
@@ -20,6 +24,7 @@ import {
   ConfirmAccountMergeResponseSchema,
   MergeChallengeResolveRequestSchema,
   MergePreviewQuerySchema,
+  GoogleAuthorizationCodeLoginRequestSchema,
 } from "@owogg/contracts";
 import type { SocialProvider } from "@owogg/contracts";
 
@@ -99,6 +104,8 @@ export type ApiEnv = {
       limit(options: { key: string }): Promise<{ success: boolean }>;
     };
     GOOGLE_CLIENT_ID?: string;
+    /** Server-only credential for the Google authorization-code exchange. Never expose to Web. */
+    GOOGLE_CLIENT_SECRET?: string;
     DISCORD_CLIENT_ID?: string;
     DISCORD_CLIENT_SECRET?: string;
     DISCORD_REDIRECT_URI?: string;
@@ -153,6 +160,41 @@ export function isLocalhost(urlStr: string): boolean {
   }
 }
 
+function resolveGooglePopupRedirectUri(frontendUrl?: string): string | null {
+  if (!frontendUrl) return null;
+  try {
+    const url = new URL(frontendUrl);
+    if (url.username || url.password) return null;
+    if (url.protocol !== "https:" && !isLocalhost(url.toString())) return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+async function establishGoogleSession(c: Context<ApiEnv>, profile: GoogleUserProfile) {
+  const { userRepo, sessionRepo } = createContainer(c.env.DB);
+  const user = await userRepo.findOrCreateUser({
+    provider: "google",
+    providerUserId: profile.sub,
+    email: profile.email,
+    nickname: profile.name,
+    avatarUrl: profile.picture,
+  });
+
+  const session = await sessionRepo.createSession(user.id);
+  const secure = !isLocalhost(c.req.url);
+  setCookie(c, "owogg_session", session.id, {
+    httpOnly: true,
+    secure,
+    sameSite: secure ? "None" : "Lax",
+    maxAge: 30 * 24 * 60 * 60,
+    path: "/",
+  });
+
+  return c.json({ authenticated: true, user });
+}
+
 // Discord only has ONE redirect_uri registered in its Developer Portal (DISCORD_REDIRECT_URI,
 // pointing at /api/auth/discord/callback). Both the LOGIN flow and the LINK flow must send
 // this exact same redirect_uri to the authorize endpoint AND the token exchange, or Discord
@@ -164,7 +206,11 @@ export function getDiscordRedirectUri(c: Context<ApiEnv>): string {
 
 // GET /api/auth/providers (non-secret readiness check)
 authRouter.get("/providers", (c) => {
-  const googleConfigured = Boolean(c.env?.GOOGLE_CLIENT_ID);
+  const googleConfigured = Boolean(
+    c.env?.GOOGLE_CLIENT_ID &&
+    c.env?.GOOGLE_CLIENT_SECRET &&
+    resolveGooglePopupRedirectUri(c.env?.FRONTEND_URL),
+  );
   const discordConfigured = Boolean(
     c.env?.DISCORD_CLIENT_ID &&
     c.env?.DISCORD_CLIENT_SECRET &&
@@ -200,34 +246,58 @@ authRouter.post("/google", async (c) => {
       return c.json({ error: verifyResult.reason || "Invalid Google token" }, 401);
     }
 
-    const { userRepo, sessionRepo } = createContainer(c.env.DB);
-    const profile = verifyResult.profile;
-
-    const user = await userRepo.findOrCreateUser({
-      provider: "google",
-      providerUserId: profile.sub,
-      email: profile.email,
-      nickname: profile.name,
-      avatarUrl: profile.picture,
-    });
-
-    const session = await sessionRepo.createSession(user.id);
-    const secure = !isLocalhost(c.req.url);
-
-    setCookie(c, "owogg_session", session.id, {
-      httpOnly: true,
-      secure,
-      sameSite: secure ? "None" : "Lax",
-      maxAge: 30 * 24 * 60 * 60,
-      path: "/",
-    });
-
-    return c.json({
-      authenticated: true,
-      user,
-    });
+    return await establishGoogleSession(c, verifyResult.profile);
   } catch (err) {
     console.error("Google Auth Error:", err);
+    return c.json({ error: "Internal server error during Google login" }, 500);
+  }
+});
+
+// POST /api/auth/google/code — popup Authorization Code login used by OwOGG's own full-width
+// button. The previous credential route remains during the rolling-deploy window for older Web
+// revisions and for the separate account-link/admin step-up flows.
+authRouter.post("/google/code", async (c) => {
+  c.header("Cache-Control", "no-store");
+
+  // Google recommends this non-simple header for popup code delivery. Together with credentialed
+  // CORS and app.ts's exact Origin guard, it forces a browser preflight and rejects cross-site
+  // form posts before a one-time code can be exchanged.
+  if (c.req.header("X-Requested-With")?.toLowerCase() !== "xmlhttprequest") {
+    return c.json({ error: "Invalid Google authorization request" }, 403);
+  }
+
+  const clientId = c.env.GOOGLE_CLIENT_ID;
+  const clientSecret = c.env.GOOGLE_CLIENT_SECRET;
+  const redirectUri = resolveGooglePopupRedirectUri(c.env.FRONTEND_URL);
+  if (!clientId || !clientSecret || !redirectUri) {
+    return c.json({ error: "Google authorization-code login is not configured" }, 503);
+  }
+
+  const body = await c.req.json<unknown>().catch(() => null);
+  const parsed = GoogleAuthorizationCodeLoginRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "A valid Google authorization code is required" }, 400);
+  }
+
+  const exchanged = await exchangeGoogleAuthorizationCode({
+    code: parsed.data.code,
+    clientId,
+    clientSecret,
+    redirectUri,
+  });
+  if (!exchanged.valid || !exchanged.idToken) {
+    return c.json({ error: exchanged.reason || "Google authorization code was rejected" }, 401);
+  }
+
+  const verified = await verifyGoogleToken(exchanged.idToken, clientId);
+  if (!verified.valid || !verified.profile) {
+    return c.json({ error: verified.reason || "Invalid Google ID token" }, 401);
+  }
+
+  try {
+    return await establishGoogleSession(c, verified.profile);
+  } catch (err) {
+    console.error("Google authorization-code login error:", err);
     return c.json({ error: "Internal server error during Google login" }, 500);
   }
 });

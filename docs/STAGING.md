@@ -117,22 +117,23 @@ Repository-level Production 값에 기대지 않습니다. 아래 항목은 GitH
 
 ### Secrets
 
-| 이름                                 | 용도/조건                                            |
-| ------------------------------------ | ---------------------------------------------------- |
-| `CLOUDFLARE_ACCOUNT_ID`              | CI와 Worker/D1 조회·배포                             |
-| `CLOUDFLARE_API_TOKEN`               | 필요한 Staging 리소스만 다루는 최소 권한 token       |
-| `B2_BUCKET_NAME`                     | 반드시 `owogg-game-bundles-staging`                  |
-| `B2_ENDPOINT`                        | Staging B2 S3 endpoint                               |
-| `B2_REGION`                          | Staging B2 region                                    |
-| `B2_KEY_ID`                          | Staging 버킷 범위 제한 key                           |
-| `B2_APPLICATION_KEY`                 | Staging 버킷 범위 제한 secret                        |
-| `DISCORD_BOT_TOKEN`                  | 테스트 guild 명령 등록용, Worker에는 업로드하지 않음 |
-| `DISCORD_CLIENT_SECRET`              | API Worker runtime secret                            |
-| `GAME_SESSION_SECRET`                | API Worker runtime secret                            |
-| `MULTIPLAYER_TICKET_SECRET`          | Staging 전용 32바이트 이상 무작위 HMAC secret        |
-| `MULTIPLAYER_TICKET_PREVIOUS_SECRET` | 최초에는 미등록, 키 회전 중에만 직전 secret          |
-| `CF_ACCESS_CLIENT_ID`                | Web smoke 활성화 시 필요한 Access service token      |
-| `CF_ACCESS_CLIENT_SECRET`            | Web smoke 활성화 시 필요한 Access service token      |
+| 이름                                 | 용도/조건                                              |
+| ------------------------------------ | ------------------------------------------------------ |
+| `CLOUDFLARE_ACCOUNT_ID`              | CI와 Worker/D1 조회·배포                               |
+| `CLOUDFLARE_API_TOKEN`               | 필요한 Staging 리소스만 다루는 최소 권한 token         |
+| `B2_BUCKET_NAME`                     | 반드시 `owogg-game-bundles-staging`                    |
+| `B2_ENDPOINT`                        | Staging B2 S3 endpoint                                 |
+| `B2_REGION`                          | Staging B2 region                                      |
+| `B2_KEY_ID`                          | Staging 버킷 범위 제한 key                             |
+| `B2_APPLICATION_KEY`                 | Staging 버킷 범위 제한 secret                          |
+| `DISCORD_BOT_TOKEN`                  | 테스트 guild 명령 등록용, Worker에는 업로드하지 않음   |
+| `DISCORD_CLIENT_SECRET`              | API Worker runtime secret                              |
+| `GOOGLE_CLIENT_SECRET`               | Google popup code 교환용 API Worker server-only secret |
+| `GAME_SESSION_SECRET`                | API Worker runtime secret                              |
+| `MULTIPLAYER_TICKET_SECRET`          | Staging 전용 32바이트 이상 무작위 HMAC secret          |
+| `MULTIPLAYER_TICKET_PREVIOUS_SECRET` | 최초에는 미등록, 키 회전 중에만 직전 secret            |
+| `CF_ACCESS_CLIENT_ID`                | Web smoke 활성화 시 필요한 Access service token        |
+| `CF_ACCESS_CLIENT_SECRET`            | Web smoke 활성화 시 필요한 Access service token        |
 
 Staging workflow에 generic `ADMIN_USER_IDS`, Streamer provider 설정, Repository-level Production
 secret/variable을 추가하지 않습니다. `DISCORD_COMMAND_SYNC_ENABLED`는 항상 `false`이고 배포는
@@ -167,7 +168,7 @@ Staging 통합 검증이 끝나면 검증한 `staging` tree를 대상으로 `sta
 1. URL, OAuth/Discord pairing, B2 버킷, D1 UUID, Wrangler route, 빈 Cron, 필수 secret을 검증합니다.
 2. Cloudflare custom-domain 할당을 읽기 전용으로 조회하고 충돌하면 DNS를 바꾸지 않고 실패합니다.
 3. 원격 D1 target을 읽기 전용으로 확인하고 CI 전용 설정을 만든 뒤 migration을 적용합니다.
-4. API Worker를 배포하고 runtime에 필요한 8개 필수 secret과, 키 회전 중에만 직전 티켓 secret을
+4. API Worker를 배포하고 runtime에 필요한 필수 secret과, 키 회전 중에만 직전 티켓 secret을
    업로드합니다.
 5. API health/provenance를 확인합니다. 기존 게임은 Staging D1/B2에서 유지되며 deploy가 Git source로
    다시 빌드·발행하거나 live version을 변경하지 않습니다.

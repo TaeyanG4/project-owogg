@@ -27,15 +27,89 @@ test("GET /api/auth/me returns 401 unauthenticated and matches AuthMeResponseSch
   assert.equal(parsed.data.authenticated, false);
 });
 
-test("GET /api/auth/providers returns non-secret provider readiness status", async () => {
-  const res = await app.request("http://localhost/api/auth/providers");
-  assert.equal(res.status, 200);
-  const json = (await res.json()) as {
-    google: { configured: boolean };
+test("GET /api/auth/providers exposes Google readiness only when code exchange is configured", async () => {
+  const missingSecret = await app.request("http://localhost/api/auth/providers", undefined, {
+    GOOGLE_CLIENT_ID: "staging-client.apps.googleusercontent.com",
+    FRONTEND_URL: "https://stg.owogg.com",
+  } as any);
+  assert.equal(missingSecret.status, 200);
+  const missingJson = (await missingSecret.json()) as {
+    google: { configured: boolean; clientId?: string };
     discord: { configured: boolean };
   };
-  assert.equal(typeof json.google.configured, "boolean");
-  assert.equal(typeof json.discord.configured, "boolean");
+  assert.deepEqual(missingJson.google, { configured: false });
+
+  const ready = await app.request("http://localhost/api/auth/providers", undefined, {
+    GOOGLE_CLIENT_ID: "staging-client.apps.googleusercontent.com",
+    GOOGLE_CLIENT_SECRET: "server-only-secret",
+    FRONTEND_URL: "https://stg.owogg.com",
+  } as any);
+  assert.equal(ready.status, 200);
+  const readyJson = (await ready.json()) as {
+    google: { configured: boolean; clientId?: string };
+    discord: { configured: boolean };
+  };
+  assert.deepEqual(readyJson.google, {
+    configured: true,
+    clientId: "staging-client.apps.googleusercontent.com",
+  });
+  assert.equal(typeof readyJson.discord.configured, "boolean");
+  assert.doesNotMatch(JSON.stringify(readyJson), /server-only-secret/);
+});
+
+test("POST /api/auth/google/code requires the preflight-forcing request header", async () => {
+  const res = await app.request(
+    "http://localhost/api/auth/google/code",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "http://localhost:5173" },
+      body: JSON.stringify({ code: "one-time-code" }),
+    },
+    {
+      GOOGLE_CLIENT_ID: "client-id",
+      GOOGLE_CLIENT_SECRET: "server-only-secret",
+      FRONTEND_URL: "http://localhost:5173",
+    } as any,
+  );
+  assert.equal(res.status, 403);
+});
+
+test("POST /api/auth/google/code fails closed when the server secret is missing", async () => {
+  const res = await app.request(
+    "http://localhost/api/auth/google/code",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "http://localhost:5173",
+        "X-Requested-With": "XmlHttpRequest",
+      },
+      body: JSON.stringify({ code: "one-time-code" }),
+    },
+    { GOOGLE_CLIENT_ID: "client-id", FRONTEND_URL: "http://localhost:5173" } as any,
+  );
+  assert.equal(res.status, 503);
+});
+
+test("POST /api/auth/google/code validates the one-time code before any exchange", async () => {
+  const res = await app.request(
+    "http://localhost/api/auth/google/code",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "http://localhost:5173",
+        "X-Requested-With": "XmlHttpRequest",
+      },
+      body: JSON.stringify({ code: "" }),
+    },
+    {
+      GOOGLE_CLIENT_ID: "client-id",
+      GOOGLE_CLIENT_SECRET: "server-only-secret",
+      FRONTEND_URL: "http://localhost:5173",
+    } as any,
+  );
+  assert.equal(res.status, 400);
 });
 
 test("POST /api/scores rejects foreign origin with 403 Forbidden", async () => {

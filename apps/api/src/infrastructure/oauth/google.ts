@@ -16,7 +16,74 @@ export interface GoogleTokenVerifyResult {
 }
 
 const GOOGLE_JWKS_URI = "https://www.googleapis.com/oauth2/v3/certs";
+const GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token";
 const VALID_ISSUERS = new Set(["https://accounts.google.com", "accounts.google.com"]);
+
+export interface GoogleAuthorizationCodeExchangeParams {
+  code: string;
+  clientId: string;
+  clientSecret: string;
+  redirectUri: string;
+}
+
+export interface GoogleAuthorizationCodeExchangeResult {
+  valid: boolean;
+  idToken?: string;
+  reason?: string;
+}
+
+/**
+ * Exchanges one short-lived browser authorization code for a Google-signed ID token. Access and
+ * refresh tokens from the response are deliberately neither returned nor stored: OwOGG uses this
+ * grant only to establish identity, never to call Google APIs on a user's behalf.
+ */
+export async function exchangeGoogleAuthorizationCode({
+  code,
+  clientId,
+  clientSecret,
+  redirectUri,
+}: GoogleAuthorizationCodeExchangeParams): Promise<GoogleAuthorizationCodeExchangeResult> {
+  let response: Response;
+  try {
+    response = await fetch(GOOGLE_TOKEN_URI, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json",
+      },
+      body: new URLSearchParams({
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+        grant_type: "authorization_code",
+      }),
+    });
+  } catch {
+    return { valid: false, reason: "Google token endpoint is unavailable" };
+  }
+
+  if (!response.ok) {
+    return { valid: false, reason: "Google authorization code exchange failed" };
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return { valid: false, reason: "Google token response was malformed" };
+  }
+
+  const idToken =
+    typeof body === "object" && body !== null && "id_token" in body
+      ? (body as { id_token?: unknown }).id_token
+      : undefined;
+  if (typeof idToken !== "string" || !idToken) {
+    return { valid: false, reason: "Google token response did not contain an ID token" };
+  }
+
+  return { valid: true, idToken };
+}
 
 interface GoogleJwk {
   kty: string;

@@ -34,6 +34,7 @@ function validStagingEnvironment(): Record<string, string> {
     FRONTEND_URL: STAGING.frontendUrl,
     GAME_ORIGIN: STAGING.gameOrigin,
     GOOGLE_CLIENT_ID: "staging-google-client",
+    GOOGLE_CLIENT_SECRET: "google-secret",
     VITE_API_URL: STAGING.apiUrl,
     VITE_GAME_ORIGIN: STAGING.gameOrigin,
     VITE_GOOGLE_CLIENT_ID: "staging-google-client",
@@ -94,6 +95,20 @@ test("Staging environment preflight accepts only the exact isolated target tuple
   assert.match(errors, /B2_BUCKET_NAME/);
   assert.match(errors, /Production D1/);
   assert.match(errors, /DISCORD_COMMAND_SYNC_ENABLED/);
+});
+
+test("Staging Google code exchange requires a non-blank, whitespace-safe server secret", () => {
+  const missingSecret = validStagingEnvironment();
+  delete missingSecret.GOOGLE_CLIENT_SECRET;
+  assert.match(validateStagingEnvironment(missingSecret).join("\n"), /GOOGLE_CLIENT_SECRET/);
+
+  assert.match(
+    validateStagingEnvironment({
+      ...validStagingEnvironment(),
+      GOOGLE_CLIENT_SECRET: " google-secret ",
+    }).join("\n"),
+    /must not have surrounding whitespace/,
+  );
 });
 
 test("Staging multiplayer ticket keys are strong, paired and rotation-safe", () => {
@@ -255,6 +270,8 @@ test("Staging workflow is push-after-CI only and contains no Production variable
   );
   assert.match(deploy, /MULTIPLAYER_SOCKET_ORIGIN:https:\/\/api-stg\.owogg\.com/);
   assert.match(deploy, /MULTIPLAYER_TICKET_KEY_ID:\$\{\{ vars\.MULTIPLAYER_TICKET_KEY_ID \}\}/);
+  assert.match(deploy, /GOOGLE_CLIENT_SECRET: \$\{\{ secrets\.GOOGLE_CLIENT_SECRET \}\}/);
+  assert.match(deploy, /put_secret GOOGLE_CLIENT_SECRET/);
   assert.match(deploy, /put_secret MULTIPLAYER_TICKET_SECRET/);
   assert.match(deploy, /put_optional_secret MULTIPLAYER_TICKET_PREVIOUS_SECRET/);
 });

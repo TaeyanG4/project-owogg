@@ -33,6 +33,13 @@ export const GoogleLoginRequestSchema = z.object({
 });
 export type GoogleLoginRequest = z.infer<typeof GoogleLoginRequestSchema>;
 
+export const GoogleAuthorizationCodeLoginRequestSchema = z.object({
+  code: z.string().min(1, "Authorization code is required").max(4096),
+});
+export type GoogleAuthorizationCodeLoginRequest = z.infer<
+  typeof GoogleAuthorizationCodeLoginRequestSchema
+>;
+
 export const AuthProvidersResponseSchema = z.object({
   google: z.object({
     configured: z.boolean(),

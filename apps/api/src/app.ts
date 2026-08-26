@@ -112,7 +112,9 @@ app.use(
     // bug report: the sandbox-game visibility toggle was the first PATCH call anyone actually
     // clicked through a real browser since this cors() config was written.
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowHeaders: ["Content-Type", "Authorization"],
+    // X-Requested-With makes the Google popup authorization-code POST non-simple, so browsers
+    // must complete this exact-origin credentialed preflight before the API exchanges a code.
+    allowHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
   }),
 );
 
