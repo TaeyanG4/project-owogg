@@ -371,7 +371,15 @@ multiplayerRouter.post("/instances/:instanceId/invites", async (c) => {
   });
   if (!result.ok) return failure(c, result.code);
   c.header("Cache-Control", "no-store");
-  return c.json(MultiplayerCreateInviteResponseSchema.parse(result), result.replayed ? 200 : 201);
+  return c.json(
+    MultiplayerCreateInviteResponseSchema.parse({
+      replayed: result.replayed,
+      inviteToken: result.inviteToken,
+      expiresAt: result.expiresAt,
+      maxUses: result.maxUses,
+    }),
+    result.replayed ? 200 : 201,
+  );
 });
 
 multiplayerRouter.post("/instances/:instanceId/ticket", async (c) => {

@@ -11,6 +11,7 @@ import {
   verifyMultiplayerJoinTicket,
 } from "@owogg/core";
 import {
+  MultiplayerCreateInviteResponseSchema,
   MultiplayerGameAvailabilityResponseSchema,
   MultiplayerJoinTicketResponseSchema,
   MultiplayerRoomResponseSchema,
@@ -368,6 +369,38 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
     },
     body: JSON.stringify({ expectedConnectionGeneration: 0 }),
   };
+  const inviteRequest = {
+    ...request,
+    body: JSON.stringify({
+      expectedGeneration: 1,
+      idempotencyKey: "api-invite-idempotency-0001",
+    }),
+  };
+  const inviteResponse = await app.request(
+    `http://localhost/api/multiplayer/instances/${INSTANCE_ID}/invites`,
+    inviteRequest,
+    env as any,
+  );
+  assert.equal(inviteResponse.status, 201);
+  assert.equal(inviteResponse.headers.get("Cache-Control"), "no-store");
+  const inviteJson = await inviteResponse.json();
+  assert.equal(Object.hasOwn(inviteJson, "ok"), false);
+  const invite = MultiplayerCreateInviteResponseSchema.parse(inviteJson);
+  assert.equal(invite.replayed, false);
+  assert.equal(invite.maxUses, 1);
+
+  const inviteReplayResponse = await app.request(
+    `http://localhost/api/multiplayer/instances/${INSTANCE_ID}/invites`,
+    inviteRequest,
+    env as any,
+  );
+  assert.equal(inviteReplayResponse.status, 200);
+  const inviteReplay = MultiplayerCreateInviteResponseSchema.parse(
+    await inviteReplayResponse.json(),
+  );
+  assert.equal(inviteReplay.replayed, true);
+  assert.equal(inviteReplay.inviteToken, invite.inviteToken);
+
   const response = await app.request(
     `http://localhost/api/multiplayer/instances/${INSTANCE_ID}/ticket`,
     request,
