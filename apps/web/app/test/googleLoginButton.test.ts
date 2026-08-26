@@ -13,7 +13,8 @@ const loginModalSource = readFileSync(
 );
 
 test("normal Google login exposes a real GIS button and never synthesizes a hidden click", () => {
-  assert.match(loginModalSource, /googleAuth\.renderButton\(googleButtonContainerRef\.current,/);
+  assert.match(loginModalSource, /const container = googleButtonContainerRef\.current;/);
+  assert.match(loginModalSource, /googleAuth\.renderButton\(container,/);
   assert.match(loginModalSource, /ref=\{googleButtonContainerRef\}/);
   assert.doesNotMatch(authContextSource, /googleAuth\.prompt\(/);
   assert.doesNotMatch(
@@ -28,4 +29,11 @@ test("the Google button container stays mounted while the GIS script loads", () 
     loginModalSource,
     /googleButtonReady\s*\?\s*\(\s*<div\s+ref=\{googleButtonContainerRef\}/,
   );
+});
+
+test("Google and Discord login controls share the modal width and large-button height", () => {
+  assert.match(loginModalSource, /width: String\(buttonWidth\)/);
+  assert.match(loginModalSource, /Math\.min\(400,/);
+  assert.match(loginModalSource, /ref=\{googleButtonContainerRef\}[\s\S]*?"w-full"/);
+  assert.match(loginModalSource, /className="flex h-10 w-full[^"]*rounded-full/);
 });

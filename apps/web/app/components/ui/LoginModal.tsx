@@ -14,7 +14,7 @@ export function LoginModal() {
     clearError,
     refreshUser,
   } = useAuth();
-  const { dict } = useI18n();
+  const { dict, locale } = useI18n();
 
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isDiscordLoading, setIsDiscordLoading] = useState(false);
@@ -45,6 +45,8 @@ export function LoginModal() {
 
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let resizeObserver: ResizeObserver | undefined;
+    let renderedWidth = 0;
 
     const tryRender = (attemptsLeft: number) => {
       if (cancelled) return;
@@ -60,7 +62,19 @@ export function LoginModal() {
         return;
       }
 
-      googleButtonContainerRef.current.replaceChildren();
+      const container = googleButtonContainerRef.current;
+      const availableWidth = Math.floor(container.getBoundingClientRect().width);
+      if (availableWidth <= 0) {
+        if (attemptsLeft <= 0) {
+          setGoogleButtonError(
+            "Google 로그인 버튼 영역을 계산하지 못했습니다. 페이지를 새로고침해주세요.",
+          );
+          return;
+        }
+        timer = setTimeout(() => tryRender(attemptsLeft - 1), 150);
+        return;
+      }
+
       googleAuth.initialize({
         client_id: googleClientId,
         callback: (response: { credential: string }) => {
@@ -72,24 +86,40 @@ export function LoginModal() {
         auto_select: false,
         cancel_on_tap_outside: true,
       });
-      googleAuth.renderButton(googleButtonContainerRef.current, {
-        type: "standard",
-        theme: "outline",
-        size: "large",
-        text: "signin_with",
-        shape: "pill",
-      });
-      setGoogleButtonReady(true);
+
+      const renderGoogleButton = () => {
+        const buttonWidth = Math.min(400, Math.floor(container.getBoundingClientRect().width));
+        if (cancelled || buttonWidth <= 0 || buttonWidth === renderedWidth) return;
+        renderedWidth = buttonWidth;
+        container.replaceChildren();
+        googleAuth.renderButton(container, {
+          type: "standard",
+          theme: "outline",
+          size: "large",
+          text: "signin_with",
+          shape: "pill",
+          logo_alignment: "left",
+          width: String(buttonWidth),
+          locale,
+        });
+        setGoogleButtonReady(true);
+      };
+
+      renderGoogleButton();
+      resizeObserver = new ResizeObserver(renderGoogleButton);
+      resizeObserver.observe(container);
     };
 
     tryRender(60);
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
+      resizeObserver?.disconnect();
     };
   }, [
     googleClientId,
     isLoginModalOpen,
+    locale,
     loginWithGoogleCredential,
     providerStatus.availability,
     providerStatus.google.configured,
@@ -165,15 +195,15 @@ export function LoginModal() {
 
           {/* Google Login Button */}
           <div className="flex flex-col gap-1 w-full">
-            <div className="relative flex min-h-[44px] w-full items-center justify-center">
+            <div className="relative flex min-h-10 w-full items-center justify-center overflow-hidden rounded-full">
               <div
                 ref={googleButtonContainerRef}
-                className={googleButtonReady && !isDiscordLoading ? undefined : "invisible"}
+                className={googleButtonReady && !isDiscordLoading ? "w-full" : "invisible w-full"}
               />
               {providerStatus.availability === "ready" &&
                 providerStatus.google.configured &&
                 (!googleButtonReady || isGoogleLoading || isDiscordLoading) && (
-                  <div className="absolute inset-0 flex items-center justify-center gap-2 rounded-2xl bg-white text-xs font-bold text-slate-600">
+                  <div className="absolute inset-0 flex items-center justify-center gap-2 rounded-full bg-white text-xs font-bold text-slate-600">
                     <Loader2 className="h-5 w-5 animate-spin" />
                     <span>{dict.loginModal.googleLoading}</span>
                   </div>
@@ -201,7 +231,7 @@ export function LoginModal() {
                 providerStatus.availability !== "ready" ||
                 !providerStatus.discord.configured
               }
-              className="flex items-center justify-center gap-3 w-full py-4 px-4 bg-[#5865F2] hover:bg-[#4752C4] text-white font-extrabold rounded-2xl transition-all shadow-lg hover:scale-[1.02] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+              className="flex h-10 w-full items-center justify-center gap-3 rounded-full bg-[#5865F2] px-4 text-sm font-bold text-white shadow-sm transition-colors hover:bg-[#4752C4] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isDiscordLoading ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
