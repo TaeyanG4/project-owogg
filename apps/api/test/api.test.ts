@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { app } from "../src/app.js";
+import { app, resolveCommitSha } from "../src/app.js";
 import { AuthMeResponseSchema, PersonalBestResponseSchema } from "@owogg/contracts";
 
 test("GET / returns 200 OK with service info", async () => {
@@ -16,6 +16,10 @@ test("GET /api/health returns 200 OK with status ok", async () => {
   assert.equal(res.status, 200);
   const data = (await res.json()) as { status: string };
   assert.equal(data.status, "ok");
+});
+
+test("health provenance falls back to the runtime commit when no CI bundle define exists", () => {
+  assert.equal(resolveCommitSha("runtime-sha"), "runtime-sha");
 });
 
 test("GET /api/auth/me returns 401 unauthenticated and matches AuthMeResponseSchema", async () => {

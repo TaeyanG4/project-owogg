@@ -103,6 +103,7 @@ jobs:
           # exists to prevent for a value an operator may have first set by hand via the Dashboard.
           command: >-
             deploy
+            --define __OWOGG_BUILD_COMMIT_SHA__:'"${{ github.event.workflow_run.head_sha }}"'
             --var COMMIT_SHA:${{ github.event.workflow_run.head_sha }}
             GOOGLE_CLIENT_ID:${{ vars.GOOGLE_CLIENT_ID }}
             DISCORD_CLIENT_ID:${{ vars.DISCORD_CLIENT_ID }}

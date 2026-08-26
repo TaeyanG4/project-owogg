@@ -29,6 +29,27 @@ import { getStreamerProviderAdapters } from "./infrastructure/streamers/index.js
 import { FEATURED_POLICY } from "@owogg/core";
 import type { ApiEnv } from "./routes/auth.js";
 
+/**
+ * Wrangler replaces this identifier at bundle time in CI. Keeping the repository SHA in the
+ * bundle as well as the runtime binding makes every release produce a distinct Worker script,
+ * including Web-only repository commits where the API source itself did not change.
+ *
+ * `typeof` keeps local tests and development safe when no Wrangler `--define` was supplied.
+ */
+declare const __OWOGG_BUILD_COMMIT_SHA__: string | undefined;
+
+export function resolveCommitSha(runtimeCommitSha?: string): string {
+  const bundledCommitSha =
+    typeof __OWOGG_BUILD_COMMIT_SHA__ === "string" ? __OWOGG_BUILD_COMMIT_SHA__ : undefined;
+  return (
+    bundledCommitSha ||
+    runtimeCommitSha ||
+    (globalThis as unknown as { process?: { env?: { COMMIT_SHA?: string } } }).process?.env
+      ?.COMMIT_SHA ||
+    "dev"
+  );
+}
+
 const app = new Hono<ApiEnv>();
 
 // Middleware
@@ -144,11 +165,7 @@ app.get("/", (c) => {
 app.get("/api/health", (c) => {
   return c.json({
     status: "ok",
-    commit:
-      c.env?.COMMIT_SHA ||
-      (globalThis as unknown as { process?: { env?: { COMMIT_SHA?: string } } }).process?.env
-        ?.COMMIT_SHA ||
-      "dev",
+    commit: resolveCommitSha(c.env?.COMMIT_SHA),
   });
 });
 
