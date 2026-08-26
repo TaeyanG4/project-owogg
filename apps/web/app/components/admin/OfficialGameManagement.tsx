@@ -136,7 +136,7 @@ export function OfficialGameManagement() {
 
   const handleOfficialDelete = async (gameId: string, title: string) => {
     const confirmation = window.prompt(
-      `"${title}" 공식 게임을 B2와 DB에서 완전히 삭제합니다. 존재하는 관련 기록과 즐겨찾기도 제거되며 되돌릴 수 없습니다. 계속하려면 slug "${gameId}"를 입력하세요.`,
+      `"${title}" 공식 게임의 B2 콘텐츠와 공개 상태를 삭제합니다. 멀티플레이 감사 기록이 있으면 내부 식별자는 보존되지만 같은 slug로 다시 등록할 수 있습니다. 계속하려면 slug "${gameId}"를 입력하세요.`,
     );
     if (confirmation !== gameId) return;
 
@@ -154,7 +154,9 @@ export function OfficialGameManagement() {
       setData(nextData);
       if (editingSlug === result.slug) setEditingSlug(null);
       setUploadMessage(
-        `${result.slug} 공식 게임과 ${result.deletedVersionCount}개 버전을 완전히 삭제했습니다. 같은 slug로 다시 등록할 수 있습니다.`,
+        result.identityRetainedForHistory
+          ? `${result.slug} 공식 게임 콘텐츠를 삭제했습니다. 멀티플레이 감사 기록을 위해 내부 식별자는 보존되며 같은 slug로 다시 등록할 수 있습니다.`
+          : `${result.slug} 공식 게임과 ${result.deletedVersionCount}개 버전을 완전히 삭제했습니다. 같은 slug로 다시 등록할 수 있습니다.`,
       );
       const nextPage = nextData?.page ?? page;
       if (nextPage !== page) setPage(nextPage);
@@ -386,7 +388,7 @@ export function OfficialGameManagement() {
                         ) : (
                           <Trash2 className="h-3.5 w-3.5" />
                         )}
-                        완전 삭제
+                        게임 삭제
                       </button>
                     )}
                   </div>

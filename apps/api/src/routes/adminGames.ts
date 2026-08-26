@@ -97,7 +97,7 @@ function officialUpdateFailure(error: unknown) {
       : error.code === "VERSION_NOT_FOUND"
         ? "부분 수정의 기준이 될 공식 게임 버전을 찾을 수 없습니다."
         : error.code === "SLUG_CONFLICT"
-          ? "동일한 slug가 사용자 게임 또는 삭제된 게임에 이미 사용되고 있습니다."
+          ? "동일한 slug가 사용자 제작 게임에 이미 사용되고 있습니다."
           : error.code === "PUBLISH_FAILED"
             ? "OWOGG 게임 변경사항을 D1/B2에 게시하지 못했습니다."
             : error.code === "LOGO_INVALID"
@@ -441,9 +441,10 @@ adminGamesRouter.post(
   },
 );
 
-// DELETE /api/admin/games/:gameId — permanently removes an OWOGG-owned identity and all of its
-// B2 bundle/canonical objects, then releases the slug for clean re-registration. Two permissions
-// are required because this is stronger than the ordinary game kill switch.
+// DELETE /api/admin/games/:gameId — removes every B2 bundle/canonical object and releases the slug
+// for clean re-registration. An identity with immutable multiplayer history remains tombstoned
+// until a successful replacement publish; history-free identities are physically removed.
+// Two permissions are required because this is stronger than the ordinary game kill switch.
 adminGamesRouter.delete("/:gameId", async (c) => {
   const admin = await requireElevatedAdmin(c);
   if (isElevatedAdminResponse(admin)) return admin;

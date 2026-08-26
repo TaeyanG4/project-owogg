@@ -14,6 +14,7 @@ function createAdminDb(options: {
   managedRole?: string;
   grants?: string[];
   officialGame?: boolean;
+  multiplayerHistory?: boolean;
 }) {
   const queriedGames: string[] = [];
   function statement(query: string) {
@@ -65,6 +66,11 @@ function createAdminDb(options: {
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
             password_changed_at: new Date().toISOString(),
+          } as T;
+        }
+        if (query.includes("FROM multiplayer_profiles WHERE game_id = games.id")) {
+          return {
+            retains_history: options.multiplayerHistory ? 1 : 0,
           } as T;
         }
         if (query.includes("FROM games")) queriedGames.push(query);
@@ -132,9 +138,11 @@ function createAdminDb(options: {
           options.officialGame &&
           statements[0]?.query.includes("official_game_deletion_audit_log")
         ) {
-          return statements.map((_, index) => ({
+          return statements.map((statement, index) => ({
             success: true,
-            meta: { changes: index === statements.length - 1 ? 1 : 0 },
+            meta: {
+              changes: index === 0 || statement.query.includes("DELETE FROM games") ? 1 : 0,
+            },
           }));
         }
         return statements.map(() => ({ success: true, meta: { changes: 0 } }));
@@ -231,13 +239,58 @@ test("official hard delete removes B2 objects and completes the D1 purge", async
       slug: string;
       deletedVersionCount: number;
       deletedObjectCount: number;
+      identityRetainedForHistory: boolean;
     };
     assert.equal(body.slug, "official-game");
     assert.equal(body.deletedVersionCount, 1);
     assert.equal(body.deletedObjectCount, 3);
+    assert.equal(body.identityRetainedForHistory, false);
     assert.equal(storageRequests.length, 3);
     assert.ok(storageRequests.every((request) => request.method === "DELETE"));
     assert.ok(queriedGames.some((query) => query.includes("DELETE FROM games")));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("official delete preserves a tombstone when multiplayer history is immutable", async () => {
+  const { db, queriedGames } = createAdminDb({
+    userId: 1,
+    officialGame: true,
+    multiplayerHistory: true,
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(null, { status: 204 });
+
+  try {
+    const response = await app.request(
+      "/api/admin/games/official-game",
+      {
+        method: "DELETE",
+        headers: { Cookie: ADMIN_COOKIE, Origin: "http://localhost:5173" },
+      },
+      {
+        DB: db,
+        ADMIN_USER_IDS: "1",
+        FRONTEND_URL: "http://localhost:5173",
+        B2_ENDPOINT: "https://s3.us-west-004.backblazeb2.com",
+        B2_REGION: "us-west-004",
+        B2_BUCKET_NAME: "owogg-game-bundles",
+        B2_KEY_ID: "someKeyId",
+        B2_APPLICATION_KEY: "someApplicationKey",
+      } as any,
+    );
+
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      identityRetainedForHistory: boolean;
+    };
+    assert.equal(body.identityRetainedForHistory, true);
+    assert.ok(queriedGames.some((query) => query.includes("DELETE FROM game_assets")));
+    assert.equal(
+      queriedGames.some((query) => query.includes("DELETE FROM games")),
+      false,
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

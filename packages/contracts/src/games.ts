@@ -132,6 +132,7 @@ export const AdminOfficialGameDeleteResponseSchema = z.object({
   deletedVersionCount: z.number().int().nonnegative(),
   deletedObjectCount: z.number().int().nonnegative(),
   deletedAt: z.string().min(1),
+  identityRetainedForHistory: z.boolean(),
 });
 export type AdminOfficialGameDeleteResponse = z.infer<typeof AdminOfficialGameDeleteResponseSchema>;
 

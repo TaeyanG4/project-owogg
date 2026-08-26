@@ -138,6 +138,11 @@ CREATE TABLE official_game_deletion_audit_log (
   object_count INTEGER NOT NULL,
   deleted_at TEXT NOT NULL
 );
+CREATE TABLE multiplayer_profiles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+  game_version_id INTEGER NOT NULL REFERENCES game_versions(id) ON DELETE CASCADE
+);
 `;
 
 test("OWOGG lifecycle quarantine + purge removes D1 state and releases the slug", async () => {
@@ -179,7 +184,7 @@ test("OWOGG lifecycle quarantine + purge removes D1 state and releases the slug"
   assert.equal(quarantined.live_version_id, null);
   assert.equal(quarantined.deleted_at, nowIso);
 
-  await lifecycleRepo.purgeDeletion({
+  const disposition = await lifecycleRepo.purgeDeletion({
     gameId: identity.id,
     slug: canonical.slug,
     actorAdminId: 1,
@@ -187,6 +192,7 @@ test("OWOGG lifecycle quarantine + purge removes D1 state and releases the slug"
     objectCount: 4,
     nowIso,
   });
+  assert.equal(disposition, "PURGED");
   assert.equal(raw.prepare("SELECT COUNT(*) AS count FROM games").get()?.count, 0);
   assert.equal(raw.prepare("SELECT COUNT(*) AS count FROM game_versions").get()?.count, 0);
   assert.equal(raw.prepare("SELECT COUNT(*) AS count FROM game_assets").get()?.count, 0);
@@ -202,4 +208,105 @@ test("OWOGG lifecycle quarantine + purge removes D1 state and releases the slug"
   assert.ok(reRegistered);
   assert.notEqual(reRegistered.id, identity.id);
   assert.equal(version.gameId, identity.id);
+});
+
+test("OWOGG lifecycle preserves multiplayer history and safely reuses its tombstoned slug", async () => {
+  const { db, raw } = createSqliteD1(OFFICIAL_LIFECYCLE_SCHEMA);
+  raw.prepare("INSERT INTO users (id, nickname) VALUES (1, 'Admin')").run();
+  const uploadRepo = new D1OfficialGameUploadRepository(db);
+  const lifecycleRepo = new D1OfficialGameLifecycleRepository(db);
+  const nowIso = "2026-08-27T00:00:00.000Z";
+  const identity = await uploadRepo.ensureOwoggIdentity({ slug: canonical.slug, nowIso });
+  assert.ok(identity);
+  const version = await uploadRepo.createVersion({
+    gameId: identity.id,
+    objectKey: `uploads/${identity.id}/multiplayer.zip`,
+    contentHash: "d".repeat(64),
+    bundleBytes: 321,
+    nowIso,
+  });
+  await uploadRepo.markPublishing({
+    gameId: identity.id,
+    versionId: version.id,
+    contentHash: version.contentHash,
+  });
+  await uploadRepo.markReady(
+    { gameId: identity.id, versionId: version.id, contentHash: version.contentHash },
+    {
+      publishedAt: nowIso,
+      manifestKey: `games/${identity.id}/${version.id}/.owogg-manifest.json`,
+      publishedSizeBytes: 99,
+      fileCount: 2,
+    },
+  );
+  await uploadRepo.upsertLogo({
+    gameId: identity.id,
+    objectKey: `games/${identity.id}/logo.svg`,
+    nowIso,
+  });
+  await uploadRepo.activate({ gameId: identity.id, versionId: version.id, canonical, nowIso });
+  raw
+    .prepare("INSERT INTO multiplayer_profiles (game_id, game_version_id) VALUES (?, ?)")
+    .run(identity.id, version.id);
+
+  const plan = await lifecycleRepo.prepareDeletion({ slug: canonical.slug, nowIso });
+  assert.ok(plan);
+  const disposition = await lifecycleRepo.purgeDeletion({
+    gameId: identity.id,
+    slug: canonical.slug,
+    actorAdminId: 1,
+    versionCount: plan.versions.length,
+    objectCount: 4,
+    nowIso,
+  });
+
+  assert.equal(disposition, "HISTORY_RETAINED");
+  const tombstone = raw
+    .prepare("SELECT visibility, live_version_id, deleted_at FROM games WHERE id = ?")
+    .get(identity.id) as Record<string, unknown>;
+  assert.equal(tombstone.visibility, "PRIVATE");
+  assert.equal(tombstone.live_version_id, null);
+  assert.equal(tombstone.deleted_at, nowIso);
+  assert.equal(raw.prepare("SELECT COUNT(*) AS count FROM game_versions").get()?.count, 1);
+  assert.equal(raw.prepare("SELECT COUNT(*) AS count FROM multiplayer_profiles").get()?.count, 1);
+  assert.equal(raw.prepare("SELECT COUNT(*) AS count FROM game_assets").get()?.count, 0);
+  assert.equal(
+    raw.prepare("SELECT COUNT(*) AS count FROM official_game_deletion_audit_log").get()?.count,
+    1,
+  );
+
+  const reusable = await uploadRepo.ensureOwoggIdentity({ slug: canonical.slug, nowIso });
+  assert.ok(reusable);
+  assert.equal(reusable.id, identity.id);
+  const retiredVersion = await uploadRepo.findVersionById(identity.id, version.id);
+  assert.equal(retiredVersion?.publishStatus, "FAILED");
+  assert.equal(retiredVersion?.manifestKey, null);
+
+  await uploadRepo.markPublishing({
+    gameId: identity.id,
+    versionId: version.id,
+    contentHash: version.contentHash,
+  });
+  await uploadRepo.markReady(
+    { gameId: identity.id, versionId: version.id, contentHash: version.contentHash },
+    {
+      publishedAt: nowIso,
+      manifestKey: `games/${identity.id}/${version.id}/.owogg-manifest.json`,
+      publishedSizeBytes: 99,
+      fileCount: 2,
+    },
+  );
+  await uploadRepo.upsertLogo({
+    gameId: identity.id,
+    objectKey: `games/${identity.id}/logo.svg`,
+    nowIso,
+  });
+  await uploadRepo.activate({ gameId: identity.id, versionId: version.id, canonical, nowIso });
+
+  const restored = raw
+    .prepare("SELECT visibility, live_version_id, deleted_at FROM games WHERE id = ?")
+    .get(identity.id) as Record<string, unknown>;
+  assert.equal(restored.visibility, "PUBLIC");
+  assert.equal(restored.live_version_id, version.id);
+  assert.equal(restored.deleted_at, null);
 });

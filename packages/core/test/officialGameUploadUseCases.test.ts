@@ -16,6 +16,7 @@ import {
   type GameVersion,
   type OfficialGameUploadRepository,
   type OfficialGameDeletionPlan,
+  type OfficialGameDeletionDisposition,
   type OfficialGameLifecycleRepository,
 } from "../src/index.js";
 
@@ -53,16 +54,18 @@ class FakeCanonicals implements GameCanonicalRepository {
 class FakeOfficialLifecycleRepository implements OfficialGameLifecycleRepository {
   purged = false;
   failPurgeOnce = false;
+  disposition: OfficialGameDeletionDisposition = "PURGED";
   constructor(public plan: OfficialGameDeletionPlan | null) {}
   async prepareDeletion(): Promise<OfficialGameDeletionPlan | null> {
     return this.plan;
   }
-  async purgeDeletion(): Promise<void> {
+  async purgeDeletion(): Promise<OfficialGameDeletionDisposition> {
     if (this.failPurgeOnce) {
       this.failPurgeOnce = false;
       throw new Error("D1 purge failed");
     }
     this.purged = true;
+    return this.disposition;
   }
 }
 
@@ -318,9 +321,33 @@ test("official deletion removes published files, source ZIP, logo and canonical 
   const result = await lifecycle.deleteGame({ slug: "admin-game", actorAdminId: 1 });
 
   assert.equal(result.deletedVersionCount, 1);
+  assert.equal(result.identityRetainedForHistory, false);
   assert.equal(lifecycleRepository.purged, true);
   assert.equal(canonicals.document, null);
   assert.deepEqual([...storage.objects.keys()], []);
+});
+
+test("official deletion reports when immutable multiplayer history retains the identity", async () => {
+  const lifecycleRepository = new FakeOfficialLifecycleRepository({
+    gameId: 7,
+    slug: "admin-game",
+    versions: [],
+    assetObjectKeys: [],
+  });
+  lifecycleRepository.disposition = "HISTORY_RETAINED";
+  const storage = new FakeStorage();
+  const publicationRepository = new FakeOfficialRepository();
+  const lifecycle = new OfficialGameLifecycleUseCases(
+    lifecycleRepository,
+    storage,
+    new FakeCanonicals(),
+    new GamePublicationService(publicationRepository, storage, archives),
+  );
+
+  const result = await lifecycle.deleteGame({ slug: "admin-game", actorAdminId: 1 });
+
+  assert.equal(result.identityRetainedForHistory, true);
+  assert.equal(lifecycleRepository.purged, true);
 });
 
 test("official deletion leaves D1 quarantined and reports a retryable storage failure", async () => {
@@ -402,5 +429,6 @@ test("official deletion can retry after B2 cleanup succeeded but the final D1 pu
   };
   const retried = await lifecycle.deleteGame({ slug: "admin-game", actorAdminId: 1 });
   assert.equal(retried.deletedVersionCount, 1);
+  assert.equal(retried.identityRetainedForHistory, false);
   assert.equal(lifecycleRepository.purged, true);
 });

@@ -3,6 +3,7 @@ import {
   type GamePublicationFacts,
   type GamePublicationTarget,
   type GameVersion,
+  type OfficialGameDeletionDisposition,
   type OfficialGameDeletionPlan,
   type OfficialGameLifecycleRepository,
   type OfficialGameUploadRepository,
@@ -39,8 +40,33 @@ export class D1OfficialGameUploadRepository implements OfficialGameUploadReposit
       .first<Record<string, unknown>>();
     if (!row) throw new Error(`OWOGG identity was not created for ${input.slug}`);
     const identity = mapGameIdentityRow(row);
-    if (identity.publisher.type !== "OWOGG" || identity.deletedAt !== null) {
-      return null;
+    if (identity.publisher.type !== "OWOGG") return null;
+
+    if (identity.deletedAt !== null) {
+      // A failed/retained deletion may have already removed some or all B2 objects. Never trust an
+      // old READY marker when re-registering that exact OWOGG identity: force the selected content
+      // hash through the normal source upload + immutable publication path again. The game remains
+      // quarantined until activate() clears deleted_at after every D1/B2 write succeeds.
+      await this.db
+        .prepare(
+          `UPDATE game_versions
+           SET publish_status = 'FAILED',
+               publish_error = CASE
+                 WHEN publish_status = 'FAILED' AND publish_error IS NOT NULL THEN publish_error
+                 ELSE 'official game quarantined for re-registration'
+               END,
+               published_at = NULL, manifest_key = NULL,
+               published_size_bytes = NULL, file_count = NULL
+           WHERE game_id = ?
+             AND EXISTS (
+               SELECT 1 FROM games
+               WHERE id = game_versions.game_id
+                 AND publisher_type = 'OWOGG'
+                 AND deleted_at IS NOT NULL
+             )`,
+        )
+        .bind(identity.id)
+        .run();
     }
     return identity;
   }
@@ -206,11 +232,12 @@ export class D1OfficialGameUploadRepository implements OfficialGameUploadReposit
         `UPDATE games
          SET leaderboard_generation = leaderboard_generation +
                CASE WHEN live_version_id IS NOT ? THEN 1 ELSE 0 END,
-             visibility = 'PUBLIC', live_version_id = ?, title = ?, short_description = ?,
+             visibility = 'PUBLIC', live_version_id = ?, deleted_at = NULL,
+             title = ?, short_description = ?,
              description = ?, genre = ?, mode = ?, xp_per_completion = ?, score_unit = ?,
              score_direction = ?, score_min = ?, score_max = ?, score_display_prefix = ?,
              score_display_suffix = ?, updated_at = ?
-         WHERE id = ? AND publisher_type = 'OWOGG' AND deleted_at IS NULL
+         WHERE id = ? AND publisher_type = 'OWOGG'
            AND EXISTS (
              SELECT 1 FROM game_versions
              WHERE id = ? AND game_id = games.id AND publish_status = 'READY'
@@ -305,12 +332,28 @@ export class D1OfficialGameLifecycleRepository implements OfficialGameLifecycleR
     return { gameId, slug: String(identityRow.slug), versions, assetObjectKeys };
   }
 
-  async purgeDeletion(input: OfficialGameDeletionAuditInput): Promise<void> {
+  async purgeDeletion(
+    input: OfficialGameDeletionAuditInput,
+  ): Promise<OfficialGameDeletionDisposition> {
     const ownsDeletion = `EXISTS (
       SELECT 1 FROM games
       WHERE id = ? AND slug = ? AND publisher_type = 'OWOGG' AND deleted_at IS NOT NULL
     )`;
-    const results = await this.db.batch([
+    const deletion = await this.db
+      .prepare(
+        `SELECT EXISTS (
+           SELECT 1 FROM multiplayer_profiles WHERE game_id = games.id
+         ) AS retains_history
+         FROM games
+         WHERE id = ? AND slug = ? AND publisher_type = 'OWOGG' AND deleted_at IS NOT NULL`,
+      )
+      .bind(input.gameId, input.slug)
+      .first<{ retains_history: number }>();
+    if (!deletion) {
+      throw new Error(`OWOGG game ${input.gameId}/${input.slug} is not prepared for deletion`);
+    }
+
+    const cleanupStatements = [
       this.db
         .prepare(
           `INSERT INTO official_game_deletion_audit_log
@@ -343,6 +386,26 @@ export class D1OfficialGameLifecycleRepository implements OfficialGameLifecycleR
         .prepare(`DELETE FROM game_settings WHERE game_id = ? AND ${ownsDeletion}`)
         .bind(input.slug, input.gameId, input.slug),
       this.db
+        .prepare(`DELETE FROM game_assets WHERE game_id = ? AND ${ownsDeletion}`)
+        .bind(input.gameId, input.gameId, input.slug),
+    ];
+
+    // Multiplayer actions, terminal results and applied rewards are intentionally immutable. A
+    // reviewed profile is sufficient proof that deleting the numeric game/version identity could
+    // cascade into that ledger. Keep the OWOGG row quarantined instead; a later upload can reuse
+    // the same slug/id and only clears deleted_at after exact bytes have been republished.
+    if (Number(deletion.retains_history) === 1) {
+      const results = await this.db.batch(cleanupStatements);
+      const auditInsert = results[0];
+      if ((auditInsert?.meta?.changes ?? auditInsert?.meta?.rows_written ?? 0) === 0) {
+        throw new Error(`OWOGG game ${input.gameId}/${input.slug} retention was not audited`);
+      }
+      return "HISTORY_RETAINED";
+    }
+
+    const results = await this.db.batch([
+      ...cleanupStatements,
+      this.db
         .prepare(
           `DELETE FROM game_slug_reservations
            WHERE slug = ? AND source_game_id = ? AND ${ownsDeletion}`,
@@ -360,5 +423,6 @@ export class D1OfficialGameLifecycleRepository implements OfficialGameLifecycleR
     if ((gameDelete?.meta?.changes ?? gameDelete?.meta?.rows_written ?? 0) === 0) {
       throw new Error(`OWOGG game ${input.gameId}/${input.slug} is not prepared for deletion`);
     }
+    return "PURGED";
   }
 }

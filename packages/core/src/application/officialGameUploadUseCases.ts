@@ -58,8 +58,9 @@ export class OfficialGameUploadFailure extends Error {
 
 /** OWOGG-only D1 write boundary. USER review and ownership writes are intentionally absent. */
 export interface OfficialGameUploadRepository extends GameVersionPublicationRepository {
-  /** Returns null only when the slug already belongs to USER or a deleted identity. Infrastructure
-   * failures must throw so callers do not misreport an outage as a user-correctable conflict. */
+  /** Returns null only when the slug already belongs to USER. A quarantined OWOGG identity is
+   * reusable so immutable multiplayer history can remain attached to the same numeric identity.
+   * Infrastructure failures must throw so callers do not misreport an outage as a conflict. */
   ensureOwoggIdentity(input: { slug: string; nowIso: string }): Promise<GameIdentity | null>;
   findOwoggIdentity(slug: string): Promise<GameIdentity | null>;
   findVersionById(gameId: number, versionId: number): Promise<GameVersion | null>;
@@ -88,6 +89,8 @@ export interface OfficialGameDeletionPlan {
   readonly assetObjectKeys: readonly string[];
 }
 
+export type OfficialGameDeletionDisposition = "PURGED" | "HISTORY_RETAINED";
+
 /** Destructive OWOGG lifecycle boundary. The first operation quarantines the identity before any
  * cross-store deletion; the final operation is allowed only for that quarantined OWOGG row. */
 export interface OfficialGameLifecycleRepository {
@@ -102,7 +105,7 @@ export interface OfficialGameLifecycleRepository {
     versionCount: number;
     objectCount: number;
     nowIso: string;
-  }): Promise<void>;
+  }): Promise<OfficialGameDeletionDisposition>;
 }
 
 export interface OfficialGameUploadResult {
@@ -141,6 +144,7 @@ export interface OfficialGameDeleteResult {
   readonly deletedVersionCount: number;
   readonly deletedObjectCount: number;
   readonly deletedAt: string;
+  readonly identityRetainedForHistory: boolean;
 }
 
 async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
@@ -435,9 +439,11 @@ export class OfficialGameUploadUseCases {
   }
 }
 
-/** Permanently removes an OWOGG game from both B2 and D1 so the same slug can be registered as a
- * new identity. D1 quarantine happens first, making play and score submission fail closed while
- * B2 cleanup runs. Every storage delete is idempotent, so a partial failure is safe to retry. */
+/** Removes an OWOGG game from B2 and public service so the same slug can be registered again. D1
+ * quarantine happens first, making play and score submission fail closed while B2 cleanup runs.
+ * Games without multiplayer history are physically purged; games with immutable match history
+ * retain the same tombstoned identity and revive only after a replacement publish succeeds. Every
+ * storage delete is idempotent, so a partial failure is safe to retry. */
 export class OfficialGameLifecycleUseCases {
   constructor(
     private readonly repository: OfficialGameLifecycleRepository,
@@ -487,8 +493,9 @@ export class OfficialGameLifecycleUseCases {
       throw new OfficialGameDeleteFailure("STORAGE_DELETE_FAILED");
     }
 
+    let disposition: OfficialGameDeletionDisposition;
     try {
-      await this.repository.purgeDeletion({
+      disposition = await this.repository.purgeDeletion({
         gameId: plan.gameId,
         slug: plan.slug,
         actorAdminId: input.actorAdminId,
@@ -506,6 +513,7 @@ export class OfficialGameLifecycleUseCases {
       deletedVersionCount: plan.versions.length,
       deletedObjectCount,
       deletedAt: nowIso,
+      identityRetainedForHistory: disposition === "HISTORY_RETAINED",
     };
   }
 }
