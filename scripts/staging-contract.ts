@@ -310,6 +310,7 @@ export function validateStagingEnvironment(env: Environment): string[] {
   const d1Id = required(env, "STAGING_D1_DATABASE_ID", errors);
   const multiplayerTicketKeyId = required(env, "MULTIPLAYER_TICKET_KEY_ID", errors);
   const multiplayerTicketSecret = required(env, "MULTIPLAYER_TICKET_SECRET", errors);
+  const multiplayerEnabled = (env.STAGING_MULTIPLAYER_ENABLED ?? "false").trim();
 
   if (frontendUrl !== STAGING.frontendUrl)
     errors.push(`FRONTEND_URL must equal ${STAGING.frontendUrl}`);
@@ -343,6 +344,9 @@ export function validateStagingEnvironment(env: Environment): string[] {
 
   if (!/^[A-Za-z0-9_-]{1,32}$/.test(multiplayerTicketKeyId)) {
     errors.push("MULTIPLAYER_TICKET_KEY_ID must be 1-32 URL-safe characters");
+  }
+  if (!["true", "false"].includes(multiplayerEnabled)) {
+    errors.push("STAGING_MULTIPLAYER_ENABLED must be true or false");
   }
   if (env.MULTIPLAYER_TICKET_SECRET !== multiplayerTicketSecret) {
     errors.push("MULTIPLAYER_TICKET_SECRET must not have surrounding whitespace");

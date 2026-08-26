@@ -913,13 +913,15 @@ vendor나 DB를 domain contract에 저장하지 않는다.
 에이전트는 다음 단계에서 자동 진행하지 않고 사용자에게 정확한 입력·승인을 요청한다.
 
 1. Staging GitHub Environment에 `MULTIPLAYER_TICKET_KEY_ID`와 32바이트 이상 무작위
-   `MULTIPLAYER_TICKET_SECRET` 등록. 최초에는 두 `PREVIOUS` 값을 비워 둠
+   `MULTIPLAYER_TICKET_SECRET` 등록. 최초에는 두 `PREVIOUS` 값을 비워 두고
+   `STAGING_MULTIPLAYER_ENABLED=false` 유지
 2. Cloudflare DO lifecycle/binding을 실제 Staging Worker에 최초 적용
 3. Staging D1 migration 적용, feature branch의 staging merge/push
-4. Staging `/admin/games`에서 reference ZIP 게시 또는 심사 계정 준비
-5. Cloudflare Access를 통과하는 두 실사용 Staging 계정/브라우저 검증
-6. Production inert lifecycle baseline, migration, secret 또는 feature enable
-7. `staging → main` Production 승격
+4. Staging 배포 및 secret/DO/D1 준비 상태를 확인한 뒤 `STAGING_MULTIPLAYER_ENABLED=true` 전환·재배포
+5. Staging `/admin/games`에서 reference ZIP 게시 또는 심사 계정 준비
+6. Cloudflare Access를 통과하는 두 실사용 Staging 계정/브라우저 검증
+7. Production inert lifecycle baseline, migration, secret 또는 feature enable
+8. `staging → main` Production 승격
 
 로컬 코드, migration, Wrangler template, 테스트와 문서는 승인 전까지 준비할 수 있다. 사용자 승인이
 없는 `main` push, Production deploy/migration/secret 변경과 Discord global command sync는 금지한다.

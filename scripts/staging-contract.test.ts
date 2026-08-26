@@ -46,6 +46,7 @@ function validStagingEnvironment(): Record<string, string> {
     DISCORD_TEST_GUILD_ID: "987654321098765432",
     STAGING_ADMIN_USER_IDS: "",
     STAGING_D1_DATABASE_ID: STAGING_D1_ID,
+    STAGING_MULTIPLAYER_ENABLED: "false",
     STAGING_WEB_SMOKE_ENABLED: "false",
     B2_APPLICATION_KEY: "secret",
     B2_BUCKET_NAME: STAGING.b2Bucket,
@@ -125,6 +126,23 @@ test("Staging multiplayer ticket keys are strong, paired and rotation-safe", () 
       MULTIPLAYER_TICKET_PREVIOUS_SECRET: "p".repeat(32),
     }).join("\n"),
     /key IDs must differ/,
+  );
+});
+
+test("Staging multiplayer activation is explicit and boolean", () => {
+  assert.deepEqual(
+    validateStagingEnvironment({
+      ...validStagingEnvironment(),
+      STAGING_MULTIPLAYER_ENABLED: "true",
+    }),
+    [],
+  );
+  assert.match(
+    validateStagingEnvironment({
+      ...validStagingEnvironment(),
+      STAGING_MULTIPLAYER_ENABLED: "enabled",
+    }).join("\n"),
+    /STAGING_MULTIPLAYER_ENABLED must be true or false/,
   );
 });
 
@@ -219,6 +237,7 @@ test("Staging workflow is push-after-CI only and contains no Production variable
   // Staging Environment intentionally has no variable by that name. Never reference it here;
   // Staging uses its explicitly scoped name and maps it only at the Worker boundary below.
   assert.doesNotMatch(deploy, /vars\.ADMIN_USER_IDS/);
+  assert.doesNotMatch(deploy, /vars\.MULTIPLAYER_ENABLED/);
   assert.doesNotMatch(deploy, /^\s+ADMIN_USER_IDS:\s*\$\{\{ vars\.ADMIN_USER_IDS/gm);
   assert.doesNotMatch(deploy, /vars\.(?:YOUTUBE|TWITCH|CHZZK|SOOP)_/);
   assert.doesNotMatch(deploy, /publish:official-games/);
@@ -230,7 +249,10 @@ test("Staging workflow is push-after-CI only and contains no Production variable
     /owogg-d1-staging --remote --env staging --config apps\/api\/wrangler\.staging\.generated\.jsonc --x-provision=false --x-auto-create=false/,
   );
   assert.match(deploy, /STAGING_ADMIN_USER_IDS/);
-  assert.match(deploy, /MULTIPLAYER_ENABLED:false/);
+  assert.match(
+    deploy,
+    /MULTIPLAYER_ENABLED:\$\{\{ vars\.STAGING_MULTIPLAYER_ENABLED \|\| 'false' \}\}/,
+  );
   assert.match(deploy, /MULTIPLAYER_SOCKET_ORIGIN:https:\/\/api-stg\.owogg\.com/);
   assert.match(deploy, /MULTIPLAYER_TICKET_KEY_ID:\$\{\{ vars\.MULTIPLAYER_TICKET_KEY_ID \}\}/);
   assert.match(deploy, /put_secret MULTIPLAYER_TICKET_SECRET/);

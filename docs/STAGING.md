@@ -108,6 +108,7 @@ Repository-level Production 값에 기대지 않습니다. 아래 항목은 GitH
 | `DISCORD_PUBLIC_KEY`                 | Staging Discord application의 64자리 hex public key            |
 | `DISCORD_REDIRECT_URI`               | `https://api-stg.owogg.com/api/auth/discord/callback`          |
 | `DISCORD_TEST_GUILD_ID`              | Staging 명령을 등록할 숫자 guild ID                            |
+| `STAGING_MULTIPLAYER_ENABLED`        | 기본 `false`; 멀티플레이 통합 검증을 승인한 뒤에만 `true`      |
 | `MULTIPLAYER_TICKET_KEY_ID`          | 1~32자 URL-safe 키 버전 ID(예: `staging_2026_08_a`)            |
 | `MULTIPLAYER_TICKET_PREVIOUS_KEY_ID` | 최초에는 빈 값, 명시적 키 회전 중에만 직전 키 ID               |
 | `STAGING_D1_DATABASE_ID`             | 운영자가 확인한 `owogg-d1-staging` UUID                        |
@@ -141,6 +142,11 @@ secret/variable을 추가하지 않습니다. `DISCORD_COMMAND_SYNC_ENABLED`는 
 현재 활성 pair를 `PREVIOUS` pair로 옮기고 새 활성 pair를 함께 등록한 뒤 배포합니다. 새 배포 검증과
 최대 티켓 유효시간·clock skew 65초가 모두 지난 뒤 `PREVIOUS` pair를 비우며, 누락되거나 한쪽만 등록된
 pair는 preflight에서 배포를 중단합니다.
+
+`STAGING_MULTIPLAYER_ENABLED`는 Staging 전용 전역 kill switch입니다. 누락하면 `false`로 배포되며,
+티켓 키와 secret 등록, Durable Object/D1 배포, 관리자 reference 게임 게시 준비가 끝난 뒤에만 `true`로
+전환합니다. workflow는 repository-level `MULTIPLAYER_ENABLED`를 상속하지 않고 이 값을 Worker runtime의
+`MULTIPLAYER_ENABLED`로 명시적으로 매핑합니다.
 
 `staging` Environment에는 generic `ADMIN_USER_IDS`를 만들지 않고 `STAGING_ADMIN_USER_IDS`만 둡니다.
 GitHub의 `vars.ADMIN_USER_IDS` 표현식은 Environment에 같은 이름이 없으면 Production이 사용하는
