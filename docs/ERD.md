@@ -2,11 +2,11 @@
 
 상태: 기준 문서
 
-마지막 검증: 2026-08-25
+마지막 검증: 2026-08-27
 
-최신 마이그레이션: `0041_multiplayer_foundation.sql`
+최신 마이그레이션: `0042_multiplayer_rematch.sql`
 
-스키마 요약: 물리 테이블 `55`, 롤링 배포 호환 뷰 `4`
+스키마 요약: 물리 테이블 `56`, 롤링 배포 호환 뷰 `4`
 
 기준 소스:
 
@@ -15,7 +15,7 @@
 - `apps/api/src/container.ts`
 - [데이터베이스 기준 문서](DATABASE.md)
 
-이 문서는 `0000_initial_schema.sql`부터 `0041_multiplayer_foundation.sql`까지를 빈 SQLite에
+이 문서는 `0000_initial_schema.sql`부터 `0042_multiplayer_rematch.sql`까지를 빈 SQLite에
 순서대로 적용한 **최종 D1 schema**를 기준으로 합니다. migration SQL이 유일한 schema 권한
 원천이며, 이 문서는 관계 탐색과 운영 이해를 위한 투영입니다.
 
@@ -323,6 +323,12 @@ erDiagram
     INTEGER user_id FK
     TEXT client_action_id
   }
+  multiplayer_rematch_requests {
+    TEXT instance_id PK, FK
+    INTEGER generation PK
+    TEXT participant_id PK, FK
+    TEXT requested_at
+  }
   multiplayer_reward_outbox {
     INTEGER id PK
     TEXT match_id FK
@@ -355,6 +361,8 @@ erDiagram
   multiplayer_participants ||--o{ multiplayer_match_players : projects
   multiplayer_matches ||--o{ multiplayer_match_actions : deduplicates
   multiplayer_participants ||--o{ multiplayer_match_actions : acts
+  multiplayer_instances ||--o{ multiplayer_rematch_requests : rematches
+  multiplayer_participants ||--o{ multiplayer_rematch_requests : consents
   multiplayer_match_players ||--o{ multiplayer_reward_outbox : rewards
   game_versions ||--o{ game_version_leases : retains
   multiplayer_instances ||--o| game_version_leases : owns
@@ -371,6 +379,10 @@ Match action은 `(match, user, client_action_id)`로 멱등이고 canonical play
 policy에 묶입니다. active `game_version_leases`가 있으면 해당 bundle version 삭제가 거절됩니다.
 `multiplayer_instance_admin_actions`는 operation ID로 강제 종료 replay를 식별하며 update/delete가
 금지된 감사 원장입니다.
+
+`multiplayer_rematch_requests`는 committed exact generation의 참가자 동의를 append-only로 저장합니다.
+두 active participant의 동의가 모두 존재하는 guarded write만 instance와 exact-version lease의
+generation을 정확히 1 증가시킵니다.
 
 계정 병합은 충돌 preflight 뒤 participant의 `user_id`를 변경하며 match player/action/outbox가
 `ON UPDATE CASCADE`로 함께 이동합니다. terminal result/action payload/source semantics는 trigger가
@@ -643,6 +655,7 @@ D1 콘솔에서 직접 수정하면 감사 로그와 두 저장소의 일관성�
 | `multiplayer_match_players`              | Multiplayer     | match별 canonical 참가자 결과와 reward eligibility         |
 | `multiplayer_matches`                    | Multiplayer     | generation별 authoritative finalization 상태               |
 | `multiplayer_participants`               | Multiplayer     | instance membership, seat, role와 connection generation    |
+| `multiplayer_rematch_requests`           | Multiplayer     | committed generation의 참가자별 재대결 동의                |
 | `multiplayer_profile_requests`           | Multiplayer     | Creator exact-version 요청과 관리자 심사 결정              |
 | `multiplayer_profiles`                   | Multiplayer     | 서버 승인 immutable runtime profile revision               |
 | `multiplayer_reward_outbox`              | Multiplayer     | committed 결과 기반 exactly-once reward 전달 원장          |

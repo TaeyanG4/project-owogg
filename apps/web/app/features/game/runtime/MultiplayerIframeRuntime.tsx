@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
-import type { MultiplayerRoomResponse } from "@owogg/contracts";
+import type {
+  MultiplayerRematchResponse,
+  MultiplayerRoomPlayer,
+  MultiplayerRoomResponse,
+} from "@owogg/contracts";
+import { ApiClientError } from "../../../lib/api/errors";
 import { GameFrame } from "../GameFrame";
 import {
   createMultiplayerBridgeHost,
@@ -12,7 +17,70 @@ import {
   openMultiplayerParentTransport,
   type MultiplayerParentTransport,
 } from "./multiplayerTransport";
-import { leaveMultiplayerRoom } from "./multiplayerRoomApi";
+import {
+  fetchMultiplayerRematchStatus,
+  fetchMultiplayerRoomRoster,
+  leaveMultiplayerRoom,
+  requestMultiplayerRematch,
+} from "./multiplayerRoomApi";
+
+function PlayerProfileCard({
+  player,
+  seatIndex,
+  selfParticipantId,
+}: {
+  readonly player: MultiplayerRoomPlayer | undefined;
+  readonly seatIndex: 0 | 1;
+  readonly selfParticipantId: string;
+}) {
+  const isSelf = player?.participantId === selfParticipantId;
+  const stoneLabel = seatIndex === 0 ? "흑" : "백";
+  return (
+    <div
+      className={`flex min-w-0 items-center gap-2 ${seatIndex === 1 ? "justify-end text-right" : ""}`}
+    >
+      {seatIndex === 1 && (
+        <span className="hidden min-w-0 sm:block">
+          <span className="block truncate text-xs font-black text-text-primary">
+            {player?.nickname ?? "상대 대기 중"}
+          </span>
+          <span className="block text-[10px] font-bold text-text-muted">
+            {player ? `${stoneLabel}${isSelf ? " · 나" : ""}` : stoneLabel}
+          </span>
+        </span>
+      )}
+      <span
+        className={`relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border text-xs font-black ${
+          seatIndex === 0
+            ? "border-slate-500 bg-slate-950 text-white"
+            : "border-slate-200 bg-slate-100 text-slate-900"
+        }`}
+        aria-hidden="true"
+      >
+        {player?.avatarUrl ? (
+          <img
+            src={player.avatarUrl}
+            alt=""
+            referrerPolicy="no-referrer"
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          player?.nickname.trim().charAt(0) || stoneLabel
+        )}
+      </span>
+      {seatIndex === 0 && (
+        <span className="hidden min-w-0 sm:block">
+          <span className="block truncate text-xs font-black text-text-primary">
+            {player?.nickname ?? "플레이어 대기 중"}
+          </span>
+          <span className="block text-[10px] font-bold text-text-muted">
+            {player ? `${stoneLabel}${isSelf ? " · 나" : ""}` : stoneLabel}
+          </span>
+        </span>
+      )}
+    </div>
+  );
+}
 
 export function multiplayerTerminalLabel(result: unknown, viewerSeatIndex: number): string {
   if (typeof result !== "object" || result === null || Array.isArray(result)) return "경기 종료";
@@ -59,6 +127,7 @@ export interface MultiplayerIframeRuntimeProps {
   readonly frameStyle?: CSSProperties;
   readonly iframeStyle?: CSSProperties;
   readonly shareValue?: string;
+  readonly onRoomChange: (room: MultiplayerRoomResponse) => void;
   readonly onExit: () => void;
 }
 
@@ -76,6 +145,7 @@ export function MultiplayerIframeRuntime({
   frameStyle,
   iframeStyle,
   shareValue,
+  onRoomChange,
   onExit,
 }: MultiplayerIframeRuntimeProps) {
   const [connectionState, setConnectionState] = useState<MultiplayerParentConnectionState>({
@@ -87,11 +157,32 @@ export function MultiplayerIframeRuntime({
   const [retryKey, setRetryKey] = useState(0);
   const [copied, setCopied] = useState<"CODE" | "LINK" | null>(null);
   const [leaving, setLeaving] = useState(false);
+  const [players, setPlayers] = useState<readonly MultiplayerRoomPlayer[]>([]);
+  const [rematchState, setRematchState] = useState<
+    "CHECKING" | "AVAILABLE" | "WAITING" | "OPPONENT_REQUESTED" | "STARTING" | "UNAVAILABLE"
+  >("CHECKING");
+  const [rematchBusy, setRematchBusy] = useState(false);
+  const [rematchError, setRematchError] = useState<string | null>(null);
   const bridgeRef = useRef<MultiplayerBridgeHost | null>(null);
   const transportRef = useRef<MultiplayerParentTransport | null>(null);
   const openAttemptRef = useRef(0);
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rosterRequestRef = useRef(0);
+  const rematchRequestRef = useRef(0);
+
+  const refreshRoster = useCallback(() => {
+    const request = ++rosterRequestRef.current;
+    void fetchMultiplayerRoomRoster(room.instance.id)
+      .then((response) => {
+        if (request !== rosterRequestRef.current || response.instanceId !== room.instance.id)
+          return;
+        setPlayers(response.players);
+      })
+      .catch(() => {
+        // Roster decoration is non-authoritative and must never interrupt the match transport.
+      });
+  }, [room.instance.id]);
 
   const closeCurrent = useCallback(() => {
     openAttemptRef.current += 1;
@@ -123,13 +214,72 @@ export function MultiplayerIframeRuntime({
     setConnectionState({ status: "CONNECTING" });
     reconnectAttemptRef.current = 0;
     setRetryKey(0);
-  }, [closeCurrent, room.instance.id, room.participant.connectionGeneration]);
+    setPlayers([]);
+    setRematchState("CHECKING");
+    setRematchBusy(false);
+    setRematchError(null);
+    rematchRequestRef.current += 1;
+    refreshRoster();
+  }, [
+    closeCurrent,
+    refreshRoster,
+    room.instance.id,
+    room.instance.generation,
+    room.participant.connectionGeneration,
+  ]);
+
+  const applyRematchResponse = useCallback(
+    (response: MultiplayerRematchResponse) => {
+      setRematchError(null);
+      if (response.state === "STARTED") {
+        setRematchState("STARTING");
+        onRoomChange(response.room);
+        return;
+      }
+      setRematchState(response.state);
+    },
+    [onRoomChange],
+  );
+
+  const refreshRematch = useCallback(() => {
+    const request = ++rematchRequestRef.current;
+    void fetchMultiplayerRematchStatus({
+      instanceId: room.instance.id,
+      expectedGeneration: room.instance.generation,
+    })
+      .then((response) => {
+        if (request === rematchRequestRef.current) applyRematchResponse(response);
+      })
+      .catch((reason: unknown) => {
+        if (request !== rematchRequestRef.current) return;
+        if (reason instanceof ApiClientError && reason.code === "INSTANCE_NOT_JOINABLE") {
+          setRematchState("UNAVAILABLE");
+          setRematchError(null);
+          return;
+        }
+        setRematchError(
+          reason instanceof Error && reason.message
+            ? reason.message
+            : "재대결 상태를 확인하지 못했습니다.",
+        );
+      });
+  }, [applyRematchResponse, room.instance.generation, room.instance.id]);
+
+  useEffect(() => {
+    if (connectionState.status !== "TERMINAL_COMMITTED") return;
+    refreshRematch();
+    const timer = window.setInterval(refreshRematch, 15_000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [connectionState.status, refreshRematch]);
 
   const handleConnectionState = useCallback(
     (nextState: MultiplayerParentConnectionState) => {
       if (nextState.status === "CONNECTED") {
         reconnectAttemptRef.current = 0;
         setConnectionState(nextState);
+        refreshRoster();
         return;
       }
       if (nextState.status === "DISCONNECTED") {
@@ -148,7 +298,7 @@ export function MultiplayerIframeRuntime({
       }
       setConnectionState(nextState);
     },
-    [closeCurrent],
+    [closeCurrent, refreshRoster],
   );
 
   const handleFrameLoad = useCallback(
@@ -175,7 +325,11 @@ export function MultiplayerIframeRuntime({
             contentWindow,
             transport.socket,
             transport.bootstrap,
-            { onConnectionState: handleConnectionState },
+            {
+              onConnectionState: handleConnectionState,
+              onRosterChange: refreshRoster,
+              onRematchChange: refreshRematch,
+            },
           );
         })
         .catch((error: unknown) => {
@@ -189,7 +343,14 @@ export function MultiplayerIframeRuntime({
           });
         });
     },
-    [closeCurrent, connectionGeneration, handleConnectionState, room.instance.id],
+    [
+      closeCurrent,
+      connectionGeneration,
+      handleConnectionState,
+      refreshRematch,
+      refreshRoster,
+      room.instance.id,
+    ],
   );
 
   const retry = useCallback(() => {
@@ -200,13 +361,14 @@ export function MultiplayerIframeRuntime({
   }, [closeCurrent]);
 
   const leave = useCallback(async () => {
-    if (connectionState.status === "TERMINAL_COMMITTED" || connectionState.status === "ABORTED") {
-      closeCurrent();
-      onExit();
-      return;
-    }
     setLeaving(true);
-    if (connectionState.status !== "DISCONNECTED") bridgeRef.current?.leave();
+    if (
+      connectionState.status !== "DISCONNECTED" &&
+      connectionState.status !== "TERMINAL_COMMITTED" &&
+      connectionState.status !== "ABORTED"
+    ) {
+      bridgeRef.current?.leave();
+    }
     try {
       await leaveMultiplayerRoom({
         instanceId: room.instance.id,
@@ -217,6 +379,27 @@ export function MultiplayerIframeRuntime({
       onExit();
     }
   }, [closeCurrent, connectionState.status, onExit, room.instance.generation, room.instance.id]);
+
+  const requestRematch = useCallback(async () => {
+    setRematchBusy(true);
+    setRematchError(null);
+    try {
+      applyRematchResponse(
+        await requestMultiplayerRematch({
+          instanceId: room.instance.id,
+          expectedGeneration: room.instance.generation,
+        }),
+      );
+    } catch (reason) {
+      setRematchError(
+        reason instanceof Error && reason.message
+          ? reason.message
+          : "재대결을 요청하지 못했습니다.",
+      );
+    } finally {
+      setRematchBusy(false);
+    }
+  }, [applyRematchResponse, room.instance.generation, room.instance.id]);
 
   const copyRoom = useCallback(
     async (kind: "CODE" | "LINK") => {
@@ -245,52 +428,136 @@ export function MultiplayerIframeRuntime({
       </div>
     ) : undefined;
 
-  return (
-    <div className="relative w-full">
-      <GameFrame
-        key={`${attemptKey}:${retryKey}`}
-        src={src}
-        title={title}
-        autoStart
-        frameClassName={frameClassName}
-        frameStyle={frameStyle}
-        iframeStyle={iframeStyle}
-        onFrameLoad={handleFrameLoad}
-        showReloadControl={false}
-      />
-      <div className="absolute left-3 top-3 z-30 flex max-w-[calc(100%_-_5.5rem)] flex-wrap items-center gap-2 rounded-2xl border border-white/15 bg-black/75 px-3 py-2 text-xs font-bold text-white shadow-lg backdrop-blur">
-        <span className="whitespace-nowrap">방 코드 {room.instance.publicCode}</span>
-        <button
-          type="button"
-          onClick={() => void copyRoom("CODE")}
-          className="cursor-pointer rounded-full border border-white/20 px-2 py-0.5 text-[11px] hover:bg-white/10"
-        >
-          {copied === "CODE" ? "코드 복사됨" : "코드 복사"}
-        </button>
-        {shareValue && (
+  const rematchActions =
+    connectionState.status === "TERMINAL_COMMITTED" ? (
+      <div className="mt-5 border-t border-border pt-5">
+        {rematchState === "OPPONENT_REQUESTED" ? (
+          <p className="text-sm font-bold text-brand-light">상대방이 재대결을 요청했습니다.</p>
+        ) : rematchState === "WAITING" ? (
+          <p className="text-sm font-semibold text-text-secondary">
+            상대방의 재대결 응답을 기다리는 중입니다.
+          </p>
+        ) : rematchState === "STARTING" ? (
+          <p className="text-sm font-semibold text-text-secondary">새 경기를 준비하고 있습니다.</p>
+        ) : rematchState === "UNAVAILABLE" ? (
+          <p className="text-sm font-semibold text-text-muted">
+            재대결 가능 시간이 종료되었습니다.
+          </p>
+        ) : (
+          <p className="text-sm text-text-secondary">같은 상대와 한 판 더 진행할 수 있습니다.</p>
+        )}
+        {(rematchState === "AVAILABLE" || rematchState === "OPPONENT_REQUESTED") && (
           <button
             type="button"
-            onClick={() => void copyRoom("LINK")}
-            className="cursor-pointer rounded-full border border-brand/50 px-2 py-0.5 text-[11px] text-brand-light hover:bg-brand/15"
+            disabled={rematchBusy}
+            onClick={() => void requestRematch()}
+            className="mt-3 rounded-xl bg-brand px-5 py-2.5 text-sm font-black text-white disabled:cursor-wait disabled:opacity-60"
           >
-            {copied === "LINK" ? "링크 복사됨" : "초대 링크 복사"}
+            {rematchBusy
+              ? "처리 중"
+              : rematchState === "OPPONENT_REQUESTED"
+                ? "재대결 수락"
+                : "다시하기"}
           </button>
         )}
-        <button
-          type="button"
-          disabled={leaving}
-          onClick={() => void leave()}
-          className="cursor-pointer rounded-full border border-red-300/30 px-2 py-0.5 text-[11px] text-red-200 hover:bg-red-400/10 disabled:cursor-wait disabled:opacity-60"
-        >
-          {leaving ? "나가는 중" : "나가기"}
-        </button>
+        {rematchState === "CHECKING" && (
+          <p className="mt-2 text-xs font-semibold text-text-muted">재대결 가능 여부 확인 중</p>
+        )}
+        {rematchError && (
+          <p role="alert" className="mt-2 text-xs font-semibold text-accent-red">
+            {rematchError}
+          </p>
+        )}
       </div>
-      <MultiplayerConnectionOverlay
-        state={connectionState}
-        canonicalResult={canonicalResult}
-        onRetry={retry}
-        onLeave={() => void leave()}
-      />
+    ) : undefined;
+
+  const leftPlayer = players.find((player) => player.seatIndex === 0);
+  const rightPlayer = players.find((player) => player.seatIndex === 1);
+  const connectionLabel =
+    connectionState.status === "CONNECTED"
+      ? "서버 연결됨"
+      : connectionState.status === "CONNECTING"
+        ? "연결 중"
+        : connectionState.status === "TERMINAL_PENDING"
+          ? "결과 저장 중"
+          : connectionState.status === "TERMINAL_COMMITTED"
+            ? "경기 종료"
+            : "연결 확인 필요";
+
+  return (
+    <div className="w-full bg-[#08090d]">
+      <div className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 border-b border-white/10 bg-surface-raised px-3 py-2 sm:px-4">
+        <PlayerProfileCard
+          player={leftPlayer}
+          seatIndex={0}
+          selfParticipantId={room.participant.id}
+        />
+        <div className="flex flex-col items-center gap-1">
+          <div className="flex flex-wrap items-center justify-center gap-1.5 text-[10px] font-bold text-text-secondary sm:text-[11px]">
+            <span className="whitespace-nowrap rounded-full border border-border bg-surface px-2 py-1">
+              방 코드 {room.instance.publicCode}
+            </span>
+            <button
+              type="button"
+              onClick={() => void copyRoom("CODE")}
+              className="cursor-pointer rounded-full border border-border px-2 py-1 hover:bg-surface-overlay"
+            >
+              {copied === "CODE" ? "복사됨" : "코드 복사"}
+            </button>
+            {shareValue && (
+              <button
+                type="button"
+                onClick={() => void copyRoom("LINK")}
+                className="cursor-pointer rounded-full border border-brand/40 px-2 py-1 text-brand-light hover:bg-brand/10"
+              >
+                {copied === "LINK" ? "복사됨" : "링크 복사"}
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={leaving}
+              onClick={() => void leave()}
+              className="cursor-pointer rounded-full border border-red-300/20 px-2 py-1 text-red-300 hover:bg-red-400/10 disabled:cursor-wait disabled:opacity-60"
+            >
+              {leaving ? "나가는 중" : "나가기"}
+            </button>
+          </div>
+          <span
+            className={`text-[10px] font-bold ${
+              connectionState.status === "CONNECTED" ? "text-emerald-400" : "text-text-muted"
+            }`}
+          >
+            {connectionLabel}
+          </span>
+        </div>
+        <PlayerProfileCard
+          player={rightPlayer}
+          seatIndex={1}
+          selfParticipantId={room.participant.id}
+        />
+      </div>
+      <div className="relative w-full overflow-hidden">
+        <GameFrame
+          key={`${attemptKey}:${room.instance.generation}:${retryKey}`}
+          src={src}
+          title={title}
+          autoStart
+          frameClassName={frameClassName}
+          frameStyle={frameStyle}
+          iframeStyle={iframeStyle}
+          onFrameLoad={handleFrameLoad}
+          showReloadControl={false}
+          disableScrolling
+        />
+        <MultiplayerConnectionOverlay
+          state={connectionState}
+          canonicalResult={canonicalResult}
+          terminalActions={rematchActions}
+          onRetry={retry}
+          onLeave={() => void leave()}
+          hideConnectedStatus
+        />
+      </div>
     </div>
   );
 }

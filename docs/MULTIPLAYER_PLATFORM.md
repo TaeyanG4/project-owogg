@@ -309,9 +309,11 @@ lifecycle: MATCH | CONTINUOUS
 runtimeBackend: internal only
 ```
 
-`public_code`는 random opaque locator이며 authorization secret이 아니다. `INVITE_ONLY`는 별도
-single/limited-use invite token을 요구한다. password는 OPEN/INVITE와 abuse 정책을 검증한 후의 후속
-기능으로 남긴다.
+`public_code`는 generic profile에서 random opaque locator이며 사용자 세션 credential은 아니다.
+`INVITE_ONLY` profile은 별도 single/limited-use invite token을 계속 요구한다. 다만 공식 오목 preset은
+`PRIVATE + OPEN`만 허용한다. 목록에 노출되지 않는 72-bit random code 자체를 사용자가 공유하는 단일
+입장 값으로 사용하되 로그인, IP/user rate limit, 2인 정원과 서버 권위 판정은 그대로 적용한다.
+password는 OPEN/INVITE와 abuse 정책을 검증한 후의 후속 기능으로 남긴다.
 
 ### Instance 상태
 
@@ -332,6 +334,11 @@ PENDING → ACTIVE → FINALIZING → COMMITTED
 한 Instance에는 한 generation당 active match 하나만 둔다. 같은 Instance에서 rematch가 필요하면
 `CLOSING → LOBBY` 전이와 같은 원자적 write에서 generation을 정확히 1 증가시킨다. 다른 전이는
 generation을 바꿀 수 없다.
+
+오목 재대결은 `COMMITTED` 뒤 2분 동안 두 active participant의 명시적 동의를 exact generation에
+append-only로 저장한다. 한 명만 요청하면 대기하고, 두 번째 동의와 동일한 D1 batch에서 generation을
+`+1` 한 뒤 참가자를 `JOINED`로 되돌린다. DO는 상대 요청을 기존 socket에 parent-only control event로
+알리고, Web은 유실 복구용 15초 폴링만 사용한다.
 
 ### 참가자 연결
 
@@ -360,6 +367,7 @@ generation을 바꿀 수 없다.
 | `multiplayer_matches`                | generation별 match/finalization      | instance+generation unique           |
 | `multiplayer_match_players`          | canonical participant result         | match+user unique                    |
 | `multiplayer_match_actions`          | M1 action idempotency                | match+user+clientActionId unique     |
+| `multiplayer_rematch_requests`       | 종료 match의 양쪽 재대결 동의        | instance+generation+participant      |
 | `multiplayer_reward_outbox`          | exactly-once reward                  | match+user+policy unique             |
 | `multiplayer_instance_admin_actions` | 관리자 강제 종료 감사                | operation ID unique                  |
 | `game_version_leases`                | active exact-version serving         | version+instance unique              |
@@ -813,9 +821,12 @@ slow client
 ### Phase 3 — M1 Simple 오목
 
 - [x] official `omokRules`
-- [x] create/join/invite/ready/action/sync
+- [x] create/join/ready/action/sync와 공식 `PRIVATE + OPEN` 코드 참가
 - [x] server winner와 typed conflict resync
 - [x] reconnect resume
+- [x] parent-only 좌우 프로필, 방 제어 header, nested scrollbar 제거와 오목판/화점 UI
+- [x] Web Audio 착수·종료음과 사용자 소리 on/off
+- [x] 2분 양방향 재대결 동의, exact generation 재시작과 socket 알림/안전 폴링
 - [x] 검증 가능한 official 오목 ZIP source/build와 v1 무랭킹 manifest
 - [x] 관리형 관리자 전용 exact-version `OMOK_V1` 활성화/비활성화 제어면
 - [x] exact version ZIP을 `/admin/games`로 Staging D1/B2에 게시
@@ -829,14 +840,16 @@ Staging 상태(2026-08-27): `official-omok` exact version을 D1/B2에 게시했�
 충돌을 반환했으며, 판정 기준을 `changes` 우선으로 수정하고 인덱스 포함 메타데이터 회귀 테스트와
 전체 `pnpm verify`를 통과했다. 수정본 Staging 재배포와 실제 무랭킹·두 사용자 acceptance가 남아 있다.
 
-후속 로컬 수정(2026-08-27): 방 코드와 초대 링크 복사를 분리하고 전체 링크 붙여넣기 시 코드·토큰을
-자동 인식하도록 했다. `INVITE_ONLY` 방의 public code는 locator일 뿐 입장 권한이 아니므로 code-only
-입장은 계속 거부한다. 15초 parent heartbeat는 Durable Object auto-response로 처리해 idle instance를
-깨우지 않으며, 일시적 단절에는 최대 3회의 제한적 자동 재연결을 적용했다. official 오목 bundle은
-iframe 내부 스크롤을 제거하고 반응형 보드 프레임·격자 끝선·화점 5개를 정리했다. 대상 테스트와
-전체 `pnpm verify`, 1280×720·390×844·390×600 시각 QA는 통과했으나 이 tree는 아직 Staging에
-반영하지 않았다. 코드 배포 뒤 갱신된 official 오목 ZIP을 D1/B2에 새 exact version으로 게시하고
-프로필 재확인 후 두 사용자 acceptance를 다시 수행한다.
+후속 로컬 수정(2026-08-27): 공식 오목 preset을 `PRIVATE + OPEN` 코드 참가로 새 revision화하고,
+로비를 새 방·링크/방 코드 참가의 한 경로로 단순화했다. 과거 invite 링크는 전환 기간 읽기 호환만
+유지하며 새 UI에는 token을 노출하지 않는다. parent header가 좌우 공개 프로필, 방 코드/링크 복사,
+연결 상태와 나가기를 소유해 게임 제목을 가리지 않으며 iframe 문서와 frame 양쪽의 nested scroll을
+차단했다. 오목판 끝선·화점 5개와 합성 착수/승패음을 추가했고, `COMMITTED` 뒤 양쪽 동의로만 정확히
+한 generation을 여는 재대결을 D1/DO에 구현했다. 상대 요청은 socket control hint로 즉시 갱신하고
+15초 폴링은 유실 복구에만 사용한다. 대상 DB/Web/Workers 테스트, official ZIP 검증, 데스크톱·모바일
+시각 QA와 전체 `pnpm verify`를 통과했다. 이 tree의 새 Staging 배포·두 사용자 acceptance가 남아 있다. 배포 뒤
+갱신된 official 오목 ZIP을 D1/B2에 새 exact version으로 게시하고 관리자 화면에서 기존 프로필을
+`코드 참가로 갱신`한 후 검증한다.
 
 완료 Gate: 동시/중복 action으로 corruption이 없고 iframe이 결과·업적·XP를 위조할 수 없다.
 

@@ -2,9 +2,13 @@ import {
   MultiplayerCreateInviteResponseSchema,
   MultiplayerGameAvailabilityResponseSchema,
   MultiplayerRoomResponseSchema,
+  MultiplayerRoomRosterResponseSchema,
+  MultiplayerRematchResponseSchema,
   type MultiplayerCreateInviteResponse,
   type MultiplayerGameAvailabilityResponse,
   type MultiplayerRoomResponse,
+  type MultiplayerRoomRosterResponse,
+  type MultiplayerRematchResponse,
 } from "@owogg/contracts";
 import { apiFetch } from "../../../lib/api/client";
 
@@ -46,6 +50,41 @@ export function joinMultiplayerRoom(
     method: "POST",
     body: JSON.stringify(input),
   });
+}
+
+export function fetchMultiplayerRoomRoster(
+  instanceId: string,
+): Promise<MultiplayerRoomRosterResponse> {
+  return apiFetch(
+    `/api/multiplayer/instances/${encodeURIComponent(instanceId)}/roster`,
+    MultiplayerRoomRosterResponseSchema,
+    { method: "GET" },
+  );
+}
+
+export function fetchMultiplayerRematchStatus(input: {
+  readonly instanceId: string;
+  readonly expectedGeneration: number;
+}): Promise<MultiplayerRematchResponse> {
+  return apiFetch(
+    `/api/multiplayer/instances/${encodeURIComponent(input.instanceId)}/rematch?generation=${encodeURIComponent(String(input.expectedGeneration))}`,
+    MultiplayerRematchResponseSchema,
+    { method: "GET" },
+  );
+}
+
+export function requestMultiplayerRematch(input: {
+  readonly instanceId: string;
+  readonly expectedGeneration: number;
+}): Promise<MultiplayerRematchResponse> {
+  return apiFetch(
+    `/api/multiplayer/instances/${encodeURIComponent(input.instanceId)}/rematch`,
+    MultiplayerRematchResponseSchema,
+    {
+      method: "POST",
+      body: JSON.stringify({ expectedGeneration: input.expectedGeneration }),
+    },
+  );
 }
 
 export function createMultiplayerInvite(input: {

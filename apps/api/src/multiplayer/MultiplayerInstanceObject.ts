@@ -1,12 +1,14 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
+  MULTIPLAYER_REMATCH_CHANGED_EVENT,
   parseGameToHostMultiplayerMessage,
   type MultiActionMessage,
   type MultiplayerActionRejectionCode,
 } from "@owogg/game-sdk/bridge";
 import {
   MULTIPLAYER_WEBSOCKET_PROTOCOL,
+  MULTIPLAYER_REMATCH_WINDOW_MS,
   OMOK_ACTION_LEDGER_SCHEMA_VERSION,
   OMOK_RULESET_KEY,
   OMOK_RULESET_REVISION,
@@ -32,6 +34,7 @@ import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_CONNECT_PATH,
   MULTIPLAYER_INTERNAL_PROTOCOL_HEADER,
+  MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH,
   decodeVerifiedMultiplayerClaims,
 } from "./internalProtocol.js";
 
@@ -263,12 +266,45 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
           action_count INTEGER NOT NULL,
           PRIMARY KEY (participant_id, generation)
         );
+        CREATE TABLE IF NOT EXISTS rematch_window (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          generation INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL
+        );
       `);
     });
   }
 
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (
+      request.method === "POST" &&
+      url.pathname === MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH &&
+      request.headers.get(MULTIPLAYER_INTERNAL_PROTOCOL_HEADER) === MULTIPLAYER_WEBSOCKET_PROTOCOL
+    ) {
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        return new Response(null, { status: 400 });
+      }
+      if (
+        typeof body !== "object" ||
+        body === null ||
+        Array.isArray(body) ||
+        Object.keys(body).length !== 1 ||
+        !("generation" in body) ||
+        !isPositiveInteger(body.generation)
+      ) {
+        return new Response(null, { status: 400 });
+      }
+      const runtime = this.readRuntimeMatch();
+      if (!runtime || runtime.generation !== body.generation || runtime.lifecycle !== "COMMITTED") {
+        return new Response(null, { status: 409 });
+      }
+      this.broadcastRematchChanged(runtime);
+      return new Response(null, { status: 204 });
+    }
     if (
       request.method !== "GET" ||
       url.pathname !== MULTIPLAYER_INTERNAL_CONNECT_PATH ||
@@ -361,6 +397,22 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
         await this.commitTerminalResult(runtime);
       } catch {
         await this.scheduleFinalizationRetry(runtime.finalizationAttempts + 1);
+      }
+    }
+    const rematchWindow = this.state.storage.sql
+      .exec<{ generation: number; expires_at: number }>(
+        "SELECT generation, expires_at FROM rematch_window WHERE singleton = 1",
+      )
+      .toArray()[0];
+    if (
+      rematchWindow &&
+      isPositiveInteger(rematchWindow.generation) &&
+      isNonNegativeInteger(rematchWindow.expires_at)
+    ) {
+      if (rematchWindow.expires_at <= nowMs) {
+        await this.closeExpiredRematchWindow(rematchWindow.generation);
+      } else {
+        await this.scheduleNextAlarm(rematchWindow.expires_at);
       }
     }
     const nextNonce = this.state.storage.sql
@@ -706,6 +758,9 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     let runtime = await this.ensureRuntimeMatch(match);
     runtime = await this.sendState(socket, runtime, "MULTI_SYNC");
     if (match.status === "COMMITTED" && runtime.terminalResultJson) {
+      if (match.committedAt) {
+        await this.ensureRematchWindow(match.generation, match.committedAt);
+      }
       const terminalResult = JSON.parse(runtime.terminalResultJson) as unknown;
       runtime = this.reserveServerSequence(runtime);
       this.sendTerminalCommitted(socket, runtime, terminalResult);
@@ -866,7 +921,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       await this.scheduleFinalizationRetry(attempts);
       return;
     }
-    await this.closeCommittedInstance(runtime.generation);
+    await this.enterRematchWindow(runtime.generation);
     let completed = this.persistRuntimeMatch({
       ...runtime,
       lifecycle: "COMMITTED",
@@ -878,6 +933,9 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       "UPDATE runtime_meta SET lifecycle_status = 'CLOSED', updated_at = ? WHERE singleton = 1",
       Math.floor(Date.now() / 1_000),
     );
+    if (committed.match.committedAt) {
+      await this.ensureRematchWindow(runtime.generation, committed.match.committedAt);
+    }
   }
 
   private playerOutcome(terminal: OmokTerminalResult, seatIndex: 0 | 1): "WIN" | "LOSS" | "DRAW" {
@@ -885,8 +943,8 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     return terminal.winnerSeatIndex === seatIndex ? "WIN" : "LOSS";
   }
 
-  private async closeCommittedInstance(generation: number): Promise<void> {
-    let instance = await this.container.multiplayerInstanceRepo.findById(this.instanceId());
+  private async enterRematchWindow(generation: number): Promise<void> {
+    const instance = await this.container.multiplayerInstanceRepo.findById(this.instanceId());
     if (!instance || instance.generation !== generation) return;
     const nowIso = new Date().toISOString();
     if (instance.status === "ACTIVE") {
@@ -900,9 +958,31 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
         abortCode: null,
         nowIso,
       });
-      instance = await this.container.multiplayerInstanceRepo.findById(instance.id);
     }
-    if (instance?.status === "CLOSING") {
+  }
+
+  private async ensureRematchWindow(generation: number, committedAtIso: string): Promise<void> {
+    const committedAtMs = Date.parse(committedAtIso);
+    if (!Number.isFinite(committedAtMs)) return;
+    const expiresAt = committedAtMs + MULTIPLAYER_REMATCH_WINDOW_MS;
+    this.state.storage.sql.exec(
+      `INSERT INTO rematch_window (singleton, generation, expires_at)
+       VALUES (1, ?, ?)
+       ON CONFLICT(singleton) DO NOTHING`,
+      generation,
+      expiresAt,
+    );
+    if (expiresAt <= Date.now()) {
+      await this.closeExpiredRematchWindow(generation);
+    } else {
+      await this.scheduleNextAlarm(expiresAt);
+    }
+  }
+
+  private async closeExpiredRematchWindow(generation: number): Promise<void> {
+    const instance = await this.container.multiplayerInstanceRepo.findById(this.instanceId());
+    if (instance?.status === "CLOSING" && instance.generation === generation) {
+      const nowIso = new Date().toISOString();
       await this.container.multiplayerInstanceRepo.transition({
         instanceId: instance.id,
         expectedStatus: "CLOSING",
@@ -914,6 +994,14 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
         nowIso,
       });
     }
+    const runtime = this.readRuntimeMatch();
+    if (runtime?.generation === generation && runtime.lifecycle === "COMMITTED") {
+      this.broadcastRematchChanged(runtime);
+    }
+    this.state.storage.sql.exec(
+      "DELETE FROM rematch_window WHERE singleton = 1 AND generation = ?",
+      generation,
+    );
   }
 
   private consumeAdmission(
@@ -957,6 +1045,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
         );
         this.state.storage.sql.exec("DELETE FROM runtime_match");
         this.state.storage.sql.exec("DELETE FROM participant_rate_windows");
+        this.state.storage.sql.exec("DELETE FROM rematch_window");
       }
     } else {
       this.state.storage.sql.exec(
@@ -1456,6 +1545,24 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
   private broadcastTerminalCommitted(runtime: RuntimeMatch, result: OmokTerminalResult): void {
     for (const socket of this.state.getWebSockets()) {
       this.sendTerminalCommitted(socket, runtime, result);
+    }
+  }
+
+  private broadcastRematchChanged(runtime: RuntimeMatch): void {
+    const sequenced = this.reserveServerSequence(runtime);
+    const message = JSON.stringify({
+      type: "MULTI_EVENT",
+      v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
+      generation: sequenced.generation,
+      serverSeq: sequenced.serverSeq,
+      name: MULTIPLAYER_REMATCH_CHANGED_EVENT,
+      payload: {},
+    });
+    for (const socket of this.state.getWebSockets()) {
+      if (socket.readyState !== 1) continue;
+      const attachment = this.readAttachment(socket);
+      if (!attachment || attachment.generation !== sequenced.generation) continue;
+      socket.send(message);
     }
   }
 

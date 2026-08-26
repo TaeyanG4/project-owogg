@@ -44,10 +44,11 @@ function isMultiplayerCatalog(runtime: RuntimeGame): boolean {
     : runtime.canonical.catalog.modes.includes("online-multi");
 }
 
-function isExactOfficialOmokProfile(
+function isOfficialOmokProfileWithJoinPolicy(
   profile: ApprovedMultiplayerProfileV1,
   gameId: number,
   gameVersionId: number,
+  joinPolicy: "OPEN" | "INVITE_ONLY",
 ): boolean {
   return (
     profile.profileVersion === 1 &&
@@ -70,11 +71,30 @@ function isExactOfficialOmokProfile(
     profile.allowedVisibility.length === 1 &&
     profile.allowedVisibility[0] === "PRIVATE" &&
     profile.allowedJoinPolicies.length === 1 &&
-    profile.allowedJoinPolicies[0] === "INVITE_ONLY" &&
+    profile.allowedJoinPolicies[0] === joinPolicy &&
     profile.maxActionBytes === 512 &&
     profile.maxStateBytes === 4096 &&
     profile.actionRateLimit === 5 &&
     profile.rewardPolicyId === null
+  );
+}
+
+function isCurrentOfficialOmokProfile(
+  profile: ApprovedMultiplayerProfileV1,
+  gameId: number,
+  gameVersionId: number,
+): boolean {
+  return isOfficialOmokProfileWithJoinPolicy(profile, gameId, gameVersionId, "OPEN");
+}
+
+function isRecognizedOfficialOmokProfile(
+  profile: ApprovedMultiplayerProfileV1,
+  gameId: number,
+  gameVersionId: number,
+): boolean {
+  return (
+    isCurrentOfficialOmokProfile(profile, gameId, gameVersionId) ||
+    isOfficialOmokProfileWithJoinPolicy(profile, gameId, gameVersionId, "INVITE_ONLY")
   );
 }
 
@@ -102,7 +122,10 @@ function buildOfficialOmokProfile(
     minPlayers: 2,
     maxPlayers: 2,
     allowedVisibility: ["PRIVATE"],
-    allowedJoinPolicies: ["INVITE_ONLY"],
+    // A PRIVATE room is never listed. Its 72-bit random public code is the single capability
+    // users exchange, while authenticated membership, rate limiting, and server authority remain
+    // unchanged. Generic profiles may still opt into one-use INVITE_ONLY credentials.
+    allowedJoinPolicies: ["OPEN"],
     maxActionBytes: 512,
     maxStateBytes: 4096,
     actionRateLimit: 5,
@@ -159,7 +182,7 @@ export class OfficialMultiplayerProfileUseCases {
     );
     if (
       record &&
-      !isExactOfficialOmokProfile(record.profile, runtime.identity.id, runtime.liveVersion.id)
+      !isRecognizedOfficialOmokProfile(record.profile, runtime.identity.id, runtime.liveVersion.id)
     ) {
       return { ok: false, code: "PROFILE_CONFLICT" };
     }
@@ -210,23 +233,44 @@ export class OfficialMultiplayerProfileUseCases {
       return { ok: false, code: "PROFILE_CONFLICT" };
     }
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const enabled = await this.dependencies.profiles.findEnabledForExactVersion(
+      let enabled = await this.dependencies.profiles.findEnabledForExactVersion(
         runtime.identity.id,
         runtime.liveVersion.id,
       );
       if (enabled) {
-        return isExactOfficialOmokProfile(
-          enabled.profile,
-          runtime.identity.id,
-          runtime.liveVersion.id,
-        )
-          ? {
-              ok: true,
-              gameSlug: runtime.identity.slug,
-              gameVersionId: runtime.liveVersion.id,
-              record: enabled,
-            }
-          : { ok: false, code: "PROFILE_CONFLICT" };
+        if (
+          isCurrentOfficialOmokProfile(enabled.profile, runtime.identity.id, runtime.liveVersion.id)
+        ) {
+          return {
+            ok: true,
+            gameSlug: runtime.identity.slug,
+            gameVersionId: runtime.liveVersion.id,
+            record: enabled,
+          };
+        }
+        if (
+          !isRecognizedOfficialOmokProfile(
+            enabled.profile,
+            runtime.identity.id,
+            runtime.liveVersion.id,
+          )
+        ) {
+          return { ok: false, code: "PROFILE_CONFLICT" };
+        }
+
+        // Preset semantics are immutable. Upgrade the historical one-use-invite revision by
+        // disabling it with an audited reason and creating a fresh room-code revision below.
+        const disabled = await this.dependencies.profiles.setEnabled({
+          profileId: enabled.id,
+          enabled: false,
+          changedByAdminId: input.changedByAdminId,
+          reasonCode: "ACCESS_POLICY_UPGRADE",
+          nowIso,
+        });
+        if (disabled.status === "NOT_FOUND" || disabled.status === "CONFLICT") {
+          return { ok: false, code: "PROFILE_CONFLICT" };
+        }
+        enabled = null;
       }
 
       const latest = await this.dependencies.profiles.findLatestForExactVersion(
@@ -236,7 +280,11 @@ export class OfficialMultiplayerProfileUseCases {
       let candidate = latest;
       if (
         !candidate ||
-        !isExactOfficialOmokProfile(candidate.profile, runtime.identity.id, runtime.liveVersion.id)
+        !isCurrentOfficialOmokProfile(
+          candidate.profile,
+          runtime.identity.id,
+          runtime.liveVersion.id,
+        )
       ) {
         const created = await this.dependencies.profiles.createApprovedRevision({
           sourceRequestId: null,

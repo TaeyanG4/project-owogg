@@ -14,12 +14,67 @@
   const revisionLabel = document.getElementById("revisionLabel");
   const stoneBadge = document.getElementById("stoneBadge");
   const stoneLabel = document.getElementById("stoneLabel");
+  const soundToggle = document.getElementById("soundToggle");
+  const soundLabel = document.getElementById("soundLabel");
   const bridge = window.OWOGG && window.OWOGG.multiplayer;
   const cells = [];
 
   let view = null;
   let pendingActionId = null;
   let connectionState = "CONNECTING";
+  let soundEnabled = true;
+  let audioContext = null;
+
+  function getAudioContext() {
+    if (!soundEnabled) return null;
+    if (!audioContext) {
+      const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextConstructor) return null;
+      audioContext = new AudioContextConstructor();
+    }
+    if (audioContext.state === "suspended") void audioContext.resume();
+    return audioContext;
+  }
+
+  function tone(frequency, startOffset, duration, volume, type) {
+    const context = getAudioContext();
+    if (!context || context.state === "closed") return;
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const startsAt = context.currentTime + startOffset;
+    oscillator.type = type || "sine";
+    oscillator.frequency.setValueAtTime(frequency, startsAt);
+    gain.gain.setValueAtTime(0.0001, startsAt);
+    gain.gain.exponentialRampToValueAtTime(volume, startsAt + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startsAt + duration);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start(startsAt);
+    oscillator.stop(startsAt + duration + 0.02);
+  }
+
+  function playMoveSound(stone) {
+    tone(stone === "BLACK" ? 190 : 260, 0, 0.075, 0.1, "triangle");
+    tone(stone === "BLACK" ? 125 : 175, 0.025, 0.095, 0.055, "sine");
+  }
+
+  function playTerminalSound(won, draw) {
+    if (draw) {
+      tone(240, 0, 0.12, 0.07, "sine");
+      tone(240, 0.15, 0.12, 0.06, "sine");
+      return;
+    }
+    const notes = won ? [392, 494, 659] : [330, 247, 196];
+    notes.forEach(function (frequency, index) {
+      tone(frequency, index * 0.11, 0.16, 0.075, "sine");
+    });
+  }
+
+  function renderSoundToggle() {
+    soundToggle.setAttribute("aria-pressed", soundEnabled ? "true" : "false");
+    soundToggle.setAttribute("aria-label", soundEnabled ? "게임 소리 끄기" : "게임 소리 켜기");
+    soundLabel.textContent = soundEnabled ? "소리 켬" : "소리 끔";
+  }
 
   function setStatus(title, detail) {
     statusTitle.textContent = title;
@@ -195,9 +250,22 @@
     if (message.type === "MULTI_SYNC" || message.type === "MULTI_STATE") {
       const nextView = parseView(message.payload);
       if (!nextView || nextView.revision !== message.revision) return;
+      const previousView = view;
       view = nextView;
       pendingActionId = null;
       render();
+      if (previousView && nextView.revision > previousView.revision) {
+        if (previousView.status === "ACTIVE" && nextView.status !== "ACTIVE") {
+          playTerminalSound(
+            nextView.winnerSeatIndex === nextView.yourSeatIndex,
+            nextView.status === "DRAW",
+          );
+        } else if (nextView.lastMove) {
+          const latestStone =
+            nextView.board[nextView.lastMove.y * BOARD_SIZE + nextView.lastMove.x];
+          playMoveSound(latestStone === "B" ? "BLACK" : "WHITE");
+        }
+      }
       return;
     }
     if (message.type === "MULTI_ACTION_REJECTED") {
@@ -229,6 +297,7 @@
   }
 
   function tryMove(x, y) {
+    getAudioContext();
     if (
       !bridge ||
       !view ||
@@ -250,6 +319,15 @@
     pendingActionId = actionId;
     render();
   }
+
+  soundToggle.addEventListener("click", function () {
+    soundEnabled = !soundEnabled;
+    if (soundEnabled) {
+      getAudioContext();
+      tone(440, 0, 0.08, 0.05, "sine");
+    }
+    renderSoundToggle();
+  });
 
   for (let y = 0; y < BOARD_SIZE; y += 1) {
     for (let x = 0; x < BOARD_SIZE; x += 1) {
@@ -281,5 +359,6 @@
   if (!bridge.ready()) {
     setStatus("준비 신호를 보내지 못했습니다", "게임 페이지를 새로고침해 주세요.");
   }
+  renderSoundToggle();
   render();
 })();

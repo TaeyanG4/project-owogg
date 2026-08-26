@@ -150,7 +150,7 @@ test("managed admin can activate, inspect, and audit-disable the exact live Omok
     assert.equal(enabled.profile?.leaderboardEnabled, false);
     assert.equal(enabled.profile?.rewardPolicyId, null);
     assert.deepEqual(enabled.profile?.allowedVisibility, ["PRIVATE"]);
-    assert.deepEqual(enabled.profile?.allowedJoinPolicies, ["INVITE_ONLY"]);
+    assert.deepEqual(enabled.profile?.allowedJoinPolicies, ["OPEN"]);
 
     const stored = raw
       .prepare(

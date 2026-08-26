@@ -12,7 +12,6 @@ import type {
 } from "@owogg/contracts";
 import { MultiplayerIframeRuntime } from "./MultiplayerIframeRuntime";
 import {
-  createMultiplayerInvite,
   createMultiplayerRoom,
   fetchMultiplayerGameAvailability,
   joinMultiplayerRoom,
@@ -48,8 +47,6 @@ function errorMessage(error: unknown): string {
 
 const PUBLIC_ROOM_CODE_PATTERN = /^[A-Za-z0-9_-]{12,64}$/;
 const INVITE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
-const INVITE_REQUIRED_MESSAGE =
-  "이 게임은 초대 전용입니다. 호스트가 보낸 초대 링크를 붙여넣어 주세요.";
 
 /** Keeps the invite credential in parent UI only while producing the one-click URL another player
  * can open. The fragment is never sent in an HTTP request, so the sandbox, origin server, CDN,
@@ -89,9 +86,9 @@ export function readMultiplayerRoomShareValue(pageUrl: string): {
   }
 }
 
-/** Accepts the safe one-click URL (or the two-line non-URL fallback) without ever putting the
- * invite credential into an HTTP query. A plain public room code intentionally returns null: it
- * locates a room but does not authorize entry to an INVITE_ONLY room. */
+/** Accepts a room-code link, a plain code, and historical two-part invite values. New official
+ * Omok rooms need only the code; the hidden invite value is retained solely so an already-created
+ * legacy Staging room can still be consumed during the rollout. */
 export function parseMultiplayerRoomJoinValue(value: string): {
   readonly publicCode: string;
   readonly inviteToken: string;
@@ -100,11 +97,12 @@ export function parseMultiplayerRoomJoinValue(value: string): {
   if (!trimmed) return null;
 
   const shared = readMultiplayerRoomShareValue(trimmed);
-  if (
-    PUBLIC_ROOM_CODE_PATTERN.test(shared.publicCode) &&
-    INVITE_TOKEN_PATTERN.test(shared.inviteToken)
-  ) {
+  if (PUBLIC_ROOM_CODE_PATTERN.test(shared.publicCode)) {
     return shared;
+  }
+
+  if (PUBLIC_ROOM_CODE_PATTERN.test(trimmed)) {
+    return { publicCode: trimmed, inviteToken: "" };
   }
 
   const [publicCode, inviteToken, ...rest] = trimmed.split(/\s+/);
@@ -162,12 +160,9 @@ export function MultiplayerGameSurface({
   const [shareValue, setShareValue] = useState<string | undefined>();
   const [publicCode, setPublicCode] = useState("");
   const [inviteToken, setInviteToken] = useState("");
-  const [visibility, setVisibility] = useState<"PUBLIC" | "UNLISTED" | "PRIVATE">("PRIVATE");
-  const [joinPolicy, setJoinPolicy] = useState<"OPEN" | "INVITE_ONLY">("OPEN");
   const [busy, setBusy] = useState<"CREATE" | "JOIN" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const createIdempotencyRef = useRef(newIdempotencyKey());
-  const inviteIdempotencyRef = useRef(newIdempotencyKey());
 
   const discover = useCallback(() => {
     let active = true;
@@ -178,20 +173,15 @@ export function MultiplayerGameSurface({
         if (!active) return;
         setAvailability(resolved);
         if (resolved.status === "AVAILABLE") {
-          const firstVisibility = resolved.profile.allowedVisibility[0];
-          const firstJoinPolicy = resolved.profile.allowedJoinPolicies[0];
-          if (!firstVisibility || !firstJoinPolicy) {
+          if (
+            !resolved.profile.allowedVisibility.includes("PRIVATE") ||
+            !resolved.profile.allowedJoinPolicies.includes("OPEN")
+          ) {
             setAvailability("ERROR");
-            setError("서버가 안전한 방 접근 정책을 제공하지 않았습니다.");
+            setError("관리자 센터에서 공식 오목을 코드 참가 방식으로 갱신해 주세요.");
             return;
           }
           onRuntimeResolved("ONLINE");
-          setVisibility(
-            resolved.profile.allowedVisibility.includes("PRIVATE") ? "PRIVATE" : firstVisibility,
-          );
-          setJoinPolicy(
-            resolved.profile.allowedJoinPolicies.includes("OPEN") ? "OPEN" : firstJoinPolicy,
-          );
         } else {
           onRuntimeResolved("LEGACY");
         }
@@ -219,12 +209,6 @@ export function MultiplayerGameSurface({
     setInviteToken(sharedRoom.inviteToken);
   }, [gameSlug]);
 
-  const inviteRequired =
-    availability !== "LOADING" &&
-    availability !== "ERROR" &&
-    availability.status === "AVAILABLE" &&
-    availability.profile.allowedJoinPolicies.every((policy) => policy === "INVITE_ONLY");
-
   const updateJoinEntry = useCallback((value: string) => {
     const parsed = parseMultiplayerRoomJoinValue(value);
     if (parsed) {
@@ -234,17 +218,6 @@ export function MultiplayerGameSurface({
       return;
     }
     setPublicCode(value);
-  }, []);
-
-  const updateInviteEntry = useCallback((value: string) => {
-    const parsed = parseMultiplayerRoomJoinValue(value);
-    if (parsed) {
-      setPublicCode(parsed.publicCode);
-      setInviteToken(parsed.inviteToken);
-      setError(null);
-      return;
-    }
-    setInviteToken(value);
   }, []);
 
   const createRoom = useCallback(async () => {
@@ -260,37 +233,23 @@ export function MultiplayerGameSurface({
     try {
       const created = await createMultiplayerRoom({
         gameSlug,
-        visibility,
-        joinPolicy,
+        visibility: "PRIVATE",
+        joinPolicy: "OPEN",
         idempotencyKey: createIdempotencyRef.current,
       });
-      let nextShareValue = roomShareValue(created.instance.publicCode);
-      if (joinPolicy === "INVITE_ONLY") {
-        const invite = await createMultiplayerInvite({
-          instanceId: created.instance.id,
-          expectedGeneration: created.instance.generation,
-          idempotencyKey: inviteIdempotencyRef.current,
-        });
-        nextShareValue = roomShareValue(created.instance.publicCode, invite.inviteToken);
-      }
-      setShareValue(nextShareValue);
+      setShareValue(roomShareValue(created.instance.publicCode));
       setRoom(created);
       createIdempotencyRef.current = newIdempotencyKey();
-      inviteIdempotencyRef.current = newIdempotencyKey();
     } catch (reason) {
       setError(errorMessage(reason));
     } finally {
       setBusy(null);
     }
-  }, [availability, gameSlug, joinPolicy, visibility]);
+  }, [availability, gameSlug]);
 
   const joinRoom = useCallback(async () => {
     const normalizedPublicCode = publicCode.trim();
     const normalizedInviteToken = inviteToken.trim();
-    if (inviteRequired && normalizedInviteToken.length === 0) {
-      setError(INVITE_REQUIRED_MESSAGE);
-      return;
-    }
     setBusy("JOIN");
     setError(null);
     try {
@@ -314,7 +273,7 @@ export function MultiplayerGameSurface({
     } finally {
       setBusy(null);
     }
-  }, [inviteRequired, inviteToken, publicCode]);
+  }, [inviteToken, publicCode]);
 
   if (
     availability !== "LOADING" &&
@@ -334,6 +293,7 @@ export function MultiplayerGameSurface({
         {...(frameStyle ? { frameStyle } : {})}
         {...(iframeStyle ? { iframeStyle } : {})}
         {...(shareValue ? { shareValue } : {})}
+        onRoomChange={setRoom}
         onExit={() => {
           setRoom(null);
           setShareValue(undefined);
@@ -379,47 +339,11 @@ export function MultiplayerGameSurface({
               {available?.profile.minPlayers}~{available?.profile.maxPlayers}명 · 서버 권위형{" "}
               {available?.profile.resolvedClass}
             </p>
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              <label className="text-xs font-bold text-text-secondary">
-                공개 범위
-                <select
-                  value={visibility}
-                  onChange={(event) =>
-                    setVisibility(event.target.value as "PUBLIC" | "UNLISTED" | "PRIVATE")
-                  }
-                  className="mt-1.5 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-text-primary"
-                >
-                  {available?.profile.allowedVisibility.map((value) => (
-                    <option key={value} value={value}>
-                      {value === "PRIVATE"
-                        ? "비공개"
-                        : value === "UNLISTED"
-                          ? "링크 공개"
-                          : "전체 공개"}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="text-xs font-bold text-text-secondary">
-                참가 방식
-                <select
-                  value={joinPolicy}
-                  onChange={(event) => setJoinPolicy(event.target.value as "OPEN" | "INVITE_ONLY")}
-                  className="mt-1.5 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-text-primary"
-                >
-                  {available?.profile.allowedJoinPolicies.map((value) => (
-                    <option key={value} value={value}>
-                      {value === "INVITE_ONLY" ? "초대 전용" : "코드로 참가"}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
             <button
               type="button"
               disabled={busy !== null}
               onClick={() => void createRoom()}
-              className="mt-4 w-full cursor-pointer rounded-xl bg-brand py-3 text-sm font-black text-white disabled:cursor-wait disabled:opacity-60"
+              className="mt-5 w-full cursor-pointer rounded-xl bg-brand py-3 text-sm font-black text-white disabled:cursor-wait disabled:opacity-60"
             >
               {busy === "CREATE" ? "방 생성 중" : "새 방 만들기"}
             </button>
@@ -429,42 +353,23 @@ export function MultiplayerGameSurface({
               또는
               <span className="h-px flex-1 bg-border" />
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="text-xs font-bold text-text-secondary">
-                초대 링크 또는 방 코드
-                <input
-                  value={publicCode}
-                  onChange={(event) => updateJoinEntry(event.target.value)}
-                  placeholder="초대 링크를 붙여넣으세요"
-                  autoComplete="off"
-                  className="mt-1.5 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-text-primary"
-                />
-              </label>
-              <label className="text-xs font-bold text-text-secondary">
-                초대 토큰{inviteRequired ? " (필수)" : ""}
-                <input
-                  value={inviteToken}
-                  onChange={(event) => updateInviteEntry(event.target.value)}
-                  placeholder={
-                    inviteRequired ? "링크를 붙여넣으면 자동 입력" : "초대 전용 방에서 사용"
-                  }
-                  autoComplete="off"
-                  className="mt-1.5 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-text-primary"
-                />
-              </label>
-            </div>
+            <label className="block text-xs font-bold text-text-secondary">
+              초대 링크 또는 방 코드
+              <input
+                value={publicCode}
+                onChange={(event) => updateJoinEntry(event.target.value)}
+                placeholder="링크를 붙여넣거나 방 코드를 입력하세요"
+                autoComplete="off"
+                className="mt-1.5 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-text-primary"
+              />
+            </label>
             <p className="mt-2 text-xs leading-relaxed text-text-muted">
-              {inviteRequired
-                ? "방 코드는 방을 찾는 값이며 입장 권한이 아닙니다. 호스트가 보낸 초대 링크 전체를 붙여넣으면 코드와 토큰이 자동으로 입력됩니다."
-                : "초대 링크 전체를 붙여넣으면 방 코드와 초대 토큰을 자동으로 인식합니다."}
+              비공개 방은 목록에 노출되지 않습니다. 받은 링크나 방 코드만 입력하면 참가할 수
+              있습니다.
             </p>
             <button
               type="button"
-              disabled={
-                busy !== null ||
-                publicCode.trim().length === 0 ||
-                (inviteRequired && inviteToken.trim().length === 0)
-              }
+              disabled={busy !== null || publicCode.trim().length === 0}
               onClick={() => void joinRoom()}
               className="mt-3 w-full cursor-pointer rounded-xl border border-border py-3 text-sm font-black text-text-primary hover:bg-surface-overlay disabled:cursor-not-allowed disabled:opacity-50"
             >

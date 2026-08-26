@@ -57,6 +57,42 @@ footer {
   gap: 16px;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.sound-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(20, 22, 30, 0.82);
+  color: #c4b5fd;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.sound-toggle:hover,
+.sound-toggle:focus-visible {
+  border-color: rgba(167, 139, 250, 0.65);
+  background: rgba(124, 58, 237, 0.18);
+}
+
+.sound-toggle:focus-visible {
+  outline: 2px solid #8b5cf6;
+  outline-offset: 2px;
+}
+
+.sound-toggle[aria-pressed="false"] {
+  color: #7b8190;
+}
+
 .eyebrow {
   margin: 0 0 4px;
   color: #a78bfa;
@@ -304,6 +340,14 @@ footer {
   .status-card,
   footer {
     align-items: flex-start;
+  }
+
+  .game-header {
+    align-items: center;
+  }
+
+  .sound-toggle #soundLabel {
+    display: none;
   }
 
   .status-card {

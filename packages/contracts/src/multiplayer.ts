@@ -104,7 +104,13 @@ const AdminOfficialMultiplayerProfileSchema = z
     minPlayers: z.literal(2),
     maxPlayers: z.literal(2),
     allowedVisibility: z.tuple([z.literal("PRIVATE")]),
-    allowedJoinPolicies: z.tuple([z.literal("INVITE_ONLY")]),
+    // Legacy Staging profiles used one-use invite credentials. Keep that exact historical
+    // shape readable so an administrator can perform the audited preset upgrade; newly created
+    // OMOK_V1 revisions use the single room-code access policy.
+    allowedJoinPolicies: z.union([
+      z.tuple([z.literal("OPEN")]),
+      z.tuple([z.literal("INVITE_ONLY")]),
+    ]),
     rewardPolicyId: z.null(),
     leaderboardEnabled: z.literal(false),
     updatedAt: z.string().datetime(),
@@ -263,6 +269,58 @@ export const MultiplayerRoomResponseSchema = z
   })
   .strict();
 export type MultiplayerRoomResponse = z.infer<typeof MultiplayerRoomResponseSchema>;
+
+export const MultiplayerRoomPlayerSchema = z
+  .object({
+    participantId: OpaqueIdSchema,
+    role: z.enum(["HOST", "PLAYER"]),
+    seatIndex: z.number().int().min(0).max(7),
+    status: z.enum(["JOINED", "READY"]),
+    nickname: z.string().min(1).max(20),
+    avatarUrl: z.string().nullable(),
+  })
+  .strict();
+export type MultiplayerRoomPlayer = z.infer<typeof MultiplayerRoomPlayerSchema>;
+
+/** Authenticated parent-only roster. Global user ids and provider identities never enter the
+ * sandbox bridge; only the same public nickname/avatar already used by OwOGG profile surfaces is
+ * returned to a current participant. */
+export const MultiplayerRoomRosterResponseSchema = z
+  .object({
+    instanceId: OpaqueIdSchema,
+    generation: z.number().int().positive(),
+    players: z.array(MultiplayerRoomPlayerSchema).max(8),
+  })
+  .strict();
+export type MultiplayerRoomRosterResponse = z.infer<typeof MultiplayerRoomRosterResponseSchema>;
+
+export const MultiplayerRematchRequestSchema = z
+  .object({ expectedGeneration: z.number().int().positive() })
+  .strict();
+export type MultiplayerRematchRequest = z.infer<typeof MultiplayerRematchRequestSchema>;
+
+const MultiplayerRematchResponseBase = {
+  requestedBySelf: z.boolean(),
+  requestedByOpponent: z.boolean(),
+} as const;
+
+export const MultiplayerRematchResponseSchema = z.discriminatedUnion("state", [
+  z
+    .object({
+      ...MultiplayerRematchResponseBase,
+      state: z.enum(["AVAILABLE", "WAITING", "OPPONENT_REQUESTED"]),
+      room: z.null(),
+    })
+    .strict(),
+  z
+    .object({
+      ...MultiplayerRematchResponseBase,
+      state: z.literal("STARTED"),
+      room: MultiplayerRoomResponseSchema,
+    })
+    .strict(),
+]);
+export type MultiplayerRematchResponse = z.infer<typeof MultiplayerRematchResponseSchema>;
 
 export const MultiplayerCreateInviteResponseSchema = z
   .object({

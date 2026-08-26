@@ -410,6 +410,7 @@ function OfficialOmokProfileControl({ gameId }: { gameId: string }) {
   }, [load]);
 
   const enabled = profile?.status === "ENABLED";
+  const requiresCodeAccessUpgrade = profile?.profile?.allowedJoinPolicies[0] === "INVITE_ONLY";
   const statusLabel =
     profile === null
       ? error
@@ -422,11 +423,13 @@ function OfficialOmokProfileControl({ gameId }: { gameId: string }) {
           : "서버 승인 전";
 
   const handleToggle = async () => {
-    const nextEnabled = !enabled;
+    const nextEnabled = requiresCodeAccessUpgrade ? true : !enabled;
     const confirmed = window.confirm(
-      nextEnabled
-        ? "현재 live 버전에 OWOGG 서버 권위형 오목 프로필을 활성화할까요? 점수 랭킹은 생성되지 않습니다."
-        : "새 방 생성·입장·재연결을 차단할까요? 이미 연결된 방은 즉시 종료되지 않을 수 있습니다.",
+      requiresCodeAccessUpgrade
+        ? "기존 일회용 초대 방식에서 비공개 방 코드 참가 방식으로 프로필을 갱신할까요? 기존 진행 중인 방에는 영향을 주지 않습니다."
+        : nextEnabled
+          ? "현재 live 버전에 OWOGG 서버 권위형 오목 프로필을 활성화할까요? 점수 랭킹은 생성되지 않습니다."
+          : "새 방 생성·입장·재연결을 차단할까요? 이미 연결된 방은 즉시 종료되지 않을 수 있습니다.",
     );
     if (!confirmed) return;
     setBusy(true);
@@ -456,7 +459,7 @@ function OfficialOmokProfileControl({ gameId }: { gameId: string }) {
         <Network className="h-3 w-3" /> {statusLabel}
       </span>
       <span className="rounded-full border border-border px-2 py-1 font-bold text-text-muted">
-        랭킹 없음 · 2인 비공개 초대방
+        랭킹 없음 · 2인 비공개 코드방
       </span>
       <button
         type="button"
@@ -465,7 +468,7 @@ function OfficialOmokProfileControl({ gameId }: { gameId: string }) {
         className="inline-flex items-center gap-1 rounded-lg border border-brand/40 px-2 py-1 font-bold text-brand-light hover:bg-brand/10 disabled:opacity-50"
       >
         {busy && <Loader2 className="h-3 w-3 animate-spin" />}
-        {enabled ? "멀티 비활성화" : "멀티 활성화"}
+        {requiresCodeAccessUpgrade ? "코드 참가로 갱신" : enabled ? "멀티 비활성화" : "멀티 활성화"}
       </button>
       {error && (
         <span className="basis-full text-accent-red">

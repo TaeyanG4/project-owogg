@@ -8,6 +8,8 @@ import { isJsonSafeValue } from "./protocol.js";
 export const MULTIPLAYER_BRIDGE_PROTOCOL_VERSION = 1 as const;
 export const MULTIPLAYER_CLIENT_MAX_PAYLOAD_BYTES = 4 * 1024;
 export const MULTIPLAYER_HOST_MAX_PAYLOAD_BYTES = 16 * 1024;
+/** Parent-owned control hint. The host consumes it and never forwards it into the game iframe. */
+export const MULTIPLAYER_REMATCH_CHANGED_EVENT = "OWOGG_REMATCH_CHANGED" as const;
 
 export const MULTIPLAYER_ACTION_REJECTION_CODES = [
   "MATCH_NOT_ACTIVE",

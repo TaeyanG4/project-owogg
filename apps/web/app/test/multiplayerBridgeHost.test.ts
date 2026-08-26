@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { MultiInitMessage } from "@owogg/game-sdk/bridge";
+import { MULTIPLAYER_REMATCH_CHANGED_EVENT, type MultiInitMessage } from "@owogg/game-sdk/bridge";
 import { MULTIPLAYER_HEARTBEAT_REQUEST, MULTIPLAYER_HEARTBEAT_RESPONSE } from "@owogg/contracts";
 import {
   createMultiplayerBridgeHost,
@@ -330,6 +330,54 @@ test("server projections require current generation and strictly increasing serv
   assert.deepEqual(states, [
     { status: "CONNECTING" },
     { status: "CONNECTED", connectionGeneration: 2 },
+  ]);
+  host.close();
+  gamePort.close();
+});
+
+test("rematch change is consumed by the parent and never enters the game iframe", async () => {
+  const iframe = createIframeHarness();
+  const socket = createSocketHarness();
+  let rematchChanges = 0;
+  const host = createMultiplayerBridgeHost(iframe.windowLike, socket.socket, BOOTSTRAP, {
+    onRematchChange: () => (rematchChanges += 1),
+  });
+  const gamePort = iframe.capture().port;
+  const received: unknown[] = [];
+  gamePort.onmessage = (event) => received.push(event.data);
+
+  socket.message(
+    JSON.stringify({
+      type: "MULTI_EVENT",
+      v: 1,
+      generation: 3,
+      serverSeq: 1,
+      name: MULTIPLAYER_REMATCH_CHANGED_EVENT,
+      payload: {},
+    }),
+  );
+  socket.message(
+    JSON.stringify({
+      type: "MULTI_EVENT",
+      v: 1,
+      generation: 3,
+      serverSeq: 2,
+      name: "GAME_EVENT",
+      payload: { safe: true },
+    }),
+  );
+  await waitUntil(() => rematchChanges + received.length, 2);
+
+  assert.equal(rematchChanges, 1);
+  assert.deepEqual(received, [
+    {
+      type: "MULTI_EVENT",
+      v: 1,
+      generation: 3,
+      serverSeq: 2,
+      name: "GAME_EVENT",
+      payload: { safe: true },
+    },
   ]);
   host.close();
   gamePort.close();

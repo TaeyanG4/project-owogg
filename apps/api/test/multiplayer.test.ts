@@ -15,6 +15,7 @@ import {
   MultiplayerGameAvailabilityResponseSchema,
   MultiplayerJoinTicketResponseSchema,
   MultiplayerRoomResponseSchema,
+  MultiplayerRoomRosterResponseSchema,
 } from "@owogg/contracts";
 import { D1MultiplayerInstanceRepository } from "@owogg/db";
 import { createSqliteD1 } from "../../../packages/db/test/helpers/sqliteD1.js";
@@ -400,6 +401,32 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
   );
   assert.equal(inviteReplay.replayed, true);
   assert.equal(inviteReplay.inviteToken, invite.inviteToken);
+
+  const rosterResponse = await app.request(
+    `http://localhost/api/multiplayer/instances/${INSTANCE_ID}/roster`,
+    {
+      headers: {
+        Cookie: `owogg_session=${sessionToken}`,
+        Origin: "http://localhost:5173",
+        "CF-Connecting-IP": "203.0.113.7",
+      },
+    },
+    env as any,
+  );
+  assert.equal(rosterResponse.status, 200);
+  const roster = MultiplayerRoomRosterResponseSchema.parse(await rosterResponse.json());
+  assert.equal(roster.instanceId, INSTANCE_ID);
+  assert.deepEqual(roster.players, [
+    {
+      participantId: "participant_api_host_0001",
+      role: "HOST",
+      seatIndex: 0,
+      status: "JOINED",
+      nickname: "Host",
+      avatarUrl: null,
+    },
+  ]);
+  assert.equal(JSON.stringify(roster).includes("userId"), false);
 
   const response = await app.request(
     `http://localhost/api/multiplayer/instances/${INSTANCE_ID}/ticket`,

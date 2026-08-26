@@ -16,13 +16,14 @@ test("generic production migrations avoid Cloudflare-incompatible TEMP table DDL
     "0039_streamer_terminology.sql",
     "0040_public_game_engagement.sql",
     "0041_multiplayer_foundation.sql",
+    "0042_multiplayer_rematch.sql",
   ]) {
     const sql = fs.readFileSync(new URL(`../migrations/${filename}`, import.meta.url), "utf8");
     assert.doesNotMatch(sql, /\bCREATE\s+TEMP(?:ORARY)?\s+TABLE\b/i, filename);
   }
 });
 
-test("full production migration chain applies through 0041 with multiplayer and Streamer compatibility schema", () => {
+test("full production migration chain applies through 0042 with multiplayer and Streamer compatibility schema", () => {
   const { raw } = createSqliteD1("");
   const migrationUrl = new URL("../migrations/", import.meta.url);
   const filenames = fs
@@ -62,6 +63,13 @@ test("full production migration chain applies through 0041 with multiplayer and 
   assert.ok(
     raw
       .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'streamer_profiles'")
+      .get(),
+  );
+  assert.ok(
+    raw
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'multiplayer_rematch_requests'",
+      )
       .get(),
   );
   assert.ok(

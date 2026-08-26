@@ -129,6 +129,33 @@ export interface AdvanceMultiplayerConnectionInput {
   readonly nowIso: string;
 }
 
+export interface RequestMultiplayerRematchInput {
+  readonly instanceId: string;
+  readonly expectedGeneration: number;
+  readonly userId: number;
+  readonly participantId: string;
+  readonly nowIso: string;
+}
+
+export type RequestMultiplayerRematchResult =
+  | {
+      readonly status: "REQUESTED" | "REPLAYED" | "STARTED";
+      readonly instance: MultiplayerInstanceRecord;
+      readonly participant: MultiplayerParticipantRecord;
+      readonly requesterParticipantIds: readonly string[];
+    }
+  | {
+      readonly status: "REJECTED";
+      readonly code: Extract<
+        MultiplayerErrorCode,
+        | "INSTANCE_NOT_FOUND"
+        | "INSTANCE_NOT_JOINABLE"
+        | "NOT_PARTICIPANT"
+        | "STALE_GENERATION"
+        | "INTERNAL_RETRYABLE"
+      >;
+    };
+
 export interface MultiplayerInstanceAdminActionRecord {
   readonly operationId: string;
   readonly instanceId: string;
@@ -179,6 +206,11 @@ export interface MultiplayerInstanceRepository {
   advanceConnectionGeneration(
     input: AdvanceMultiplayerConnectionInput,
   ): Promise<MultiplayerParticipantRecord | null>;
+  requestRematch(input: RequestMultiplayerRematchInput): Promise<RequestMultiplayerRematchResult>;
+  listRematchRequesterParticipantIds(
+    instanceId: string,
+    generation: number,
+  ): Promise<readonly string[]>;
   findLease(instanceId: string): Promise<GameVersionLeaseRecord | null>;
   adminKill(input: AdminKillMultiplayerInstanceInput): Promise<AdminKillMultiplayerInstanceResult>;
   /** Idempotently expires due live instances; terminal cleanup releases all attached authority. */

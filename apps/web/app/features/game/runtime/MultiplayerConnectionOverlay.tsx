@@ -26,8 +26,12 @@ export interface MultiplayerConnectionOverlayProps {
   readonly labels?: Partial<MultiplayerConnectionOverlayLabels>;
   /** Parent-rendered canonical result. The iframe never controls this node. */
   readonly canonicalResult?: ReactNode;
+  readonly terminalActions?: ReactNode;
   readonly onRetry?: () => void;
   readonly onLeave?: () => void;
+  /** The multiplayer room header can own the compact connected indicator so it does not cover
+   * controls rendered by the game document. */
+  readonly hideConnectedStatus?: boolean;
 }
 
 /**
@@ -38,12 +42,15 @@ export function MultiplayerConnectionOverlay({
   state,
   labels: labelOverrides,
   canonicalResult,
+  terminalActions,
   onRetry,
   onLeave,
+  hideConnectedStatus = false,
 }: MultiplayerConnectionOverlayProps) {
   const labels = { ...DEFAULT_LABELS, ...labelOverrides };
 
   if (state.status === "CONNECTED") {
+    if (hideConnectedStatus) return null;
     return (
       <div
         role="status"
@@ -76,6 +83,7 @@ export function MultiplayerConnectionOverlay({
       >
         <div className="w-full max-w-md rounded-3xl border border-border bg-surface-raised p-6 text-center shadow-2xl">
           {canonicalResult}
+          {terminalActions}
           {onLeave && (
             <button
               type="button"

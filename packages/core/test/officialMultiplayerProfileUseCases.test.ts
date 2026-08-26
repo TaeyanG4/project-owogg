@@ -184,7 +184,7 @@ test("trusted admin activation creates one exact-version Omok profile without ra
   assert.equal(records[0]?.profile.gameVersionId, 12);
   assert.equal(records[0]?.profile.rewardPolicyId, null);
   assert.deepEqual(records[0]?.profile.allowedVisibility, ["PRIVATE"]);
-  assert.deepEqual(records[0]?.profile.allowedJoinPolicies, ["INVITE_ONLY"]);
+  assert.deepEqual(records[0]?.profile.allowedJoinPolicies, ["OPEN"]);
 
   const replay = await useCases.setEnabled({
     gameSlug: "official-omok",
@@ -224,6 +224,36 @@ test("profile disable is audited and can be re-enabled without creating another 
   assert.equal(reenabled.ok, true);
   assert.equal(records.length, 1);
   assert.equal(records[0]?.profile.enabled, true);
+});
+
+test("an enabled legacy invite profile upgrades to a new room-code revision", async () => {
+  const { records, useCases } = harness();
+  await useCases.setEnabled({
+    gameSlug: "official-omok",
+    enabled: true,
+    changedByAdminId: 3,
+    disabledReasonCode: null,
+  });
+  const current = records[0]!;
+  records[0] = {
+    ...current,
+    profile: { ...current.profile, allowedJoinPolicies: ["INVITE_ONLY"] },
+  };
+
+  const upgraded = await useCases.setEnabled({
+    gameSlug: "official-omok",
+    enabled: true,
+    changedByAdminId: 3,
+    disabledReasonCode: null,
+  });
+
+  assert.equal(upgraded.ok, true);
+  assert.equal(records.length, 2);
+  assert.equal(records[0]?.profile.enabled, false);
+  assert.equal(records[0]?.disabledReasonCode, "ACCESS_POLICY_UPGRADE");
+  assert.equal(records[1]?.profile.profileRevision, 2);
+  assert.deepEqual(records[1]?.profile.allowedJoinPolicies, ["OPEN"]);
+  assert.equal(records[1]?.profile.enabled, true);
 });
 
 test("USER, single-player, and score/rank manifests cannot obtain official authority", async () => {

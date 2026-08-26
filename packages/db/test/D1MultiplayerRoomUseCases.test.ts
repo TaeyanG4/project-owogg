@@ -138,6 +138,13 @@ function tokenFactory() {
   };
 }
 
+async function sha256(value: string): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)),
+  );
+  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 function harness() {
   const { db, raw } = createDatabase();
   seedAuthority(raw);
@@ -320,4 +327,112 @@ test("two READY calls converge on one ACTIVE match and explicit leave aborts it"
   assert.equal(left.ok, true, JSON.stringify(left));
   assert.equal((await instances.findById(created.instance.id))?.status, "ABORTED");
   assert.equal((await matches.findMatch(match?.id ?? "missing"))?.status, "ABORTED");
+});
+
+test("one rematch request waits while two exact participants open one next generation", async () => {
+  const { rooms, matches, instances } = harness();
+  const created = await createRoom(rooms);
+  const invite = await rooms.createInvite({
+    userId: 1,
+    instanceId: created.instance.id,
+    expectedGeneration: 1,
+    idempotencyKey: "invite_request_rematch_01",
+    keyring,
+  });
+  assert.equal(invite.ok, true);
+  if (!invite.ok) return;
+  const joined = await rooms.joinRoom({
+    userId: 2,
+    publicCode: created.instance.publicCode,
+    inviteToken: invite.inviteToken,
+  });
+  assert.equal(joined.ok, true);
+  if (!joined.ok) return;
+  await Promise.all([
+    rooms.readyParticipant({ userId: 1, instanceId: created.instance.id, expectedGeneration: 1 }),
+    rooms.readyParticipant({ userId: 2, instanceId: created.instance.id, expectedGeneration: 1 }),
+  ]);
+
+  const match = await matches.findMatchByInstanceGeneration(created.instance.id, 1);
+  assert.equal(match?.status, "ACTIVE");
+  if (!match) return;
+  const participants = await instances.listParticipants(created.instance.id);
+  const terminalResultJson = JSON.stringify({ kind: "DRAW", revision: 0 });
+  const finalized = await matches.finalize({
+    matchId: match.id,
+    expectedStateRevision: 0,
+    terminalResultJson,
+    terminalResultHash: await sha256(terminalResultJson),
+    players: participants.map((participant) => ({
+      userId: participant.userId,
+      participantId: participant.id,
+      outcome: "DRAW" as const,
+      placement: null,
+      resultJson: JSON.stringify({ outcome: "DRAW", generation: 1 }),
+      rewardEligible: false,
+      reward: null,
+    })),
+    nowIso: NOW,
+  });
+  assert.equal(finalized.status, "COMMITTED");
+  assert.equal(
+    await instances.transition({
+      instanceId: created.instance.id,
+      expectedStatus: "ACTIVE",
+      expectedGeneration: 1,
+      nextStatus: "CLOSING",
+      nextGeneration: 1,
+      closedAt: null,
+      abortCode: null,
+      nowIso: NOW,
+    }),
+    true,
+  );
+
+  const hostRequest = await rooms.requestRematch({
+    userId: 1,
+    instanceId: created.instance.id,
+    expectedGeneration: 1,
+  });
+  assert.equal(hostRequest.ok, true);
+  if (!hostRequest.ok) return;
+  assert.equal(hostRequest.state, "WAITING");
+  assert.equal((await instances.findById(created.instance.id))?.generation, 1);
+
+  const opponentStatus = await rooms.getRematchStatus({
+    userId: 2,
+    instanceId: created.instance.id,
+    expectedGeneration: 1,
+  });
+  assert.equal(opponentStatus.ok, true);
+  if (!opponentStatus.ok) return;
+  assert.equal(opponentStatus.state, "OPPONENT_REQUESTED");
+
+  const accepted = await rooms.requestRematch({
+    userId: 2,
+    instanceId: created.instance.id,
+    expectedGeneration: 1,
+  });
+  assert.equal(accepted.ok, true);
+  if (!accepted.ok) return;
+  assert.equal(accepted.state, "STARTED");
+  assert.equal(accepted.instance.generation, 2);
+  assert.equal(accepted.instance.status, "LOBBY");
+  assert.deepEqual(
+    (await instances.listParticipants(created.instance.id)).map(
+      (participant) => participant.status,
+    ),
+    ["JOINED", "JOINED"],
+  );
+  assert.equal((await instances.findLease(created.instance.id))?.generation, 2);
+
+  await Promise.all([
+    rooms.readyParticipant({ userId: 1, instanceId: created.instance.id, expectedGeneration: 2 }),
+    rooms.readyParticipant({ userId: 2, instanceId: created.instance.id, expectedGeneration: 2 }),
+  ]);
+  assert.equal((await instances.findById(created.instance.id))?.status, "ACTIVE");
+  assert.equal(
+    (await matches.findMatchByInstanceGeneration(created.instance.id, 2))?.status,
+    "ACTIVE",
+  );
 });

@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { applyD1Migrations, evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { beforeAll, test } from "vitest";
 import { MULTIPLAYER_HEARTBEAT_REQUEST, MULTIPLAYER_HEARTBEAT_RESPONSE } from "@owogg/contracts";
+import { MULTIPLAYER_REMATCH_CHANGED_EVENT } from "@owogg/game-sdk/bridge";
 import {
   OMOK_ACTION_LEDGER_SCHEMA_VERSION,
   MULTIPLAYER_TICKET_AUDIENCE,
@@ -24,6 +25,7 @@ import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_CONNECT_PATH,
   MULTIPLAYER_INTERNAL_PROTOCOL_HEADER,
+  MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH,
   decodeVerifiedMultiplayerClaims,
   encodeVerifiedMultiplayerClaims,
 } from "../src/multiplayer/internalProtocol.js";
@@ -195,6 +197,17 @@ function internalRequest(ticketClaims: MultiplayerJoinTicketClaims): Request {
       [MULTIPLAYER_INTERNAL_PROTOCOL_HEADER]: MULTIPLAYER_WEBSOCKET_PROTOCOL,
       [MULTIPLAYER_INTERNAL_CLAIMS_HEADER]: encodeVerifiedMultiplayerClaims(ticketClaims),
     },
+  });
+}
+
+function internalRematchNotificationRequest(generation: number): Request {
+  return new Request(`https://example.com${MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      [MULTIPLAYER_INTERNAL_PROTOCOL_HEADER]: MULTIPLAYER_WEBSOCKET_PROTOCOL,
+    },
+    body: JSON.stringify({ generation }),
   });
 }
 
@@ -801,7 +814,7 @@ test("two D1 participants ready, exchange authoritative Omok actions, reject rep
   room.playerSocket.close(1000, "done");
 });
 
-test("server-authoritative Omok win commits exact D1 results and closes the instance", async ({
+test("server-authoritative Omok win commits exact D1 results and opens the rematch window", async ({
   expect,
 }) => {
   const room = await createConnectedRoom("terminal");
@@ -892,7 +905,7 @@ test("server-authoritative Omok win commits exact D1 results and closes the inst
   });
   expect(players.every((player) => player.resultStatus === "COMMITTED")).toBe(true);
   expect(await room.instances.findById(room.instanceId)).toMatchObject({
-    status: "CLOSED",
+    status: "CLOSING",
     abortCode: null,
   });
   expect(
@@ -921,6 +934,34 @@ test("server-authoritative Omok win commits exact D1 results and closes the inst
         )
         .one(),
     ).toEqual({ revision: 9, lifecycle_status: "COMMITTED" });
+    expect(
+      state.storage.sql
+        .exec<{ generation: number }>("SELECT generation FROM rematch_window WHERE singleton = 1")
+        .one().generation,
+    ).toBe(1);
+  });
+  const hostRematchChanged = nextMessageWhere(
+    room.hostSocket,
+    "host rematch changed event",
+    (message) => message.name === MULTIPLAYER_REMATCH_CHANGED_EVENT,
+  );
+  const playerRematchChanged = nextMessageWhere(
+    room.playerSocket,
+    "player rematch changed event",
+    (message) => message.name === MULTIPLAYER_REMATCH_CHANGED_EVENT,
+  );
+  expect((await stub.fetch(internalRematchNotificationRequest(1))).status).toBe(204);
+  await expect(hostRematchChanged).resolves.toMatchObject({
+    type: "MULTI_EVENT",
+    generation: 1,
+    name: MULTIPLAYER_REMATCH_CHANGED_EVENT,
+    payload: {},
+  });
+  await expect(playerRematchChanged).resolves.toMatchObject({
+    type: "MULTI_EVENT",
+    generation: 1,
+    name: MULTIPLAYER_REMATCH_CHANGED_EVENT,
+    payload: {},
   });
   room.hostSocket.close(1000, "done");
   room.playerSocket.close(1000, "done");

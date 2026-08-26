@@ -10,7 +10,10 @@ import {
   MultiplayerJoinTicketResponseSchema,
   MultiplayerJoinRoomRequestSchema,
   MultiplayerLeaveRoomRequestSchema,
+  MultiplayerRematchRequestSchema,
+  MultiplayerRematchResponseSchema,
   MultiplayerRoomResponseSchema,
+  MultiplayerRoomRosterResponseSchema,
   MultiplayerRuntimeStatusResponseSchema,
 } from "@owogg/contracts";
 import {
@@ -20,6 +23,7 @@ import {
   parseMultiplayerWebSocketProtocols,
   verifyMultiplayerJoinTicket,
   type MultiplayerErrorCode,
+  type MultiplayerRematchResult,
 } from "@owogg/core";
 import { createContainer } from "../container.js";
 import { readB2Config } from "./devGames.js";
@@ -32,6 +36,7 @@ import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_CONNECT_PATH,
   MULTIPLAYER_INTERNAL_PROTOCOL_HEADER,
+  MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH,
   encodeVerifiedMultiplayerClaims,
 } from "../multiplayer/internalProtocol.js";
 import type { ApiEnv } from "./auth.js";
@@ -94,7 +99,7 @@ async function takeRateLimit(
 
 function requestRateKey(
   c: Context<ApiEnv>,
-  operation: "create" | "join" | "leave" | "invite" | "ticket" | "socket",
+  operation: "create" | "join" | "leave" | "invite" | "roster" | "ticket" | "socket",
 ): string {
   return `multiplayer:${operation}:ip:${c.req.header("CF-Connecting-IP") ?? "unknown"}`;
 }
@@ -144,6 +149,47 @@ function publicParticipant(participant: {
     status: participant.status,
     connectionGeneration: participant.connectionGeneration,
   };
+}
+
+function publicRematch(result: Extract<MultiplayerRematchResult, { readonly ok: true }>) {
+  return MultiplayerRematchResponseSchema.parse({
+    state: result.state,
+    requestedBySelf: result.requestedBySelf,
+    requestedByOpponent: result.requestedByOpponent,
+    room:
+      result.state === "STARTED"
+        ? {
+            replayed: false,
+            instance: publicRoom(result.instance),
+            participant: publicParticipant(result.participant),
+          }
+        : null,
+  });
+}
+
+function notifyRematchChange(c: Context<ApiEnv>, instanceId: string, generation: number): void {
+  const namespace = c.env.MULTIPLAYER_INSTANCES;
+  if (!namespace) return;
+  const notification = namespace
+    .get(namespace.idFromName(instanceId))
+    .fetch(
+      new Request(`https://multiplayer.internal${MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          [MULTIPLAYER_INTERNAL_PROTOCOL_HEADER]: MULTIPLAYER_WEBSOCKET_PROTOCOL,
+        },
+        body: JSON.stringify({ generation }),
+      }),
+    )
+    .then(() => undefined)
+    .catch(() => undefined);
+  try {
+    c.executionCtx.waitUntil(notification);
+  } catch {
+    // Hono's direct unit-test request helper has no ExecutionContext. The already-started promise
+    // remains harmless; production Workers always attach it to waitUntil.
+  }
 }
 
 export const multiplayerRouter = new Hono<ApiEnv>();
@@ -296,6 +342,122 @@ multiplayerRouter.post("/instances/join", async (c) => {
     }),
     200,
   );
+});
+
+multiplayerRouter.get("/instances/:instanceId/roster", async (c) => {
+  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED) || !runtimeReady(c.env)) {
+    return failure(c, "MULTIPLAYER_UNAVAILABLE");
+  }
+  const rateLimit = await takeRateLimit(c.env, requestRateKey(c, "roster"));
+  if (rateLimit === "DENIED") return failure(c, "RATE_LIMITED");
+  if (rateLimit === "UNAVAILABLE") return failure(c, "MULTIPLAYER_UNAVAILABLE");
+
+  const sessionId = getCookie(c, "owogg_session");
+  if (!sessionId) return failure(c, "UNAUTHENTICATED");
+  const container = createContainer(c.env.DB, readB2Config(c.env));
+  const authenticated = await container.sessionRepo.findSession(sessionId);
+  if (!authenticated) return failure(c, "UNAUTHENTICATED");
+
+  const instanceId = c.req.param("instanceId");
+  const [instance, viewer] = await Promise.all([
+    container.multiplayerInstanceRepo.findById(instanceId),
+    container.multiplayerInstanceRepo.findParticipant(instanceId, authenticated.user.id),
+  ]);
+  if (!instance) return failure(c, "INSTANCE_NOT_FOUND");
+  if (!viewer || (viewer.status !== "JOINED" && viewer.status !== "READY")) {
+    return failure(c, "NOT_PARTICIPANT");
+  }
+
+  const participants = (
+    await container.multiplayerInstanceRepo.listParticipants(instanceId)
+  ).filter((participant) => participant.status === "JOINED" || participant.status === "READY");
+  const users = await Promise.all(
+    participants.map((participant) => container.userRepo.findById(participant.userId)),
+  );
+  c.header("Cache-Control", "no-store");
+  return c.json(
+    MultiplayerRoomRosterResponseSchema.parse({
+      instanceId,
+      generation: instance.generation,
+      players: participants.flatMap((participant, index) => {
+        const user = users[index];
+        return user
+          ? [
+              {
+                participantId: participant.id,
+                role: participant.role,
+                seatIndex: participant.seatIndex,
+                status: participant.status,
+                nickname: user.nickname,
+                avatarUrl: user.avatar_url,
+              },
+            ]
+          : [];
+      }),
+    }),
+    200,
+  );
+});
+
+multiplayerRouter.get("/instances/:instanceId/rematch", async (c) => {
+  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED) || !runtimeReady(c.env)) {
+    return failure(c, "MULTIPLAYER_UNAVAILABLE");
+  }
+  const parsed = MultiplayerRematchRequestSchema.safeParse({
+    expectedGeneration: Number(c.req.query("generation")),
+  });
+  if (!parsed.success) return failure(c, "INVALID_REQUEST");
+
+  const sessionId = getCookie(c, "owogg_session");
+  if (!sessionId) return failure(c, "UNAUTHENTICATED");
+  const container = createContainer(c.env.DB, readB2Config(c.env));
+  const authenticated = await container.sessionRepo.findSession(sessionId);
+  if (!authenticated) return failure(c, "UNAUTHENTICATED");
+  const rateLimit = await takeRateLimit(c.env, `multiplayer:rematch:user:${authenticated.user.id}`);
+  if (rateLimit === "DENIED") return failure(c, "RATE_LIMITED");
+  if (rateLimit === "UNAVAILABLE") return failure(c, "MULTIPLAYER_UNAVAILABLE");
+
+  const result = await container.multiplayerRoomUseCases.getRematchStatus({
+    userId: authenticated.user.id,
+    instanceId: c.req.param("instanceId"),
+    expectedGeneration: parsed.data.expectedGeneration,
+  });
+  if (!result.ok) return failure(c, result.code);
+  c.header("Cache-Control", "no-store");
+  return c.json(publicRematch(result), 200);
+});
+
+multiplayerRouter.post("/instances/:instanceId/rematch", async (c) => {
+  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED) || !runtimeReady(c.env)) {
+    return failure(c, "MULTIPLAYER_UNAVAILABLE");
+  }
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return failure(c, "INVALID_REQUEST");
+  }
+  const parsed = MultiplayerRematchRequestSchema.safeParse(body);
+  if (!parsed.success) return failure(c, "INVALID_REQUEST");
+
+  const sessionId = getCookie(c, "owogg_session");
+  if (!sessionId) return failure(c, "UNAUTHENTICATED");
+  const container = createContainer(c.env.DB, readB2Config(c.env));
+  const authenticated = await container.sessionRepo.findSession(sessionId);
+  if (!authenticated) return failure(c, "UNAUTHENTICATED");
+  const rateLimit = await takeRateLimit(c.env, `multiplayer:rematch:user:${authenticated.user.id}`);
+  if (rateLimit === "DENIED") return failure(c, "RATE_LIMITED");
+  if (rateLimit === "UNAVAILABLE") return failure(c, "MULTIPLAYER_UNAVAILABLE");
+
+  const result = await container.multiplayerRoomUseCases.requestRematch({
+    userId: authenticated.user.id,
+    instanceId: c.req.param("instanceId"),
+    expectedGeneration: parsed.data.expectedGeneration,
+  });
+  if (!result.ok) return failure(c, result.code);
+  notifyRematchChange(c, c.req.param("instanceId"), parsed.data.expectedGeneration);
+  c.header("Cache-Control", "no-store");
+  return c.json(publicRematch(result), 200);
 });
 
 multiplayerRouter.post("/instances/:instanceId/leave", async (c) => {

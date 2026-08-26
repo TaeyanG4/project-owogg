@@ -1,6 +1,7 @@
 import {
   MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
   MULTIPLAYER_HOST_MAX_PAYLOAD_BYTES,
+  MULTIPLAYER_REMATCH_CHANGED_EVENT,
   parseGameToHostMultiplayerMessage,
   parseHostToGameMultiplayerMessage,
   type HostToGameMultiplayerMessage,
@@ -48,6 +49,11 @@ export interface MultiplayerBridgeHostCallbacks {
   onLeave?: () => void;
   onConnectionState?: (state: MultiplayerParentConnectionState) => void;
   onTerminalCommitted?: (result: unknown) => void;
+  /** Parent-only hint to refresh the authenticated roster. No profile data crosses the iframe
+   * MessagePort; the parent fetches the current safe projection from the API. */
+  onRosterChange?: () => void;
+  /** Parent-only hint to refetch rematch consent. It is never forwarded into the game iframe. */
+  onRematchChange?: () => void;
   onProtocolDrop?: (direction: "GAME_TO_HOST" | "SERVER_TO_HOST") => void;
 }
 
@@ -226,6 +232,10 @@ export function createMultiplayerBridgeHost(
       }
       lastServerSeq = message.serverSeq;
     }
+    if (message.type === "MULTI_EVENT" && message.name === MULTIPLAYER_REMATCH_CHANGED_EVENT) {
+      callbacks.onRematchChange?.();
+      return;
+    }
     if (message.type === "MULTI_CONNECTED") {
       if (message.connectionGeneration <= lastConnectionGeneration) {
         notifyDrop("SERVER_TO_HOST");
@@ -252,6 +262,13 @@ export function createMultiplayerBridgeHost(
     } else if (message.type === "MULTI_ABORTED") {
       aborted = true;
       callbacks.onConnectionState?.({ status: "ABORTED", code: message.code });
+    }
+    if (
+      message.type === "MULTI_PLAYER_JOINED" ||
+      message.type === "MULTI_PLAYER_LEFT" ||
+      message.type === "MULTI_SYNC"
+    ) {
+      callbacks.onRosterChange?.();
     }
     channel.port1.postMessage(message);
   };

@@ -5,6 +5,7 @@ import {
   MULTIPLAYER_JOIN_POLICIES,
   MULTIPLAYER_PARTICIPANT_ROLES,
   MULTIPLAYER_PARTICIPANT_STATUSES,
+  MULTIPLAYER_REMATCH_WINDOW_MS,
   MULTIPLAYER_VISIBILITIES,
   type AdvanceMultiplayerConnectionInput,
   type AdminKillMultiplayerInstanceInput,
@@ -21,6 +22,8 @@ import {
   type MultiplayerInstanceAdminActionRecord,
   type MultiplayerInstanceRepository,
   type MultiplayerParticipantRecord,
+  type RequestMultiplayerRematchInput,
+  type RequestMultiplayerRematchResult,
   type TransitionMultiplayerParticipantInput,
   type TransitionMultiplayerInstanceInput,
 } from "@owogg/core";
@@ -728,6 +731,165 @@ export class D1MultiplayerInstanceRepository implements MultiplayerInstanceRepos
       .run();
     if ((writtenRows(result) ?? 0) !== 1) return null;
     return this.findParticipant(input.instanceId, input.userId);
+  }
+
+  async listRematchRequesterParticipantIds(
+    instanceId: string,
+    generation: number,
+  ): Promise<readonly string[]> {
+    const result = await this.db
+      .prepare(
+        `SELECT participant_id
+         FROM multiplayer_rematch_requests
+         WHERE instance_id = ? AND generation = ?
+         ORDER BY requested_at, participant_id`,
+      )
+      .bind(instanceId, generation)
+      .all<{ participant_id: string }>();
+    return (result.results ?? []).map((row) =>
+      requiredString(row.participant_id, "participant_id"),
+    );
+  }
+
+  async requestRematch(
+    input: RequestMultiplayerRematchInput,
+  ): Promise<RequestMultiplayerRematchResult> {
+    const current = await this.findById(input.instanceId);
+    if (!current) return { status: "REJECTED", code: "INSTANCE_NOT_FOUND" };
+    if (current.generation !== input.expectedGeneration) {
+      if (current.generation === input.expectedGeneration + 1) {
+        return this.classifyRematchAfterWrite(input, false);
+      }
+      return { status: "REJECTED", code: "STALE_GENERATION" };
+    }
+    const participant = await this.findParticipant(input.instanceId, input.userId);
+    if (!participant || participant.id !== input.participantId || participant.status !== "READY") {
+      return { status: "REJECTED", code: "NOT_PARTICIPANT" };
+    }
+    if (current.status !== "CLOSING" || current.expiresAt <= input.nowIso) {
+      return { status: "REJECTED", code: "INSTANCE_NOT_JOINABLE" };
+    }
+
+    const existingRequesters = await this.listRematchRequesterParticipantIds(
+      input.instanceId,
+      input.expectedGeneration,
+    );
+    const replayed = existingRequesters.includes(input.participantId);
+    try {
+      await this.db.batch([
+        this.db
+          .prepare(
+            `INSERT OR IGNORE INTO multiplayer_rematch_requests (
+               instance_id, generation, participant_id, requested_at
+             )
+             SELECT instance.id, instance.generation, participant.id, ?
+             FROM multiplayer_instances instance
+             JOIN multiplayer_participants participant
+               ON participant.instance_id = instance.id
+             WHERE instance.id = ?
+               AND instance.generation = ?
+               AND instance.status = 'CLOSING'
+               AND instance.expires_at > ?
+               AND participant.id = ?
+               AND participant.user_id = ?
+               AND participant.status = 'READY'`,
+          )
+          .bind(
+            input.nowIso,
+            input.instanceId,
+            input.expectedGeneration,
+            input.nowIso,
+            input.participantId,
+            input.userId,
+          ),
+        this.db
+          .prepare(
+            `UPDATE multiplayer_instances
+             SET status = 'LOBBY', generation = generation + 1,
+                 closed_at = NULL, abort_code = NULL, updated_at = ?
+             WHERE id = ?
+               AND generation = ?
+               AND status = 'CLOSING'
+               AND expires_at > ?
+               AND participant_count >= 2
+               AND participant_count = (
+                 SELECT COUNT(*)
+                 FROM multiplayer_participants participant
+                 WHERE participant.instance_id = multiplayer_instances.id
+                   AND participant.status = 'READY'
+               )
+               AND participant_count = (
+                 SELECT COUNT(DISTINCT request.participant_id)
+                 FROM multiplayer_rematch_requests request
+                 WHERE request.instance_id = multiplayer_instances.id
+                   AND request.generation = multiplayer_instances.generation
+               )
+               AND EXISTS (
+                 SELECT 1
+                 FROM multiplayer_matches match
+                 WHERE match.instance_id = multiplayer_instances.id
+                   AND match.generation = multiplayer_instances.generation
+                   AND match.status = 'COMMITTED'
+                   AND match.committed_at IS NOT NULL
+                   AND unixepoch(?) < unixepoch(match.committed_at) + ?
+               )`,
+          )
+          .bind(
+            input.nowIso,
+            input.instanceId,
+            input.expectedGeneration,
+            input.nowIso,
+            input.nowIso,
+            MULTIPLAYER_REMATCH_WINDOW_MS / 1_000,
+          ),
+      ]);
+    } catch {
+      return this.classifyRematchAfterWrite(input, replayed);
+    }
+    return this.classifyRematchAfterWrite(input, replayed);
+  }
+
+  private async classifyRematchAfterWrite(
+    input: RequestMultiplayerRematchInput,
+    replayed: boolean,
+  ): Promise<RequestMultiplayerRematchResult> {
+    const [instance, participant, requesterParticipantIds] = await Promise.all([
+      this.findById(input.instanceId),
+      this.findParticipant(input.instanceId, input.userId),
+      this.listRematchRequesterParticipantIds(input.instanceId, input.expectedGeneration),
+    ]);
+    if (!instance) return { status: "REJECTED", code: "INSTANCE_NOT_FOUND" };
+    if (!participant || participant.id !== input.participantId) {
+      return { status: "REJECTED", code: "NOT_PARTICIPANT" };
+    }
+    if (
+      instance.generation === input.expectedGeneration + 1 &&
+      (instance.status === "LOBBY" ||
+        instance.status === "STARTING" ||
+        instance.status === "ACTIVE")
+    ) {
+      return {
+        status: "STARTED",
+        instance,
+        participant,
+        requesterParticipantIds,
+      };
+    }
+    if (instance.generation !== input.expectedGeneration) {
+      return { status: "REJECTED", code: "STALE_GENERATION" };
+    }
+    if (instance.status !== "CLOSING") {
+      return { status: "REJECTED", code: "INSTANCE_NOT_JOINABLE" };
+    }
+    if (!requesterParticipantIds.includes(input.participantId)) {
+      return { status: "REJECTED", code: "INTERNAL_RETRYABLE" };
+    }
+    return {
+      status: replayed ? "REPLAYED" : "REQUESTED",
+      instance,
+      participant,
+      requesterParticipantIds,
+    };
   }
 
   async findLease(instanceId: string): Promise<GameVersionLeaseRecord | null> {

@@ -13,9 +13,21 @@
           <p class="eyebrow">OWOGG OFFICIAL</p>
           <h1>온라인 오목</h1>
         </div>
-        <div id="stoneBadge" class="stone-badge" aria-live="polite">
-          <span class="stone stone-neutral"></span>
-          <span id="stoneLabel">좌석 확인 중</span>
+        <div class="header-actions">
+          <button
+            id="soundToggle"
+            class="sound-toggle"
+            type="button"
+            aria-pressed="true"
+            aria-label="게임 소리 끄기"
+          >
+            <span aria-hidden="true">♪</span>
+            <span id="soundLabel">소리 켬</span>
+          </button>
+          <div id="stoneBadge" class="stone-badge" aria-live="polite">
+            <span class="stone stone-neutral"></span>
+            <span id="stoneLabel">좌석 확인 중</span>
+          </div>
         </div>
       </header>
 

@@ -58,7 +58,7 @@ test("share parsing prefers fragments, supports legacy query links, and strips c
   );
 });
 
-test("pasting an invite link fills both credentials while a public code alone stays non-authorizing", () => {
+test("room-code links, plain codes, and historical invite links all normalize safely", () => {
   const inviteLink = buildMultiplayerRoomShareValue(
     "https://stg.owogg.com/games/official-omok",
     "ROOMCODE1234",
@@ -75,7 +75,16 @@ test("pasting an invite link fills both credentials while a public code alone st
       inviteToken: "invite_token_12345678901234567890",
     },
   );
-  assert.equal(parseMultiplayerRoomJoinValue("ROOMCODE1234"), null);
+  assert.deepEqual(parseMultiplayerRoomJoinValue("ROOMCODE1234"), {
+    publicCode: "ROOMCODE1234",
+    inviteToken: "",
+  });
+  assert.deepEqual(
+    parseMultiplayerRoomJoinValue(
+      buildMultiplayerRoomShareValue("https://stg.owogg.com/games/official-omok", "ROOMCODE1234"),
+    ),
+    { publicCode: "ROOMCODE1234", inviteToken: "" },
+  );
 });
 
 test("room-code and invite-link clipboard actions never substitute for each other", () => {
