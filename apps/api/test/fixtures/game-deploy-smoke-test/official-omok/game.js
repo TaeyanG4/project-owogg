@@ -1,0 +1,263 @@
+"use strict";
+
+/**
+ * OWOGG official M1 reference client. This file renders server projections and submits intents;
+ * it never decides turns, legal moves, winners, rewards, or persistence and never opens a network
+ * connection. The platform-injected window.OWOGG.multiplayer bridge owns that boundary.
+ */
+(function () {
+  const BOARD_SIZE = 15;
+  const BOARD_CELLS = BOARD_SIZE * BOARD_SIZE;
+  const boardElement = document.getElementById("board");
+  const statusTitle = document.getElementById("statusTitle");
+  const statusDetail = document.getElementById("statusDetail");
+  const revisionLabel = document.getElementById("revisionLabel");
+  const stoneBadge = document.getElementById("stoneBadge");
+  const stoneLabel = document.getElementById("stoneLabel");
+  const bridge = window.OWOGG && window.OWOGG.multiplayer;
+  const cells = [];
+
+  let view = null;
+  let pendingActionId = null;
+  let connectionState = "CONNECTING";
+
+  function setStatus(title, detail) {
+    statusTitle.textContent = title;
+    statusDetail.textContent = detail;
+  }
+
+  function validCoordinate(value) {
+    return (
+      value &&
+      Number.isInteger(value.x) &&
+      Number.isInteger(value.y) &&
+      value.x >= 0 &&
+      value.x < BOARD_SIZE &&
+      value.y >= 0 &&
+      value.y < BOARD_SIZE
+    );
+  }
+
+  function parseView(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    if (
+      value.stateSchemaVersion !== 1 ||
+      value.rulesetKey !== "official:omok" ||
+      value.rulesetRevision !== 1 ||
+      value.boardSize !== BOARD_SIZE ||
+      value.winLength !== 5 ||
+      !Number.isInteger(value.revision) ||
+      value.revision < 0 ||
+      typeof value.board !== "string" ||
+      value.board.length !== BOARD_CELLS ||
+      !/^[.BW]+$/.test(value.board) ||
+      (value.status !== "ACTIVE" && value.status !== "WON" && value.status !== "DRAW") ||
+      (value.yourSeatIndex !== 0 && value.yourSeatIndex !== 1) ||
+      (value.yourStone !== "BLACK" && value.yourStone !== "WHITE") ||
+      (value.nextSeatIndex !== null && value.nextSeatIndex !== 0 && value.nextSeatIndex !== 1) ||
+      (value.winnerSeatIndex !== null && value.winnerSeatIndex !== 0 && value.winnerSeatIndex !== 1)
+    ) {
+      return null;
+    }
+    if (value.lastMove !== null && !validCoordinate(value.lastMove)) return null;
+    if (
+      value.winningLine !== null &&
+      (!Array.isArray(value.winningLine) || !value.winningLine.every(validCoordinate))
+    ) {
+      return null;
+    }
+    return value;
+  }
+
+  function isWinningCoordinate(x, y) {
+    return Boolean(
+      view &&
+      Array.isArray(view.winningLine) &&
+      view.winningLine.some(function (coordinate) {
+        return coordinate.x === x && coordinate.y === y;
+      }),
+    );
+  }
+
+  function renderStoneBadge() {
+    const marker = stoneBadge.querySelector(".stone");
+    marker.className = "stone";
+    if (!view) {
+      marker.classList.add("stone-neutral");
+      stoneLabel.textContent = "좌석 확인 중";
+      return;
+    }
+    if (view.yourStone === "BLACK") {
+      marker.classList.add("stone-black");
+      stoneLabel.textContent = "내 돌 · 흑";
+    } else {
+      marker.classList.add("stone-white");
+      stoneLabel.textContent = "내 돌 · 백";
+    }
+  }
+
+  function renderStatus() {
+    if (!view) {
+      if (connectionState === "CONNECTED") {
+        setStatus("상대와 준비를 맞추는 중입니다", "공식 상태가 도착하면 판이 열립니다.");
+      }
+      return;
+    }
+    if (view.status === "WON") {
+      const won = view.winnerSeatIndex === view.yourSeatIndex;
+      setStatus(won ? "승리했습니다" : "상대가 승리했습니다", "공식 결과 확정을 기다립니다.");
+      return;
+    }
+    if (view.status === "DRAW") {
+      setStatus("무승부입니다", "공식 결과 확정을 기다립니다.");
+      return;
+    }
+    if (pendingActionId) {
+      setStatus("착수를 확인 중입니다", "서버 판정이 올 때까지 잠시 기다려 주세요.");
+      return;
+    }
+    if (view.nextSeatIndex === view.yourSeatIndex) {
+      setStatus("내 차례입니다", "빈 교차점을 선택해 돌을 놓으세요.");
+    } else {
+      setStatus("상대 차례입니다", "상대의 착수를 기다리고 있습니다.");
+    }
+  }
+
+  function renderBoard() {
+    const canMove = Boolean(
+      view &&
+      view.status === "ACTIVE" &&
+      view.nextSeatIndex === view.yourSeatIndex &&
+      pendingActionId === null,
+    );
+    for (let index = 0; index < cells.length; index += 1) {
+      const cell = cells[index];
+      const x = index % BOARD_SIZE;
+      const y = Math.floor(index / BOARD_SIZE);
+      const value = view ? view.board[index] : ".";
+      cell.disabled = !canMove || value !== ".";
+      cell.replaceChildren();
+      cell.setAttribute(
+        "aria-label",
+        value === "."
+          ? `${y + 1}행 ${x + 1}열 빈 자리`
+          : `${y + 1}행 ${x + 1}열 ${value === "B" ? "흑돌" : "백돌"}`,
+      );
+      if (value === ".") continue;
+      const piece = document.createElement("span");
+      piece.className = `piece ${value === "B" ? "black" : "white"}`;
+      if (view && view.lastMove && view.lastMove.x === x && view.lastMove.y === y) {
+        piece.classList.add("last");
+      }
+      if (isWinningCoordinate(x, y)) piece.classList.add("winner");
+      cell.appendChild(piece);
+    }
+  }
+
+  function render() {
+    renderStoneBadge();
+    renderStatus();
+    renderBoard();
+    revisionLabel.textContent = view ? `공식 상태 · ${view.revision}수` : "공식 상태 대기 중";
+  }
+
+  function rejectionMessage(code) {
+    if (code === "NOT_YOUR_TURN") return "아직 내 차례가 아닙니다.";
+    if (code === "ACTION_INVALID") return "그 자리에는 둘 수 없습니다.";
+    if (code === "ACTION_CONFLICT") return "동시에 상태가 바뀌어 판을 다시 맞췄습니다.";
+    if (code === "RATE_LIMITED") return "착수가 너무 빠릅니다. 잠시 후 다시 시도하세요.";
+    if (code === "MATCH_NOT_ACTIVE") return "현재 진행 중인 경기가 아닙니다.";
+    return "착수가 승인되지 않았습니다.";
+  }
+
+  function handleMessage(message) {
+    if (message.type === "MULTI_CONNECTED") {
+      connectionState = "CONNECTED";
+      renderStatus();
+      return;
+    }
+    if (message.type === "MULTI_SYNC" || message.type === "MULTI_STATE") {
+      const nextView = parseView(message.payload);
+      if (!nextView || nextView.revision !== message.revision) return;
+      view = nextView;
+      pendingActionId = null;
+      render();
+      return;
+    }
+    if (message.type === "MULTI_ACTION_REJECTED") {
+      if (pendingActionId === message.clientActionId) pendingActionId = null;
+      setStatus("착수가 거절되었습니다", rejectionMessage(message.code));
+      renderBoard();
+      return;
+    }
+    if (message.type === "MULTI_TERMINAL_PENDING") {
+      setStatus("경기가 끝났습니다", "공식 결과를 안전하게 저장하는 중입니다.");
+      return;
+    }
+    if (message.type === "MULTI_TERMINAL_COMMITTED") {
+      setStatus("공식 결과가 확정되었습니다", "결과는 게임 화면 밖 OWOGG 패널에 표시됩니다.");
+      return;
+    }
+    if (message.type === "MULTI_DISCONNECTED") {
+      connectionState = "DISCONNECTED";
+      setStatus("연결이 끊어졌습니다", "OWOGG 연결 패널에서 재연결할 수 있습니다.");
+      return;
+    }
+    if (message.type === "MULTI_ABORTED") {
+      setStatus("경기가 중단되었습니다", "공식 결과와 보상은 생성되지 않습니다.");
+      return;
+    }
+    if (message.type === "MULTI_PLAYER_JOINED") {
+      setStatus("상대가 참가했습니다", "두 플레이어의 준비를 확인하고 있습니다.");
+    }
+  }
+
+  function tryMove(x, y) {
+    if (
+      !bridge ||
+      !view ||
+      view.status !== "ACTIVE" ||
+      view.nextSeatIndex !== view.yourSeatIndex ||
+      pendingActionId !== null ||
+      view.board[y * BOARD_SIZE + x] !== "."
+    ) {
+      return;
+    }
+    const actionId = bridge.action({
+      expectedRevision: view.revision,
+      payload: { x: x, y: y },
+    });
+    if (!actionId) {
+      setStatus("착수를 보내지 못했습니다", "연결 상태를 확인한 뒤 다시 시도하세요.");
+      return;
+    }
+    pendingActionId = actionId;
+    render();
+  }
+
+  for (let y = 0; y < BOARD_SIZE; y += 1) {
+    for (let x = 0; x < BOARD_SIZE; x += 1) {
+      const cell = document.createElement("button");
+      cell.type = "button";
+      cell.className = "intersection";
+      cell.setAttribute("role", "gridcell");
+      cell.addEventListener("click", function () {
+        tryMove(x, y);
+      });
+      boardElement.appendChild(cell);
+      cells.push(cell);
+    }
+  }
+
+  if (!bridge) {
+    setStatus("멀티플레이 브리지를 찾을 수 없습니다", "OWOGG 게임 페이지에서 다시 실행해 주세요.");
+    render();
+    return;
+  }
+
+  bridge.subscribe(handleMessage);
+  if (!bridge.ready()) {
+    setStatus("준비 신호를 보내지 못했습니다", "게임 페이지를 새로고침해 주세요.");
+  }
+  render();
+})();

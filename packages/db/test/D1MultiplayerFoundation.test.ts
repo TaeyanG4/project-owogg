@@ -1226,6 +1226,7 @@ test("D1 multiplayer request repository pins owner, canonical hash, review CAS, 
   const profileCreated = await profiles.createApprovedRevision(profileInput);
   assert.ok(profileCreated.status === "CREATED");
   assert.equal((await profiles.createApprovedRevision(profileInput)).status, "REPLAYED");
+  assert.equal((await profiles.findLatestForExactVersion(1, 10))?.profile.profileRevision, 1);
   assert.equal(await profiles.findEnabledForExactVersion(1, 10), null);
   assert.equal(
     (
@@ -1245,6 +1246,7 @@ test("D1 multiplayer request repository pins owner, canonical hash, review CAS, 
     profile: { ...managedProfile, profileRevision: 2 },
   });
   assert.ok(secondProfile.status === "CREATED");
+  assert.equal((await profiles.findLatestForExactVersion(1, 10))?.profile.profileRevision, 2);
   assert.equal(
     (
       await profiles.setEnabled({
@@ -1435,11 +1437,15 @@ test("D1 multiplayer instance repository atomically creates, replays, conflicts,
     instanceId: "new_generated_id_ignored_0000001",
     publicCode: "NEWCODE000001",
     hostParticipantId: "new_host_id_ignored",
+    instanceExpiresAt: new Date(Date.parse(EXPIRES) + 60_000).toISOString(),
+    leaseExpiresAt: new Date(Date.parse(EXPIRES) + 120_000).toISOString(),
     nowIso: LATER,
   });
   assert.equal(replay.status, "REPLAYED");
   assert.ok("instance" in replay);
   assert.equal(replay.instance.id, input.instanceId);
+  assert.equal(replay.instance.expiresAt, EXPIRES);
+  assert.equal(replay.lease.expiresAt, EXPIRES);
 
   const idempotencyConflict = await repository.createWithHostAndLease({
     ...input,
@@ -1592,7 +1598,15 @@ test("D1 multiplayer joins consume invites exactly once and serialize capacity",
   };
   const invite = await repository.createInvite(inviteInput);
   assert.equal(invite.status, "CREATED");
-  assert.equal((await repository.createInvite(inviteInput)).status, "REPLAYED");
+  const replayedInvite = await repository.createInvite({
+    ...inviteInput,
+    expiresAt: new Date(Date.parse(EXPIRES) + 60_000).toISOString(),
+  });
+  assert.equal(replayedInvite.status, "REPLAYED");
+  assert.equal(
+    replayedInvite.status === "REPLAYED" ? replayedInvite.invite.expiresAt : null,
+    EXPIRES,
+  );
   assert.ok("invite" in invite);
 
   const joined = await repository.join({
@@ -1920,6 +1934,8 @@ test("D1 match repository atomically ledgers actions, finalizes results, and del
   });
   assert.equal(secondAction.status, "RECORDED");
   assert.equal((await matches.listActionsAfterRevision(matchId, 0, 10)).length, 2);
+  assert.equal((await matches.findLatestAction(matchId))?.clientActionId, "repository_action_0004");
+  assert.equal(await matches.findLatestAction("match_missing_0000000001"), null);
 
   const finalization = {
     matchId,

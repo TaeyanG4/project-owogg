@@ -127,6 +127,11 @@ export interface MultiplayerMatchRepository {
     afterRevision: number,
     limit: number,
   ): Promise<readonly MultiplayerMatchActionRecord[]>;
+  /**
+   * Returns the highest durable server sequence, including rejected actions whose result
+   * revision did not advance. Runtime recovery must not infer this from accepted revisions.
+   */
+  findLatestAction(matchId: string): Promise<MultiplayerMatchActionRecord | null>;
   recordAction(input: RecordMultiplayerActionInput): Promise<RecordMultiplayerActionResult>;
   finalize(input: FinalizeMultiplayerMatchInput): Promise<FinalizeMultiplayerMatchResult>;
   claimNextReward(

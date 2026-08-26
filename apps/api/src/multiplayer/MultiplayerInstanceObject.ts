@@ -2,8 +2,31 @@ import { DurableObject } from "cloudflare:workers";
 import {
   MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
   parseGameToHostMultiplayerMessage,
+  type MultiActionMessage,
+  type MultiplayerActionRejectionCode,
 } from "@owogg/game-sdk/bridge";
-import { MULTIPLAYER_WEBSOCKET_PROTOCOL, type MultiplayerJoinTicketClaims } from "@owogg/core";
+import {
+  MULTIPLAYER_WEBSOCKET_PROTOCOL,
+  OMOK_ACTION_LEDGER_SCHEMA_VERSION,
+  OMOK_RULESET_KEY,
+  OMOK_RULESET_REVISION,
+  applyOmokAction,
+  createInitialOmokState,
+  encodeOmokActionLedgerResponse,
+  getOmokTerminalResult,
+  isSupportedMultiplayerRuntimeProfile,
+  parseOmokAction,
+  parseOmokActionLedgerResponse,
+  parseOmokStateV1,
+  projectOmokState,
+  type MultiplayerJoinTicketClaims,
+  type MultiplayerMatchRecord,
+  type OmokActionLedgerResponseV1,
+  type OmokStateV1,
+  type OmokTerminalResult,
+} from "@owogg/core";
+import type { D1Database } from "@cloudflare/workers-types";
+import { createContainer, type AppContainer } from "../container.js";
 import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_CONNECT_PATH,
@@ -11,17 +34,47 @@ import {
   decodeVerifiedMultiplayerClaims,
 } from "./internalProtocol.js";
 
-const STATE_SCHEMA_VERSION = 1;
+const STATE_SCHEMA_VERSION = 2;
 const REPLACED_CONNECTION_CLOSE_CODE = 4001;
 const STALE_CONNECTION_CLOSE_CODE = 4002;
 const POLICY_CLOSE_CODE = 1008;
 const RUNTIME_UNAVAILABLE_CLOSE_CODE = 1013;
+const ACTION_RATE_WINDOW_MS = 1_000;
+const FINALIZATION_RETRY_BASE_MS = 2_000;
+const FINALIZATION_RETRY_MAX_MS = 60_000;
 const textEncoder = new TextEncoder();
+
+interface MultiplayerDurableObjectEnv {
+  readonly DB: D1Database;
+}
 
 interface ConnectionAttachment {
   readonly participantId: string;
   readonly generation: number;
   readonly connectionGeneration: number;
+}
+
+interface ParticipantAuthority {
+  readonly participantId: string;
+  readonly userId: number;
+  readonly role: "HOST" | "PLAYER";
+  readonly seatIndex: 0 | 1;
+  readonly generation: number;
+}
+
+type RuntimeLifecycle = "ACTIVE" | "TERMINAL_PENDING" | "COMMITTED" | "ABORTED";
+
+interface RuntimeMatch {
+  readonly matchId: string;
+  readonly generation: number;
+  readonly state: OmokStateV1;
+  readonly serverSeq: number;
+  readonly lifecycle: RuntimeLifecycle;
+  readonly maxActionBytes: number;
+  readonly maxStateBytes: number;
+  readonly actionRateLimit: number;
+  readonly terminalResultJson: string | null;
+  readonly finalizationAttempts: number;
 }
 
 type AdmissionResult =
@@ -30,6 +83,10 @@ type AdmissionResult =
 
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 function parseAttachment(value: unknown): ConnectionAttachment | null {
@@ -61,21 +118,67 @@ function integerValue(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) ? value : null;
 }
 
+function actionCodeForClient(code: string): MultiplayerActionRejectionCode {
+  switch (code) {
+    case "MATCH_NOT_ACTIVE":
+    case "NOT_PARTICIPANT":
+    case "NOT_YOUR_TURN":
+    case "ACTION_INVALID":
+    case "ACTION_CONFLICT":
+    case "ACTION_ID_REUSED":
+    case "STALE_GENERATION":
+    case "RATE_LIMITED":
+      return code;
+    default:
+      return "ACTION_CONFLICT";
+  }
+}
+
+function abortCodeForClient(
+  code: string | null,
+):
+  | "INSUFFICIENT_PLAYERS"
+  | "PARTICIPANT_LEFT"
+  | "RULE_VIOLATION"
+  | "INFRA_FAILURE"
+  | "ADMIN_KILLED"
+  | "VERSION_UNAVAILABLE" {
+  switch (code) {
+    case "INSUFFICIENT_PLAYERS":
+    case "PARTICIPANT_LEFT":
+    case "RULE_VIOLATION":
+    case "ADMIN_KILLED":
+    case "VERSION_UNAVAILABLE":
+      return code;
+    default:
+      return "INFRA_FAILURE";
+  }
+}
+
+function stablePayloadJson(payload: unknown): string {
+  const action = parseOmokAction(payload);
+  return action ? JSON.stringify({ x: action.x, y: action.y }) : JSON.stringify(payload);
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", textEncoder.encode(value)));
+  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 /**
- * Provider-specific realtime shell. It owns only admission nonce consumption, connection
- * generation, hibernation attachments, and minimal lifecycle persistence. Game state/rules are
- * deliberately absent until the M1 Omok phase supplies an explicit server ruleset.
- *
- * This class uses Cloudflare's DurableObject base so WebSocket upgrades and hibernation events
- * follow the provider's current module contract. `worker.ts` isolates this provider-only import;
- * plain Node tooling imports `app.ts`/`index.ts` and never resolves `cloudflare:workers`.
+ * One authoritative M1 runtime per D1-approved instance. Clients submit intents only. Accepted
+ * actions reach the D1 action ledger before the DO checkpoint, allowing crash-safe replay.
  */
-export class MultiplayerInstanceObject extends DurableObject<Cloudflare.Env> {
+export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableObjectEnv> {
+  private readonly container: AppContainer;
+  private messageQueue: Promise<void> = Promise.resolve();
+
   constructor(
     private readonly state: DurableObjectState,
-    env: Cloudflare.Env,
+    env: MultiplayerDurableObjectEnv,
   ) {
     super(state, env);
+    this.container = createContainer(env.DB);
     state.blockConcurrencyWhile(async () => {
       state.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS runtime_meta (
@@ -89,7 +192,6 @@ export class MultiplayerInstanceObject extends DurableObject<Cloudflare.Env> {
           created_at INTEGER NOT NULL,
           updated_at INTEGER NOT NULL
         );
-
         CREATE TABLE IF NOT EXISTS consumed_ticket_nonces (
           jti TEXT PRIMARY KEY,
           participant_id TEXT NOT NULL,
@@ -101,7 +203,6 @@ export class MultiplayerInstanceObject extends DurableObject<Cloudflare.Env> {
         );
         CREATE INDEX IF NOT EXISTS idx_consumed_ticket_nonces_expiry
           ON consumed_ticket_nonces(expires_at);
-
         CREATE TABLE IF NOT EXISTS participant_connections (
           participant_id TEXT PRIMARY KEY,
           user_id INTEGER NOT NULL,
@@ -111,6 +212,49 @@ export class MultiplayerInstanceObject extends DurableObject<Cloudflare.Env> {
           connected_at INTEGER NOT NULL,
           last_seen_at INTEGER NOT NULL,
           disconnected_at INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS runtime_authority (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          profile_id INTEGER NOT NULL,
+          ruleset_key TEXT NOT NULL,
+          ruleset_revision INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS participant_authority (
+          participant_id TEXT NOT NULL,
+          generation INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          role TEXT NOT NULL CHECK (role IN ('HOST', 'PLAYER')),
+          seat_index INTEGER NOT NULL CHECK (seat_index IN (0, 1)),
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (participant_id, generation),
+          UNIQUE (generation, user_id),
+          UNIQUE (generation, seat_index)
+        );
+        CREATE TABLE IF NOT EXISTS runtime_match (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          match_id TEXT NOT NULL,
+          generation INTEGER NOT NULL,
+          state_json TEXT NOT NULL,
+          revision INTEGER NOT NULL,
+          server_seq INTEGER NOT NULL,
+          lifecycle_status TEXT NOT NULL CHECK (
+            lifecycle_status IN ('ACTIVE', 'TERMINAL_PENDING', 'COMMITTED', 'ABORTED')
+          ),
+          max_action_bytes INTEGER NOT NULL,
+          max_state_bytes INTEGER NOT NULL,
+          action_rate_limit INTEGER NOT NULL,
+          terminal_result_json TEXT,
+          finalization_attempts INTEGER NOT NULL DEFAULT 0,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS participant_rate_windows (
+          participant_id TEXT NOT NULL,
+          generation INTEGER NOT NULL,
+          window_started_at INTEGER NOT NULL,
+          action_count INTEGER NOT NULL,
+          PRIMARY KEY (participant_id, generation)
         );
       `);
     });
@@ -126,29 +270,20 @@ export class MultiplayerInstanceObject extends DurableObject<Cloudflare.Env> {
     ) {
       return new Response(null, { status: 404 });
     }
-
     const claims = decodeVerifiedMultiplayerClaims(
       request.headers.get(MULTIPLAYER_INTERNAL_CLAIMS_HEADER),
     );
-    const nowSeconds = Math.floor(Date.now() / 1000);
+    const nowSeconds = Math.floor(Date.now() / 1_000);
     if (!claims || claims.exp <= nowSeconds) return new Response(null, { status: 401 });
 
-    // Create the pair before SQLite writes so workerd can retain the pending upgrade through its
-    // storage output gate. The client endpoint is not returned and the server endpoint is not
-    // accepted unless every authority check below succeeds.
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
-
     const admission = this.consumeAdmission(claims, nowSeconds);
     if (!admission.ok) {
       return new Response(null, { status: admission.code === "REPLAYED" ? 401 : 409 });
     }
 
-    // All synchronous SQLite authority updates complete before any socket is accepted. A crash
-    // after this point can at worst consume a short-lived ticket without opening a socket; it can
-    // never open two sockets from one nonce. The client obtains a fresh generation/ticket through
-    // the API. Cleanup alarm I/O is deferred through waitUntil after the upgrade is established.
     this.closeSupersededSockets(
       claims.participantId,
       claims.generation,
@@ -169,15 +304,71 @@ export class MultiplayerInstanceObject extends DurableObject<Cloudflare.Env> {
         connectionGeneration: claims.connectionGeneration,
       }),
     );
-    this.ctx.waitUntil(this.scheduleNonceCleanup(claims.exp));
-
-    return new Response(null, {
-      status: 101,
-      webSocket: client,
-    });
+    try {
+      await this.sendReconnectState(server, attachment);
+    } catch {
+      this.disconnectUnavailable(server, attachment);
+    }
+    this.ctx.waitUntil(this.scheduleNextAlarm(claims.exp * 1_000 + 1_000));
+    return new Response(null, { status: 101, webSocket: client });
   }
 
   override webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): void {
+    const task = this.messageQueue.then(() => this.handleWebSocketMessage(socket, message));
+    this.messageQueue = task.catch(() => {
+      const attachment = this.readAttachment(socket);
+      if (attachment) this.disconnectUnavailable(socket, attachment);
+    });
+    this.ctx.waitUntil(this.messageQueue);
+  }
+
+  override webSocketClose(socket: WebSocket): void {
+    const attachment = this.readAttachment(socket);
+    if (attachment) this.markDisconnected(attachment, Math.floor(Date.now() / 1_000));
+  }
+
+  override webSocketError(socket: WebSocket): void {
+    const attachment = this.readAttachment(socket);
+    if (attachment) this.markDisconnected(attachment, Math.floor(Date.now() / 1_000));
+  }
+
+  override async alarm(): Promise<void> {
+    const nowMs = Date.now();
+    const nowSeconds = Math.floor(nowMs / 1_000);
+    this.state.storage.sql.exec(
+      "DELETE FROM consumed_ticket_nonces WHERE expires_at <= ?",
+      nowSeconds,
+    );
+    this.state.storage.sql.exec(
+      `DELETE FROM participant_connections
+       WHERE disconnected_at IS NOT NULL AND disconnected_at <= ?`,
+      nowSeconds - 24 * 60 * 60,
+    );
+    this.state.storage.sql.exec(
+      "DELETE FROM participant_rate_windows WHERE window_started_at < ?",
+      nowMs - 60_000,
+    );
+    const runtime = this.readRuntimeMatch();
+    if (runtime?.lifecycle === "TERMINAL_PENDING") {
+      try {
+        await this.commitTerminalResult(runtime);
+      } catch {
+        await this.scheduleFinalizationRetry(runtime.finalizationAttempts + 1);
+      }
+    }
+    const nextNonce = this.state.storage.sql
+      .exec<{ expires_at: number }>(
+        "SELECT MIN(expires_at) AS expires_at FROM consumed_ticket_nonces",
+      )
+      .toArray()[0];
+    const nextExpiry = integerValue(nextNonce?.expires_at);
+    if (nextExpiry !== null) await this.scheduleNextAlarm(nextExpiry * 1_000 + 1_000);
+  }
+
+  private async handleWebSocketMessage(
+    socket: WebSocket,
+    message: string | ArrayBuffer,
+  ): Promise<void> {
     const attachment = this.readAttachment(socket);
     if (!attachment) {
       socket.close(POLICY_CLOSE_CODE, "invalid connection");
@@ -187,7 +378,6 @@ export class MultiplayerInstanceObject extends DurableObject<Cloudflare.Env> {
       socket.close(POLICY_CLOSE_CODE, "invalid message");
       return;
     }
-
     let decoded: unknown;
     try {
       decoded = JSON.parse(message);
@@ -200,7 +390,6 @@ export class MultiplayerInstanceObject extends DurableObject<Cloudflare.Env> {
       socket.close(STALE_CONNECTION_CLOSE_CODE, "stale generation");
       return;
     }
-
     const current = this.currentConnection(attachment.participantId);
     if (
       !current ||
@@ -211,56 +400,513 @@ export class MultiplayerInstanceObject extends DurableObject<Cloudflare.Env> {
       socket.close(STALE_CONNECTION_CLOSE_CODE, "stale connection");
       return;
     }
-
-    const nowSeconds = Math.floor(Date.now() / 1000);
-    if (parsed.type === "MULTI_LEAVE") {
-      this.markDisconnected(attachment, nowSeconds);
-      socket.close(1000, "left");
+    const authority = this.currentAuthority(attachment.participantId, attachment.generation);
+    if (!authority) {
+      socket.close(POLICY_CLOSE_CODE, "invalid authority");
       return;
     }
 
-    // Phase 2 is an inert transport baseline. Never echo or persist an untrusted action before a
-    // concrete ruleset owns its schema and authority in the next phase.
-    socket.send(
-      JSON.stringify({
-        type: "MULTI_DISCONNECTED",
-        v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
-        generation: attachment.generation,
-        code: "SERVER_UNAVAILABLE",
-      }),
+    const nowSeconds = Math.floor(Date.now() / 1_000);
+    this.touchConnection(attachment, nowSeconds);
+    switch (parsed.type) {
+      case "MULTI_LEAVE":
+        await this.handleLeave(authority, attachment, socket);
+        return;
+      case "MULTI_READY":
+        await this.handleReady(authority, attachment, socket);
+        return;
+      case "MULTI_ACTION":
+        await this.handleAction(authority, attachment, socket, parsed);
+        return;
+      case "MULTI_INPUT":
+        socket.close(POLICY_CLOSE_CODE, "input unsupported by ruleset");
+        this.markDisconnected(attachment, nowSeconds);
+    }
+  }
+
+  private async handleReady(
+    authority: ParticipantAuthority,
+    attachment: ConnectionAttachment,
+    socket: WebSocket,
+  ): Promise<void> {
+    const result = await this.container.multiplayerRoomUseCases.readyParticipant({
+      userId: authority.userId,
+      instanceId: this.instanceId(),
+      expectedGeneration: authority.generation,
+    });
+    if (!result.ok) {
+      if (result.code === "STALE_GENERATION") {
+        socket.close(STALE_CONNECTION_CLOSE_CODE, "stale generation");
+      } else {
+        this.disconnectUnavailable(socket, attachment);
+      }
+      return;
+    }
+    if (result.state === "WAITING" || !result.match) return;
+    const runtime = await this.ensureRuntimeMatch(result.match);
+    await this.broadcastState(runtime, "MULTI_SYNC");
+  }
+
+  private async handleAction(
+    authority: ParticipantAuthority,
+    attachment: ConnectionAttachment,
+    socket: WebSocket,
+    message: MultiActionMessage,
+  ): Promise<void> {
+    const match = await this.container.multiplayerMatchRepo.findMatchByInstanceGeneration(
+      this.instanceId(),
+      attachment.generation,
     );
-    this.markDisconnected(attachment, nowSeconds);
-    socket.close(RUNTIME_UNAVAILABLE_CLOSE_CODE, "ruleset unavailable");
+    if (!match || match.status !== "ACTIVE") {
+      await this.sendActionRejection(socket, message.clientActionId, "MATCH_NOT_ACTIVE", 0);
+      return;
+    }
+    let runtime = await this.ensureRuntimeMatch(match);
+    if (runtime.lifecycle !== "ACTIVE") {
+      await this.sendActionRejection(
+        socket,
+        message.clientActionId,
+        "MATCH_NOT_ACTIVE",
+        runtime.state.revision,
+      );
+      return;
+    }
+    if (!this.consumeActionRate(authority, runtime.actionRateLimit, Date.now())) {
+      await this.sendActionRejection(
+        socket,
+        message.clientActionId,
+        "RATE_LIMITED",
+        runtime.state.revision,
+      );
+      return;
+    }
+
+    const payloadJson = stablePayloadJson(message.payload);
+    if (textEncoder.encode(payloadJson).byteLength > runtime.maxActionBytes) {
+      await this.recordAndSendRejectedAction(
+        runtime,
+        authority,
+        socket,
+        message,
+        payloadJson,
+        "ACTION_INVALID",
+      );
+      return;
+    }
+    const action = parseOmokAction(message.payload);
+    const transition = action
+      ? applyOmokAction(runtime.state, authority.seatIndex, action, message.expectedRevision)
+      : {
+          ok: false as const,
+          code: "ACTION_INVALID" as const,
+          currentRevision: runtime.state.revision,
+        };
+    const nextServerSeq = runtime.serverSeq + 1;
+    const ledgerResponse: OmokActionLedgerResponseV1 = transition.ok
+      ? {
+          schemaVersion: OMOK_ACTION_LEDGER_SCHEMA_VERSION,
+          kind: "ACCEPTED",
+          generation: runtime.generation,
+          serverSeq: nextServerSeq,
+          clientActionId: message.clientActionId,
+          revision: transition.state.revision,
+          state: transition.state,
+        }
+      : {
+          schemaVersion: OMOK_ACTION_LEDGER_SCHEMA_VERSION,
+          kind: "REJECTED",
+          generation: runtime.generation,
+          serverSeq: nextServerSeq,
+          clientActionId: message.clientActionId,
+          code: transition.code,
+          currentRevision: transition.currentRevision,
+        };
+    const recorded = await this.container.multiplayerMatchRepo.recordAction({
+      matchId: runtime.matchId,
+      userId: authority.userId,
+      participantId: authority.participantId,
+      clientSeq: message.clientSeq,
+      serverSeq: nextServerSeq,
+      clientActionId: message.clientActionId,
+      payloadHash: await this.hashActionPayload(payloadJson),
+      expectedRevision: message.expectedRevision,
+      resultRevision: transition.ok ? transition.state.revision : transition.currentRevision,
+      resultCode: transition.ok ? "ACCEPTED" : transition.code,
+      responseJson: encodeOmokActionLedgerResponse(ledgerResponse),
+      nowIso: new Date().toISOString(),
+    });
+
+    if (recorded.status === "REJECTED") {
+      if (recorded.code === "ACTION_CONFLICT") {
+        const refreshedMatch = await this.container.multiplayerMatchRepo.findMatch(match.id);
+        if (!refreshedMatch) throw new Error("match disappeared during action conflict");
+        runtime = await this.recoverRuntimeMatch(refreshedMatch, runtime);
+      }
+      await this.sendActionRejection(
+        socket,
+        message.clientActionId,
+        actionCodeForClient(recorded.code),
+        recorded.currentRevision ?? runtime.state.revision,
+      );
+      if (recorded.code === "ACTION_CONFLICT") await this.sendState(socket, runtime, "MULTI_SYNC");
+      return;
+    }
+
+    let stored: OmokActionLedgerResponseV1 | null = null;
+    try {
+      stored = parseOmokActionLedgerResponse(JSON.parse(recorded.action.responseJson));
+    } catch {
+      stored = null;
+    }
+    if (!stored || stored.generation !== runtime.generation) {
+      throw new Error("invalid authoritative Omok action response");
+    }
+    if (recorded.status === "REPLAYED") {
+      const refreshedMatch = await this.container.multiplayerMatchRepo.findMatch(match.id);
+      if (!refreshedMatch) throw new Error("match disappeared during action replay");
+      runtime = await this.recoverRuntimeMatch(refreshedMatch, runtime);
+      if (stored.kind === "ACCEPTED") {
+        await this.sendState(socket, runtime, "MULTI_SYNC");
+      } else {
+        await this.sendActionRejection(
+          socket,
+          stored.clientActionId,
+          actionCodeForClient(stored.code),
+          runtime.state.revision,
+        );
+      }
+      if (runtime.state.status !== "ACTIVE" && runtime.lifecycle === "ACTIVE") {
+        await this.beginTerminalCommit(runtime);
+      }
+      return;
+    }
+
+    if (stored.kind === "REJECTED") {
+      runtime = this.persistRuntimeMatch({ ...runtime, serverSeq: stored.serverSeq });
+      this.sendStoredActionRejection(socket, stored);
+      if (stored.code === "ACTION_CONFLICT") await this.sendState(socket, runtime, "MULTI_SYNC");
+      return;
+    }
+    runtime = this.persistRuntimeMatch({
+      ...runtime,
+      state: stored.state,
+      serverSeq: stored.serverSeq,
+    });
+    this.broadcastProjectedState(runtime, "MULTI_STATE", stored.serverSeq);
+    if (stored.state.status !== "ACTIVE") await this.beginTerminalCommit(runtime);
   }
 
-  override webSocketClose(socket: WebSocket): void {
-    const attachment = this.readAttachment(socket);
-    if (attachment) this.markDisconnected(attachment, Math.floor(Date.now() / 1000));
+  private async recordAndSendRejectedAction(
+    runtime: RuntimeMatch,
+    authority: ParticipantAuthority,
+    socket: WebSocket,
+    message: MultiActionMessage,
+    payloadJson: string,
+    code: "ACTION_INVALID",
+  ): Promise<void> {
+    const serverSeq = runtime.serverSeq + 1;
+    const response: OmokActionLedgerResponseV1 = {
+      schemaVersion: OMOK_ACTION_LEDGER_SCHEMA_VERSION,
+      kind: "REJECTED",
+      generation: runtime.generation,
+      serverSeq,
+      clientActionId: message.clientActionId,
+      code,
+      currentRevision: runtime.state.revision,
+    };
+    const recorded = await this.container.multiplayerMatchRepo.recordAction({
+      matchId: runtime.matchId,
+      userId: authority.userId,
+      participantId: authority.participantId,
+      clientSeq: message.clientSeq,
+      serverSeq,
+      clientActionId: message.clientActionId,
+      payloadHash: await this.hashActionPayload(payloadJson),
+      expectedRevision: message.expectedRevision,
+      resultRevision: runtime.state.revision,
+      resultCode: code,
+      responseJson: encodeOmokActionLedgerResponse(response),
+      nowIso: new Date().toISOString(),
+    });
+    if (recorded.status === "REJECTED") {
+      await this.sendActionRejection(
+        socket,
+        message.clientActionId,
+        actionCodeForClient(recorded.code),
+        recorded.currentRevision ?? runtime.state.revision,
+      );
+      return;
+    }
+    const stored = parseOmokActionLedgerResponse(JSON.parse(recorded.action.responseJson));
+    if (!stored) throw new Error("invalid rejected Omok ledger response");
+    if (recorded.status === "RECORDED") {
+      this.persistRuntimeMatch({ ...runtime, serverSeq: stored.serverSeq });
+    }
+    await this.sendActionRejection(
+      socket,
+      stored.clientActionId,
+      stored.kind === "REJECTED" ? actionCodeForClient(stored.code) : "ACTION_CONFLICT",
+      stored.kind === "REJECTED" ? stored.currentRevision : runtime.state.revision,
+    );
   }
 
-  override webSocketError(socket: WebSocket): void {
-    const attachment = this.readAttachment(socket);
-    if (attachment) this.markDisconnected(attachment, Math.floor(Date.now() / 1000));
+  private async handleLeave(
+    authority: ParticipantAuthority,
+    attachment: ConnectionAttachment,
+    socket: WebSocket,
+  ): Promise<void> {
+    const result = await this.container.multiplayerRoomUseCases.leaveRoom({
+      userId: authority.userId,
+      instanceId: this.instanceId(),
+      expectedGeneration: authority.generation,
+    });
+    this.markDisconnected(attachment, Math.floor(Date.now() / 1_000));
+    if (!result.ok) {
+      this.disconnectUnavailable(socket, attachment);
+      return;
+    }
+    if (result.instance.status === "ABORTED") {
+      const runtime = this.readRuntimeMatch();
+      if (runtime) this.persistRuntimeMatch({ ...runtime, lifecycle: "ABORTED" });
+      this.broadcastAbort(abortCodeForClient(result.instance.abortCode));
+      for (const connected of this.state.getWebSockets()) connected.close(1000, "match aborted");
+      return;
+    }
+    socket.close(1000, "left");
   }
 
-  override async alarm(): Promise<void> {
-    const nowSeconds = Math.floor(Date.now() / 1000);
+  private async sendReconnectState(
+    socket: WebSocket,
+    attachment: ConnectionAttachment,
+  ): Promise<void> {
+    const match = await this.container.multiplayerMatchRepo.findMatchByInstanceGeneration(
+      this.instanceId(),
+      attachment.generation,
+    );
+    if (!match) return;
+    if (match.status === "ABORTED") {
+      socket.send(
+        JSON.stringify({
+          type: "MULTI_ABORTED",
+          v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
+          generation: attachment.generation,
+          code: abortCodeForClient(match.abortCode),
+        }),
+      );
+      return;
+    }
+    if (match.status === "PENDING") return;
+    let runtime = await this.ensureRuntimeMatch(match);
+    runtime = await this.sendState(socket, runtime, "MULTI_SYNC");
+    if (match.status === "COMMITTED" && runtime.terminalResultJson) {
+      const terminalResult = JSON.parse(runtime.terminalResultJson) as unknown;
+      runtime = this.reserveServerSequence(runtime);
+      this.sendTerminalCommitted(socket, runtime, terminalResult);
+    } else if (runtime.lifecycle === "TERMINAL_PENDING") {
+      runtime = this.reserveServerSequence(runtime);
+      this.sendTerminalPending(socket, runtime);
+    }
+  }
+
+  private async ensureRuntimeMatch(match: MultiplayerMatchRecord): Promise<RuntimeMatch> {
+    const current = this.readRuntimeMatch();
+    if (current && (current.matchId !== match.id || current.generation !== match.generation)) {
+      throw new Error("runtime match context mismatch");
+    }
+    return this.recoverRuntimeMatch(match, current);
+  }
+
+  private async recoverRuntimeMatch(
+    match: MultiplayerMatchRecord,
+    current: RuntimeMatch | null,
+  ): Promise<RuntimeMatch> {
+    const authority = this.readRuntimeAuthority();
+    if (
+      !authority ||
+      authority.profileId !== match.profileId ||
+      authority.rulesetKey !== OMOK_RULESET_KEY ||
+      authority.rulesetRevision !== OMOK_RULESET_REVISION ||
+      match.generation !== this.generation()
+    ) {
+      throw new Error("unsupported runtime authority");
+    }
+    const profileRecord = await this.container.multiplayerProfileRepo.findById(match.profileId);
+    if (
+      !profileRecord ||
+      !isSupportedMultiplayerRuntimeProfile(profileRecord.profile) ||
+      profileRecord.profile.gameVersionId !== match.gameVersionId ||
+      profileRecord.profile.profileRevision !== match.profileRevision
+    ) {
+      throw new Error("unsupported multiplayer profile");
+    }
+
+    let state = current?.state ?? createInitialOmokState();
+    if (state.revision > match.stateRevision) throw new Error("DO state is ahead of D1 ledger");
+    if (state.revision < match.stateRevision) {
+      const actions = await this.container.multiplayerMatchRepo.listActionsAfterRevision(
+        match.id,
+        state.revision,
+        500,
+      );
+      for (const action of actions) {
+        if (action.resultCode !== "ACCEPTED") continue;
+        let response: OmokActionLedgerResponseV1 | null = null;
+        try {
+          response = parseOmokActionLedgerResponse(JSON.parse(action.responseJson));
+        } catch {
+          response = null;
+        }
+        if (
+          !response ||
+          response.kind !== "ACCEPTED" ||
+          response.generation !== match.generation ||
+          response.revision !== state.revision + 1 ||
+          response.serverSeq !== action.serverSeq
+        ) {
+          throw new Error("invalid Omok recovery action");
+        }
+        state = response.state;
+      }
+    }
+    if (state.revision !== match.stateRevision) throw new Error("incomplete Omok action ledger");
+
+    const latestAction = await this.container.multiplayerMatchRepo.findLatestAction(match.id);
+    const terminalResultJson = match.terminalResultJson ?? current?.terminalResultJson ?? null;
+    const lifecycle: RuntimeLifecycle =
+      match.status === "COMMITTED"
+        ? "COMMITTED"
+        : match.status === "FINALIZING"
+          ? "TERMINAL_PENDING"
+          : match.status === "ABORTED"
+            ? "ABORTED"
+            : current?.lifecycle === "TERMINAL_PENDING"
+              ? "TERMINAL_PENDING"
+              : "ACTIVE";
+    return this.persistRuntimeMatch({
+      matchId: match.id,
+      generation: match.generation,
+      state,
+      serverSeq: Math.max(current?.serverSeq ?? 0, latestAction?.serverSeq ?? 0),
+      lifecycle,
+      maxActionBytes: profileRecord.profile.maxActionBytes,
+      maxStateBytes: profileRecord.profile.maxStateBytes,
+      actionRateLimit: profileRecord.profile.actionRateLimit,
+      terminalResultJson,
+      finalizationAttempts: current?.finalizationAttempts ?? 0,
+    });
+  }
+
+  private async beginTerminalCommit(runtime: RuntimeMatch): Promise<void> {
+    const terminal = getOmokTerminalResult(runtime.state);
+    if (!terminal) throw new Error("terminal Omok state has no result");
+    let pending = this.persistRuntimeMatch({
+      ...runtime,
+      lifecycle: "TERMINAL_PENDING",
+      terminalResultJson: JSON.stringify(terminal),
+    });
+    pending = this.reserveServerSequence(pending);
+    this.broadcastTerminalPending(pending);
+    await this.commitTerminalResult(pending);
+  }
+
+  private async commitTerminalResult(runtime: RuntimeMatch): Promise<void> {
+    const terminal = getOmokTerminalResult(runtime.state);
+    if (!terminal || !runtime.terminalResultJson) throw new Error("terminal result unavailable");
+    const [players, participants] = await Promise.all([
+      this.container.multiplayerMatchRepo.listPlayers(runtime.matchId),
+      this.container.multiplayerInstanceRepo.listParticipants(this.instanceId()),
+    ]);
+    const participantsById = new Map(
+      participants.map((participant) => [participant.id, participant]),
+    );
+    if (players.length !== 2) throw new Error("Omok requires exactly two match players");
+    const finalPlayers = players.map((player) => {
+      const participant = participantsById.get(player.participantId);
+      if (!participant || (participant.seatIndex !== 0 && participant.seatIndex !== 1)) {
+        throw new Error("invalid Omok player seat");
+      }
+      const outcome = this.playerOutcome(terminal, participant.seatIndex);
+      const placement = outcome === "WIN" ? 1 : outcome === "LOSS" ? 2 : null;
+      return {
+        userId: player.userId,
+        participantId: player.participantId,
+        outcome,
+        placement,
+        resultJson: JSON.stringify({
+          schemaVersion: 1,
+          matchId: runtime.matchId,
+          generation: runtime.generation,
+          seatIndex: participant.seatIndex,
+          outcome,
+          placement,
+          terminalRevision: terminal.revision,
+        }),
+        rewardEligible: false,
+        reward: null,
+      } as const;
+    });
+    const committed = await this.container.multiplayerMatchRepo.finalize({
+      matchId: runtime.matchId,
+      expectedStateRevision: runtime.state.revision,
+      terminalResultJson: runtime.terminalResultJson,
+      terminalResultHash: await sha256Hex(runtime.terminalResultJson),
+      players: finalPlayers,
+      nowIso: new Date().toISOString(),
+    });
+    if (committed.status === "REJECTED") {
+      const attempts = runtime.finalizationAttempts + 1;
+      this.persistRuntimeMatch({ ...runtime, finalizationAttempts: attempts });
+      await this.scheduleFinalizationRetry(attempts);
+      return;
+    }
+    await this.closeCommittedInstance(runtime.generation);
+    let completed = this.persistRuntimeMatch({
+      ...runtime,
+      lifecycle: "COMMITTED",
+      terminalResultJson: committed.match.terminalResultJson,
+    });
+    completed = this.reserveServerSequence(completed);
+    this.broadcastTerminalCommitted(completed, terminal);
     this.state.storage.sql.exec(
-      "DELETE FROM consumed_ticket_nonces WHERE expires_at <= ?",
-      nowSeconds,
+      "UPDATE runtime_meta SET lifecycle_status = 'CLOSED', updated_at = ? WHERE singleton = 1",
+      Math.floor(Date.now() / 1_000),
     );
-    this.state.storage.sql.exec(
-      `DELETE FROM participant_connections
-       WHERE disconnected_at IS NOT NULL AND disconnected_at <= ?`,
-      nowSeconds - 24 * 60 * 60,
-    );
-    const next = this.state.storage.sql
-      .exec<{ expires_at: number }>(
-        "SELECT MIN(expires_at) AS expires_at FROM consumed_ticket_nonces",
-      )
-      .toArray()[0];
-    const nextExpiry = integerValue(next?.expires_at);
-    if (nextExpiry !== null) await this.scheduleNonceCleanup(nextExpiry);
+  }
+
+  private playerOutcome(terminal: OmokTerminalResult, seatIndex: 0 | 1): "WIN" | "LOSS" | "DRAW" {
+    if (terminal.kind === "DRAW") return "DRAW";
+    return terminal.winnerSeatIndex === seatIndex ? "WIN" : "LOSS";
+  }
+
+  private async closeCommittedInstance(generation: number): Promise<void> {
+    let instance = await this.container.multiplayerInstanceRepo.findById(this.instanceId());
+    if (!instance || instance.generation !== generation) return;
+    const nowIso = new Date().toISOString();
+    if (instance.status === "ACTIVE") {
+      await this.container.multiplayerInstanceRepo.transition({
+        instanceId: instance.id,
+        expectedStatus: "ACTIVE",
+        expectedGeneration: generation,
+        nextStatus: "CLOSING",
+        nextGeneration: generation,
+        closedAt: null,
+        abortCode: null,
+        nowIso,
+      });
+      instance = await this.container.multiplayerInstanceRepo.findById(instance.id);
+    }
+    if (instance?.status === "CLOSING") {
+      await this.container.multiplayerInstanceRepo.transition({
+        instanceId: instance.id,
+        expectedStatus: "CLOSING",
+        expectedGeneration: generation,
+        nextStatus: "CLOSED",
+        nextGeneration: generation,
+        closedAt: nowIso,
+        abortCode: null,
+        nowIso,
+      });
+    }
   }
 
   private consumeAdmission(
@@ -279,7 +925,7 @@ export class MultiplayerInstanceObject extends DurableObject<Cloudflare.Env> {
         generation: number;
       }>(
         `SELECT instance_id, game_version_id, profile_revision, generation
-           FROM runtime_meta WHERE singleton = 1`,
+         FROM runtime_meta WHERE singleton = 1`,
       )
       .toArray()[0];
     if (meta) {
@@ -295,19 +941,22 @@ export class MultiplayerInstanceObject extends DurableObject<Cloudflare.Env> {
       if (claims.generation === meta.generation + 1) {
         this.state.storage.sql.exec(
           `UPDATE runtime_meta
-             SET generation = ?, lifecycle_status = 'INERT', updated_at = ?
-             WHERE singleton = 1 AND generation = ?`,
+           SET generation = ?, lifecycle_status = 'INERT', state_schema_version = ?, updated_at = ?
+           WHERE singleton = 1 AND generation = ?`,
           claims.generation,
+          STATE_SCHEMA_VERSION,
           nowSeconds,
           meta.generation,
         );
+        this.state.storage.sql.exec("DELETE FROM runtime_match");
+        this.state.storage.sql.exec("DELETE FROM participant_rate_windows");
       }
     } else {
       this.state.storage.sql.exec(
         `INSERT INTO runtime_meta (
-             singleton, instance_id, game_version_id, profile_revision, generation,
-             state_schema_version, lifecycle_status, created_at, updated_at
-           ) VALUES (1, ?, ?, ?, ?, ?, 'INERT', ?, ?)`,
+           singleton, instance_id, game_version_id, profile_revision, generation,
+           state_schema_version, lifecycle_status, created_at, updated_at
+         ) VALUES (1, ?, ?, ?, ?, ?, 'INERT', ?, ?)`,
         claims.instanceId,
         claims.gameVersionId,
         claims.profileRevision,
@@ -318,6 +967,55 @@ export class MultiplayerInstanceObject extends DurableObject<Cloudflare.Env> {
       );
     }
 
+    const runtimeAuthority = this.readRuntimeAuthority();
+    if (
+      runtimeAuthority &&
+      (runtimeAuthority.profileId !== claims.profileId ||
+        runtimeAuthority.rulesetKey !== claims.rulesetKey ||
+        runtimeAuthority.rulesetRevision !== claims.rulesetRevision)
+    ) {
+      return { ok: false, code: "CONTEXT_MISMATCH" };
+    }
+    if (!runtimeAuthority) {
+      this.state.storage.sql.exec(
+        `INSERT INTO runtime_authority (
+           singleton, profile_id, ruleset_key, ruleset_revision, created_at, updated_at
+         ) VALUES (1, ?, ?, ?, ?, ?)`,
+        claims.profileId,
+        claims.rulesetKey,
+        claims.rulesetRevision,
+        nowSeconds,
+        nowSeconds,
+      );
+    }
+
+    const participantAuthority = this.currentAuthority(claims.participantId, claims.generation);
+    if (
+      participantAuthority &&
+      (participantAuthority.userId !== claims.userId ||
+        participantAuthority.role !== claims.role ||
+        participantAuthority.seatIndex !== claims.seatIndex)
+    ) {
+      return { ok: false, code: "CONTEXT_MISMATCH" };
+    }
+    if (!participantAuthority) {
+      try {
+        this.state.storage.sql.exec(
+          `INSERT INTO participant_authority (
+             participant_id, generation, user_id, role, seat_index, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?)`,
+          claims.participantId,
+          claims.generation,
+          claims.userId,
+          claims.role,
+          claims.seatIndex,
+          nowSeconds,
+        );
+      } catch {
+        return { ok: false, code: "CONTEXT_MISMATCH" };
+      }
+    }
+
     const existingNonce = this.state.storage.sql
       .exec<{ present: number }>(
         "SELECT 1 AS present FROM consumed_ticket_nonces WHERE jti = ?",
@@ -325,7 +1023,6 @@ export class MultiplayerInstanceObject extends DurableObject<Cloudflare.Env> {
       )
       .toArray()[0];
     if (existingNonce) return { ok: false, code: "REPLAYED" };
-
     const current = this.currentConnection(claims.participantId);
     if (
       current &&
@@ -338,8 +1035,8 @@ export class MultiplayerInstanceObject extends DurableObject<Cloudflare.Env> {
 
     const nonceInsert = this.state.storage.sql.exec(
       `INSERT OR IGNORE INTO consumed_ticket_nonces (
-           jti, participant_id, user_id, generation, connection_generation, expires_at, consumed_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         jti, participant_id, user_id, generation, connection_generation, expires_at, consumed_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       claims.jti,
       claims.participantId,
       claims.userId,
@@ -348,25 +1045,21 @@ export class MultiplayerInstanceObject extends DurableObject<Cloudflare.Env> {
       claims.exp,
       nowSeconds,
     );
-    // SqlStorageCursor counters are final only after the cursor is fully consumed.
     nonceInsert.toArray();
-    // The expiry index contributes an additional billed row write, so a successful insert can
-    // report more than one. INSERT OR IGNORE reports zero only when this nonce already exists.
     if (nonceInsert.rowsWritten === 0) return { ok: false, code: "REPLAYED" };
-
     this.state.storage.sql.exec(
       `INSERT INTO participant_connections (
-           participant_id, user_id, role, generation, connection_generation,
-           connected_at, last_seen_at, disconnected_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
-         ON CONFLICT(participant_id) DO UPDATE SET
-           user_id = excluded.user_id,
-           role = excluded.role,
-           generation = excluded.generation,
-           connection_generation = excluded.connection_generation,
-           connected_at = excluded.connected_at,
-           last_seen_at = excluded.last_seen_at,
-           disconnected_at = NULL`,
+         participant_id, user_id, role, generation, connection_generation,
+         connected_at, last_seen_at, disconnected_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+       ON CONFLICT(participant_id) DO UPDATE SET
+         user_id = excluded.user_id,
+         role = excluded.role,
+         generation = excluded.generation,
+         connection_generation = excluded.connection_generation,
+         connected_at = excluded.connected_at,
+         last_seen_at = excluded.last_seen_at,
+         disconnected_at = NULL`,
       claims.participantId,
       claims.userId,
       claims.role,
@@ -376,13 +1069,416 @@ export class MultiplayerInstanceObject extends DurableObject<Cloudflare.Env> {
       nowSeconds,
     );
     this.state.storage.sql.exec(
-      "UPDATE runtime_meta SET lifecycle_status = 'ACTIVE', updated_at = ? WHERE singleton = 1",
+      `UPDATE runtime_meta
+       SET lifecycle_status = 'ACTIVE', state_schema_version = ?, updated_at = ?
+       WHERE singleton = 1`,
+      STATE_SCHEMA_VERSION,
       nowSeconds,
     );
     return {
       ok: true,
       previousConnectionGeneration: current?.connectionGeneration ?? null,
     };
+  }
+
+  private readRuntimeAuthority(): {
+    readonly profileId: number;
+    readonly rulesetKey: string;
+    readonly rulesetRevision: number;
+  } | null {
+    const row = this.state.storage.sql
+      .exec<{ profile_id: number; ruleset_key: string; ruleset_revision: number }>(
+        `SELECT profile_id, ruleset_key, ruleset_revision
+         FROM runtime_authority WHERE singleton = 1`,
+      )
+      .toArray()[0];
+    return row && isPositiveInteger(row.profile_id) && isPositiveInteger(row.ruleset_revision)
+      ? {
+          profileId: row.profile_id,
+          rulesetKey: row.ruleset_key,
+          rulesetRevision: row.ruleset_revision,
+        }
+      : null;
+  }
+
+  private currentAuthority(participantId: string, generation: number): ParticipantAuthority | null {
+    const row = this.state.storage.sql
+      .exec<{
+        participant_id: string;
+        user_id: number;
+        role: "HOST" | "PLAYER";
+        seat_index: number;
+        generation: number;
+      }>(
+        `SELECT participant_id, user_id, role, seat_index, generation
+         FROM participant_authority WHERE participant_id = ? AND generation = ?`,
+        participantId,
+        generation,
+      )
+      .toArray()[0];
+    if (
+      !row ||
+      !isPositiveInteger(row.user_id) ||
+      (row.role !== "HOST" && row.role !== "PLAYER") ||
+      (row.seat_index !== 0 && row.seat_index !== 1) ||
+      !isPositiveInteger(row.generation)
+    ) {
+      return null;
+    }
+    return {
+      participantId: row.participant_id,
+      userId: row.user_id,
+      role: row.role,
+      seatIndex: row.seat_index,
+      generation: row.generation,
+    };
+  }
+
+  private readRuntimeMatch(): RuntimeMatch | null {
+    const row = this.state.storage.sql
+      .exec<{
+        match_id: string;
+        generation: number;
+        state_json: string;
+        revision: number;
+        server_seq: number;
+        lifecycle_status: RuntimeLifecycle;
+        max_action_bytes: number;
+        max_state_bytes: number;
+        action_rate_limit: number;
+        terminal_result_json: string | null;
+        finalization_attempts: number;
+      }>(
+        `SELECT match_id, generation, state_json, revision, server_seq, lifecycle_status,
+                max_action_bytes, max_state_bytes, action_rate_limit, terminal_result_json,
+                finalization_attempts
+         FROM runtime_match WHERE singleton = 1`,
+      )
+      .toArray()[0];
+    if (!row) return null;
+    let state: OmokStateV1 | null = null;
+    try {
+      state = parseOmokStateV1(JSON.parse(row.state_json));
+    } catch {
+      state = null;
+    }
+    if (
+      !state ||
+      state.revision !== row.revision ||
+      !isPositiveInteger(row.generation) ||
+      !isNonNegativeInteger(row.server_seq) ||
+      !["ACTIVE", "TERMINAL_PENDING", "COMMITTED", "ABORTED"].includes(row.lifecycle_status) ||
+      !isPositiveInteger(row.max_action_bytes) ||
+      !isPositiveInteger(row.max_state_bytes) ||
+      !isPositiveInteger(row.action_rate_limit) ||
+      !isNonNegativeInteger(row.finalization_attempts)
+    ) {
+      throw new Error("invalid persisted multiplayer runtime state");
+    }
+    return {
+      matchId: row.match_id,
+      generation: row.generation,
+      state,
+      serverSeq: row.server_seq,
+      lifecycle: row.lifecycle_status,
+      maxActionBytes: row.max_action_bytes,
+      maxStateBytes: row.max_state_bytes,
+      actionRateLimit: row.action_rate_limit,
+      terminalResultJson: row.terminal_result_json,
+      finalizationAttempts: row.finalization_attempts,
+    };
+  }
+
+  private persistRuntimeMatch(runtime: RuntimeMatch): RuntimeMatch {
+    const current = this.readRuntimeMatch();
+    if (current) {
+      if (current.matchId !== runtime.matchId || current.generation !== runtime.generation) {
+        throw new Error("runtime match persistence context mismatch");
+      }
+      if (
+        current.maxActionBytes !== runtime.maxActionBytes ||
+        current.maxStateBytes !== runtime.maxStateBytes ||
+        current.actionRateLimit !== runtime.actionRateLimit
+      ) {
+        throw new Error("runtime profile limits changed inside a match");
+      }
+      if (current.state.revision > runtime.state.revision) return current;
+      if (
+        current.state.revision === runtime.state.revision &&
+        JSON.stringify(current.state) !== JSON.stringify(runtime.state)
+      ) {
+        throw new Error("conflicting authoritative state at one revision");
+      }
+      const lifecycleRank: Record<RuntimeLifecycle, number> = {
+        ACTIVE: 0,
+        TERMINAL_PENDING: 1,
+        COMMITTED: 2,
+        ABORTED: 2,
+      };
+      if (
+        lifecycleRank[current.lifecycle] > lifecycleRank[runtime.lifecycle] ||
+        (current.lifecycle === "COMMITTED" && runtime.lifecycle === "ABORTED") ||
+        (current.lifecycle === "ABORTED" && runtime.lifecycle === "COMMITTED")
+      ) {
+        runtime = { ...runtime, lifecycle: current.lifecycle };
+      }
+      runtime = {
+        ...runtime,
+        serverSeq: Math.max(current.serverSeq, runtime.serverSeq),
+        terminalResultJson: current.terminalResultJson ?? runtime.terminalResultJson,
+        finalizationAttempts: Math.max(current.finalizationAttempts, runtime.finalizationAttempts),
+      };
+    }
+    const stateJson = JSON.stringify(runtime.state);
+    if (textEncoder.encode(stateJson).byteLength > runtime.maxStateBytes) {
+      throw new Error("authoritative state exceeds approved profile limit");
+    }
+    this.state.storage.sql.exec(
+      `INSERT INTO runtime_match (
+         singleton, match_id, generation, state_json, revision, server_seq,
+         lifecycle_status, max_action_bytes, max_state_bytes, action_rate_limit,
+         terminal_result_json, finalization_attempts, updated_at
+       ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(singleton) DO UPDATE SET
+         state_json = excluded.state_json,
+         revision = excluded.revision,
+         server_seq = excluded.server_seq,
+         lifecycle_status = excluded.lifecycle_status,
+         max_action_bytes = excluded.max_action_bytes,
+         max_state_bytes = excluded.max_state_bytes,
+         action_rate_limit = excluded.action_rate_limit,
+         terminal_result_json = excluded.terminal_result_json,
+         finalization_attempts = excluded.finalization_attempts,
+         updated_at = excluded.updated_at
+       WHERE runtime_match.match_id = excluded.match_id
+         AND runtime_match.generation = excluded.generation`,
+      runtime.matchId,
+      runtime.generation,
+      stateJson,
+      runtime.state.revision,
+      runtime.serverSeq,
+      runtime.lifecycle,
+      runtime.maxActionBytes,
+      runtime.maxStateBytes,
+      runtime.actionRateLimit,
+      runtime.terminalResultJson,
+      runtime.finalizationAttempts,
+      Date.now(),
+    );
+    return runtime;
+  }
+
+  private reserveServerSequence(runtime: RuntimeMatch): RuntimeMatch {
+    const current = this.readRuntimeMatch();
+    const base =
+      current &&
+      current.matchId === runtime.matchId &&
+      current.generation === runtime.generation &&
+      current.state.revision >= runtime.state.revision
+        ? current
+        : runtime;
+    return this.persistRuntimeMatch({ ...base, serverSeq: base.serverSeq + 1 });
+  }
+
+  private consumeActionRate(
+    authority: ParticipantAuthority,
+    limit: number,
+    nowMs: number,
+  ): boolean {
+    const row = this.state.storage.sql
+      .exec<{ window_started_at: number; action_count: number }>(
+        `SELECT window_started_at, action_count FROM participant_rate_windows
+         WHERE participant_id = ? AND generation = ?`,
+        authority.participantId,
+        authority.generation,
+      )
+      .toArray()[0];
+    if (!row || nowMs - row.window_started_at >= ACTION_RATE_WINDOW_MS) {
+      this.state.storage.sql.exec(
+        `INSERT INTO participant_rate_windows (
+           participant_id, generation, window_started_at, action_count
+         ) VALUES (?, ?, ?, 1)
+         ON CONFLICT(participant_id, generation) DO UPDATE SET
+           window_started_at = excluded.window_started_at, action_count = 1`,
+        authority.participantId,
+        authority.generation,
+        nowMs,
+      );
+      return true;
+    }
+    if (row.action_count >= limit) return false;
+    this.state.storage.sql.exec(
+      `UPDATE participant_rate_windows SET action_count = action_count + 1
+       WHERE participant_id = ? AND generation = ? AND window_started_at = ?`,
+      authority.participantId,
+      authority.generation,
+      row.window_started_at,
+    );
+    return true;
+  }
+
+  private async hashActionPayload(payloadJson: string): Promise<string> {
+    return sha256Hex(
+      [
+        "owogg.multiplayer.action.v1",
+        OMOK_RULESET_KEY,
+        String(OMOK_RULESET_REVISION),
+        payloadJson,
+      ].join("\u0000"),
+    );
+  }
+
+  private async broadcastState(
+    runtime: RuntimeMatch,
+    type: "MULTI_SYNC" | "MULTI_STATE",
+  ): Promise<RuntimeMatch> {
+    const sequenced = this.reserveServerSequence(runtime);
+    this.broadcastProjectedState(sequenced, type, sequenced.serverSeq);
+    return sequenced;
+  }
+
+  private broadcastProjectedState(
+    runtime: RuntimeMatch,
+    type: "MULTI_SYNC" | "MULTI_STATE",
+    serverSeq: number,
+  ): void {
+    for (const socket of this.state.getWebSockets()) {
+      const attachment = this.readAttachment(socket);
+      if (!attachment || attachment.generation !== runtime.generation || socket.readyState !== 1) {
+        continue;
+      }
+      const authority = this.currentAuthority(attachment.participantId, attachment.generation);
+      if (!authority) continue;
+      const message = JSON.stringify({
+        type,
+        v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
+        generation: runtime.generation,
+        serverSeq,
+        revision: runtime.state.revision,
+        payload: projectOmokState(runtime.state, authority.seatIndex),
+      });
+      if (textEncoder.encode(message).byteLength > runtime.maxStateBytes) {
+        socket.close(RUNTIME_UNAVAILABLE_CLOSE_CODE, "state limit exceeded");
+      } else {
+        socket.send(message);
+      }
+    }
+  }
+
+  private async sendState(
+    socket: WebSocket,
+    runtime: RuntimeMatch,
+    type: "MULTI_SYNC" | "MULTI_STATE",
+  ): Promise<RuntimeMatch> {
+    const attachment = this.readAttachment(socket);
+    if (!attachment) return runtime;
+    const authority = this.currentAuthority(attachment.participantId, attachment.generation);
+    if (!authority) return runtime;
+    const sequenced = this.reserveServerSequence(runtime);
+    const message = JSON.stringify({
+      type,
+      v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
+      generation: sequenced.generation,
+      serverSeq: sequenced.serverSeq,
+      revision: sequenced.state.revision,
+      payload: projectOmokState(sequenced.state, authority.seatIndex),
+    });
+    if (textEncoder.encode(message).byteLength > sequenced.maxStateBytes) {
+      socket.close(RUNTIME_UNAVAILABLE_CLOSE_CODE, "state limit exceeded");
+      this.markDisconnected(attachment, Math.floor(Date.now() / 1_000));
+    } else {
+      socket.send(message);
+    }
+    return sequenced;
+  }
+
+  private async sendActionRejection(
+    socket: WebSocket,
+    clientActionId: string,
+    code: MultiplayerActionRejectionCode,
+    currentRevision: number,
+  ): Promise<void> {
+    const runtime = this.readRuntimeMatch();
+    const sequenced = runtime ? this.reserveServerSequence(runtime) : null;
+    socket.send(
+      JSON.stringify({
+        type: "MULTI_ACTION_REJECTED",
+        v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
+        generation: sequenced?.generation ?? this.generation(),
+        serverSeq: sequenced?.serverSeq ?? 0,
+        clientActionId,
+        code,
+        currentRevision,
+      }),
+    );
+  }
+
+  private sendStoredActionRejection(
+    socket: WebSocket,
+    response: Extract<OmokActionLedgerResponseV1, { readonly kind: "REJECTED" }>,
+  ): void {
+    socket.send(
+      JSON.stringify({
+        type: "MULTI_ACTION_REJECTED",
+        v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
+        generation: response.generation,
+        serverSeq: response.serverSeq,
+        clientActionId: response.clientActionId,
+        code: actionCodeForClient(response.code),
+        currentRevision: response.currentRevision,
+      }),
+    );
+  }
+
+  private broadcastTerminalPending(runtime: RuntimeMatch): void {
+    for (const socket of this.state.getWebSockets()) this.sendTerminalPending(socket, runtime);
+  }
+
+  private sendTerminalPending(socket: WebSocket, runtime: RuntimeMatch): void {
+    if (socket.readyState !== 1) return;
+    socket.send(
+      JSON.stringify({
+        type: "MULTI_TERMINAL_PENDING",
+        v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
+        generation: runtime.generation,
+        serverSeq: runtime.serverSeq,
+      }),
+    );
+  }
+
+  private broadcastTerminalCommitted(runtime: RuntimeMatch, result: OmokTerminalResult): void {
+    for (const socket of this.state.getWebSockets()) {
+      this.sendTerminalCommitted(socket, runtime, result);
+    }
+  }
+
+  private sendTerminalCommitted(socket: WebSocket, runtime: RuntimeMatch, result: unknown): void {
+    if (socket.readyState !== 1) return;
+    socket.send(
+      JSON.stringify({
+        type: "MULTI_TERMINAL_COMMITTED",
+        v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
+        generation: runtime.generation,
+        serverSeq: runtime.serverSeq,
+        result,
+      }),
+    );
+  }
+
+  private broadcastAbort(code: ReturnType<typeof abortCodeForClient>): void {
+    for (const socket of this.state.getWebSockets()) {
+      if (socket.readyState !== 1) continue;
+      const attachment = this.readAttachment(socket);
+      if (!attachment) continue;
+      socket.send(
+        JSON.stringify({
+          type: "MULTI_ABORTED",
+          v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
+          generation: attachment.generation,
+          code,
+        }),
+      );
+    }
   }
 
   private currentConnection(participantId: string): {
@@ -436,6 +1532,18 @@ export class MultiplayerInstanceObject extends DurableObject<Cloudflare.Env> {
     }
   }
 
+  private touchConnection(attachment: ConnectionAttachment, nowSeconds: number): void {
+    this.state.storage.sql.exec(
+      `UPDATE participant_connections SET last_seen_at = ?
+       WHERE participant_id = ? AND generation = ? AND connection_generation = ?
+         AND disconnected_at IS NULL`,
+      nowSeconds,
+      attachment.participantId,
+      attachment.generation,
+      attachment.connectionGeneration,
+    );
+  }
+
   private markDisconnected(attachment: ConnectionAttachment, nowSeconds: number): void {
     this.state.storage.sql.exec(
       `UPDATE participant_connections
@@ -459,9 +1567,45 @@ export class MultiplayerInstanceObject extends DurableObject<Cloudflare.Env> {
     );
   }
 
-  private async scheduleNonceCleanup(expiresAtSeconds: number): Promise<void> {
-    const desired = expiresAtSeconds * 1000 + 1_000;
+  private disconnectUnavailable(socket: WebSocket, attachment: ConnectionAttachment): void {
+    if (socket.readyState === 1) {
+      socket.send(
+        JSON.stringify({
+          type: "MULTI_DISCONNECTED",
+          v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
+          generation: attachment.generation,
+          code: "SERVER_UNAVAILABLE",
+        }),
+      );
+      socket.close(RUNTIME_UNAVAILABLE_CLOSE_CODE, "runtime unavailable");
+    }
+    this.markDisconnected(attachment, Math.floor(Date.now() / 1_000));
+  }
+
+  private instanceId(): string {
+    const row = this.state.storage.sql
+      .exec<{ instance_id: string }>("SELECT instance_id FROM runtime_meta WHERE singleton = 1")
+      .toArray()[0];
+    if (!row?.instance_id) throw new Error("missing multiplayer instance context");
+    return row.instance_id;
+  }
+
+  private generation(): number {
+    const row = this.state.storage.sql
+      .exec<{ generation: number }>("SELECT generation FROM runtime_meta WHERE singleton = 1")
+      .toArray()[0];
+    if (!isPositiveInteger(row?.generation)) throw new Error("missing multiplayer generation");
+    return row.generation;
+  }
+
+  private async scheduleFinalizationRetry(attempts: number): Promise<void> {
+    const exponent = Math.min(5, Math.max(0, attempts - 1));
+    const delay = Math.min(FINALIZATION_RETRY_MAX_MS, FINALIZATION_RETRY_BASE_MS * 2 ** exponent);
+    await this.scheduleNextAlarm(Date.now() + delay);
+  }
+
+  private async scheduleNextAlarm(desiredMs: number): Promise<void> {
     const current = await this.state.storage.getAlarm();
-    if (current === null || desired < current) await this.state.storage.setAlarm(desired);
+    if (current === null || desiredMs < current) await this.state.storage.setAlarm(desiredMs);
   }
 }

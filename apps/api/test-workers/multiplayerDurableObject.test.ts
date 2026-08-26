@@ -1,12 +1,24 @@
 import { env } from "cloudflare:workers";
-import { evictDurableObject, runInDurableObject } from "cloudflare:test";
-import { test } from "vitest";
+import { applyD1Migrations, evictDurableObject, runInDurableObject } from "cloudflare:test";
+import { beforeAll, test } from "vitest";
 import {
+  OMOK_ACTION_LEDGER_SCHEMA_VERSION,
   MULTIPLAYER_TICKET_AUDIENCE,
   MULTIPLAYER_TICKET_ISSUER,
   MULTIPLAYER_WEBSOCKET_PROTOCOL,
+  MultiplayerRoomUseCases,
+  applyOmokAction,
+  createInitialOmokState,
+  encodeOmokActionLedgerResponse,
+  type RuntimeGame,
+  type RuntimeGameRegistry,
   type MultiplayerJoinTicketClaims,
 } from "@owogg/core";
+import {
+  D1MultiplayerInstanceRepository,
+  D1MultiplayerMatchRepository,
+  D1MultiplayerProfileRepository,
+} from "@owogg/db";
 import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_CONNECT_PATH,
@@ -14,6 +26,138 @@ import {
   decodeVerifiedMultiplayerClaims,
   encodeVerifiedMultiplayerClaims,
 } from "../src/multiplayer/internalProtocol.js";
+
+const GAME_ID = 81_001;
+const GAME_VERSION_ID = 81_002;
+const PROFILE_ID = 81_003;
+const HOST_USER_ID = 81_011;
+const PLAYER_USER_ID = 81_012;
+const GAME_SLUG = "workers-official-omok";
+
+beforeAll(async () => {
+  await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+  const nowIso = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare("INSERT OR IGNORE INTO users (id, nickname) VALUES (?, ?)").bind(
+      HOST_USER_ID,
+      "Workers Host",
+    ),
+    env.DB.prepare("INSERT OR IGNORE INTO users (id, nickname) VALUES (?, ?)").bind(
+      PLAYER_USER_ID,
+      "Workers Player",
+    ),
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO games (
+           id, slug, publisher_type, publisher_user_id, visibility, live_version_id,
+           deleted_at, created_at, updated_at
+         ) VALUES (?, ?, 'OWOGG', NULL, 'PRIVATE', NULL, NULL, ?, ?)`,
+    ).bind(GAME_ID, GAME_SLUG, nowIso, nowIso),
+  ]);
+  await env.DB.prepare(
+    `INSERT OR IGNORE INTO game_versions (
+         id, game_id, object_key, content_hash, bundle_bytes, publish_status,
+         uploaded_at, moderation_status
+       ) VALUES (?, ?, ?, ?, 100, 'READY', ?, NULL)`,
+  )
+    .bind(
+      GAME_VERSION_ID,
+      GAME_ID,
+      "uploads/81001/workers-omok.zip",
+      "workers-omok-content-hash",
+      nowIso,
+    )
+    .run();
+  await env.DB.prepare("UPDATE games SET live_version_id = ?, visibility = 'PUBLIC' WHERE id = ?")
+    .bind(GAME_VERSION_ID, GAME_ID)
+    .run();
+  await env.DB.prepare(
+    `INSERT OR IGNORE INTO multiplayer_profiles (
+         id, source_request_id, source_request_hash, profile_version, game_id, game_version_id,
+         profile_revision, protocol_version, resolved_class, simulation_model, runtime_backend,
+         ruleset_key, ruleset_revision, resolved_config_json, lifecycle, persistence,
+         latency_profile, reconnect_policy, min_players, max_players, allowed_visibility_json,
+         allowed_join_policies_json, max_action_bytes, max_state_bytes, action_rate_limit,
+         reward_policy_id, enabled, approved_at, updated_at
+       ) VALUES (
+         ?, NULL, NULL, 1, ?, ?, 1, 1, 'M1', 'turn', 'durable-object',
+         'official:omok', 1, '{"boardSize":15,"winLength":5}', 'match', 'match',
+         'relaxed', 'resume', 2, 2, '["PRIVATE"]', '["OPEN"]',
+         1024, 8192, 60, NULL, 1, ?, ?
+       )`,
+  )
+    .bind(PROFILE_ID, GAME_ID, GAME_VERSION_ID, nowIso, nowIso)
+    .run();
+});
+
+function runtimeGame(): RuntimeGame {
+  const nowIso = new Date().toISOString();
+  return {
+    identity: {
+      id: GAME_ID,
+      slug: GAME_SLUG,
+      publisher: { type: "OWOGG" },
+      visibility: "PUBLIC",
+      liveVersionId: GAME_VERSION_ID,
+      deletedAt: null,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    },
+    liveVersion: {
+      id: GAME_VERSION_ID,
+      gameId: GAME_ID,
+      objectKey: "uploads/81001/workers-omok.zip",
+      contentHash: "workers-omok-content-hash",
+      bundleBytes: 100,
+      publishStatus: "READY",
+      publishError: null,
+      publishedAt: nowIso,
+      manifestKey: "games/81001/81002/manifest.json",
+      publishedSizeBytes: 100,
+      fileCount: 3,
+      uploadedAt: nowIso,
+    },
+    canonical: {
+      schemaVersion: 3,
+      slug: GAME_SLUG,
+      title: "Workers 오목",
+      shortDescription: "두 사용자 DO 통합 테스트",
+      description: "서버 권위형 오목",
+      publisher: { official: true },
+      policy: { score: null, leaderboard: false, xpPerCompletion: 0, requiresAuth: true },
+      supportsReplay: false,
+      catalog: {
+        type: "TAXONOMY",
+        categories: ["board"],
+        tags: ["multiplayer"],
+        modes: ["online-multi"],
+        inputMethods: ["mouse", "touch"],
+        minPlayers: 2,
+        maxPlayers: 2,
+        thumbnail: "/api/games/workers-official-omok/logo",
+      },
+      updatedAt: nowIso,
+    },
+  };
+}
+
+function roomHarness() {
+  const instances = new D1MultiplayerInstanceRepository(env.DB);
+  const matches = new D1MultiplayerMatchRepository(env.DB);
+  const profiles = new D1MultiplayerProfileRepository(env.DB);
+  const runtimeGames: RuntimeGameRegistry = {
+    async findBySlug(slug) {
+      return slug === GAME_SLUG ? runtimeGame() : null;
+    },
+    async listPublic() {
+      return [runtimeGame()];
+    },
+  };
+  return {
+    instances,
+    matches,
+    rooms: new MultiplayerRoomUseCases({ runtimeGames, profiles, instances, matches }),
+  };
+}
 
 function claims(
   instanceId: string,
@@ -31,9 +175,13 @@ function claims(
     participantId: "participant_workers_0001",
     userId: 7,
     gameVersionId: 12,
+    profileId: 13,
     profileRevision: 2,
+    rulesetKey: "official:omok",
+    rulesetRevision: 1,
     generation: 1,
     connectionGeneration: 1,
+    seatIndex: 0,
     role: "HOST",
     ...overrides,
   };
@@ -49,12 +197,9 @@ function internalRequest(ticketClaims: MultiplayerJoinTicketClaims): Request {
   });
 }
 
-async function nextMessage(socket: WebSocket): Promise<unknown> {
+async function nextMessage(socket: WebSocket, label = "WebSocket message"): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(
-      () => reject(new Error("timed out waiting for WebSocket message")),
-      2_000,
-    );
+    const timeout = setTimeout(() => reject(new Error(`timed out waiting for ${label}`)), 2_000);
     socket.addEventListener(
       "message",
       (event) => {
@@ -67,6 +212,75 @@ async function nextMessage(socket: WebSocket): Promise<unknown> {
       },
       { once: true },
     );
+  });
+}
+
+async function collectMessages(socket: WebSocket, count: number): Promise<unknown[]> {
+  return new Promise((resolve, reject) => {
+    const messages: unknown[] = [];
+    const timeout = setTimeout(
+      () =>
+        reject(
+          new Error(
+            `timed out waiting for ${count} WebSocket messages; received=${JSON.stringify(messages)}`,
+          ),
+        ),
+      4_000,
+    );
+    const listener = (event: MessageEvent) => {
+      try {
+        messages.push(JSON.parse(String(event.data)));
+      } catch (error) {
+        clearTimeout(timeout);
+        socket.removeEventListener("message", listener);
+        reject(error);
+        return;
+      }
+      if (messages.length === count) {
+        clearTimeout(timeout);
+        socket.removeEventListener("message", listener);
+        resolve(messages);
+      }
+    };
+    socket.addEventListener("message", listener);
+  });
+}
+
+async function nextMessageWhere(
+  socket: WebSocket,
+  label: string,
+  predicate: (message: Record<string, unknown>) => boolean,
+): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const skipped: unknown[] = [];
+    const timeout = setTimeout(() => {
+      socket.removeEventListener("message", listener);
+      reject(new Error(`timed out waiting for ${label}; skipped=${JSON.stringify(skipped)}`));
+    }, 2_000);
+    const listener = (event: MessageEvent) => {
+      let message: unknown;
+      try {
+        message = JSON.parse(String(event.data));
+      } catch (error) {
+        clearTimeout(timeout);
+        socket.removeEventListener("message", listener);
+        reject(error);
+        return;
+      }
+      if (
+        typeof message === "object" &&
+        message !== null &&
+        !Array.isArray(message) &&
+        predicate(message as Record<string, unknown>)
+      ) {
+        clearTimeout(timeout);
+        socket.removeEventListener("message", listener);
+        resolve(message as Record<string, unknown>);
+      } else {
+        skipped.push(message);
+      }
+    };
+    socket.addEventListener("message", listener);
   });
 }
 
@@ -107,6 +321,133 @@ async function connect(ticketClaims: MultiplayerJoinTicketClaims): Promise<{
   }
   socket.accept();
   return { socket, response };
+}
+
+async function createConnectedRoom(key: string): Promise<{
+  readonly instanceId: string;
+  readonly hostClaims: MultiplayerJoinTicketClaims;
+  readonly playerClaims: MultiplayerJoinTicketClaims;
+  readonly hostSocket: WebSocket;
+  readonly playerSocket: WebSocket;
+  readonly matches: D1MultiplayerMatchRepository;
+  readonly instances: D1MultiplayerInstanceRepository;
+}> {
+  const { rooms, instances, matches } = roomHarness();
+  const created = await rooms.createRoom({
+    userId: HOST_USER_ID,
+    gameSlug: GAME_SLUG,
+    visibility: "PRIVATE",
+    joinPolicy: "OPEN",
+    idempotencyKey: `workers_room_${key}_00000001`,
+  });
+  if (!created.ok) throw new Error(`room create failed: ${created.code}`);
+  const joined = await rooms.joinRoom({
+    userId: PLAYER_USER_ID,
+    publicCode: created.instance.publicCode,
+    inviteToken: null,
+  });
+  if (!joined.ok) throw new Error(`room join failed: ${joined.code}`);
+
+  const hostParticipant = await instances.advanceConnectionGeneration({
+    instanceId: created.instance.id,
+    expectedInstanceGeneration: created.instance.generation,
+    userId: HOST_USER_ID,
+    expectedConnectionGeneration: created.participant.connectionGeneration,
+    nowIso: new Date().toISOString(),
+  });
+  const playerParticipant = await instances.advanceConnectionGeneration({
+    instanceId: created.instance.id,
+    expectedInstanceGeneration: created.instance.generation,
+    userId: PLAYER_USER_ID,
+    expectedConnectionGeneration: joined.participant.connectionGeneration,
+    nowIso: new Date().toISOString(),
+  });
+  if (!hostParticipant || !playerParticipant) throw new Error("connection generation failed");
+
+  const hostClaims = claims(created.instance.id, {
+    participantId: hostParticipant.id,
+    userId: HOST_USER_ID,
+    gameVersionId: GAME_VERSION_ID,
+    profileId: PROFILE_ID,
+    profileRevision: 1,
+    rulesetKey: "official:omok",
+    rulesetRevision: 1,
+    generation: created.instance.generation,
+    connectionGeneration: hostParticipant.connectionGeneration,
+    seatIndex: hostParticipant.seatIndex,
+    role: "HOST",
+  });
+  const playerClaims = claims(created.instance.id, {
+    participantId: playerParticipant.id,
+    userId: PLAYER_USER_ID,
+    gameVersionId: GAME_VERSION_ID,
+    profileId: PROFILE_ID,
+    profileRevision: 1,
+    rulesetKey: "official:omok",
+    rulesetRevision: 1,
+    generation: created.instance.generation,
+    connectionGeneration: playerParticipant.connectionGeneration,
+    seatIndex: playerParticipant.seatIndex,
+    role: "PLAYER",
+  });
+  const host = await connect(hostClaims);
+  await nextMessage(host.socket, "host connected acknowledgement");
+  const player = await connect(playerClaims);
+  await nextMessage(player.socket, "player connected acknowledgement");
+  return {
+    instanceId: created.instance.id,
+    hostClaims,
+    playerClaims,
+    hostSocket: host.socket,
+    playerSocket: player.socket,
+    matches,
+    instances,
+  };
+}
+
+async function readyConnectedRoom(room: Awaited<ReturnType<typeof createConnectedRoom>>) {
+  const hostSync = nextMessage(room.hostSocket, "host initial sync");
+  const playerSync = nextMessage(room.playerSocket, "player initial sync");
+  room.hostSocket.send(JSON.stringify({ type: "MULTI_READY", v: 1, generation: 1 }));
+  room.playerSocket.send(JSON.stringify({ type: "MULTI_READY", v: 1, generation: 1 }));
+  return Promise.all([hostSync, playerSync]);
+}
+
+async function playAcceptedMove(
+  room: Awaited<ReturnType<typeof createConnectedRoom>>,
+  input: {
+    readonly actor: "HOST" | "PLAYER";
+    readonly clientSeq: number;
+    readonly clientActionId: string;
+    readonly expectedRevision: number;
+    readonly x: number;
+    readonly y: number;
+  },
+): Promise<readonly [Record<string, unknown>, Record<string, unknown>]> {
+  const revision = input.expectedRevision + 1;
+  const hostState = nextMessageWhere(
+    room.hostSocket,
+    `host revision ${revision} state`,
+    (message) => message.type === "MULTI_STATE" && message.revision === revision,
+  );
+  const playerState = nextMessageWhere(
+    room.playerSocket,
+    `player revision ${revision} state`,
+    (message) => message.type === "MULTI_STATE" && message.revision === revision,
+  );
+  const actorSocket = input.actor === "HOST" ? room.hostSocket : room.playerSocket;
+  actorSocket.send(
+    JSON.stringify({
+      type: "MULTI_ACTION",
+      v: 1,
+      generation: 1,
+      clientSeq: input.clientSeq,
+      clientActionId: input.clientActionId,
+      expectedRevision: input.expectedRevision,
+      payload: { x: input.x, y: input.y },
+    }),
+  );
+  return Promise.all([hostState, playerState]);
 }
 
 test("SQLite DO consumes one nonce and persists only minimal connection authority", async ({
@@ -189,7 +530,7 @@ test("new connection generation takes over and closes the old hibernatable socke
   second.socket.close(1000, "done");
 });
 
-test("socket attachment and SQLite authority survive Durable Object eviction", async ({
+test("socket attachment and SQLite authority survive eviction and fail closed without D1 room authority", async ({
   expect,
 }) => {
   const instanceId = "workers_hibernate_instance_01";
@@ -204,7 +545,7 @@ test("socket attachment and SQLite authority survive Durable Object eviction", a
 
   const closed = nextClose(socket);
   socket.send(JSON.stringify({ type: "MULTI_LEAVE", v: 1, generation: 1 }));
-  expect((await closed).code).toBe(1000);
+  expect((await closed).code).toBe(1013);
   await runInDurableObject(stub, async (_instance, state) => {
     const row = state.storage.sql
       .exec<{ disconnected_at: number | null }>(
@@ -223,7 +564,7 @@ test("socket attachment and SQLite authority survive Durable Object eviction", a
   });
 });
 
-test("Phase 2 rejects gameplay messages and returns the instance to inert state", async ({
+test("runtime rejects gameplay without matching D1 control-plane state and returns to inert", async ({
   expect,
 }) => {
   const instanceId = "workers_inert_instance_00001";
@@ -254,6 +595,471 @@ test("Phase 2 rejects gameplay messages and returns the instance to inert state"
         .one().lifecycle_status,
     ).toBe("INERT");
   });
+});
+
+test("two D1 participants ready, exchange authoritative Omok actions, reject replay abuse, and resume", async ({
+  expect,
+}) => {
+  const room = await createConnectedRoom("actions");
+  const [hostInitial, playerInitial] = await readyConnectedRoom(room);
+  expect(hostInitial).toMatchObject({
+    type: "MULTI_SYNC",
+    generation: 1,
+    revision: 0,
+    payload: { yourSeatIndex: 0, yourStone: "BLACK", revision: 0 },
+  });
+  expect(playerInitial).toMatchObject({
+    type: "MULTI_SYNC",
+    generation: 1,
+    revision: 0,
+    payload: { yourSeatIndex: 1, yourStone: "WHITE", revision: 0 },
+  });
+  const activeMatch = await room.matches.findMatchByInstanceGeneration(room.instanceId, 1);
+  expect(activeMatch).toMatchObject({
+    status: "ACTIVE",
+    stateRevision: 0,
+  });
+  expect(await room.matches.listPlayers(activeMatch?.id ?? "missing")).toHaveLength(2);
+
+  const hostMove = nextMessageWhere(
+    room.hostSocket,
+    "host revision 1 state",
+    (message) => message.type === "MULTI_STATE" && message.revision === 1,
+  );
+  const playerView = nextMessageWhere(
+    room.playerSocket,
+    "player revision 1 state",
+    (message) => message.type === "MULTI_STATE" && message.revision === 1,
+  );
+  room.hostSocket.send(
+    JSON.stringify({
+      type: "MULTI_ACTION",
+      v: 1,
+      generation: 1,
+      clientSeq: 1,
+      clientActionId: "workers_action_0001",
+      expectedRevision: 0,
+      payload: { x: 7, y: 7 },
+    }),
+  );
+  await expect(hostMove).resolves.toMatchObject({
+    type: "MULTI_STATE",
+    revision: 1,
+    payload: { yourSeatIndex: 0, nextSeatIndex: 1, revision: 1 },
+  });
+  await expect(playerView).resolves.toMatchObject({
+    type: "MULTI_STATE",
+    revision: 1,
+    payload: { yourSeatIndex: 1, nextSeatIndex: 1, revision: 1 },
+  });
+
+  const replaySync = nextMessageWhere(
+    room.hostSocket,
+    "idempotent replay sync",
+    (message) => message.type === "MULTI_SYNC" && message.revision === 1,
+  );
+  room.hostSocket.send(
+    JSON.stringify({
+      type: "MULTI_ACTION",
+      v: 1,
+      generation: 1,
+      clientSeq: 1,
+      clientActionId: "workers_action_0001",
+      expectedRevision: 0,
+      payload: { y: 7, x: 7 },
+    }),
+  );
+  await expect(replaySync).resolves.toMatchObject({ type: "MULTI_SYNC", revision: 1 });
+
+  const reusedId = nextMessageWhere(
+    room.hostSocket,
+    "reused action id rejection",
+    (message) => message.type === "MULTI_ACTION_REJECTED" && message.code === "ACTION_ID_REUSED",
+  );
+  room.hostSocket.send(
+    JSON.stringify({
+      type: "MULTI_ACTION",
+      v: 1,
+      generation: 1,
+      clientSeq: 2,
+      clientActionId: "workers_action_0001",
+      expectedRevision: 1,
+      payload: { x: 8, y: 8 },
+    }),
+  );
+  await expect(reusedId).resolves.toMatchObject({
+    type: "MULTI_ACTION_REJECTED",
+    clientActionId: "workers_action_0001",
+    code: "ACTION_ID_REUSED",
+    currentRevision: 1,
+  });
+
+  const wrongTurn = nextMessageWhere(
+    room.hostSocket,
+    "wrong turn rejection",
+    (message) => message.type === "MULTI_ACTION_REJECTED" && message.code === "NOT_YOUR_TURN",
+  );
+  room.hostSocket.send(
+    JSON.stringify({
+      type: "MULTI_ACTION",
+      v: 1,
+      generation: 1,
+      clientSeq: 3,
+      clientActionId: "workers_action_0002",
+      expectedRevision: 1,
+      payload: { x: 8, y: 8 },
+    }),
+  );
+  await expect(wrongTurn).resolves.toMatchObject({
+    type: "MULTI_ACTION_REJECTED",
+    code: "NOT_YOUR_TURN",
+    currentRevision: 1,
+  });
+
+  const hostSecondState = nextMessageWhere(
+    room.hostSocket,
+    "host revision 2 state",
+    (message) => message.type === "MULTI_STATE" && message.revision === 2,
+  );
+  const playerSecondState = nextMessageWhere(
+    room.playerSocket,
+    "player revision 2 state",
+    (message) => message.type === "MULTI_STATE" && message.revision === 2,
+  );
+  room.playerSocket.send(
+    JSON.stringify({
+      type: "MULTI_ACTION",
+      v: 1,
+      generation: 1,
+      clientSeq: 1,
+      clientActionId: "workers_action_0003",
+      expectedRevision: 1,
+      payload: { x: 7, y: 8 },
+    }),
+  );
+  await expect(hostSecondState).resolves.toMatchObject({ type: "MULTI_STATE", revision: 2 });
+  await expect(playerSecondState).resolves.toMatchObject({ type: "MULTI_STATE", revision: 2 });
+
+  const match = await room.matches.findMatchByInstanceGeneration(room.instanceId, 1);
+  expect(match?.stateRevision).toBe(2);
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM multiplayer_match_actions WHERE match_id = ?",
+      )
+        .bind(match?.id)
+        .first<{ count: number }>()
+    )?.count,
+  ).toBe(3);
+
+  room.hostSocket.close(1000, "reconnect");
+  const nextParticipant = await room.instances.advanceConnectionGeneration({
+    instanceId: room.instanceId,
+    expectedInstanceGeneration: 1,
+    userId: HOST_USER_ID,
+    expectedConnectionGeneration: 1,
+    nowIso: new Date().toISOString(),
+  });
+  expect(nextParticipant?.connectionGeneration).toBe(2);
+  const stub = env.MULTIPLAYER_INSTANCES.get(env.MULTIPLAYER_INSTANCES.idFromName(room.instanceId));
+  await evictDurableObject(stub);
+  const resumed = await connect({
+    ...room.hostClaims,
+    jti: `workers_resume_${crypto.randomUUID()}`,
+    connectionGeneration: 2,
+  });
+  await expect(
+    nextMessage(resumed.socket, "resumed connected acknowledgement"),
+  ).resolves.toMatchObject({
+    type: "MULTI_CONNECTED",
+    connectionGeneration: 2,
+  });
+  await expect(nextMessage(resumed.socket, "resumed state sync")).resolves.toMatchObject({
+    type: "MULTI_SYNC",
+    revision: 2,
+    payload: { yourSeatIndex: 0, nextSeatIndex: 0 },
+  });
+  resumed.socket.close(1000, "done");
+  room.playerSocket.close(1000, "done");
+});
+
+test("server-authoritative Omok win commits exact D1 results and closes the instance", async ({
+  expect,
+}) => {
+  const room = await createConnectedRoom("terminal");
+  await readyConnectedRoom(room);
+  const moves = [
+    { actor: "HOST", clientSeq: 1, x: 0, y: 0 },
+    { actor: "PLAYER", clientSeq: 1, x: 0, y: 1 },
+    { actor: "HOST", clientSeq: 2, x: 1, y: 0 },
+    { actor: "PLAYER", clientSeq: 2, x: 1, y: 1 },
+    { actor: "HOST", clientSeq: 3, x: 2, y: 0 },
+    { actor: "PLAYER", clientSeq: 3, x: 2, y: 1 },
+    { actor: "HOST", clientSeq: 4, x: 3, y: 0 },
+    { actor: "PLAYER", clientSeq: 4, x: 3, y: 1 },
+    { actor: "HOST", clientSeq: 5, x: 4, y: 0 },
+  ] as const;
+
+  for (let index = 0; index < moves.length - 1; index += 1) {
+    const move = moves[index];
+    if (!move) throw new Error("missing terminal test move");
+    const [hostState, playerState] = await playAcceptedMove(room, {
+      ...move,
+      clientActionId: `workers_terminal_action_${String(index + 1).padStart(2, "0")}`,
+      expectedRevision: index,
+    });
+    expect(hostState).toMatchObject({
+      type: "MULTI_STATE",
+      revision: index + 1,
+      payload: { status: "ACTIVE", revision: index + 1 },
+    });
+    expect(playerState).toMatchObject({
+      type: "MULTI_STATE",
+      revision: index + 1,
+      payload: { status: "ACTIVE", revision: index + 1 },
+    });
+  }
+
+  const hostTerminalMessages = collectMessages(room.hostSocket, 3);
+  const playerTerminalMessages = collectMessages(room.playerSocket, 3);
+  const finalMove = moves[8];
+  room.hostSocket.send(
+    JSON.stringify({
+      type: "MULTI_ACTION",
+      v: 1,
+      generation: 1,
+      clientSeq: finalMove.clientSeq,
+      clientActionId: "workers_terminal_action_09",
+      expectedRevision: 8,
+      payload: { x: finalMove.x, y: finalMove.y },
+    }),
+  );
+  const [hostMessages, playerMessages] = (await Promise.all([
+    hostTerminalMessages,
+    playerTerminalMessages,
+  ])) as readonly [Record<string, unknown>[], Record<string, unknown>[]];
+  for (const messages of [hostMessages, playerMessages]) {
+    expect(messages.map((message) => message.type)).toEqual([
+      "MULTI_STATE",
+      "MULTI_TERMINAL_PENDING",
+      "MULTI_TERMINAL_COMMITTED",
+    ]);
+    expect(messages[0]).toMatchObject({
+      revision: 9,
+      payload: { status: "WON", winnerSeatIndex: 0, revision: 9 },
+    });
+    expect(messages[2]).toMatchObject({
+      result: { kind: "WIN", winnerSeatIndex: 0, loserSeatIndex: 1, revision: 9 },
+    });
+    const serverSequences = messages.map((message) => Number(message.serverSeq));
+    expect(
+      serverSequences.every(
+        (serverSequence, index) => index === 0 || serverSequence > serverSequences[index - 1]!,
+      ),
+    ).toBe(true);
+  }
+
+  const match = await room.matches.findMatchByInstanceGeneration(room.instanceId, 1);
+  expect(match).toMatchObject({ status: "COMMITTED", stateRevision: 9, abortCode: null });
+  expect(JSON.parse(match?.terminalResultJson ?? "null")).toMatchObject({
+    kind: "WIN",
+    winnerSeatIndex: 0,
+    loserSeatIndex: 1,
+    revision: 9,
+  });
+  const players = await room.matches.listPlayers(match?.id ?? "missing");
+  expect(Object.fromEntries(players.map((player) => [player.userId, player.outcome]))).toEqual({
+    [HOST_USER_ID]: "WIN",
+    [PLAYER_USER_ID]: "LOSS",
+  });
+  expect(players.every((player) => player.resultStatus === "COMMITTED")).toBe(true);
+  expect(await room.instances.findById(room.instanceId)).toMatchObject({
+    status: "CLOSED",
+    abortCode: null,
+  });
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM multiplayer_reward_outbox WHERE match_id = ?",
+      )
+        .bind(match?.id)
+        .first<{ count: number }>()
+    )?.count,
+  ).toBe(0);
+
+  const stub = env.MULTIPLAYER_INSTANCES.get(env.MULTIPLAYER_INSTANCES.idFromName(room.instanceId));
+  await runInDurableObject(stub, async (_instance, state) => {
+    expect(
+      state.storage.sql
+        .exec<{ lifecycle_status: string }>(
+          "SELECT lifecycle_status FROM runtime_meta WHERE singleton = 1",
+        )
+        .one().lifecycle_status,
+    ).toBe("CLOSED");
+    expect(
+      state.storage.sql
+        .exec<{ revision: number; lifecycle_status: string }>(
+          "SELECT revision, lifecycle_status FROM runtime_match",
+        )
+        .one(),
+    ).toEqual({ revision: 9, lifecycle_status: "COMMITTED" });
+  });
+  room.hostSocket.close(1000, "done");
+  room.playerSocket.close(1000, "done");
+});
+
+test("reconnect repairs a D1-committed action missing from the DO checkpoint", async ({
+  expect,
+}) => {
+  const room = await createConnectedRoom("recovery-gap");
+  await readyConnectedRoom(room);
+  await playAcceptedMove(room, {
+    actor: "HOST",
+    clientSeq: 1,
+    clientActionId: "workers_gap_action_01",
+    expectedRevision: 0,
+    x: 7,
+    y: 7,
+  });
+  await playAcceptedMove(room, {
+    actor: "PLAYER",
+    clientSeq: 1,
+    clientActionId: "workers_gap_action_02",
+    expectedRevision: 1,
+    x: 7,
+    y: 8,
+  });
+
+  const match = await room.matches.findMatchByInstanceGeneration(room.instanceId, 1);
+  if (!match) throw new Error("active recovery match missing");
+  let recoveryState = createInitialOmokState();
+  for (const [seatIndex, action] of [
+    [0, { x: 7, y: 7 }],
+    [1, { x: 7, y: 8 }],
+    [0, { x: 8, y: 7 }],
+  ] as const) {
+    const transition = applyOmokAction(recoveryState, seatIndex, action, recoveryState.revision);
+    if (!transition.ok) throw new Error(`failed to build recovery fixture: ${transition.code}`);
+    recoveryState = transition.state;
+  }
+  const latestAction = await room.matches.findLatestAction(match.id);
+  const gapServerSeq = (latestAction?.serverSeq ?? 0) + 1;
+  const recordedGap = await room.matches.recordAction({
+    matchId: match.id,
+    userId: HOST_USER_ID,
+    participantId: room.hostClaims.participantId,
+    clientSeq: 2,
+    serverSeq: gapServerSeq,
+    clientActionId: "workers_gap_action_03",
+    payloadHash: "a".repeat(64),
+    expectedRevision: 2,
+    resultRevision: 3,
+    resultCode: "ACCEPTED",
+    responseJson: encodeOmokActionLedgerResponse({
+      schemaVersion: OMOK_ACTION_LEDGER_SCHEMA_VERSION,
+      kind: "ACCEPTED",
+      generation: 1,
+      serverSeq: gapServerSeq,
+      clientActionId: "workers_gap_action_03",
+      revision: 3,
+      state: recoveryState,
+    }),
+    nowIso: new Date().toISOString(),
+  });
+  expect(recordedGap.status).toBe("RECORDED");
+  expect((await room.matches.findMatch(match.id))?.stateRevision).toBe(3);
+
+  const stub = env.MULTIPLAYER_INSTANCES.get(env.MULTIPLAYER_INSTANCES.idFromName(room.instanceId));
+  await runInDurableObject(stub, async (_instance, state) => {
+    expect(
+      state.storage.sql.exec<{ revision: number }>("SELECT revision FROM runtime_match").one()
+        .revision,
+    ).toBe(2);
+  });
+  room.hostSocket.close(1000, "recovery");
+  room.playerSocket.close(1000, "recovery");
+  const nextParticipant = await room.instances.advanceConnectionGeneration({
+    instanceId: room.instanceId,
+    expectedInstanceGeneration: 1,
+    userId: HOST_USER_ID,
+    expectedConnectionGeneration: 1,
+    nowIso: new Date().toISOString(),
+  });
+  expect(nextParticipant?.connectionGeneration).toBe(2);
+  await evictDurableObject(stub);
+
+  const resumed = await connect({
+    ...room.hostClaims,
+    jti: `workers_gap_resume_${crypto.randomUUID()}`,
+    connectionGeneration: 2,
+  });
+  await expect(
+    nextMessage(resumed.socket, "gap recovery connected acknowledgement"),
+  ).resolves.toMatchObject({ type: "MULTI_CONNECTED", connectionGeneration: 2 });
+  await expect(nextMessage(resumed.socket, "gap recovery state sync")).resolves.toMatchObject({
+    type: "MULTI_SYNC",
+    revision: 3,
+    payload: {
+      revision: 3,
+      status: "ACTIVE",
+      nextSeatIndex: 1,
+      lastMove: { x: 8, y: 7, seatIndex: 0 },
+    },
+  });
+  await runInDurableObject(stub, async (_instance, state) => {
+    expect(
+      state.storage.sql.exec<{ revision: number }>("SELECT revision FROM runtime_match").one()
+        .revision,
+    ).toBe(3);
+  });
+  resumed.socket.close(1000, "done");
+});
+
+test("explicit leave aborts the active match for every participant without rewards", async ({
+  expect,
+}) => {
+  const room = await createConnectedRoom("leave");
+  await readyConnectedRoom(room);
+  const hostAborted = nextMessageWhere(
+    room.hostSocket,
+    "host participant-left abort",
+    (message) => message.type === "MULTI_ABORTED",
+  );
+  const playerAborted = nextMessageWhere(
+    room.playerSocket,
+    "player participant-left abort",
+    (message) => message.type === "MULTI_ABORTED",
+  );
+  room.hostSocket.send(JSON.stringify({ type: "MULTI_LEAVE", v: 1, generation: 1 }));
+  await expect(hostAborted).resolves.toMatchObject({
+    type: "MULTI_ABORTED",
+    code: "PARTICIPANT_LEFT",
+  });
+  await expect(playerAborted).resolves.toMatchObject({
+    type: "MULTI_ABORTED",
+    code: "PARTICIPANT_LEFT",
+  });
+
+  expect(await room.instances.findById(room.instanceId)).toMatchObject({
+    status: "ABORTED",
+    abortCode: "PARTICIPANT_LEFT",
+  });
+  const match = await room.matches.findMatchByInstanceGeneration(room.instanceId, 1);
+  expect(match).toMatchObject({ status: "ABORTED", abortCode: "PARTICIPANT_LEFT" });
+  const players = await room.matches.listPlayers(match?.id ?? "missing");
+  expect(players).toHaveLength(2);
+  expect(
+    players.every((player) => player.resultStatus === "ABORTED" && player.outcome === "ABORTED"),
+  ).toBe(true);
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM multiplayer_reward_outbox WHERE match_id = ?",
+      )
+        .bind(match?.id)
+        .first<{ count: number }>()
+    )?.count,
+  ).toBe(0);
 });
 
 test("DO rejects expired and cross-instance claims without accepting a socket", async ({

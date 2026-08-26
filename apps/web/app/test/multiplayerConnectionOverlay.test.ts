@@ -3,6 +3,14 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MultiplayerConnectionOverlay } from "../features/game/runtime/MultiplayerConnectionOverlay";
+import { multiplayerTerminalLabel } from "../features/game/runtime/MultiplayerIframeRuntime";
+
+test("canonical Omok result is projected to the viewer without rendering raw terminal fields", () => {
+  assert.equal(multiplayerTerminalLabel({ kind: "WIN", winnerSeatIndex: 0 }, 0), "승리");
+  assert.equal(multiplayerTerminalLabel({ kind: "WIN", winnerSeatIndex: 0 }, 1), "패배");
+  assert.equal(multiplayerTerminalLabel({ kind: "DRAW" }, 1), "무승부");
+  assert.equal(multiplayerTerminalLabel({ hidden: "server-only" }, 0), "경기 종료");
+});
 
 test("connected state is rendered by the parent as a non-interactive status badge", () => {
   const html = renderToStaticMarkup(

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://owogg.com/schemas/manifest/v1.json",
+  "schemaVersion": 1,
+  "game": {
+    "slug": "official-omok",
+    "title": "온라인 오목",
+    "genre": "board",
+    "mode": "multi",
+    "shortDescription": "서버가 모든 착수와 승패를 판정하는 OWOGG 공식 2인 오목",
+    "description": "15×15 판에서 흑과 백이 번갈아 돌을 놓습니다. 가로, 세로 또는 대각선으로 돌 5개 이상을 먼저 이으면 승리합니다."
+  },
+  "input": ["mouse", "touch"],
+  "presentation": { "orientation": "any", "aspectRatio": "1:1" },
+  "progression": { "type": "none" },
+  "result": { "outcome": null, "score": null },
+  "leaderboard": { "enabled": false }
+}

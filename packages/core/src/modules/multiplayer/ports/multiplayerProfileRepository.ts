@@ -63,6 +63,11 @@ export interface MultiplayerProfileRepository {
   ): Promise<CreateApprovedMultiplayerProfileResult>;
   setEnabled(input: SetMultiplayerProfileEnabledInput): Promise<SetMultiplayerProfileEnabledResult>;
   findById(profileId: number): Promise<MultiplayerProfileRecord | null>;
+  /** Latest reviewed revision for an exact version, including disabled profiles (admin only). */
+  findLatestForExactVersion(
+    gameId: number,
+    gameVersionId: number,
+  ): Promise<MultiplayerProfileRecord | null>;
   findEnabledForExactVersion(
     gameId: number,
     gameVersionId: number,

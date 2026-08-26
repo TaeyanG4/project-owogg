@@ -1,19 +1,26 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   FileArchive,
   FileJson,
   Gamepad2,
   Image,
   Loader2,
+  Network,
   Pencil,
   Power,
   ShieldCheck,
   Trash2,
 } from "lucide-react";
-import type { AdminGameListResponse, GameAvailabilityDto } from "@owogg/contracts";
+import type {
+  AdminGameListResponse,
+  AdminOfficialMultiplayerProfileResponse,
+  GameAvailabilityDto,
+} from "@owogg/contracts";
 import {
   deleteOfficialGame,
   fetchAdminGames,
+  fetchOfficialMultiplayerProfile,
+  postOfficialMultiplayerProfileEnabled,
   postToggleAdminGame,
   uploadOfficialGame,
   replaceOfficialGameBundle,
@@ -101,7 +108,7 @@ export function OfficialGameManagement() {
 
   const handleOfficialDelete = async (gameId: string, title: string) => {
     const confirmation = window.prompt(
-      `"${title}" 공식 게임을 B2와 DB에서 완전히 삭제합니다. 기존 리더보드와 즐겨찾기도 제거되며 되돌릴 수 없습니다. 계속하려면 slug "${gameId}"를 입력하세요.`,
+      `"${title}" 공식 게임을 B2와 DB에서 완전히 삭제합니다. 존재하는 관련 기록과 즐겨찾기도 제거되며 되돌릴 수 없습니다. 계속하려면 slug "${gameId}"를 입력하세요.`,
     );
     if (confirmation !== gameId) return;
 
@@ -198,7 +205,8 @@ export function OfficialGameManagement() {
           <div>
             <h3 className="text-sm font-black text-text-primary">전체 공개 게임 안전 제어</h3>
             <p className="mt-1 text-xs text-text-muted">
-              비활성화하면 카탈로그와 랭킹에서 즉시 숨겨지고 새 점수 제출도 거부됩니다.
+              비활성화하면 카탈로그에서 즉시 숨겨지고, 랭킹 대상 게임은 랭킹에서도 숨겨지며 새 결과
+              제출이 거부됩니다.
             </p>
           </div>
           <button
@@ -252,6 +260,9 @@ export function OfficialGameManagement() {
                       <p className="mt-1 text-[11px] text-text-muted">
                         서버 업로드 (KST) {formatServerUploadDate(game.latestUploadedAt)}
                       </p>
+                      {supportsOfficialOmokProfileControl(game) && (
+                        <OfficialOmokProfileControl gameId={game.gameId} />
+                      )}
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center justify-end gap-2">
@@ -373,6 +384,98 @@ export function OfficialGameManagement() {
         )}
       </div>
     </section>
+  );
+}
+
+export function supportsOfficialOmokProfileControl(game: GameAvailabilityDto): boolean {
+  return game.publisherType === "OWOGG" && game.gameId === "official-omok" && game.mode === "multi";
+}
+
+function OfficialOmokProfileControl({ gameId }: { gameId: string }) {
+  const [profile, setProfile] = useState<AdminOfficialMultiplayerProfileResponse | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      setProfile(await fetchOfficialMultiplayerProfile(gameId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "멀티플레이 프로필을 조회하지 못했습니다.");
+    }
+  }, [gameId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const enabled = profile?.status === "ENABLED";
+  const statusLabel =
+    profile === null
+      ? error
+        ? "조회 실패"
+        : "조회 중"
+      : profile.status === "ENABLED"
+        ? "서버 멀티 활성"
+        : profile.status === "DISABLED"
+          ? "서버 멀티 비활성"
+          : "서버 승인 전";
+
+  const handleToggle = async () => {
+    const nextEnabled = !enabled;
+    const confirmed = window.confirm(
+      nextEnabled
+        ? "현재 live 버전에 OWOGG 서버 권위형 오목 프로필을 활성화할까요? 점수 랭킹은 생성되지 않습니다."
+        : "새 방 생성·입장·재연결을 차단할까요? 이미 연결된 방은 즉시 종료되지 않을 수 있습니다.",
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setProfile(
+        await postOfficialMultiplayerProfileEnabled(
+          gameId,
+          nextEnabled,
+          nextEnabled ? null : "ADMIN_DISABLED",
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "멀티플레이 프로필을 변경하지 못했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+      <span
+        className={`inline-flex items-center gap-1 rounded-full px-2 py-1 font-bold ${
+          enabled ? "bg-accent-green/10 text-accent-green" : "border border-border text-text-muted"
+        }`}
+      >
+        <Network className="h-3 w-3" /> {statusLabel}
+      </span>
+      <span className="rounded-full border border-border px-2 py-1 font-bold text-text-muted">
+        랭킹 없음 · 2인 비공개 초대방
+      </span>
+      <button
+        type="button"
+        disabled={busy || profile === null}
+        onClick={() => void handleToggle()}
+        className="inline-flex items-center gap-1 rounded-lg border border-brand/40 px-2 py-1 font-bold text-brand-light hover:bg-brand/10 disabled:opacity-50"
+      >
+        {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+        {enabled ? "멀티 비활성화" : "멀티 활성화"}
+      </button>
+      {error && (
+        <span className="basis-full text-accent-red">
+          {error}{" "}
+          <button type="button" onClick={() => void load()} className="font-bold underline">
+            다시 시도
+          </button>
+        </span>
+      )}
+    </div>
   );
 }
 

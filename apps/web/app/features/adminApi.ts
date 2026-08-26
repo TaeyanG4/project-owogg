@@ -16,6 +16,8 @@ import {
   AdminGameToggleResponseSchema,
   AdminOfficialGameDeleteResponseSchema,
   AdminOfficialGameUploadResponseSchema,
+  AdminOfficialMultiplayerProfileResponseSchema,
+  AdminOfficialMultiplayerProfileUpdateRequestSchema,
   GameLogoUpdateResponseSchema,
   AdminUserSearchResponseSchema,
   AdminUserDetailResponseSchema,
@@ -244,6 +246,30 @@ export function postToggleAdminGame(gameId: string, enabled: boolean, reason: st
       method: "POST",
       body: JSON.stringify({ enabled, reason }),
     }),
+  );
+}
+
+export function fetchOfficialMultiplayerProfile(gameId: string) {
+  return apiFetch(
+    `/api/admin/games/${encodeURIComponent(gameId)}/multiplayer-profile`,
+    AdminOfficialMultiplayerProfileResponseSchema,
+  );
+}
+
+export function postOfficialMultiplayerProfileEnabled(
+  gameId: string,
+  enabled: boolean,
+  reasonCode: string | null = null,
+) {
+  const body = AdminOfficialMultiplayerProfileUpdateRequestSchema.parse({
+    preset: "OMOK_V1",
+    enabled,
+    ...(reasonCode ? { reasonCode } : {}),
+  });
+  return apiFetch(
+    `/api/admin/games/${encodeURIComponent(gameId)}/multiplayer-profile`,
+    AdminOfficialMultiplayerProfileResponseSchema,
+    { method: "POST", body: JSON.stringify(body) },
   );
 }
 

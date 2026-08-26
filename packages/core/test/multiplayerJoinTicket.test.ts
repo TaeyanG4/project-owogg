@@ -31,9 +31,13 @@ function claims(overrides: Partial<MultiplayerJoinTicketClaims> = {}): Multiplay
     participantId: "participant_12345678",
     userId: 17,
     gameVersionId: 41,
+    profileId: 19,
     profileRevision: 3,
+    rulesetKey: "official:omok",
+    rulesetRevision: 1,
     generation: 2,
     connectionGeneration: 4,
+    seatIndex: 1,
     role: "PLAYER",
     ...overrides,
   };
@@ -52,8 +56,10 @@ test("multiplayer join ticket signs and verifies exact route/admission context",
       instanceId: "instance_12345678",
       participantId: "participant_12345678",
       userId: 17,
+      profileId: 19,
       generation: 2,
       connectionGeneration: 4,
+      seatIndex: 1,
     },
     NOW,
   );
@@ -73,8 +79,10 @@ test("multiplayer join ticket supports an explicit previous verification key", a
 
 test("multiplayer join ticket rejects tampering, unknown keys, and mismatched context", async () => {
   const token = await signMultiplayerJoinTicket(claims(), keyring);
-  const replacement = token.endsWith("A") ? "B" : "A";
-  const tampered = `${token.slice(0, -1)}${replacement}`;
+  const tokenParts = token.split(".");
+  const signature = tokenParts[3] ?? "";
+  tokenParts[3] = `${signature.startsWith("A") ? "B" : "A"}${signature.slice(1)}`;
+  const tampered = tokenParts.join(".");
   assert.deepEqual(await verifyMultiplayerJoinTicket(tampered, keyring, {}, NOW), {
     ok: false,
     error: "BAD_SIGNATURE",
@@ -121,6 +129,8 @@ test("multiplayer join ticket claims are exact-shape and require post-issuance c
   assert.equal(parseMultiplayerJoinTicketClaims({ ...claims(), extra: true }), null);
   assert.equal(parseMultiplayerJoinTicketClaims(claims({ connectionGeneration: 0 })), null);
   assert.equal(parseMultiplayerJoinTicketClaims(claims({ userId: 1.5 })), null);
+  assert.equal(parseMultiplayerJoinTicketClaims(claims({ seatIndex: 8 })), null);
+  assert.equal(parseMultiplayerJoinTicketClaims(claims({ rulesetKey: "LATEST" })), null);
   assert.equal(parseMultiplayerJoinTicketClaims(claims({ role: "SPECTATOR" as "PLAYER" })), null);
 });
 

@@ -9,6 +9,7 @@ import {
 import type { MultiplayerErrorCode } from "../domain/multiplayerErrors.js";
 import type { MultiplayerInstanceRepository } from "../ports/multiplayerInstanceRepository.js";
 import type { MultiplayerProfileRepository } from "../ports/multiplayerProfileRepository.js";
+import { isSupportedMultiplayerRuntimeProfile } from "../rules/supportedRulesets.js";
 
 const TERMINAL_INSTANCE_STATUSES = new Set(["CLOSED", "ABORTED", "EXPIRED"]);
 
@@ -126,6 +127,9 @@ export class MultiplayerAdmissionUseCases {
     ) {
       return { ok: false, code: "VERSION_MISMATCH" };
     }
+    if (!isSupportedMultiplayerRuntimeProfile(profile)) {
+      return { ok: false, code: "PROFILE_DISABLED" };
+    }
     if (
       !lease ||
       lease.status !== "ACTIVE" ||
@@ -166,9 +170,13 @@ export class MultiplayerAdmissionUseCases {
           participantId: advanced.id,
           userId: input.userId,
           gameVersionId: instance.gameVersionId,
+          profileId: instance.profileId,
           profileRevision: instance.profileRevision,
+          rulesetKey: profile.rulesetKey,
+          rulesetRevision: profile.rulesetRevision,
           generation: instance.generation,
           connectionGeneration: advanced.connectionGeneration,
+          seatIndex: advanced.seatIndex,
           role: advanced.role,
         },
         input.keyring,

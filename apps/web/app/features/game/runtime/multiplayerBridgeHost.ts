@@ -51,6 +51,8 @@ export interface MultiplayerBridgeHostCallbacks {
 }
 
 export interface MultiplayerBridgeHost {
+  /** Sends the authenticated parent's explicit leave intent without exposing the socket to UI. */
+  leave(): boolean;
   /** Idempotently releases the MessagePort, socket listeners, and parent-owned WebSocket. */
   close(): void;
 }
@@ -98,6 +100,7 @@ export function createMultiplayerBridgeHost(
   let left = false;
   let disconnectNotified = false;
   let terminalCommitted = false;
+  let aborted = false;
   let lastClientSeq = 0;
   let lastServerSeq = -1;
   let lastConnectionGeneration = 0;
@@ -163,7 +166,9 @@ export function createMultiplayerBridgeHost(
       callbacks.onReady?.();
     } else if (message.type === "MULTI_LEAVE") {
       left = true;
+      sendToSocket(message);
       callbacks.onLeave?.();
+      return;
     }
     sendToSocket(message);
   };
@@ -222,12 +227,13 @@ export function createMultiplayerBridgeHost(
       callbacks.onConnectionState?.({ status: "TERMINAL_COMMITTED", result: message.result });
       callbacks.onTerminalCommitted?.(message.result);
     } else if (message.type === "MULTI_ABORTED") {
+      aborted = true;
       callbacks.onConnectionState?.({ status: "ABORTED", code: message.code });
     }
     channel.port1.postMessage(message);
   };
   const onClose = (event: SocketCloseEventLike) => {
-    if (closed || disconnectNotified) return;
+    if (closed || disconnectNotified || terminalCommitted || aborted) return;
     disconnectNotified = true;
     const code = closeCodeToDisconnectCode(event.code);
     const message = {
@@ -252,6 +258,17 @@ export function createMultiplayerBridgeHost(
   iframeWindow.postMessage(bootstrap, "*", [channel.port2]);
 
   return {
+    leave() {
+      if (closed || left) return false;
+      left = true;
+      sendToSocket({
+        type: "MULTI_LEAVE",
+        v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
+        generation: bootstrap.generation,
+      });
+      callbacks.onLeave?.();
+      return true;
+    },
     close() {
       if (closed) return;
       closed = true;

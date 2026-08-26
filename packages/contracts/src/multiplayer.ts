@@ -2,6 +2,14 @@ import { z } from "zod";
 
 const OpaqueIdSchema = z.string().regex(/^[A-Za-z0-9_-]{8,128}$/);
 const StableIdentifierSchema = z.string().regex(/^[a-z0-9][a-z0-9._:/-]{0,95}$/);
+const GameSlugSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+const IdempotencyKeySchema = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/);
+const PublicRoomCodeSchema = z.string().regex(/^[A-Za-z0-9_-]{12,64}$/);
+const InviteTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{32,128}$/);
 
 export const MultiplayerRuntimeStatusResponseSchema = z
   .object({
@@ -11,6 +19,123 @@ export const MultiplayerRuntimeStatusResponseSchema = z
   .strict();
 export type MultiplayerRuntimeStatusResponse = z.infer<
   typeof MultiplayerRuntimeStatusResponseSchema
+>;
+
+const MultiplayerPublicProfileSchema = z
+  .object({
+    profileRevision: z.number().int().positive(),
+    resolvedClass: z.enum(["M1", "M2"]),
+    simulationModel: z.enum(["turn", "event", "realtime"]),
+    rulesetKey: StableIdentifierSchema,
+    rulesetRevision: z.number().int().positive(),
+    reconnectPolicy: z.enum(["none", "rejoin", "resume"]),
+    minPlayers: z.number().int().min(2).max(8),
+    maxPlayers: z.number().int().min(2).max(8),
+    allowedVisibility: z.array(z.enum(["PUBLIC", "UNLISTED", "PRIVATE"])).min(1),
+    allowedJoinPolicies: z.array(z.enum(["OPEN", "INVITE_ONLY"])).min(1),
+  })
+  .strict();
+
+/**
+ * Public, credential-free capability discovery. The server exposes only UI-safe profile facts;
+ * resolved config, profile ids, tickets, socket paths, and user identity never enter this shape.
+ */
+export const MultiplayerGameAvailabilityResponseSchema = z.discriminatedUnion("status", [
+  z
+    .object({
+      status: z.literal("UNAVAILABLE"),
+      protocolVersion: z.literal(1),
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal("AVAILABLE"),
+      protocolVersion: z.literal(1),
+      gameSlug: GameSlugSchema,
+      profile: MultiplayerPublicProfileSchema,
+    })
+    .strict(),
+]);
+export type MultiplayerGameAvailabilityResponse = z.infer<
+  typeof MultiplayerGameAvailabilityResponseSchema
+>;
+
+export const AdminOfficialMultiplayerProfileUpdateRequestSchema = z
+  .object({
+    preset: z.literal("OMOK_V1"),
+    enabled: z.boolean(),
+    reasonCode: z
+      .string()
+      .trim()
+      .regex(/^[A-Z][A-Z0-9_]{0,63}$/)
+      .nullable()
+      .optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.enabled && value.reasonCode != null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["reasonCode"],
+        message: "reasonCode is forbidden when enabling",
+      });
+    }
+  });
+export type AdminOfficialMultiplayerProfileUpdateRequest = z.infer<
+  typeof AdminOfficialMultiplayerProfileUpdateRequestSchema
+>;
+
+const AdminOfficialMultiplayerProfileSchema = z
+  .object({
+    id: z.number().int().positive(),
+    profileRevision: z.number().int().positive(),
+    enabled: z.boolean(),
+    rulesetKey: z.literal("official:omok"),
+    rulesetRevision: z.literal(1),
+    resolvedClass: z.literal("M1"),
+    simulationModel: z.literal("turn"),
+    reconnectPolicy: z.literal("resume"),
+    minPlayers: z.literal(2),
+    maxPlayers: z.literal(2),
+    allowedVisibility: z.tuple([z.literal("PRIVATE")]),
+    allowedJoinPolicies: z.tuple([z.literal("INVITE_ONLY")]),
+    rewardPolicyId: z.null(),
+    leaderboardEnabled: z.literal(false),
+    updatedAt: z.string().datetime(),
+  })
+  .strict();
+
+const AdminOfficialMultiplayerProfileResponseBase = {
+  gameSlug: GameSlugSchema,
+  gameVersionId: z.number().int().positive(),
+  preset: z.literal("OMOK_V1"),
+} as const;
+
+export const AdminOfficialMultiplayerProfileResponseSchema = z.discriminatedUnion("status", [
+  z
+    .object({
+      ...AdminOfficialMultiplayerProfileResponseBase,
+      status: z.literal("NONE"),
+      profile: z.null(),
+    })
+    .strict(),
+  z
+    .object({
+      ...AdminOfficialMultiplayerProfileResponseBase,
+      status: z.literal("ENABLED"),
+      profile: AdminOfficialMultiplayerProfileSchema.extend({ enabled: z.literal(true) }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...AdminOfficialMultiplayerProfileResponseBase,
+      status: z.literal("DISABLED"),
+      profile: AdminOfficialMultiplayerProfileSchema.extend({ enabled: z.literal(false) }).strict(),
+    })
+    .strict(),
+]);
+export type AdminOfficialMultiplayerProfileResponse = z.infer<
+  typeof AdminOfficialMultiplayerProfileResponseSchema
 >;
 
 export const MultiplayerJoinTicketRequestSchema = z
@@ -52,3 +177,93 @@ export const MultiplayerJoinTicketResponseSchema = z
   })
   .strict();
 export type MultiplayerJoinTicketResponse = z.infer<typeof MultiplayerJoinTicketResponseSchema>;
+
+export const MultiplayerCreateRoomRequestSchema = z
+  .object({
+    gameSlug: GameSlugSchema,
+    visibility: z.enum(["PUBLIC", "UNLISTED", "PRIVATE"]),
+    joinPolicy: z.enum(["OPEN", "INVITE_ONLY"]),
+    idempotencyKey: IdempotencyKeySchema,
+  })
+  .strict();
+export type MultiplayerCreateRoomRequest = z.infer<typeof MultiplayerCreateRoomRequestSchema>;
+
+export const MultiplayerJoinRoomRequestSchema = z
+  .object({
+    publicCode: PublicRoomCodeSchema,
+    inviteToken: InviteTokenSchema.nullable().optional().default(null),
+  })
+  .strict();
+export type MultiplayerJoinRoomRequest = z.infer<typeof MultiplayerJoinRoomRequestSchema>;
+
+export const MultiplayerLeaveRoomRequestSchema = z
+  .object({
+    expectedGeneration: z.number().int().positive(),
+  })
+  .strict();
+export type MultiplayerLeaveRoomRequest = z.infer<typeof MultiplayerLeaveRoomRequestSchema>;
+
+export const MultiplayerCreateInviteRequestSchema = z
+  .object({
+    expectedGeneration: z.number().int().positive(),
+    idempotencyKey: IdempotencyKeySchema,
+  })
+  .strict();
+export type MultiplayerCreateInviteRequest = z.infer<typeof MultiplayerCreateInviteRequestSchema>;
+
+export const MultiplayerRoomInstanceSchema = z
+  .object({
+    id: OpaqueIdSchema,
+    publicCode: PublicRoomCodeSchema,
+    gameId: z.number().int().positive(),
+    gameVersionId: z.number().int().positive(),
+    profileRevision: z.number().int().positive(),
+    visibility: z.enum(["PUBLIC", "UNLISTED", "PRIVATE"]),
+    joinPolicy: z.enum(["OPEN", "INVITE_ONLY"]),
+    status: z.enum([
+      "CREATED",
+      "LOBBY",
+      "STARTING",
+      "ACTIVE",
+      "CLOSING",
+      "CLOSED",
+      "ABORTED",
+      "EXPIRED",
+    ]),
+    generation: z.number().int().positive(),
+    participantCount: z.number().int().nonnegative(),
+    maxPlayers: z.number().int().min(2).max(8),
+    expiresAt: z.string().datetime(),
+  })
+  .strict();
+export type MultiplayerRoomInstance = z.infer<typeof MultiplayerRoomInstanceSchema>;
+
+export const MultiplayerRoomParticipantSchema = z
+  .object({
+    id: OpaqueIdSchema,
+    role: z.enum(["HOST", "PLAYER"]),
+    seatIndex: z.number().int().min(0).max(7),
+    status: z.enum(["JOINED", "READY", "LEFT", "KICKED"]),
+    connectionGeneration: z.number().int().nonnegative(),
+  })
+  .strict();
+export type MultiplayerRoomParticipant = z.infer<typeof MultiplayerRoomParticipantSchema>;
+
+export const MultiplayerRoomResponseSchema = z
+  .object({
+    replayed: z.boolean(),
+    instance: MultiplayerRoomInstanceSchema,
+    participant: MultiplayerRoomParticipantSchema,
+  })
+  .strict();
+export type MultiplayerRoomResponse = z.infer<typeof MultiplayerRoomResponseSchema>;
+
+export const MultiplayerCreateInviteResponseSchema = z
+  .object({
+    replayed: z.boolean(),
+    inviteToken: InviteTokenSchema,
+    expiresAt: z.string().datetime(),
+    maxUses: z.literal(1),
+  })
+  .strict();
+export type MultiplayerCreateInviteResponse = z.infer<typeof MultiplayerCreateInviteResponseSchema>;

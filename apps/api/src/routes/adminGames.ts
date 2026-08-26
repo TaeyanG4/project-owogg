@@ -1,5 +1,7 @@
 import { Hono } from "hono";
 import {
+  AdminOfficialMultiplayerProfileResponseSchema,
+  AdminOfficialMultiplayerProfileUpdateRequestSchema,
   AdminGameListResponseSchema,
   AdminGameListQuerySchema,
   AdminGameToggleRequestSchema,
@@ -8,7 +10,12 @@ import {
   SandboxGameBasicMetadataUpdateRequestSchema,
   GameLogoUpdateResponseSchema,
 } from "@owogg/contracts";
-import { OfficialGameDeleteFailure, OfficialGameUploadFailure } from "@owogg/core";
+import {
+  OfficialGameDeleteFailure,
+  OfficialGameUploadFailure,
+  type OfficialMultiplayerProfileFailureCode,
+  type OfficialMultiplayerProfileResult,
+} from "@owogg/core";
 import { createContainer } from "../container.js";
 import { isTrustedAdminOrigin } from "../auth/admin.js";
 import {
@@ -22,6 +29,57 @@ import { rateLimit } from "../middleware/rateLimit.js";
 import { purgePublicGameReadCache } from "./publicGameCache.js";
 
 export const adminGamesRouter = new Hono<ApiEnv>();
+
+function multiplayerProfileFailure(code: OfficialMultiplayerProfileFailureCode) {
+  const status = code === "GAME_NOT_FOUND" || code === "PROFILE_NOT_FOUND" ? 404 : 409;
+  const message =
+    code === "GAME_NOT_FOUND"
+      ? "현재 게시된 exact 게임 버전을 찾을 수 없습니다."
+      : code === "PROFILE_NOT_FOUND"
+        ? "현재 live 버전에 비활성화할 멀티플레이 프로필이 없습니다."
+        : code === "OFFICIAL_GAME_REQUIRED"
+          ? "OWOGG 공식 게임만 이 관리 경로에서 프로필을 승인할 수 있습니다."
+          : code === "PRESET_GAME_MISMATCH"
+            ? "OMOK_V1 프로필은 official-omok 게임에만 적용할 수 있습니다."
+            : code === "MULTIPLAYER_MANIFEST_REQUIRED"
+              ? "owogg.json이 멀티플레이 게임으로 선언되어 있지 않습니다."
+              : code === "LEADERBOARD_FORBIDDEN"
+                ? "멀티플레이 게임은 score, leaderboard, client completion XP를 선언할 수 없습니다."
+                : "현재 live 버전의 멀티플레이 프로필 상태가 충돌합니다.";
+  return { body: { error: { code, message } }, status } as const;
+}
+
+function multiplayerProfileResponse(
+  result: Extract<OfficialMultiplayerProfileResult, { ok: true }>,
+) {
+  const profile = result.record?.profile;
+  return AdminOfficialMultiplayerProfileResponseSchema.parse({
+    gameSlug: result.gameSlug,
+    gameVersionId: result.gameVersionId,
+    preset: "OMOK_V1",
+    status: !result.record ? "NONE" : profile?.enabled ? "ENABLED" : "DISABLED",
+    profile:
+      !result.record || !profile
+        ? null
+        : {
+            id: result.record.id,
+            profileRevision: profile.profileRevision,
+            enabled: profile.enabled,
+            rulesetKey: profile.rulesetKey,
+            rulesetRevision: profile.rulesetRevision,
+            resolvedClass: profile.resolvedClass,
+            simulationModel: profile.simulationModel,
+            reconnectPolicy: profile.reconnectPolicy,
+            minPlayers: profile.minPlayers,
+            maxPlayers: profile.maxPlayers,
+            allowedVisibility: profile.allowedVisibility,
+            allowedJoinPolicies: profile.allowedJoinPolicies,
+            rewardPolicyId: profile.rewardPolicyId,
+            leaderboardEnabled: false,
+            updatedAt: result.record.updatedAt,
+          },
+  });
+}
 
 function officialUpdateFailure(error: unknown) {
   if (!(error instanceof OfficialGameUploadFailure)) throw error;
@@ -85,6 +143,72 @@ adminGamesRouter.get("/", async (c) => {
   });
 
   return c.json(AdminGameListResponseSchema.parse(result), 200);
+});
+
+// Trusted control-plane approval for the current OWOGG live version. A ZIP cannot invoke this or
+// choose server authority; a managed elevated admin explicitly activates the allowlisted preset.
+adminGamesRouter.get("/:gameId/multiplayer-profile", async (c) => {
+  const admin = await requireElevatedAdmin(c);
+  if (isElevatedAdminResponse(admin)) return admin;
+  const denied = requirePermission(admin, "games.moderate");
+  if (denied) return denied;
+  const container = createContainer(c.env.DB, readB2Config(c.env));
+  if (!container.gameBundlesConfigured) {
+    return c.json(
+      { error: { code: "GAME_BUNDLES_NOT_CONFIGURED", message: "B2 구성이 필요합니다." } },
+      503,
+    );
+  }
+  const result = await container.officialMultiplayerProfileUseCases.get(c.req.param("gameId"));
+  if (!result.ok) {
+    const failure = multiplayerProfileFailure(result.code);
+    return c.json(failure.body, failure.status);
+  }
+  return c.json(multiplayerProfileResponse(result), 200);
+});
+
+adminGamesRouter.post("/:gameId/multiplayer-profile", async (c) => {
+  const admin = await requireElevatedAdmin(c);
+  if (isElevatedAdminResponse(admin)) return admin;
+  const denied = requirePermission(admin, "games.moderate");
+  if (denied) return denied;
+  if (!admin.account) {
+    return c.json(
+      {
+        error: {
+          code: "MANAGED_ADMIN_REQUIRED",
+          message: "감사 가능한 관리 계정으로 로그인해야 멀티플레이 프로필을 변경할 수 있습니다.",
+        },
+      },
+      403,
+    );
+  }
+  const body = await c.req.json().catch(() => null);
+  const parsed = AdminOfficialMultiplayerProfileUpdateRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json(
+      { error: { code: "INVALID_REQUEST", message: "프로필 설정이 올바르지 않습니다." } },
+      400,
+    );
+  }
+  const container = createContainer(c.env.DB, readB2Config(c.env));
+  if (!container.gameBundlesConfigured) {
+    return c.json(
+      { error: { code: "GAME_BUNDLES_NOT_CONFIGURED", message: "B2 구성이 필요합니다." } },
+      503,
+    );
+  }
+  const result = await container.officialMultiplayerProfileUseCases.setEnabled({
+    gameSlug: c.req.param("gameId"),
+    enabled: parsed.data.enabled,
+    changedByAdminId: admin.account.id,
+    disabledReasonCode: parsed.data.reasonCode ?? null,
+  });
+  if (!result.ok) {
+    const failure = multiplayerProfileFailure(result.code);
+    return c.json(failure.body, failure.status);
+  }
+  return c.json(multiplayerProfileResponse(result), 200);
 });
 
 // POST /api/admin/games/upload — publishes a ZIP as an official OWOGG game. Authority comes only

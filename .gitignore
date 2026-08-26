@@ -1,4 +1,6 @@
 node_modules/
+# Optional workspace-local pnpm content-addressable store.
+.pnpm-store/
 dist/
 build/
 .react-router/
@@ -52,6 +54,10 @@ apps/api/wrangler.staging.generated.jsonc
 # fixture), not source. Regenerate with:
 #   node apps/api/test/fixtures/game-deploy-smoke-test/build-ball-dodge-zip.mjs
 apps/api/test/fixtures/game-deploy-smoke-test/ball-dodge.zip
+
+# Generated official M1 reference upload artifact. Keep the reviewable source + build/verify
+# scripts in Git and regenerate the ZIP at the Staging upload boundary.
+apps/api/test/fixtures/game-deploy-smoke-test/official-omok.zip
 
 # examples/ball-dodge/ (Game Bridge reference integration) build output — vendor/ is
 # @owogg/game-sdk/bridge's source, copied fresh on every build (see build.mjs), never committed;

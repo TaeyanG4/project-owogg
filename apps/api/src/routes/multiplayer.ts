@@ -2,18 +2,27 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
 import {
+  MultiplayerCreateInviteRequestSchema,
+  MultiplayerCreateInviteResponseSchema,
+  MultiplayerCreateRoomRequestSchema,
+  MultiplayerGameAvailabilityResponseSchema,
   MultiplayerJoinTicketRequestSchema,
   MultiplayerJoinTicketResponseSchema,
+  MultiplayerJoinRoomRequestSchema,
+  MultiplayerLeaveRoomRequestSchema,
+  MultiplayerRoomResponseSchema,
   MultiplayerRuntimeStatusResponseSchema,
 } from "@owogg/contracts";
 import {
   MULTIPLAYER_ERROR_HTTP_STATUS,
   MULTIPLAYER_WEBSOCKET_PROTOCOL,
+  isSupportedMultiplayerRuntimeProfile,
   parseMultiplayerWebSocketProtocols,
   verifyMultiplayerJoinTicket,
   type MultiplayerErrorCode,
 } from "@owogg/core";
 import { createContainer } from "../container.js";
+import { readB2Config } from "./devGames.js";
 import {
   isMultiplayerFeatureEnabled,
   isTrustedMultiplayerSocketRequest,
@@ -34,6 +43,7 @@ const PUBLIC_MESSAGES: Readonly<Record<MultiplayerErrorCode, string>> = {
   MULTIPLAYER_UNAVAILABLE: "멀티플레이 기능을 사용할 수 없습니다.",
   PROFILE_DISABLED: "현재 멀티플레이 입장이 중지되었습니다.",
   VERSION_MISMATCH: "게임 버전이 더 이상 유효하지 않습니다.",
+  IDEMPOTENCY_CONFLICT: "같은 요청 식별자가 다른 방 생성 요청에 이미 사용되었습니다.",
   INSTANCE_NOT_FOUND: "게임 방을 찾을 수 없습니다.",
   INSTANCE_NOT_JOINABLE: "현재 입장할 수 없는 게임 방입니다.",
   INSTANCE_FULL: "게임 방이 가득 찼습니다.",
@@ -82,8 +92,58 @@ async function takeRateLimit(
   }
 }
 
-function requestRateKey(c: Context<ApiEnv>, operation: "ticket" | "socket"): string {
+function requestRateKey(
+  c: Context<ApiEnv>,
+  operation: "create" | "join" | "leave" | "invite" | "ticket" | "socket",
+): string {
   return `multiplayer:${operation}:ip:${c.req.header("CF-Connecting-IP") ?? "unknown"}`;
+}
+
+function publicRoom(instance: {
+  readonly id: string;
+  readonly publicCode: string;
+  readonly gameId: number;
+  readonly gameVersionId: number;
+  readonly profileRevision: number;
+  readonly visibility: "PUBLIC" | "UNLISTED" | "PRIVATE";
+  readonly joinPolicy: "OPEN" | "INVITE_ONLY";
+  readonly status:
+    "CREATED" | "LOBBY" | "STARTING" | "ACTIVE" | "CLOSING" | "CLOSED" | "ABORTED" | "EXPIRED";
+  readonly generation: number;
+  readonly participantCount: number;
+  readonly maxPlayers: number;
+  readonly expiresAt: string;
+}) {
+  return {
+    id: instance.id,
+    publicCode: instance.publicCode,
+    gameId: instance.gameId,
+    gameVersionId: instance.gameVersionId,
+    profileRevision: instance.profileRevision,
+    visibility: instance.visibility,
+    joinPolicy: instance.joinPolicy,
+    status: instance.status,
+    generation: instance.generation,
+    participantCount: instance.participantCount,
+    maxPlayers: instance.maxPlayers,
+    expiresAt: instance.expiresAt,
+  };
+}
+
+function publicParticipant(participant: {
+  readonly id: string;
+  readonly role: "HOST" | "PLAYER";
+  readonly seatIndex: number;
+  readonly status: "JOINED" | "READY" | "LEFT" | "KICKED";
+  readonly connectionGeneration: number;
+}) {
+  return {
+    id: participant.id,
+    role: participant.role,
+    seatIndex: participant.seatIndex,
+    status: participant.status,
+    connectionGeneration: participant.connectionGeneration,
+  };
 }
 
 export const multiplayerRouter = new Hono<ApiEnv>();
@@ -97,6 +157,221 @@ multiplayerRouter.get("/status", (c) => {
     }),
     200,
   );
+});
+
+multiplayerRouter.get("/games/:gameSlug", async (c) => {
+  const unavailable = () => {
+    c.header("Cache-Control", "no-store");
+    return c.json(
+      MultiplayerGameAvailabilityResponseSchema.parse({
+        status: "UNAVAILABLE",
+        protocolVersion: 1,
+      }),
+      200,
+    );
+  };
+  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED) || !runtimeReady(c.env)) {
+    return unavailable();
+  }
+  const gameSlug = c.req.param("gameSlug");
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(gameSlug) || gameSlug.length > 64) {
+    return unavailable();
+  }
+  const b2Config = readB2Config(c.env);
+  if (!b2Config) return unavailable();
+
+  try {
+    const container = createContainer(c.env.DB, b2Config);
+    const runtime = await container.runtimeGameRegistry.findBySlug(gameSlug);
+    if (!runtime) return unavailable();
+    const profileRecord = await container.multiplayerProfileRepo.findEnabledForExactVersion(
+      runtime.identity.id,
+      runtime.liveVersion.id,
+    );
+    if (!profileRecord || !isSupportedMultiplayerRuntimeProfile(profileRecord.profile)) {
+      return unavailable();
+    }
+    const profile = profileRecord.profile;
+    c.header("Cache-Control", "no-store");
+    return c.json(
+      MultiplayerGameAvailabilityResponseSchema.parse({
+        status: "AVAILABLE",
+        protocolVersion: 1,
+        gameSlug,
+        profile: {
+          profileRevision: profile.profileRevision,
+          resolvedClass: profile.resolvedClass,
+          simulationModel: profile.simulationModel,
+          rulesetKey: profile.rulesetKey,
+          rulesetRevision: profile.rulesetRevision,
+          reconnectPolicy: profile.reconnectPolicy,
+          minPlayers: profile.minPlayers,
+          maxPlayers: profile.maxPlayers,
+          allowedVisibility: profile.allowedVisibility,
+          allowedJoinPolicies: profile.allowedJoinPolicies,
+        },
+      }),
+      200,
+    );
+  } catch {
+    return unavailable();
+  }
+});
+
+multiplayerRouter.post("/instances", async (c) => {
+  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED)) {
+    return failure(c, "MULTIPLAYER_UNAVAILABLE");
+  }
+  if (!runtimeReady(c.env)) return failure(c, "MULTIPLAYER_UNAVAILABLE");
+  const rateLimit = await takeRateLimit(c.env, requestRateKey(c, "create"));
+  if (rateLimit === "DENIED") return failure(c, "RATE_LIMITED");
+  if (rateLimit === "UNAVAILABLE") return failure(c, "MULTIPLAYER_UNAVAILABLE");
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return failure(c, "INVALID_REQUEST");
+  }
+  const parsed = MultiplayerCreateRoomRequestSchema.safeParse(body);
+  if (!parsed.success) return failure(c, "INVALID_REQUEST");
+
+  const sessionId = getCookie(c, "owogg_session");
+  if (!sessionId) return failure(c, "UNAUTHENTICATED");
+  const container = createContainer(c.env.DB, readB2Config(c.env));
+  const authenticated = await container.sessionRepo.findSession(sessionId);
+  if (!authenticated) return failure(c, "UNAUTHENTICATED");
+
+  const result = await container.multiplayerRoomUseCases.createRoom({
+    userId: authenticated.user.id,
+    ...parsed.data,
+  });
+  if (!result.ok) return failure(c, result.code);
+  c.header("Cache-Control", "no-store");
+  return c.json(
+    MultiplayerRoomResponseSchema.parse({
+      replayed: result.replayed,
+      instance: publicRoom(result.instance),
+      participant: publicParticipant(result.participant),
+    }),
+    result.replayed ? 200 : 201,
+  );
+});
+
+multiplayerRouter.post("/instances/join", async (c) => {
+  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED)) {
+    return failure(c, "MULTIPLAYER_UNAVAILABLE");
+  }
+  if (!runtimeReady(c.env)) return failure(c, "MULTIPLAYER_UNAVAILABLE");
+  const rateLimit = await takeRateLimit(c.env, requestRateKey(c, "join"));
+  if (rateLimit === "DENIED") return failure(c, "RATE_LIMITED");
+  if (rateLimit === "UNAVAILABLE") return failure(c, "MULTIPLAYER_UNAVAILABLE");
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return failure(c, "INVALID_REQUEST");
+  }
+  const parsed = MultiplayerJoinRoomRequestSchema.safeParse(body);
+  if (!parsed.success) return failure(c, "INVALID_REQUEST");
+
+  const sessionId = getCookie(c, "owogg_session");
+  if (!sessionId) return failure(c, "UNAUTHENTICATED");
+  const container = createContainer(c.env.DB, readB2Config(c.env));
+  const authenticated = await container.sessionRepo.findSession(sessionId);
+  if (!authenticated) return failure(c, "UNAUTHENTICATED");
+  const result = await container.multiplayerRoomUseCases.joinRoom({
+    userId: authenticated.user.id,
+    publicCode: parsed.data.publicCode,
+    inviteToken: parsed.data.inviteToken,
+  });
+  if (!result.ok) return failure(c, result.code);
+  c.header("Cache-Control", "no-store");
+  return c.json(
+    MultiplayerRoomResponseSchema.parse({
+      replayed: result.replayed,
+      instance: publicRoom(result.instance),
+      participant: publicParticipant(result.participant),
+    }),
+    200,
+  );
+});
+
+multiplayerRouter.post("/instances/:instanceId/leave", async (c) => {
+  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED)) {
+    return failure(c, "MULTIPLAYER_UNAVAILABLE");
+  }
+  if (!runtimeReady(c.env)) return failure(c, "MULTIPLAYER_UNAVAILABLE");
+  const rateLimit = await takeRateLimit(c.env, requestRateKey(c, "leave"));
+  if (rateLimit === "DENIED") return failure(c, "RATE_LIMITED");
+  if (rateLimit === "UNAVAILABLE") return failure(c, "MULTIPLAYER_UNAVAILABLE");
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return failure(c, "INVALID_REQUEST");
+  }
+  const parsed = MultiplayerLeaveRoomRequestSchema.safeParse(body);
+  if (!parsed.success) return failure(c, "INVALID_REQUEST");
+
+  const sessionId = getCookie(c, "owogg_session");
+  if (!sessionId) return failure(c, "UNAUTHENTICATED");
+  const container = createContainer(c.env.DB, readB2Config(c.env));
+  const authenticated = await container.sessionRepo.findSession(sessionId);
+  if (!authenticated) return failure(c, "UNAUTHENTICATED");
+  const result = await container.multiplayerRoomUseCases.leaveRoom({
+    userId: authenticated.user.id,
+    instanceId: c.req.param("instanceId"),
+    expectedGeneration: parsed.data.expectedGeneration,
+  });
+  if (!result.ok) return failure(c, result.code);
+  c.header("Cache-Control", "no-store");
+  return c.json(
+    MultiplayerRoomResponseSchema.parse({
+      replayed: result.replayed,
+      instance: publicRoom(result.instance),
+      participant: publicParticipant(result.participant),
+    }),
+    200,
+  );
+});
+
+multiplayerRouter.post("/instances/:instanceId/invites", async (c) => {
+  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED)) {
+    return failure(c, "MULTIPLAYER_UNAVAILABLE");
+  }
+  const config = readMultiplayerRuntimeConfig(c.env);
+  if (!config || !runtimeReady(c.env)) return failure(c, "MULTIPLAYER_UNAVAILABLE");
+  const rateLimit = await takeRateLimit(c.env, requestRateKey(c, "invite"));
+  if (rateLimit === "DENIED") return failure(c, "RATE_LIMITED");
+  if (rateLimit === "UNAVAILABLE") return failure(c, "MULTIPLAYER_UNAVAILABLE");
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return failure(c, "INVALID_REQUEST");
+  }
+  const parsed = MultiplayerCreateInviteRequestSchema.safeParse(body);
+  if (!parsed.success) return failure(c, "INVALID_REQUEST");
+
+  const sessionId = getCookie(c, "owogg_session");
+  if (!sessionId) return failure(c, "UNAUTHENTICATED");
+  const container = createContainer(c.env.DB, readB2Config(c.env));
+  const authenticated = await container.sessionRepo.findSession(sessionId);
+  if (!authenticated) return failure(c, "UNAUTHENTICATED");
+  const result = await container.multiplayerRoomUseCases.createInvite({
+    userId: authenticated.user.id,
+    instanceId: c.req.param("instanceId"),
+    expectedGeneration: parsed.data.expectedGeneration,
+    idempotencyKey: parsed.data.idempotencyKey,
+    keyring: config.keyring,
+  });
+  if (!result.ok) return failure(c, result.code);
+  c.header("Cache-Control", "no-store");
+  return c.json(MultiplayerCreateInviteResponseSchema.parse(result), result.replayed ? 200 : 201);
 });
 
 multiplayerRouter.post("/instances/:instanceId/ticket", async (c) => {
@@ -123,7 +398,7 @@ multiplayerRouter.post("/instances/:instanceId/ticket", async (c) => {
 
   const sessionId = getCookie(c, "owogg_session");
   if (!sessionId) return failure(c, "UNAUTHENTICATED");
-  const container = createContainer(c.env.DB);
+  const container = createContainer(c.env.DB, readB2Config(c.env));
   const authenticated = await container.sessionRepo.findSession(sessionId);
   if (!authenticated) return failure(c, "UNAUTHENTICATED");
 

@@ -354,6 +354,25 @@ export class D1MultiplayerProfileRepository implements MultiplayerProfileReposit
     return row ? mapMultiplayerProfileRow(row) : null;
   }
 
+  async findLatestForExactVersion(
+    gameId: number,
+    gameVersionId: number,
+  ): Promise<MultiplayerProfileRecord | null> {
+    assertPositiveId(gameId, "gameId");
+    assertPositiveId(gameVersionId, "gameVersionId");
+    const row = await this.db
+      .prepare(
+        `SELECT ${PROFILE_SELECT_COLUMNS}
+         FROM multiplayer_profiles profile
+         WHERE profile.game_id = ? AND profile.game_version_id = ?
+         ORDER BY profile.profile_revision DESC
+         LIMIT 1`,
+      )
+      .bind(gameId, gameVersionId)
+      .first<Record<string, unknown>>();
+    return row ? mapMultiplayerProfileRow(row) : null;
+  }
+
   async findEnabledForExactVersion(
     gameId: number,
     gameVersionId: number,

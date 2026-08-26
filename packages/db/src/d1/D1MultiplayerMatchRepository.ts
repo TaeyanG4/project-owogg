@@ -377,6 +377,20 @@ export class D1MultiplayerMatchRepository implements MultiplayerMatchRepository 
     return (result.results ?? []).map(mapMultiplayerMatchActionRow);
   }
 
+  async findLatestAction(matchId: string): Promise<MultiplayerMatchActionRecord | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT ${ACTION_SELECT_COLUMNS}
+         FROM multiplayer_match_actions
+         WHERE match_id = ?
+         ORDER BY server_seq DESC, id DESC
+         LIMIT 1`,
+      )
+      .bind(matchId)
+      .first<Record<string, unknown>>();
+    return row ? mapMultiplayerMatchActionRow(row) : null;
+  }
+
   async recordAction(input: RecordMultiplayerActionInput): Promise<RecordMultiplayerActionResult> {
     if (!this.isValidActionInput(input)) {
       return { status: "REJECTED", code: "INVALID_INPUT", currentRevision: null };
@@ -461,7 +475,9 @@ export class D1MultiplayerMatchRepository implements MultiplayerMatchRepository 
         };
       }
       return {
-        status: writtenRows(insertResult) === 1 ? "RECORDED" : "REPLAYED",
+        // D1 may include index maintenance in rows_written, so a successful single-row table
+        // insert can report more than one billed write. Zero is the only replay signal here.
+        status: (writtenRows(insertResult) ?? 0) > 0 ? "RECORDED" : "REPLAYED",
         action: recorded,
       };
     }

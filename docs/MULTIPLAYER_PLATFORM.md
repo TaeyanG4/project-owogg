@@ -2,9 +2,9 @@
 
 상태: 구현 중인 기준 계획
 
-마지막 검증: 2026-08-25
+마지막 검증: 2026-08-26
 
-기준 브랜치: `feature/multiplayer-platform-foundation` (base: `staging`)
+기준 브랜치: `feature/multiplayer-omok` (base: `staging`)
 
 이 문서는 OwOGG 멀티플레이 플랫폼의 구현 범위, 보안 불변식, 단계별 완료 조건과 운영 Gate를
 추적하는 단일 계획 문서입니다. 현재 구현 사실은 코드, D1 migration, Wrangler 설정과 배포
@@ -30,6 +30,7 @@
 - 4인 fanout/access reference
 - M1 Advanced reference: hidden information과 동시 응답을 검증하는 게임
 - 결과, 업적, 통계, XP의 server-authoritative finalization
+- canonical 승패 기록은 보존하되 멀티플레이 점수 리더보드·랭킹은 제공하지 않음
 - Creator용 managed multiplayer template와 `owogg.json` v2 beta 경로
 - Staging 격리, diagnostics, 부하·비용 계측과 kill/drain 운영 경로
 
@@ -41,7 +42,7 @@
 - M5 persistent world runtime
 - M6 distributed world runtime
 - Creator가 업로드하는 임의 `server.ts`, WebSocket URL, API URL 또는 서버 plugin
-- 고가치 ranked/현금성 보상
+- 멀티플레이 점수 리더보드, Elo/MMR, ranked/현금성 보상
 - text/voice chat, spectator, 자동 matchmaking, Elo/MMR, full replay
 - Git workspace, 정적 registry 또는 deploy bootstrap을 통한 runtime 게임 등록
 
@@ -86,8 +87,10 @@
 9. active match가 사용하는 game version, profile revision, ruleset revision과 protocol version을
    in-place 수정하지 않는다.
 10. terminal match의 D1 commit 전에는 canonical result와 reward를 확정하지 않는다.
-11. aborted, self-match 또는 eligibility 미달 match에는 0 XP event도 생성하지 않는다.
-12. secret, raw ticket, password, hidden state와 arbitrary payload를 로그에 남기지 않는다.
+11. 관리형 멀티게임은 score leaderboard, rank, Elo/MMR에 참여하지 않는다. 승·패·무승부는
+    canonical match history로만 보존한다.
+12. aborted, self-match 또는 eligibility 미달 match에는 0 XP event도 생성하지 않는다.
+13. secret, raw ticket, password, hidden state와 arbitrary payload를 로그에 남기지 않는다.
 
 ---
 
@@ -222,6 +225,7 @@ delete는 lease보다 우선하며 관련 match를 audit 가능한 reason으로 
 - v1만으로 online multiplayer를 활성화하지 않는다.
 - D1 approved profile이 없으면 public API는 online multiplayer를 노출하지 않는다.
 - 기존 v1 single/local game의 결과·플레이 흐름은 유지한다.
+- approved online profile에는 generic score session과 `/api/scores/:slug` 리더보드를 열지 않는다.
 
 ### 계획된 v2 request
 
@@ -269,6 +273,7 @@ Creator manifest에 허용하지 않는다.
 resolvedClass / runtimeBackend / backendClass
 arbitrary rulesetKey / latest template version
 rewardPolicy / XP amount / official / verified
+multiplayer score leaderboard / rank / Elo / MMR
 API URL / WebSocket URL / external server
 server code / schema URL / secret
 ```
@@ -546,6 +551,7 @@ V1 participants ≤ 8
 | `packages/core/src/application/gameScoreAcceptanceUseCases.ts`                                          | token·score 정규화 전에 authoritative multiplayer profile을 확인하고 client score 경로를 거절한다.              |
 | `packages/core/src/application/gameResultAcceptanceUseCases.ts`                                         | result 정규화·저장 전에 동일 gate를 적용하고 canonical committed result만 별도 경로로 수락한다.                 |
 | `apps/api/src/routes/games.ts`의 game result/score route와 `apps/api/src/routes/scores.ts` legacy route | 모든 공개 입력이 위 core admission gate를 우회하지 못하게 한다.                                                 |
+| `apps/api/src/routes/scores.ts`의 `GET /:gameId`                                                        | enabled approved multiplayer exact version은 과거 점수가 있어도 빈 leaderboard만 반환한다.                      |
 | `apps/web/app/features/game/runtime/gameBridgeHost.ts`                                                  | `GAME_EVENT`/`GAME_COMPLETE`는 single/local legacy channel에만 남기고 multiplayer channel로 전달하지 않는다.    |
 | `apps/web/app/features/game/gameResultFlow.ts`                                                          | online multiplayer attempt에서는 generic session/result flow를 시작하지 않는다.                                 |
 | progression/achievement/XP consumer                                                                     | D1 canonical match commit 뒤 생성된 idempotent reward outbox만 소비한다. iframe event를 사실로 사용하지 않는다. |
@@ -582,6 +588,9 @@ Reaction Duel은 network path 차이 때문에 high-value competitive 결과로 
 `/admin/games`에 exact version multiplayer profile 심사를 통합한다.
 
 - OWOGG upload는 server-side `publisher_type=OWOGG`만 V1 profile 후보
+- `OMOK_V1`은 `official-omok` slug에만 적용되며 다른 공식 멀티게임에 재사용하지 않음
+- 관리형 관리자만 현재 live version의 프로필을 활성화/비활성화하고 변경자를 감사 필드에 기록
+- 관리자 응답과 화면에는 secret/resolved config를 노출하지 않고 `leaderboardEnabled: false`를 명시
 - Creator request는 USER ownership을 유지하고 별도 review 상태 사용
 - profile enable/disable, new-join drain, force-abort kill switch
 - active version/ruleset lease 수 표시
@@ -801,12 +810,15 @@ slow client
 
 ### Phase 3 — M1 Simple 오목
 
-- [ ] official `omokRules`
-- [ ] create/join/invite/ready/action/sync
-- [ ] server winner와 typed conflict resync
-- [ ] reconnect resume
+- [x] official `omokRules`
+- [x] create/join/invite/ready/action/sync
+- [x] server winner와 typed conflict resync
+- [x] reconnect resume
+- [x] 검증 가능한 official 오목 ZIP source/build와 v1 무랭킹 manifest
+- [x] 관리형 관리자 전용 exact-version `OMOK_V1` 활성화/비활성화 제어면
 - [ ] exact version ZIP을 `/admin/games`로 Staging D1/B2에 게시
-- [ ] 결과 ledger 검증 후 reward 활성화
+- [~] 결과 ledger 로컬 검증 완료, reward는 별도 Staging Gate 전까지 비활성 유지
+- [~] score/leaderboard 미생성·미노출 로컬 검증 완료, Staging acceptance 대기
 - [ ] 두 사용자 browser E2E
 
 완료 Gate: 동시/중복 action으로 corruption이 없고 iframe이 결과·업적·XP를 위조할 수 없다.

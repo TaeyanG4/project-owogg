@@ -63,11 +63,16 @@ export * from "./modules/multiplayer/domain/multiplayerErrors.js";
 export * from "./modules/multiplayer/domain/multiplayerInstance.js";
 export * from "./modules/multiplayer/domain/multiplayerMatch.js";
 export * from "./modules/multiplayer/domain/multiplayerJoinTicket.js";
+export * from "./modules/multiplayer/rules/omokRules.js";
+export * from "./modules/multiplayer/rules/omokActionLedger.js";
+export * from "./modules/multiplayer/rules/supportedRulesets.js";
 export * from "./modules/multiplayer/ports/multiplayerProfileRepository.js";
 export * from "./modules/multiplayer/ports/multiplayerProfileRequestRepository.js";
 export * from "./modules/multiplayer/ports/multiplayerInstanceRepository.js";
 export * from "./modules/multiplayer/ports/multiplayerMatchRepository.js";
 export * from "./modules/multiplayer/application/multiplayerAdmissionUseCases.js";
+export * from "./modules/multiplayer/application/multiplayerRoomUseCases.js";
+export * from "./modules/multiplayer/application/officialMultiplayerProfileUseCases.js";
 
 export * from "./application/genericScoreReadUseCases.js";
 export * from "./application/personalizationUseCases.js";

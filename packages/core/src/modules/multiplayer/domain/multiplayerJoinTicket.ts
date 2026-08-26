@@ -43,9 +43,13 @@ export interface MultiplayerJoinTicketClaims {
   readonly participantId: string;
   readonly userId: number;
   readonly gameVersionId: number;
+  readonly profileId: number;
   readonly profileRevision: number;
+  readonly rulesetKey: string;
+  readonly rulesetRevision: number;
   readonly generation: number;
   readonly connectionGeneration: number;
+  readonly seatIndex: number;
   readonly role: MultiplayerTicketParticipantRole;
 }
 
@@ -71,8 +75,10 @@ export interface MultiplayerJoinTicketExpectedContext {
   readonly instanceId?: string;
   readonly participantId?: string;
   readonly userId?: number;
+  readonly profileId?: number;
   readonly generation?: number;
   readonly connectionGeneration?: number;
+  readonly seatIndex?: number;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -115,9 +121,13 @@ export function parseMultiplayerJoinTicketClaims(
       "participantId",
       "userId",
       "gameVersionId",
+      "profileId",
       "profileRevision",
+      "rulesetKey",
+      "rulesetRevision",
       "generation",
       "connectionGeneration",
+      "seatIndex",
       "role",
     ])
   ) {
@@ -134,9 +144,18 @@ export function parseMultiplayerJoinTicketClaims(
   if (!isOpaqueId(value.instanceId) || !isOpaqueId(value.participantId)) return null;
   if (!isPositiveSafeInteger(value.userId)) return null;
   if (!isPositiveSafeInteger(value.gameVersionId)) return null;
+  if (!isPositiveSafeInteger(value.profileId)) return null;
   if (!isPositiveSafeInteger(value.profileRevision)) return null;
+  if (
+    typeof value.rulesetKey !== "string" ||
+    !/^[a-z0-9][a-z0-9._:/-]{0,95}$/.test(value.rulesetKey)
+  ) {
+    return null;
+  }
+  if (!isPositiveSafeInteger(value.rulesetRevision)) return null;
   if (!isPositiveSafeInteger(value.generation)) return null;
   if (!isPositiveSafeInteger(value.connectionGeneration)) return null;
+  if (!isNonNegativeSafeInteger(value.seatIndex) || value.seatIndex > 7) return null;
   if (value.role !== "HOST" && value.role !== "PLAYER") return null;
 
   // Return a freshly-shaped object so signing has a deterministic field order and no unknown
@@ -152,9 +171,13 @@ export function parseMultiplayerJoinTicketClaims(
     participantId: value.participantId,
     userId: value.userId,
     gameVersionId: value.gameVersionId,
+    profileId: value.profileId,
     profileRevision: value.profileRevision,
+    rulesetKey: value.rulesetKey,
+    rulesetRevision: value.rulesetRevision,
     generation: value.generation,
     connectionGeneration: value.connectionGeneration,
+    seatIndex: value.seatIndex,
     role: value.role,
   };
 }
@@ -253,9 +276,11 @@ function contextMatches(
     (expected.instanceId === undefined || claims.instanceId === expected.instanceId) &&
     (expected.participantId === undefined || claims.participantId === expected.participantId) &&
     (expected.userId === undefined || claims.userId === expected.userId) &&
+    (expected.profileId === undefined || claims.profileId === expected.profileId) &&
     (expected.generation === undefined || claims.generation === expected.generation) &&
     (expected.connectionGeneration === undefined ||
-      claims.connectionGeneration === expected.connectionGeneration)
+      claims.connectionGeneration === expected.connectionGeneration) &&
+    (expected.seatIndex === undefined || claims.seatIndex === expected.seatIndex)
   );
 }
 

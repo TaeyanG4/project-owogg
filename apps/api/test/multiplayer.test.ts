@@ -10,7 +10,11 @@ import {
   signMultiplayerJoinTicket,
   verifyMultiplayerJoinTicket,
 } from "@owogg/core";
-import { MultiplayerJoinTicketResponseSchema } from "@owogg/contracts";
+import {
+  MultiplayerGameAvailabilityResponseSchema,
+  MultiplayerJoinTicketResponseSchema,
+  MultiplayerRoomResponseSchema,
+} from "@owogg/contracts";
 import { D1MultiplayerInstanceRepository } from "@owogg/db";
 import { createSqliteD1 } from "../../../packages/db/test/helpers/sqliteD1.js";
 import { app } from "../src/app.js";
@@ -24,6 +28,13 @@ import {
 const SECRET = "api-multiplayer-ticket-secret-32-bytes-minimum";
 const KEY_ID = "api_test_key";
 const INSTANCE_ID = "instance_api_ticket_000000001";
+const B2_ENV = {
+  B2_ENDPOINT: "https://s3.us-west-004.backblazeb2.com",
+  B2_REGION: "us-west-004",
+  B2_BUCKET_NAME: "test",
+  B2_KEY_ID: "test",
+  B2_APPLICATION_KEY: "test",
+};
 
 function limiter(success = true) {
   return {
@@ -71,9 +82,13 @@ async function websocketTicket(
       participantId: "participant_api_12345678",
       userId: 7,
       gameVersionId: 12,
+      profileId: 13,
       profileRevision: 2,
+      rulesetKey: "official:omok",
+      rulesetRevision: 1,
       generation: 3,
       connectionGeneration: 4,
+      seatIndex: 1,
       role: "PLAYER",
       ...overrides,
     },
@@ -246,7 +261,7 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
        ) VALUES (12, 11, 'games/11/12.zip', 'api-content-12', 100, 'READY', ?, NULL)`,
     )
     .run(nowIso);
-  raw.prepare("UPDATE games SET live_version_id = 12 WHERE id = 11").run();
+  raw.prepare("UPDATE games SET visibility = 'PUBLIC', live_version_id = 12 WHERE id = 11").run();
   raw
     .prepare(
       `INSERT INTO multiplayer_profiles (
@@ -285,7 +300,64 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
   });
   assert.equal(created.status, "CREATED");
 
-  const env = runtimeEnv({ DB: db });
+  const env = runtimeEnv({ DB: db, ...B2_ENV });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        schemaVersion: 2,
+        slug: "api-omok",
+        title: "온라인 오목",
+        shortDescription: "서버 권위형 2인 오목",
+        description: "OWOGG 공식 온라인 오목입니다.",
+        publisher: { official: true },
+        policy: {
+          score: null,
+          leaderboard: false,
+          xpPerCompletion: 0,
+          requiresAuth: true,
+        },
+        supportsReplay: false,
+        catalog: {
+          type: "TAXONOMY",
+          categories: ["board"],
+          tags: ["omok"],
+          modes: ["online-multi"],
+          inputMethods: ["mouse", "touch"],
+          minPlayers: 2,
+          maxPlayers: 2,
+          thumbnail: "/omok.svg",
+        },
+        updatedAt: nowIso,
+      }),
+      { status: 200 },
+    )) as typeof fetch;
+  try {
+    const availabilityResponse = await app.request(
+      "http://localhost/api/multiplayer/games/api-omok",
+      {},
+      env as any,
+    );
+    assert.equal(availabilityResponse.status, 200);
+    assert.equal(availabilityResponse.headers.get("Cache-Control"), "no-store");
+    const availability = MultiplayerGameAvailabilityResponseSchema.parse(
+      await availabilityResponse.json(),
+    );
+    assert.equal(availability.status, "AVAILABLE");
+    if (availability.status === "AVAILABLE") {
+      assert.equal(availability.gameSlug, "api-omok");
+      assert.equal(availability.profile.resolvedClass, "M1");
+      assert.equal(availability.profile.rulesetKey, "official:omok");
+      assert.deepEqual(availability.profile.allowedVisibility, ["PRIVATE"]);
+      assert.deepEqual(availability.profile.allowedJoinPolicies, ["INVITE_ONLY"]);
+    }
+    const publicAvailability = JSON.stringify(availability);
+    assert.equal(publicAvailability.includes("profileId"), false);
+    assert.equal(publicAvailability.includes("ticket"), false);
+    assert.equal(publicAvailability.includes("socket"), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
   const request = {
     method: "POST",
     headers: {
@@ -333,4 +405,22 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
   );
   assert.equal(replay.status, 409);
   assert.equal((await replay.json()).error.code, "STALE_GENERATION");
+
+  const leave = await app.request(
+    `http://localhost/api/multiplayer/instances/${INSTANCE_ID}/leave`,
+    {
+      ...request,
+      body: JSON.stringify({ expectedGeneration: 1 }),
+    },
+    env as any,
+  );
+  assert.equal(leave.status, 200);
+  const left = MultiplayerRoomResponseSchema.parse(await leave.json());
+  assert.equal(left.instance.status, "ABORTED");
+  assert.equal(left.participant.status, "LEFT");
+  assert.equal(
+    raw.prepare("SELECT abort_code FROM multiplayer_instances WHERE id = ?").get(INSTANCE_ID)
+      ?.abort_code,
+    "INSUFFICIENT_PLAYERS",
+  );
 });

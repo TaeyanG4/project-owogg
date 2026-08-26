@@ -26,6 +26,8 @@ import { GamePlayAdSlot } from "../../components/game/GamePlayAdSlot";
 import { GameRecommendations } from "../../components/game/GameRecommendations";
 import { XIcon } from "../../components/ui/XIcon";
 import { IframeRuntime } from "./runtime/IframeRuntime";
+import { MultiplayerGameSurface } from "./runtime/MultiplayerGameSurface";
+import type { MultiplayerRuntimeResolution } from "./runtime/multiplayerRuntimeResolution";
 import { fetchGameSession } from "./gameSessionApi";
 import { acceptGameResult } from "./gameResultAcceptApi";
 import { createGameResultFlow } from "./gameResultFlow";
@@ -97,6 +99,32 @@ export function formatMetadataValue(key: string, value: unknown): string {
  */
 export function resolveGameRuntimeUrl(slug: string): string {
   return gamePlayUrl(slug);
+}
+
+/**
+ * Coarse catalog gate before the D1/B2-backed multiplayer availability probe. TAXONOMY can state
+ * online play exactly; legacy GENRE_MODE only knows `multi`, so the server profile decides whether
+ * that game uses the online runtime or falls back to the unchanged local iframe path.
+ */
+export function isPotentialOnlineMultiplayerGame(game: PublicGame | null): boolean {
+  if (!game) return false;
+  return game.catalog.type === "TAXONOMY"
+    ? game.catalog.modes.includes("online-multi")
+    : game.catalog.mode === "multi";
+}
+
+/**
+ * A coarse `multi` catalog entry cannot decide which attempt authority to use. The parent waits
+ * for the D1/B2-backed profile probe: an approved online profile must never mint a generic score
+ * session, while an unavailable legacy game keeps the existing result flow unchanged.
+ */
+export function shouldStartGenericGameSession(
+  game: PublicGame | null,
+  resolution: { readonly gameSlug: string; readonly mode: MultiplayerRuntimeResolution } | null,
+): boolean {
+  if (!game) return false;
+  if (!isPotentialOnlineMultiplayerGame(game)) return true;
+  return resolution?.gameSlug === game.slug && resolution.mode === "LEGACY";
 }
 
 /**
@@ -473,6 +501,10 @@ export function GameHost({ slug }: GameHostProps) {
   const [resultLeaderboard, setResultLeaderboard] = useState<LeaderRecord[] | null>(null);
 
   const [game, setGame] = useState<PublicGame | null>(null);
+  const [multiplayerRuntimeResolution, setMultiplayerRuntimeResolution] = useState<{
+    readonly gameSlug: string;
+    readonly mode: MultiplayerRuntimeResolution;
+  } | null>(null);
   const localizedTitle = game?.title;
   const catalogCards = useMemo(() => publicGames.map(publicGameToCard), [publicGames]);
   const currentGameCard = useMemo(
@@ -648,8 +680,24 @@ export function GameHost({ slug }: GameHostProps) {
 
   useEffect(() => {
     if (authLoading) return;
+    if (!shouldStartGenericGameSession(game, multiplayerRuntimeResolution)) return;
     void resultFlow.startAttempt(isAuthenticated, selectedDifficultyId);
-  }, [authLoading, isAuthenticated, resultFlow, selectedDifficultyId, attemptKey]);
+  }, [
+    authLoading,
+    isAuthenticated,
+    resultFlow,
+    selectedDifficultyId,
+    attemptKey,
+    game,
+    multiplayerRuntimeResolution,
+  ]);
+
+  const handleMultiplayerRuntimeResolved = useCallback(
+    (mode: MultiplayerRuntimeResolution) => {
+      setMultiplayerRuntimeResolution({ gameSlug: slug, mode });
+    },
+    [slug],
+  );
 
   // One generic detail fetch supplies canonical policy/presentation/media for both publishers.
   // No static manifest or sandbox-specific resolver is consulted on the primary play path.
@@ -1305,21 +1353,51 @@ export function GameHost({ slug }: GameHostProps) {
                     className="flex w-full items-center justify-center overflow-hidden"
                     ref={iframeAreaRef}
                   >
-                    <IframeRuntime
-                      src={resolveGameRuntimeUrl(slug)}
-                      title={localizedTitle ?? slug}
-                      autoStart
-                      attemptKey={attemptKey}
-                      frameClassName={renderedIframeFrameClassName}
-                      frameStyle={iframeFrameStyle}
-                      iframeStyle={iframeElementStyle}
-                      {...(game?.difficulty ? { difficultyId: selectedDifficultyId } : {})}
-                      onStarted={handleIframeStarted}
-                      onEvent={handleIframeEvent}
-                      onComplete={handleIframeComplete}
-                      onCancel={runtime.cancel}
-                      onError={handleIframeError}
-                    />
+                    {isPotentialOnlineMultiplayerGame(game) ? (
+                      <MultiplayerGameSurface
+                        gameSlug={slug}
+                        src={resolveGameRuntimeUrl(slug)}
+                        title={localizedTitle ?? slug}
+                        attemptKey={attemptKey}
+                        onRuntimeResolved={handleMultiplayerRuntimeResolved}
+                        frameClassName={renderedIframeFrameClassName}
+                        {...(iframeFrameStyle ? { frameStyle: iframeFrameStyle } : {})}
+                        {...(iframeElementStyle ? { iframeStyle: iframeElementStyle } : {})}
+                        fallback={
+                          <IframeRuntime
+                            src={resolveGameRuntimeUrl(slug)}
+                            title={localizedTitle ?? slug}
+                            autoStart
+                            attemptKey={attemptKey}
+                            frameClassName={renderedIframeFrameClassName}
+                            frameStyle={iframeFrameStyle}
+                            iframeStyle={iframeElementStyle}
+                            {...(game?.difficulty ? { difficultyId: selectedDifficultyId } : {})}
+                            onStarted={handleIframeStarted}
+                            onEvent={handleIframeEvent}
+                            onComplete={handleIframeComplete}
+                            onCancel={runtime.cancel}
+                            onError={handleIframeError}
+                          />
+                        }
+                      />
+                    ) : (
+                      <IframeRuntime
+                        src={resolveGameRuntimeUrl(slug)}
+                        title={localizedTitle ?? slug}
+                        autoStart
+                        attemptKey={attemptKey}
+                        frameClassName={renderedIframeFrameClassName}
+                        frameStyle={iframeFrameStyle}
+                        iframeStyle={iframeElementStyle}
+                        {...(game?.difficulty ? { difficultyId: selectedDifficultyId } : {})}
+                        onStarted={handleIframeStarted}
+                        onEvent={handleIframeEvent}
+                        onComplete={handleIframeComplete}
+                        onCancel={runtime.cancel}
+                        onError={handleIframeError}
+                      />
+                    )}
                   </div>
                 )}
               </div>

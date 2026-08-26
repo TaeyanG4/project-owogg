@@ -290,7 +290,7 @@ test("server projections require current generation and strictly increasing serv
   gamePort.close();
 });
 
-test("terminal state stays parent-owned and socket close maps to a typed disconnect", async () => {
+test("terminal state stays parent-owned and remains sticky after the transport closes", async () => {
   const iframe = createIframeHarness();
   const socket = createSocketHarness();
   const states: MultiplayerParentConnectionState[] = [];
@@ -321,21 +321,137 @@ test("terminal state stays parent-owned and socket close maps to a typed disconn
     }),
   );
   socket.closeFromServer(4001);
-  await waitUntil(() => received.length, 3);
+  await waitUntil(() => received.length, 2);
 
   assert.deepEqual(terminal, [{ outcome: "win" }]);
   assert.deepEqual(states, [
     { status: "CONNECTING" },
     { status: "TERMINAL_PENDING" },
     { status: "TERMINAL_COMMITTED", result: { outcome: "win" } },
-    { status: "DISCONNECTED", code: "REPLACED_BY_NEW_CONNECTION" },
   ]);
-  assert.deepEqual(received[2], {
-    type: "MULTI_DISCONNECTED",
-    v: 1,
-    generation: 3,
-    code: "REPLACED_BY_NEW_CONNECTION",
+  assert.equal(received.length, 2);
+  host.close();
+  gamePort.close();
+});
+
+test("a non-terminal socket close becomes one sanitized disconnected projection", async () => {
+  const iframe = createIframeHarness();
+  const socket = createSocketHarness();
+  const states: MultiplayerParentConnectionState[] = [];
+  const host = createMultiplayerBridgeHost(iframe.windowLike, socket.socket, BOOTSTRAP, {
+    onConnectionState: (state) => states.push(state),
   });
+  const gamePort = iframe.capture().port;
+  const received: unknown[] = [];
+  gamePort.onmessage = (event) => received.push(event.data);
+
+  socket.closeFromServer(4008, "implementation detail must not cross the bridge");
+  socket.closeFromServer(4008);
+  await waitUntil(() => received.length, 1);
+
+  assert.deepEqual(states, [
+    { status: "CONNECTING" },
+    { status: "DISCONNECTED", code: "SLOW_CONSUMER" },
+  ]);
+  assert.deepEqual(received, [
+    {
+      type: "MULTI_DISCONNECTED",
+      v: 1,
+      generation: 3,
+      code: "SLOW_CONSUMER",
+    },
+  ]);
+  host.close();
+  gamePort.close();
+});
+
+test("aborted state remains sticky when the server closes the transport", async () => {
+  const iframe = createIframeHarness();
+  const socket = createSocketHarness();
+  const states: MultiplayerParentConnectionState[] = [];
+  const host = createMultiplayerBridgeHost(iframe.windowLike, socket.socket, BOOTSTRAP, {
+    onConnectionState: (state) => states.push(state),
+  });
+  const gamePort = iframe.capture().port;
+  const received: unknown[] = [];
+  gamePort.onmessage = (event) => received.push(event.data);
+
+  socket.message(
+    JSON.stringify({
+      type: "MULTI_ABORTED",
+      v: 1,
+      generation: 3,
+      code: "PARTICIPANT_LEFT",
+    }),
+  );
+  socket.closeFromServer(1011);
+  await waitUntil(() => received.length, 1);
+
+  assert.deepEqual(states, [
+    { status: "CONNECTING" },
+    { status: "ABORTED", code: "PARTICIPANT_LEFT" },
+  ]);
+  assert.deepEqual(received, [
+    {
+      type: "MULTI_ABORTED",
+      v: 1,
+      generation: 3,
+      code: "PARTICIPANT_LEFT",
+    },
+  ]);
+  host.close();
+  gamePort.close();
+});
+
+test("oversized server projections are dropped before entering the sandbox", async () => {
+  const iframe = createIframeHarness();
+  const socket = createSocketHarness();
+  let drops = 0;
+  const host = createMultiplayerBridgeHost(iframe.windowLike, socket.socket, BOOTSTRAP, {
+    onProtocolDrop: (direction) => {
+      assert.equal(direction, "SERVER_TO_HOST");
+      drops += 1;
+    },
+  });
+  const gamePort = iframe.capture().port;
+  const received: unknown[] = [];
+  gamePort.onmessage = (event) => received.push(event.data);
+
+  socket.message(
+    JSON.stringify({
+      type: "MULTI_STATE",
+      v: 1,
+      generation: 3,
+      serverSeq: 1,
+      revision: 1,
+      payload: { padding: "x".repeat(20 * 1024) },
+    }),
+  );
+  await waitUntil(() => drops, 1);
+
+  assert.equal(drops, 1);
+  assert.deepEqual(received, []);
+  host.close();
+  gamePort.close();
+});
+
+test("the parent can send one explicit leave intent without exposing the socket to UI", () => {
+  const iframe = createIframeHarness();
+  const socket = createSocketHarness();
+  let leaveCalls = 0;
+  const host = createMultiplayerBridgeHost(iframe.windowLike, socket.socket, BOOTSTRAP, {
+    onLeave: () => {
+      leaveCalls += 1;
+    },
+  });
+  const gamePort = iframe.capture().port;
+  assert.equal(host.leave(), true);
+  assert.equal(host.leave(), false);
+  assert.deepEqual(
+    socket.sent.map((value) => JSON.parse(value)),
+    [{ type: "MULTI_LEAVE", v: 1, generation: 3 }],
+  );
+  assert.equal(leaveCalls, 1);
   host.close();
   gamePort.close();
 });

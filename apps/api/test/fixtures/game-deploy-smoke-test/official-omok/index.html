@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+    <title>온라인 오목</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="game-header">
+        <div>
+          <p class="eyebrow">OWOGG OFFICIAL</p>
+          <h1>온라인 오목</h1>
+        </div>
+        <div id="stoneBadge" class="stone-badge" aria-live="polite">
+          <span class="stone stone-neutral"></span>
+          <span id="stoneLabel">좌석 확인 중</span>
+        </div>
+      </header>
+
+      <section class="status-card" aria-live="polite">
+        <strong id="statusTitle">서버에 연결 중입니다</strong>
+        <span id="statusDetail">두 플레이어가 준비되면 흑이 먼저 둡니다.</span>
+      </section>
+
+      <section class="board-wrap" aria-label="15 곱하기 15 오목판">
+        <div id="board" class="board" role="grid" aria-label="오목판"></div>
+      </section>
+
+      <footer>
+        <span id="revisionLabel">공식 상태 대기 중</span>
+        <span>자유 오목 · 5개 이상 연결 시 승리</span>
+      </footer>
+    </main>
+    <script src="game.js"></script>
+  </body>
+</html>

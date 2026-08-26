@@ -23,7 +23,7 @@ interface FakeScoreRow {
   created_at: string;
 }
 
-function createDb(rows: FakeScoreRow[], queryLog: string[] = []) {
+function createDb(rows: FakeScoreRow[], queryLog: string[] = [], multiplayerManaged = false) {
   const ids: Record<string, { gameId: number; versionId: number }> = {
     "reaction-time": { gameId: 9, versionId: 5 },
     "memory-test": { gameId: 11, versionId: 7 },
@@ -36,6 +36,46 @@ function createDb(rows: FakeScoreRow[], queryLog: string[] = []) {
         return this;
       },
       async first() {
+        if (query.includes("FROM multiplayer_profiles profile")) {
+          if (!multiplayerManaged) return null;
+          const gameId = Number(values[0]);
+          const gameVersionId = Number(values[1]);
+          return {
+            id: 101,
+            source_request_id: null,
+            source_request_hash: null,
+            profile_version: 1,
+            game_id: gameId,
+            game_version_id: gameVersionId,
+            profile_revision: 1,
+            protocol_version: 1,
+            resolved_class: "M1",
+            simulation_model: "turn",
+            runtime_backend: "durable-object",
+            ruleset_key: "official:omok",
+            ruleset_revision: 1,
+            resolved_config_json: '{"boardSize":15,"winLength":5}',
+            lifecycle: "match",
+            persistence: "match",
+            latency_profile: "relaxed",
+            reconnect_policy: "resume",
+            min_players: 2,
+            max_players: 2,
+            allowed_visibility_json: '["PRIVATE"]',
+            allowed_join_policies_json: '["INVITE_ONLY"]',
+            max_action_bytes: 1024,
+            max_state_bytes: 8192,
+            action_rate_limit: 5,
+            reward_policy_id: null,
+            enabled: 1,
+            created_by_admin_id: null,
+            approved_at: "2026-01-01T00:00:00.000Z",
+            disabled_at: null,
+            disabled_reason_code: null,
+            disabled_by_admin_id: null,
+            updated_at: "2026-01-01T00:00:00.000Z",
+          };
+        }
         if (query.includes("FROM games WHERE slug") || query.includes("FROM games WHERE id")) {
           const slug = query.includes("FROM games WHERE id")
             ? Object.keys(ids).find((value) => ids[value]?.gameId === Number(values[0]))
@@ -222,6 +262,34 @@ test("GET /api/scores/:gameId gameTitle is consistent across multiple rows of th
 
   assert.equal(body.leaderboard.length, 2);
   assert.ok(body.leaderboard.every((row) => row.gameTitle === "순서 기억력 테스트"));
+});
+
+test("managed multiplayer never exposes a score leaderboard, including stale legacy rows", async () => {
+  const queries: string[] = [];
+  const db = createDb(
+    [
+      {
+        id: 1,
+        user_id: 42,
+        nickname: "Legacy Winner",
+        avatar_url: null,
+        game_id: "reaction-time",
+        score: 1,
+        difficulty: "normal",
+        created_at: new Date().toISOString(),
+      },
+    ],
+    queries,
+    true,
+  );
+
+  const response = await requestLeaderboard(db, "/api/scores/reaction-time");
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { game_id: "reaction-time", leaderboard: [] });
+  assert.equal(
+    queries.some((query) => query.includes("FROM scores")),
+    false,
+  );
 });
 
 test("generic leaderboard keeps runtime validation on primary and reads score rows through replica session", async () => {

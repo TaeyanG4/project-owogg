@@ -3,8 +3,11 @@ import assert from "node:assert/strict";
 import {
   resolveGameRuntimeUrl,
   buildGameResultFromBridgeComplete,
+  isPotentialOnlineMultiplayerGame,
+  shouldStartGenericGameSession,
   shouldRemountIframeOnDifficultyChange,
 } from "../features/game/GameHost";
+import type { PublicGame } from "@owogg/contracts";
 import { API_URL } from "../lib/api/config";
 
 /**
@@ -20,6 +23,99 @@ test("every publisher uses the generic /play resolver", () => {
   for (const slug of ["reaction-time", "aim-test", "memory-test", "typing-test", "ball-dodge"]) {
     assert.equal(resolveGameRuntimeUrl(slug), `${API_URL}/play/${slug}`, slug);
   }
+});
+
+test("only explicit online taxonomy or legacy coarse multi mode probes the server profile", () => {
+  const withCatalog = (catalog: PublicGame["catalog"]) => ({ catalog }) as PublicGame;
+  assert.equal(
+    isPotentialOnlineMultiplayerGame(
+      withCatalog({
+        type: "TAXONOMY",
+        categories: [],
+        tags: [],
+        modes: ["online-multi"],
+        inputMethods: [],
+        minPlayers: 2,
+        maxPlayers: 2,
+        thumbnail: "/omok.svg",
+      }),
+    ),
+    true,
+  );
+  assert.equal(
+    isPotentialOnlineMultiplayerGame(
+      withCatalog({
+        type: "TAXONOMY",
+        categories: [],
+        tags: [],
+        modes: ["local-multi"],
+        inputMethods: [],
+        minPlayers: 2,
+        maxPlayers: 2,
+        thumbnail: "/local.svg",
+      }),
+    ),
+    false,
+  );
+  assert.equal(
+    isPotentialOnlineMultiplayerGame(
+      withCatalog({ type: "GENRE_MODE", genre: "board", mode: "multi" }),
+    ),
+    true,
+  );
+  assert.equal(isPotentialOnlineMultiplayerGame(null), false);
+});
+
+test("generic score sessions wait for multiplayer discovery and stay disabled for online authority", () => {
+  const onlineGame = {
+    slug: "official-omok",
+    catalog: {
+      type: "TAXONOMY",
+      categories: [],
+      tags: [],
+      modes: ["online-multi"],
+      inputMethods: [],
+      minPlayers: 2,
+      maxPlayers: 2,
+      thumbnail: "/omok.svg",
+    },
+  } as unknown as PublicGame;
+
+  assert.equal(shouldStartGenericGameSession(null, null), false);
+  assert.equal(shouldStartGenericGameSession(onlineGame, null), false);
+  assert.equal(
+    shouldStartGenericGameSession(onlineGame, {
+      gameSlug: "official-omok",
+      mode: "ONLINE",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldStartGenericGameSession(onlineGame, {
+      gameSlug: "different-game",
+      mode: "LEGACY",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldStartGenericGameSession(onlineGame, {
+      gameSlug: "official-omok",
+      mode: "LEGACY",
+    }),
+    true,
+  );
+});
+
+test("non-multiplayer games start the generic score session without discovery", () => {
+  const soloGame = {
+    slug: "reaction-time",
+    catalog: {
+      type: "GENRE_MODE",
+      genre: "casual",
+      mode: "single",
+    },
+  } as unknown as PublicGame;
+  assert.equal(shouldStartGenericGameSession(soloGame, null), true);
 });
 
 // ── shouldRemountIframeOnDifficultyChange ────────────────────────────────────

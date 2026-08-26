@@ -216,8 +216,7 @@ function sameCreateSemantics(
     instance.visibility === input.visibility &&
     instance.joinPolicy === input.joinPolicy &&
     instance.lifecycle === input.lifecycle &&
-    instance.maxPlayers === input.maxPlayers &&
-    instance.expiresAt === input.instanceExpiresAt
+    instance.maxPlayers === input.maxPlayers
   );
 }
 
@@ -597,8 +596,7 @@ export class D1MultiplayerInstanceRepository implements MultiplayerInstanceRepos
         invite.instanceId === input.instanceId &&
         invite.generation === input.expectedGeneration &&
         invite.createdByUserId === input.createdByUserId &&
-        invite.maxUses === input.maxUses &&
-        invite.expiresAt === input.expiresAt;
+        invite.maxUses === input.maxUses;
       return sameRequest
         ? { status: writtenRows(result) === 1 ? "CREATED" : "REPLAYED", invite }
         : { status: "REJECTED", code: "INTERNAL_RETRYABLE" };
@@ -1003,9 +1001,6 @@ export class D1MultiplayerInstanceRepository implements MultiplayerInstanceRepos
       return { status: "IDEMPOTENCY_CONFLICT" };
     }
     const aggregate = await this.loadAggregate(instance);
-    if (aggregate.lease.expiresAt !== input.leaseExpiresAt) {
-      return { status: "IDEMPOTENCY_CONFLICT" };
-    }
     return { status: "REPLAYED", ...aggregate };
   }
 

@@ -318,6 +318,17 @@ scoresRouter.get("/:gameId", edgeCache({ ttlSeconds: 30 }), async (c) => {
       );
     }
 
+    // Managed multiplayer has canonical match history, not a score ranking. This exact-version
+    // authority gate also hides any stale pre-multiplayer scores if a game is converted later;
+    // profile lookup failure fails closed to an empty board instead of reopening legacy reads.
+    const legacyFlow = await container.multiplayerLegacyFlowGate.evaluate(
+      runtime.identity.id,
+      runtime.liveVersion.id,
+    );
+    if (!legacyFlow.allowed) {
+      return c.json({ game_id: gameId, leaderboard: [] });
+    }
+
     if (!runtime.canonical.policy.leaderboard || runtime.canonical.policy.score === null) {
       return c.json({ game_id: gameId, leaderboard: [] });
     }

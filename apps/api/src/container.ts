@@ -68,6 +68,8 @@ import {
   PublicGameMetricsUseCases,
   RuntimeGameAvailability,
   MultiplayerAdmissionUseCases,
+  OfficialMultiplayerProfileUseCases,
+  MultiplayerRoomUseCases,
   MultiplayerLegacyFlowGate,
   type UserRepository,
   type SessionRepository,
@@ -151,6 +153,8 @@ export interface AppContainer {
   multiplayerInstanceRepo: MultiplayerInstanceRepository;
   multiplayerMatchRepo: MultiplayerMatchRepository;
   multiplayerAdmissionUseCases: MultiplayerAdmissionUseCases;
+  officialMultiplayerProfileUseCases: OfficialMultiplayerProfileUseCases;
+  multiplayerRoomUseCases: MultiplayerRoomUseCases;
   multiplayerLegacyFlowGate: MultiplayerLegacyFlowGate;
   publicGameMetricsUseCases: PublicGameMetricsUseCases;
   scoreReadUseCases: GenericScoreReadUseCases;
@@ -242,6 +246,16 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     gameVersionRepo,
     gameCanonicalRepo,
   );
+  const multiplayerRoomUseCases = new MultiplayerRoomUseCases({
+    runtimeGames: runtimeGameRegistry,
+    profiles: multiplayerProfileRepo,
+    instances: multiplayerInstanceRepo,
+    matches: multiplayerMatchRepo,
+  });
+  const officialMultiplayerProfileUseCases = new OfficialMultiplayerProfileUseCases({
+    runtimeGames: runtimeGameRegistry,
+    profiles: multiplayerProfileRepo,
+  });
   const runtimeGameAvailability = new RuntimeGameAvailability(
     gameIdentityRepo,
     gameVersionRepo,
@@ -377,6 +391,8 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     multiplayerInstanceRepo,
     multiplayerMatchRepo,
     multiplayerAdmissionUseCases,
+    officialMultiplayerProfileUseCases,
+    multiplayerRoomUseCases,
     multiplayerLegacyFlowGate,
     publicGameMetricsUseCases,
     scoreReadUseCases,
