@@ -15,10 +15,9 @@ export interface D1PreparedStatement {
   bind(...values: unknown[]): D1PreparedStatement;
   first<T = unknown>(colName?: string): Promise<T | null>;
   all<T = unknown>(): Promise<{ results: T[] }>;
-  /** `meta.changes` (when present) reports rows actually written by this statement —
-   * used to detect whether an `ON CONFLICT DO NOTHING` insert was a no-op. `meta.rows_written` is
-   * the same signal under Cloudflare D1's own field name; generic score acceptance reads that
-   * field specifically rather than `changes`. */
+  /** `meta.changes` (when present) reports rows affected by the statement and is suitable for
+   * compare-and-set decisions. `meta.rows_written` is D1's billing count and can be larger because
+   * it includes index maintenance; generic score acceptance only tests that value for > 0. */
   run(): Promise<D1Result>;
 }
 

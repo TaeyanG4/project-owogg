@@ -23,13 +23,18 @@ const REQUEST_HASH = "a".repeat(64);
 const IDEMPOTENCY_HASH = "b".repeat(64);
 const PAYLOAD_HASH = "c".repeat(64);
 const TERMINAL_HASH = "d".repeat(64);
+const INDEX_INCLUSIVE_D1_WRITE_META = {
+  rowsWrittenForChanges: (changes: number) => (changes === 0 ? 0 : changes + 3),
+} as const;
 
 function createMigratedDatabase(): RawDatabase {
   return createMigratedD1().raw;
 }
 
-function createMigratedD1(): ReturnType<typeof createSqliteD1> {
-  const result = createSqliteD1("PRAGMA foreign_keys = ON;");
+function createMigratedD1(
+  options?: Parameters<typeof createSqliteD1>[1],
+): ReturnType<typeof createSqliteD1> {
+  const result = createSqliteD1("PRAGMA foreign_keys = ON;", options);
   const { raw } = result;
   const migrationUrl = new URL("../migrations/", import.meta.url);
   const filenames = fs
@@ -1066,8 +1071,34 @@ test("D1 multiplayer profile repository maps trusted rows and fails closed", asy
   );
 });
 
+test("D1 multiplayer profile activation ignores index-inclusive rows_written billing counts", async () => {
+  const { db, raw } = createMigratedD1(INDEX_INCLUSIVE_D1_WRITE_META);
+  seedUsers(raw);
+  seedAdmin(raw);
+  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "official-omok" });
+  seedProfile(raw, {
+    profileId: 100,
+    gameId: 1,
+    versionId: 10,
+    enabled: false,
+  });
+  const repository = new D1MultiplayerProfileRepository(db);
+
+  const activated = await repository.setEnabled({
+    profileId: 100,
+    enabled: true,
+    changedByAdminId: 1,
+    reasonCode: null,
+    nowIso: LATER,
+  });
+
+  assert.equal(activated.status, "UPDATED");
+  assert.equal(activated.record.profile.enabled, true);
+  assert.equal((await repository.findEnabledForExactVersion(1, 10))?.id, 100);
+});
+
 test("D1 multiplayer request repository pins owner, canonical hash, review CAS, and withdrawal", async () => {
-  const { db, raw } = createMigratedD1();
+  const { db, raw } = createMigratedD1(INDEX_INCLUSIVE_D1_WRITE_META);
   seedUsers(raw);
   seedAdmin(raw);
   seedGameVersion(raw, {
@@ -1393,7 +1424,7 @@ test("D1 multiplayer request repository pins owner, canonical hash, review CAS, 
 });
 
 test("D1 multiplayer instance repository atomically creates, replays, conflicts, and CAS-transitions", async () => {
-  const { db, raw } = createMigratedD1();
+  const { db, raw } = createMigratedD1(INDEX_INCLUSIVE_D1_WRITE_META);
   seedUsers(raw);
   seedAdmin(raw);
   seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "official-omok" });
@@ -1747,7 +1778,7 @@ test("D1 multiplayer joins consume invites exactly once and serialize capacity",
 });
 
 test("D1 match repository atomically ledgers actions, finalizes results, and delivers rewards", async () => {
-  const { db, raw } = createMigratedD1();
+  const { db, raw } = createMigratedD1(INDEX_INCLUSIVE_D1_WRITE_META);
   seedUsers(raw);
   seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "official-omok" });
   seedProfile(raw, {

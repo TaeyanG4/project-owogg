@@ -47,7 +47,8 @@ function errorMessage(error: unknown): string {
 }
 
 /** Keeps the invite credential in parent UI only while producing the one-click URL another player
- * can open. The sandbox receives neither this URL nor the token. */
+ * can open. The fragment is never sent in an HTTP request, so the sandbox, origin server, CDN,
+ * and access logs receive neither this URL credential nor the token. */
 export function buildMultiplayerRoomShareValue(
   pageUrl: string,
   publicCode: string,
@@ -55,13 +56,46 @@ export function buildMultiplayerRoomShareValue(
 ): string {
   try {
     const url = new URL(pageUrl);
-    url.searchParams.set("room", publicCode);
-    if (inviteToken) url.searchParams.set("invite", inviteToken);
-    else url.searchParams.delete("invite");
-    url.hash = "";
+    url.searchParams.delete("room");
+    url.searchParams.delete("invite");
+    const fragment = new URLSearchParams({ room: publicCode });
+    if (inviteToken) fragment.set("invite", inviteToken);
+    url.hash = fragment.toString();
     return url.toString();
   } catch {
     return inviteToken ? `${publicCode}\n${inviteToken}` : publicCode;
+  }
+}
+
+export function readMultiplayerRoomShareValue(pageUrl: string): {
+  readonly publicCode: string;
+  readonly inviteToken: string;
+} {
+  try {
+    const url = new URL(pageUrl);
+    const fragment = new URLSearchParams(url.hash.replace(/^#/, ""));
+    const source = fragment.has("room") || fragment.has("invite") ? fragment : url.searchParams;
+    return {
+      publicCode: source.get("room") ?? "",
+      inviteToken: source.get("invite") ?? "",
+    };
+  } catch {
+    return { publicCode: "", inviteToken: "" };
+  }
+}
+
+export function stripMultiplayerRoomCredentials(pageUrl: string): string {
+  try {
+    const url = new URL(pageUrl);
+    url.searchParams.delete("room");
+    url.searchParams.delete("invite");
+    const fragment = new URLSearchParams(url.hash.replace(/^#/, ""));
+    fragment.delete("room");
+    fragment.delete("invite");
+    url.hash = fragment.toString();
+    return url.toString();
+  } catch {
+    return pageUrl;
   }
 }
 
@@ -144,9 +178,9 @@ export function MultiplayerGameSurface({
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const query = new URLSearchParams(window.location.search);
-    setPublicCode(query.get("room") ?? "");
-    setInviteToken(query.get("invite") ?? "");
+    const sharedRoom = readMultiplayerRoomShareValue(window.location.href);
+    setPublicCode(sharedRoom.publicCode);
+    setInviteToken(sharedRoom.inviteToken);
   }, [gameSlug]);
 
   const createRoom = useCallback(async () => {
@@ -196,6 +230,13 @@ export function MultiplayerGameSurface({
       });
       setShareValue(roomShareValue(joined.instance.publicCode));
       setRoom(joined);
+      if (typeof window !== "undefined") {
+        window.history.replaceState(
+          window.history.state,
+          "",
+          stripMultiplayerRoomCredentials(window.location.href),
+        );
+      }
     } catch (reason) {
       setError(errorMessage(reason));
     } finally {

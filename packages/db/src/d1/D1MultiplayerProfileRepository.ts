@@ -60,7 +60,9 @@ function parseJson(value: unknown, field: string): unknown {
 }
 
 function writtenRows(result: D1Result | undefined): number | null {
-  const value = result?.meta?.rows_written ?? result?.meta?.changes;
+  // D1 rows_written is a billing-oriented count that includes index maintenance. CAS and
+  // idempotency decisions need the statement's affected table-row count instead.
+  const value = result?.meta?.changes ?? result?.meta?.rows_written;
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 

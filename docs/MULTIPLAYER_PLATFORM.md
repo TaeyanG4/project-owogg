@@ -2,7 +2,7 @@
 
 상태: 구현 중인 기준 계획
 
-마지막 검증: 2026-08-26
+마지막 검증: 2026-08-27
 
 기준 브랜치: `feature/multiplayer-omok` (base: `staging`)
 
@@ -377,6 +377,8 @@ trigger 관례를 재사용한다.
 - 동일 clientActionId + 다른 payload는 abuse/conflict로 거절한다.
 - stale revision은 typed error와 최신 projected revision/state를 반환한다.
 - public code와 invite token 생성은 collision retry를 갖는다.
+- 초대 URL은 token을 HTTP query가 아닌 fragment에만 두고, 참가 성공 시 parent history에서 제거한다.
+  기존 query 링크는 전환 기간 동안 읽기 호환만 제공한다.
 
 ### Finalization과 reward
 
@@ -816,10 +818,16 @@ slow client
 - [x] reconnect resume
 - [x] 검증 가능한 official 오목 ZIP source/build와 v1 무랭킹 manifest
 - [x] 관리형 관리자 전용 exact-version `OMOK_V1` 활성화/비활성화 제어면
-- [ ] exact version ZIP을 `/admin/games`로 Staging D1/B2에 게시
+- [x] exact version ZIP을 `/admin/games`로 Staging D1/B2에 게시
 - [~] 결과 ledger 로컬 검증 완료, reward는 별도 Staging Gate 전까지 비활성 유지
 - [~] score/leaderboard 미생성·미노출 로컬 검증 완료, Staging acceptance 대기
 - [ ] 두 사용자 browser E2E
+
+Staging 상태(2026-08-27): `official-omok` exact version을 D1/B2에 게시했고 현재 live version의
+`OMOK_V1` 프로필이 `leaderboardEnabled: false`로 활성화된 것을 관리자 화면에서 확인했다. 최초
+활성화 응답은 D1의 인덱스 유지 비용까지 포함하는 `rows_written`을 단일 행 변경 수로 오인해 거짓
+충돌을 반환했으며, 판정 기준을 `changes` 우선으로 수정하고 인덱스 포함 메타데이터 회귀 테스트와
+전체 `pnpm verify`를 통과했다. 수정본 Staging 재배포와 실제 무랭킹·두 사용자 acceptance가 남아 있다.
 
 완료 Gate: 동시/중복 action으로 corruption이 없고 iframe이 결과·업적·XP를 위조할 수 없다.
 

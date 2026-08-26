@@ -3,6 +3,11 @@ import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import type { D1Database, D1PreparedStatement } from "../../src/d1/D1UserRepository.js";
 
+export interface SqliteD1TestOptions {
+  /** Override D1's billing-oriented rows_written count while preserving statement changes. */
+  readonly rowsWrittenForChanges?: (changes: number) => number;
+}
+
 /**
  * Real SQLite-backed D1Database test double (Node's built-in `node:sqlite`, no native
  * dependency — run with NODE_OPTIONS=--experimental-sqlite, see package.json `test` script).
@@ -13,7 +18,10 @@ import type { D1Database, D1PreparedStatement } from "../../src/d1/D1UserReposit
  * text against a real SQLite engine — the same dialect Cloudflare D1 uses — so leaderboard
  * correctness tests exercise the real query, not a re-implementation of it.
  */
-export function createSqliteD1(schemaSql: string): { db: D1Database; raw: DatabaseSync } {
+export function createSqliteD1(
+  schemaSql: string,
+  options: SqliteD1TestOptions = {},
+): { db: D1Database; raw: DatabaseSync } {
   const raw = new DatabaseSync(":memory:");
   raw.exec(schemaSql);
 
@@ -23,15 +31,15 @@ export function createSqliteD1(schemaSql: string): { db: D1Database; raw: Databa
       let bound: unknown[] = [];
       const runSync = () => {
         const info = stmt.run(...(bound as never[]));
-        // node:sqlite's own `changes` count and Cloudflare D1's `rows_written` field mean the
-        // same thing for a plain INSERT — mirrored under both names so a caller reading either
-        // one (the generic score-acceptance repository reads rows_written specifically)
-        // gets a real, correctly-populated value rather than undefined.
+        const changes = Number(info.changes);
+        // Cloudflare rows_written includes index maintenance while node:sqlite only exposes the
+        // statement's changed table rows. Most tests mirror the simple case; focused tests can
+        // inflate rows_written to exercise the real D1 distinction.
         return {
           success: true,
           meta: {
-            changes: Number(info.changes),
-            rows_written: Number(info.changes),
+            changes,
+            rows_written: options.rowsWrittenForChanges?.(changes) ?? changes,
             last_row_id: Number(info.lastInsertRowid),
           },
         };

@@ -112,7 +112,8 @@ function nullableJsonObjectString(value: unknown, field: string): string | null 
 }
 
 function writtenRows(result: D1Result | undefined): number | null {
-  const value = result?.meta?.rows_written ?? result?.meta?.changes;
+  // D1 rows_written includes index maintenance; changes is the CAS-relevant table-row count.
+  const value = result?.meta?.changes ?? result?.meta?.rows_written;
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
