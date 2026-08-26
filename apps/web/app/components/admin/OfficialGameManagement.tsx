@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FileArchive,
   FileJson,
@@ -36,6 +36,30 @@ import {
   type AdminGamePageSize,
 } from "./AdminGamePagination";
 
+/** Keeps a successful destructive mutation visible even if an older in-flight list request or a
+ * briefly stale edge response arrives afterwards. The total is adjusted only when the returned
+ * page still contains a hidden row, so an already-fresh server response is not decremented twice. */
+export function hideDeletedAdminGames(
+  data: AdminGameListResponse,
+  deletedGameIds: ReadonlySet<string>,
+): AdminGameListResponse {
+  const hiddenCount = data.games.reduce(
+    (count, game) => count + (deletedGameIds.has(game.gameId) ? 1 : 0),
+    0,
+  );
+  if (hiddenCount === 0) return data;
+
+  const total = Math.max(0, data.total - hiddenCount);
+  const totalPages = Math.max(1, Math.ceil(total / data.pageSize));
+  return {
+    ...data,
+    games: data.games.filter((game) => !deletedGameIds.has(game.gameId)),
+    total,
+    page: Math.min(data.page, totalPages),
+    totalPages,
+  };
+}
+
 /** `games.moderate` portion of the combined admin game workspace.
  *
  * Review permission remains independent, so this panel fails closed without hiding the review
@@ -53,29 +77,32 @@ export function OfficialGameManagement() {
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<AdminGamePageSize>(10);
+  const listRequestIdRef = useRef(0);
+  const deletedGameIdsRef = useRef<Set<string>>(new Set());
 
-  const loadGames = async (targetPage: number, targetPageSize: AdminGamePageSize) => {
+  const loadGames = useCallback(async (targetPage: number, targetPageSize: AdminGamePageSize) => {
+    const requestId = ++listRequestIdRef.current;
     setError(null);
     try {
-      const result = await fetchAdminGames(targetPage, targetPageSize);
-      if (targetPage > result.totalPages) {
-        setPage(result.totalPages);
-        return;
-      }
+      const fetched = await fetchAdminGames(targetPage, targetPageSize);
+      if (requestId !== listRequestIdRef.current) return;
+      const result = hideDeletedAdminGames(fetched, deletedGameIdsRef.current);
       setData(result);
       setAccessDenied(false);
+      if (targetPage > result.totalPages) setPage(result.totalPages);
     } catch (err) {
+      if (requestId !== listRequestIdRef.current) return;
       if (err instanceof ApiClientError && (err.status === 401 || err.status === 403)) {
         setAccessDenied(true);
         return;
       }
       setError(err instanceof Error ? err.message : "공개 게임 목록을 불러올 수 없습니다.");
     }
-  };
+  }, []);
 
   useEffect(() => {
     void loadGames(page, pageSize);
-  }, [page, pageSize]);
+  }, [loadGames, page, pageSize]);
 
   const handleToggle = async (gameId: string, nextEnabled: boolean) => {
     const reason = nextEnabled ? null : (reasons[gameId]?.trim() ?? "") || null;
@@ -97,6 +124,7 @@ export function OfficialGameManagement() {
     setUploadMessage(null);
     try {
       const result = await uploadOfficialGame(file);
+      deletedGameIdsRef.current.delete(result.slug);
       setUploadMessage(`${result.title} (${result.slug})을 OWOGG 공식 게임으로 게시했습니다.`);
       await loadGames(page, pageSize);
     } catch (err) {
@@ -117,10 +145,20 @@ export function OfficialGameManagement() {
     setUploadMessage(null);
     try {
       const result = await deleteOfficialGame(gameId);
+      deletedGameIdsRef.current.add(result.slug);
+      // Invalidate any refresh that began before the DELETE completed, then remove the row before
+      // making another network request. This makes the confirmed server mutation immediately
+      // visible and prevents a late stale response from resurrecting the card.
+      listRequestIdRef.current += 1;
+      const nextData = data ? hideDeletedAdminGames(data, deletedGameIdsRef.current) : data;
+      setData(nextData);
+      if (editingSlug === result.slug) setEditingSlug(null);
       setUploadMessage(
         `${result.slug} 공식 게임과 ${result.deletedVersionCount}개 버전을 완전히 삭제했습니다. 같은 slug로 다시 등록할 수 있습니다.`,
       );
-      await loadGames(page, pageSize);
+      const nextPage = nextData?.page ?? page;
+      if (nextPage !== page) setPage(nextPage);
+      else await loadGames(nextPage, pageSize);
     } catch (err) {
       setError(err instanceof Error ? err.message : "공식 게임을 완전히 삭제하지 못했습니다.");
     } finally {
