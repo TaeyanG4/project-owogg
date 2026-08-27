@@ -73,6 +73,7 @@ export * from "./modules/multiplayer/ports/multiplayerMatchRepository.js";
 export * from "./modules/multiplayer/application/multiplayerAdmissionUseCases.js";
 export * from "./modules/multiplayer/application/multiplayerRoomUseCases.js";
 export * from "./modules/multiplayer/application/officialMultiplayerProfileUseCases.js";
+export * from "./modules/multiplayer/application/managedMultiplayerProfileReviewUseCases.js";
 
 export * from "./application/genericScoreReadUseCases.js";
 export * from "./application/personalizationUseCases.js";

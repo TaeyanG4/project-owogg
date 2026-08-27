@@ -20,6 +20,7 @@
 
 export * from "./manifest.js";
 export * from "./gameCreatorManifest.js";
+export * from "./multiplayerManifest.js";
 export * from "./presentation.js";
 export * from "./result.js";
 export * from "../events/index.js";

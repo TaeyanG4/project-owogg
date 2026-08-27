@@ -9,6 +9,7 @@ import {
 } from "../domain/sandboxGameBundle.js";
 import {
   extractGameCreatorManifest,
+  getManagedMultiplayerProfileRequestV1,
   parseGameCreatorManifestBytes,
 } from "../domain/gameCreatorManifest.js";
 import { mapGameCreatorManifestToCanonical } from "../domain/gameCreatorManifestCanonical.js";
@@ -17,6 +18,7 @@ import type { GameCanonicalDocument } from "../modules/game/domain/gameCanonical
 import type { GameIdentity } from "../modules/game/domain/gameIdentity.js";
 import type { GameVersion } from "../modules/game/domain/gameVersion.js";
 import type { GameCanonicalRepository } from "../modules/game/ports/gameCanonicalRepository.js";
+import type { MultiplayerProfileRequestRepository } from "../modules/multiplayer/ports/multiplayerProfileRequestRepository.js";
 import type {
   GamePublicationFacts,
   GamePublicationTarget,
@@ -161,7 +163,41 @@ export class OfficialGameUploadUseCases {
     private readonly canonicals: GameCanonicalRepository,
     private readonly publication: GamePublicationService,
     private readonly archiveWriter?: BundleArchiveWriter,
+    private readonly multiplayerProfileRequests?: MultiplayerProfileRequestRepository,
   ) {}
+
+  private async submitDeclaredMultiplayerRequest(input: {
+    manifest: NonNullable<ReturnType<typeof extractGameCreatorManifest>>;
+    gameId: number;
+    gameVersionId: number;
+    nowIso: string;
+  }): Promise<void> {
+    const request = getManagedMultiplayerProfileRequestV1(input.manifest);
+    if (!request) return;
+    if (!this.multiplayerProfileRequests) throw new OfficialGameUploadFailure("PUBLISH_FAILED");
+    try {
+      const submitted = await this.multiplayerProfileRequests.submit({
+        gameId: input.gameId,
+        gameVersionId: input.gameVersionId,
+        requestedByUserId: null,
+        request,
+        nowIso: input.nowIso,
+      });
+      if (submitted.status === "REJECTED") {
+        console.error(
+          `official multiplayer profile request rejected for gameId=${input.gameId} versionId=${input.gameVersionId}: ${submitted.code}`,
+        );
+        throw new OfficialGameUploadFailure("PUBLISH_FAILED");
+      }
+    } catch (error) {
+      if (error instanceof OfficialGameUploadFailure) throw error;
+      console.error(
+        `official multiplayer profile request failed for gameId=${input.gameId} versionId=${input.gameVersionId}:`,
+        error instanceof Error ? error.message : error,
+      );
+      throw new OfficialGameUploadFailure("PUBLISH_FAILED");
+    }
+  }
 
   async upload(input: {
     bytes: ArrayBuffer;
@@ -250,6 +286,12 @@ export class OfficialGameUploadUseCases {
         contentType: logo.contentType,
       });
       await this.repository.upsertLogo({ gameId: identity.id, objectKey: logoKey, nowIso });
+      await this.submitDeclaredMultiplayerRequest({
+        manifest,
+        gameId: identity.id,
+        gameVersionId: version.id,
+        nowIso,
+      });
       await this.canonicals.save(canonical);
       await this.repository.activate({
         gameId: identity.id,

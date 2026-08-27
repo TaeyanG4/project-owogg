@@ -31,15 +31,23 @@ import {
   type OmokTerminalResult,
 } from "@owogg/core";
 import type { D1Database } from "@cloudflare/workers-types";
-import { MULTIPLAYER_HEARTBEAT_REQUEST, MULTIPLAYER_HEARTBEAT_RESPONSE } from "@owogg/contracts";
+import {
+  MULTIPLAYER_HEARTBEAT_REQUEST,
+  MULTIPLAYER_HEARTBEAT_RESPONSE,
+  MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
+} from "@owogg/contracts";
 import { createContainer, type AppContainer } from "../container.js";
 import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_CONNECT_PATH,
   MULTIPLAYER_INTERNAL_LEAVE_PATH,
+  MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER,
+  MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH,
+  MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH,
   MULTIPLAYER_INTERNAL_PROTOCOL_HEADER,
   MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH,
   decodeVerifiedMultiplayerClaims,
+  decodeVerifiedMultiplayerLobbyClaims,
 } from "./internalProtocol.js";
 
 const STATE_SCHEMA_VERSION = 2;
@@ -150,6 +158,14 @@ function parseAttachment(value: unknown): ConnectionAttachment | null {
 
 function participantTag(participantId: string): string {
   return `participant:${participantId}`;
+}
+
+function lobbyGenerationTag(generation: number): string {
+  return `lobby:generation:${generation}`;
+}
+
+function lobbyParticipantTag(participantId: string): string {
+  return `lobby:participant:${participantId}`;
 }
 
 function integerValue(value: unknown): number | null {
@@ -317,12 +333,72 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
           generation INTEGER NOT NULL,
           expires_at INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS lobby_event_sequence (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          generation INTEGER NOT NULL,
+          server_sequence INTEGER NOT NULL
+        );
       `);
     });
   }
 
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (
+      request.method === "GET" &&
+      url.pathname === MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH &&
+      request.headers.get(MULTIPLAYER_INTERNAL_PROTOCOL_HEADER) ===
+        MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL &&
+      request.headers.get("Upgrade")?.toLowerCase() === "websocket"
+    ) {
+      const claims = decodeVerifiedMultiplayerLobbyClaims(
+        request.headers.get(MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER),
+      );
+      if (!claims) return new Response(null, { status: 401 });
+      const pair = new WebSocketPair();
+      const client = pair[0];
+      const server = pair[1];
+      // Lobby sockets deliberately have no gameplay attachment. Hibernation callbacks therefore
+      // ignore their close/error events instead of starting an in-match reconnect grace period.
+      this.state.acceptWebSocket(server, [
+        lobbyGenerationTag(claims.generation),
+        lobbyParticipantTag(claims.participantId),
+      ]);
+      return new Response(null, { status: 101, webSocket: client });
+    }
+    if (
+      request.method === "POST" &&
+      url.pathname === MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH &&
+      request.headers.get(MULTIPLAYER_INTERNAL_PROTOCOL_HEADER) ===
+        MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL
+    ) {
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        return new Response(null, { status: 400 });
+      }
+      if (
+        typeof body !== "object" ||
+        body === null ||
+        Array.isArray(body) ||
+        Object.keys(body).length !== 2 ||
+        !("instanceId" in body) ||
+        !("generation" in body) ||
+        !isOpaqueId(body.instanceId) ||
+        !isPositiveInteger(body.generation)
+      ) {
+        return new Response(null, { status: 400 });
+      }
+      const meta = this.state.storage.sql
+        .exec<{ instance_id: string }>("SELECT instance_id FROM runtime_meta WHERE singleton = 1")
+        .toArray()[0];
+      if (meta && meta.instance_id !== body.instanceId) {
+        return new Response(null, { status: 409 });
+      }
+      this.broadcastLobbyChanged(body.instanceId, body.generation);
+      return new Response(null, { status: 204 });
+    }
     if (
       request.method === "POST" &&
       url.pathname === MULTIPLAYER_INTERNAL_LEAVE_PATH &&
@@ -968,6 +1044,9 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
         generation,
       );
       for (const connected of this.state.getWebSockets(participantTag(participant.id))) {
+        connected.close(1000, "left");
+      }
+      for (const connected of this.state.getWebSockets(lobbyParticipantTag(participant.id))) {
         connected.close(1000, "left");
       }
     }
@@ -2143,7 +2222,9 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
   }
 
   private broadcastTerminalPending(runtime: RuntimeMatch): void {
-    for (const socket of this.state.getWebSockets()) this.sendTerminalPending(socket, runtime);
+    for (const socket of this.state.getWebSockets()) {
+      if (this.readAttachment(socket)) this.sendTerminalPending(socket, runtime);
+    }
   }
 
   private sendTerminalPending(socket: WebSocket, runtime: RuntimeMatch): void {
@@ -2160,7 +2241,37 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
 
   private broadcastTerminalCommitted(runtime: RuntimeMatch, result: CanonicalTerminalResult): void {
     for (const socket of this.state.getWebSockets()) {
-      this.sendTerminalCommitted(socket, runtime, result);
+      if (this.readAttachment(socket)) this.sendTerminalCommitted(socket, runtime, result);
+    }
+  }
+
+  private broadcastLobbyChanged(instanceId: string, generation: number): void {
+    this.state.storage.sql.exec(
+      `INSERT INTO lobby_event_sequence (singleton, generation, server_sequence)
+       VALUES (1, ?, 1)
+       ON CONFLICT(singleton) DO UPDATE SET
+         generation = excluded.generation,
+         server_sequence = CASE
+           WHEN lobby_event_sequence.generation = excluded.generation
+             THEN lobby_event_sequence.server_sequence + 1
+           ELSE 1
+         END`,
+      generation,
+    );
+    const sequence = this.state.storage.sql
+      .exec<{ server_sequence: number }>(
+        "SELECT server_sequence FROM lobby_event_sequence WHERE singleton = 1",
+      )
+      .one().server_sequence;
+    const message = JSON.stringify({
+      type: "LOBBY_CHANGED",
+      v: 1,
+      instanceId,
+      generation,
+      sequence,
+    });
+    for (const socket of this.state.getWebSockets(lobbyGenerationTag(generation))) {
+      if (socket.readyState === 1) socket.send(message);
     }
   }
 

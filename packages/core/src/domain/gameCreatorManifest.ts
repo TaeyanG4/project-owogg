@@ -1,5 +1,7 @@
 import {
   OWOGG_GAME_CREATOR_MANIFEST_FILENAME,
+  OWOGG_GAME_CREATOR_MANIFEST_V2_SCHEMA_URL,
+  OWOGG_GAME_CREATOR_MANIFEST_V2_VERSION,
   OWOGG_GAME_CREATOR_MANIFEST_VERSION,
   type OwoggAchievementAggregate,
   type OwoggAchievementCondition,
@@ -8,15 +10,19 @@ import {
   type OwoggAchievementSource,
   type OwoggComparisonOperator,
   type OwoggGameCreatorManifest,
+  type OwoggGameCreatorManifestV1,
+  type OwoggGameCreatorManifestV2,
   type OwoggDifficultyDefinition,
   type OwoggEventDefinition,
   type OwoggInputMethod,
   type OwoggManifestGame,
+  type OwoggManifestGameV2,
   type OwoggManifestPresentation,
   type OwoggMetricDefinition,
   type OwoggMetricType,
   type OwoggOrientation,
   type OwoggOutcome,
+  type OwoggPlayMode,
   type OwoggProgressionDefinition,
   type OwoggProgressionType,
   type OwoggRangeDefinition,
@@ -24,6 +30,13 @@ import {
   type OwoggResultDefinition,
   type OwoggScoreDefinition,
 } from "@owogg/game-sdk/contracts";
+import {
+  MultiplayerProfileRequestValidationError,
+  parseManagedMultiplayerProfileRequestV1,
+  resolveManagedMultiplayerProfileRequestV1,
+  toOwoggManagedMultiplayerRequestV1,
+  type ManagedMultiplayerRequestResolutionV1,
+} from "../modules/multiplayer/domain/multiplayerProfileRequest.js";
 import { SANDBOX_GAME_POLICY } from "./sandboxGames.js";
 import type { PreparedBundleFile } from "./sandboxGameBundle.js";
 
@@ -149,11 +162,25 @@ function parseRange(value: unknown, path: string): OwoggRangeDefinition {
   return { min, max, outOfRange };
 }
 
-function parseGame(value: unknown): OwoggManifestGame {
+function parseGame(value: unknown, manifestVersion: 1): OwoggManifestGame;
+function parseGame(value: unknown, manifestVersion: 2): OwoggManifestGameV2;
+function parseGame(
+  value: unknown,
+  manifestVersion: 1 | 2,
+): OwoggManifestGame | OwoggManifestGameV2 {
   const source = record(value, "game");
   exactKeys(
     source,
-    ["slug", "title", "genre", "mode", "shortDescription", "description", "tags"],
+    [
+      "slug",
+      "title",
+      "genre",
+      "mode",
+      "shortDescription",
+      "description",
+      "tags",
+      ...(manifestVersion === 2 ? ["playModes"] : []),
+    ],
     "game",
   );
   const shortDescription = optionalString(source, "shortDescription", "game", {
@@ -163,7 +190,8 @@ function parseGame(value: unknown): OwoggManifestGame {
     max: SANDBOX_GAME_POLICY.MAX_DESCRIPTION_LENGTH,
   });
   const tags = source.tags === undefined ? undefined : uniqueStrings(source.tags, "game.tags");
-  return {
+  const mode = enumValue(source, "mode", "game", ["single", "multi"] as const);
+  const common: OwoggManifestGame = {
     slug: requiredString(source, "slug", "game", {
       min: SANDBOX_GAME_POLICY.MIN_SLUG_LENGTH,
       max: SANDBOX_GAME_POLICY.MAX_SLUG_LENGTH,
@@ -174,11 +202,27 @@ function parseGame(value: unknown): OwoggManifestGame {
       max: SANDBOX_GAME_POLICY.MAX_TITLE_LENGTH,
     }),
     genre: requiredString(source, "genre", "game", { min: 1 }),
-    mode: enumValue(source, "mode", "game", ["single", "multi"] as const),
+    mode,
     ...(shortDescription !== undefined ? { shortDescription } : {}),
     ...(description !== undefined ? { description } : {}),
     ...(tags !== undefined ? { tags } : {}),
   };
+  if (manifestVersion === 1) return common;
+
+  const playModes = uniqueStrings(source.playModes, "game.playModes", [
+    "single",
+    "local-multi",
+    "online-multi",
+  ] as const satisfies readonly OwoggPlayMode[]) as readonly OwoggPlayMode[];
+  if (playModes.length === 0) invalid("game.playModes must not be empty");
+  const hasMultiplayerMode = playModes.some((playMode) => playMode !== "single");
+  if (mode === "single" && (playModes.length !== 1 || playModes[0] !== "single")) {
+    invalid('game.mode "single" requires game.playModes to contain only "single"');
+  }
+  if (mode === "multi" && !hasMultiplayerMode) {
+    invalid('game.mode "multi" requires local-multi or online-multi in game.playModes');
+  }
+  return { ...common, playModes };
 }
 
 function parsePresentation(value: unknown): OwoggManifestPresentation {
@@ -485,9 +529,18 @@ function parseAchievements(
   return achievements;
 }
 
-/** Parses and semantically validates an OWOGG Game Creator Manifest v1 value. */
+/** Parses and semantically validates an OWOGG Game Creator Manifest v1 or v2 value. */
 export function parseGameCreatorManifest(value: unknown): OwoggGameCreatorManifest {
   const source = record(value, "manifest");
+  const schemaVersion = source.schemaVersion;
+  if (
+    schemaVersion !== OWOGG_GAME_CREATOR_MANIFEST_VERSION &&
+    schemaVersion !== OWOGG_GAME_CREATOR_MANIFEST_V2_VERSION
+  ) {
+    invalid(
+      `schemaVersion must be ${OWOGG_GAME_CREATOR_MANIFEST_VERSION} or ${OWOGG_GAME_CREATOR_MANIFEST_V2_VERSION}`,
+    );
+  }
   exactKeys(
     source,
     [
@@ -502,17 +555,25 @@ export function parseGameCreatorManifest(value: unknown): OwoggGameCreatorManife
       "leaderboard",
       "events",
       "achievements",
+      ...(schemaVersion === OWOGG_GAME_CREATOR_MANIFEST_V2_VERSION ? ["multiplayer"] : []),
     ],
     "manifest",
   );
-  if (source.schemaVersion !== OWOGG_GAME_CREATOR_MANIFEST_VERSION) {
-    invalid(`schemaVersion must be ${OWOGG_GAME_CREATOR_MANIFEST_VERSION}`);
-  }
   if (source.game === undefined) invalid("game is required");
   if (source.progression === undefined) invalid("progression is required");
   if (source.result === undefined) invalid("result is required");
   const schema = optionalString(source, "$schema", "manifest");
-  const game = parseGame(source.game);
+  if (
+    schemaVersion === OWOGG_GAME_CREATOR_MANIFEST_V2_VERSION &&
+    schema !== undefined &&
+    schema !== OWOGG_GAME_CREATOR_MANIFEST_V2_SCHEMA_URL
+  ) {
+    invalid(`manifest.$schema must be ${OWOGG_GAME_CREATOR_MANIFEST_V2_SCHEMA_URL} for v2`);
+  }
+  const game =
+    schemaVersion === OWOGG_GAME_CREATOR_MANIFEST_VERSION
+      ? parseGame(source.game, OWOGG_GAME_CREATOR_MANIFEST_VERSION)
+      : parseGame(source.game, OWOGG_GAME_CREATOR_MANIFEST_V2_VERSION);
   const input =
     source.input === undefined
       ? undefined
@@ -547,9 +608,8 @@ export function parseGameCreatorManifest(value: unknown): OwoggGameCreatorManife
       ? undefined
       : parseAchievements(source.achievements, result, progression, events);
 
-  return {
+  const common = {
     ...(schema !== undefined ? { $schema: schema } : {}),
-    schemaVersion: OWOGG_GAME_CREATOR_MANIFEST_VERSION,
     game,
     ...(input !== undefined ? { input } : {}),
     ...(presentation !== undefined ? { presentation } : {}),
@@ -559,6 +619,90 @@ export function parseGameCreatorManifest(value: unknown): OwoggGameCreatorManife
     ...(leaderboard !== undefined ? { leaderboard } : {}),
     ...(source.events !== undefined ? { events } : {}),
     ...(achievements !== undefined ? { achievements } : {}),
+  };
+
+  if (schemaVersion === OWOGG_GAME_CREATOR_MANIFEST_VERSION) {
+    return {
+      ...common,
+      schemaVersion: OWOGG_GAME_CREATOR_MANIFEST_VERSION,
+      game,
+    } as OwoggGameCreatorManifestV1;
+  }
+
+  let multiplayer: OwoggGameCreatorManifestV2["multiplayer"];
+  if (source.multiplayer !== undefined) {
+    try {
+      multiplayer = toOwoggManagedMultiplayerRequestV1(
+        parseManagedMultiplayerProfileRequestV1(source.multiplayer),
+      );
+    } catch (error) {
+      if (error instanceof MultiplayerProfileRequestValidationError) {
+        invalid(error.detail);
+      }
+      throw error;
+    }
+  }
+  const v2Game = game as OwoggManifestGameV2;
+  const requestsOnline = v2Game.playModes.includes("online-multi");
+  if (requestsOnline !== (multiplayer !== undefined)) {
+    invalid(
+      requestsOnline
+        ? "game.playModes online-multi requires multiplayer"
+        : "multiplayer requires online-multi in game.playModes",
+    );
+  }
+  if (multiplayer !== undefined && v2Game.mode !== "multi") {
+    invalid('multiplayer requires game.mode "multi"');
+  }
+  if (multiplayer !== undefined && leaderboard?.enabled === true) {
+    invalid("online multiplayer manifests cannot enable leaderboard");
+  }
+
+  return {
+    ...common,
+    schemaVersion: OWOGG_GAME_CREATOR_MANIFEST_V2_VERSION,
+    game: v2Game,
+    ...(multiplayer !== undefined ? { multiplayer } : {}),
+  };
+}
+
+/**
+ * Returns the normalized untrusted managed request declared by a validated v2 manifest. This is
+ * still only review input; callers must never treat its presence as an approved online profile.
+ */
+export function getManagedMultiplayerProfileRequestV1(
+  manifest: OwoggGameCreatorManifest,
+): ReturnType<typeof parseManagedMultiplayerProfileRequestV1> | null {
+  return manifest.schemaVersion === OWOGG_GAME_CREATOR_MANIFEST_V2_VERSION &&
+    manifest.multiplayer !== undefined
+    ? parseManagedMultiplayerProfileRequestV1(manifest.multiplayer)
+    : null;
+}
+
+export interface GameCreatorManifestMultiplayerPlanV1 {
+  /** M0 is local-only and needs no online profile or platform runtime. */
+  readonly local: { readonly resolvedClass: "M0" } | null;
+  /** Online class/backend is resolved from the normalized request, never supplied by the ZIP. */
+  readonly online: ManagedMultiplayerRequestResolutionV1 | null;
+}
+
+/**
+ * Resolves the two independent multiplayer surfaces declared by a validated manifest. A game may
+ * expose both local M0 and a separately reviewed M1/M2 online mode.
+ */
+export function resolveGameCreatorManifestMultiplayerPlanV1(
+  manifest: OwoggGameCreatorManifest,
+): GameCreatorManifestMultiplayerPlanV1 {
+  if (manifest.schemaVersion === OWOGG_GAME_CREATOR_MANIFEST_VERSION) {
+    return {
+      local: manifest.game.mode === "multi" ? { resolvedClass: "M0" } : null,
+      online: null,
+    };
+  }
+  const request = getManagedMultiplayerProfileRequestV1(manifest);
+  return {
+    local: manifest.game.playModes.includes("local-multi") ? { resolvedClass: "M0" } : null,
+    online: request ? resolveManagedMultiplayerProfileRequestV1(request) : null,
   };
 }
 

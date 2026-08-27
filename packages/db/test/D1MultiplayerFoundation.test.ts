@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { parseManagedMultiplayerProfileRequestV1 } from "@owogg/core";
+import {
+  buildApprovedManagedMultiplayerProfileV1,
+  parseManagedMultiplayerProfileRequestV1,
+} from "@owogg/core";
 import {
   D1AccountMergeRepository,
   D1MultiplayerInstanceRepository,
@@ -71,6 +74,7 @@ function seedAdmin(raw: RawDatabase): void {
 
 function managedTurnGridRequest(boardWidth = 15) {
   return parseManagedMultiplayerProfileRequestV1({
+    requestVersion: 1,
     kind: "managed-template",
     template: { id: "turn-grid", version: 1 },
     players: { min: 2, max: 2 },
@@ -1150,6 +1154,7 @@ test("D1 multiplayer request repository pins owner, canonical hash, review CAS, 
   assert.equal(created.record.requestedByUserId, 1);
   assert.match(created.record.requestHash, /^[0-9a-f]{64}$/);
   assert.deepEqual(JSON.parse(created.record.requestJson), {
+    requestVersion: 1,
     kind: "managed-template",
     template: { id: "turn-grid", version: 1 },
     players: { min: 2, max: 2 },
@@ -1227,7 +1232,7 @@ test("D1 multiplayer request repository pins owner, canonical hash, review CAS, 
     minPlayers: 2,
     maxPlayers: 2,
     allowedVisibility: ["PRIVATE"],
-    allowedJoinPolicies: ["INVITE_ONLY"],
+    allowedJoinPolicies: ["OPEN"],
     maxActionBytes: 1024,
     maxStateBytes: 8192,
     actionRateLimit: 5,
@@ -1251,6 +1256,13 @@ test("D1 multiplayer request repository pins owner, canonical hash, review CAS, 
     await profiles.createApprovedRevision({
       ...profileInput,
       profile: { ...managedProfile, rulesetKey: "official:omok" },
+    }),
+    { status: "REJECTED", code: "MANAGED_PROFILE_MISMATCH" },
+  );
+  assert.deepEqual(
+    await profiles.createApprovedRevision({
+      ...profileInput,
+      profile: { ...managedProfile, actionRateLimit: 60 },
     }),
     { status: "REJECTED", code: "MANAGED_PROFILE_MISMATCH" },
   );
@@ -1302,7 +1314,7 @@ test("D1 multiplayer request repository pins owner, canonical hash, review CAS, 
     profileId: profileCreated.record.id,
     profileRevision: 1,
     visibility: "PRIVATE",
-    joinPolicy: "INVITE_ONLY",
+    joinPolicy: "OPEN",
     lifecycle: "match",
     maxPlayers: 2,
     instanceExpiresAt: EXPIRES,
@@ -1420,6 +1432,67 @@ test("D1 multiplayer request repository pins owner, canonical hash, review CAS, 
     rejected.status === "UPDATED" ? rejected.record.decisionReasonCode : null,
     "UNSUPPORTED_RULESET",
   );
+  assert.deepEqual(raw.prepare("PRAGMA foreign_key_check").all(), []);
+});
+
+test("OWOGG managed requests use the same exact-version approval boundary without claiming a user", async () => {
+  const { db, raw } = createMigratedD1(INDEX_INCLUSIVE_D1_WRITE_META);
+  seedUsers(raw);
+  seedAdmin(raw);
+  seedGameVersion(raw, {
+    gameId: 1,
+    versionId: 10,
+    slug: "official-managed-turn-grid",
+  });
+  const requests = new D1MultiplayerProfileRequestRepository(db);
+  const request = managedTurnGridRequest();
+
+  assert.deepEqual(
+    await requests.submit({
+      gameId: 1,
+      gameVersionId: 10,
+      requestedByUserId: 1,
+      request,
+      nowIso: NOW,
+    }),
+    { status: "REJECTED", code: "REQUESTER_NOT_OWNER" },
+  );
+  const submitted = await requests.submit({
+    gameId: 1,
+    gameVersionId: 10,
+    requestedByUserId: null,
+    request,
+    nowIso: NOW,
+  });
+  assert.ok(submitted.status === "CREATED");
+  assert.equal(submitted.record.requestedByUserId, null);
+  const reviewed = await requests.review({
+    requestId: submitted.record.id,
+    decision: "APPROVED",
+    reviewedByAdminId: 1,
+    decisionReasonCode: null,
+    nowIso: LATER,
+  });
+  assert.equal(reviewed.status, "UPDATED");
+
+  const profiles = new D1MultiplayerProfileRepository(db);
+  const profile = buildApprovedManagedMultiplayerProfileV1({
+    gameId: 1,
+    gameVersionId: 10,
+    requestHash: submitted.record.requestHash,
+    profileRevision: 1,
+    request,
+  });
+  const created = await profiles.createApprovedRevision({
+    sourceRequestId: submitted.record.id,
+    profile,
+    createdByAdminId: 1,
+    nowIso: LATER,
+  });
+  assert.ok(created.status === "CREATED");
+  assert.equal(created.record.profile.enabled, false);
+  assert.equal(created.record.profile.resolvedClass, "M1");
+  assert.equal(created.record.profile.rewardPolicyId, null);
   assert.deepEqual(raw.prepare("PRAGMA foreign_key_check").all(), []);
 });
 

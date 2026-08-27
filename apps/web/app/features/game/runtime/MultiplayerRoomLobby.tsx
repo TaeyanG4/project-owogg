@@ -7,22 +7,29 @@ import {
   setMultiplayerRoomReady,
   startMultiplayerRoom,
 } from "./multiplayerRoomApi";
+import {
+  openMultiplayerLobbyRealtime,
+  type MultiplayerLobbyRealtimeHandle,
+} from "./multiplayerLobbyRealtime";
 import { playMultiplayerLobbySound, type MultiplayerLobbySound } from "./multiplayerLobbySound";
 
-// Lobby state is control-plane data, not realtime gameplay. A modest cadence keeps host start
-// responsive without turning D1 roster reads into a high-frequency transport.
-// MULTIPLAYER_RATE_LIMITER permits ten requests per minute for each operation/session key.
-// One immediate read plus a 6.5 second cadence remains below that ceiling without collective
-// throttling for players sharing an IP. Hidden tabs back off further to keep D1 cost bounded.
-const ROSTER_REFRESH_MS = 6_500;
-const BACKGROUND_ROSTER_REFRESH_MS = 15_000;
+// The lobby WebSocket carries invalidations only. These low-frequency reads are a resilience
+// fallback, not the primary transport, and keep D1/rate-limit cost bounded during idle rooms.
+const ROSTER_REFRESH_MS = 30_000;
+const BACKGROUND_ROSTER_REFRESH_MS = 60_000;
+const LOBBY_INVALIDATION_DEBOUNCE_MS = 120;
+const LOBBY_RECONNECT_DELAYS_MS = [1_000, 3_000, 10_000, 30_000] as const;
+const LOBBY_RECONNECT_STABLE_MS = 60_000;
 const MAX_RENDERED_LOBBY_SLOTS = 16;
 
 export function multiplayerLobbyCanStart(
   players: readonly MultiplayerRoomPlayer[],
   minPlayers: number,
 ): boolean {
-  return players.length >= minPlayers && players.every((player) => player.status === "READY");
+  return (
+    players.length >= minPlayers &&
+    players.every((player) => player.role === "HOST" || player.status === "READY")
+  );
 }
 
 export function multiplayerLobbySlotCount(maxPlayers: number, occupiedPlayers: number): number {
@@ -118,20 +125,22 @@ function PlayerSlot({
           <strong className="truncate text-sm text-text-primary">{player.nickname}</strong>
           {isSelf && <span className="shrink-0 text-xs font-black text-brand-light">나</span>}
         </span>
-        <span className="mt-1 flex flex-wrap items-center gap-1.5">
-          <span className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-bold text-text-secondary">
+        <span className="mt-1.5 flex flex-col items-start gap-1.5">
+          <span className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-2 py-0.5 text-xs font-bold text-text-secondary">
             {player.role === "HOST" ? <Crown className="h-3 w-3 text-amber-300" /> : null}
             {player.role === "HOST" ? "방장" : `플레이어 ${slotIndex + 1}`}
           </span>
-          {player.status === "READY" ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-400/10 px-2 py-0.5 text-[11px] font-black text-emerald-300">
-              <Check className="h-3 w-3" /> 준비 완료
-            </span>
-          ) : (
-            <span className="inline-flex items-center rounded-full bg-amber-300/10 px-2 py-0.5 text-[11px] font-black text-amber-200">
-              준비 확인 중
-            </span>
-          )}
+          {player.role === "PLAYER" ? (
+            player.status === "READY" ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-400/10 px-2 py-0.5 text-xs font-black text-emerald-300">
+                <Check className="h-3 w-3" /> 준비 완료
+              </span>
+            ) : (
+              <span className="inline-flex items-center rounded-full bg-amber-300/10 px-2 py-0.5 text-xs font-black text-amber-200">
+                준비 미완료
+              </span>
+            )
+          ) : null}
         </span>
       </span>
     </div>
@@ -154,13 +163,25 @@ export function MultiplayerRoomLobby({
   const [copied, setCopied] = useState<"CODE" | "LINK" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const previousParticipantIdsRef = useRef<ReadonlySet<string> | null>(null);
+  const latestRoomRef = useRef(room);
+  const onRoomChangeRef = useRef(onRoomChange);
+  latestRoomRef.current = room;
+  onRoomChangeRef.current = onRoomChange;
   const isHost = room.participant.role === "HOST";
 
   useEffect(() => {
     let active = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let pollTimer: ReturnType<typeof setTimeout> | undefined;
+    let invalidationTimer: ReturnType<typeof setTimeout> | undefined;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let reconnectStableTimer: ReturnType<typeof setTimeout> | undefined;
+    let realtime: MultiplayerLobbyRealtimeHandle | undefined;
+    let reconnectAttempt = 0;
+    let refreshInFlight = false;
+    let refreshQueued = false;
+    previousParticipantIdsRef.current = null;
 
-    const refresh = async () => {
+    const refreshOnce = async () => {
       try {
         const roster = await fetchMultiplayerRoomRoster(room.instance.id);
         if (!active || roster.generation !== room.instance.generation) return;
@@ -176,7 +197,7 @@ export function MultiplayerRoomLobby({
         setPlayers(roster.players);
         setError(null);
         if (roster.instance.status === "ACTIVE") {
-          onRoomChange({ ...room, instance: roster.instance });
+          onRoomChangeRef.current({ ...latestRoomRef.current, instance: roster.instance });
           return;
         }
         if (["ABORTED", "CLOSED", "EXPIRED"].includes(roster.instance.status)) {
@@ -186,22 +207,103 @@ export function MultiplayerRoomLobby({
       } catch (reason) {
         if (active) setError(messageFor(reason));
       }
-      if (active) {
-        timer = setTimeout(
-          () => void refresh(),
-          typeof document !== "undefined" && document.visibilityState === "hidden"
-            ? BACKGROUND_ROSTER_REFRESH_MS
-            : ROSTER_REFRESH_MS,
-        );
+    };
+    const refresh = async () => {
+      if (refreshInFlight) {
+        refreshQueued = true;
+        return;
+      }
+      refreshInFlight = true;
+      try {
+        do {
+          refreshQueued = false;
+          await refreshOnce();
+        } while (active && refreshQueued);
+      } finally {
+        refreshInFlight = false;
+      }
+    };
+    const poll = async () => {
+      await refresh();
+      if (!active) return;
+      pollTimer = setTimeout(
+        () => void poll(),
+        typeof document !== "undefined" && document.visibilityState === "hidden"
+          ? BACKGROUND_ROSTER_REFRESH_MS
+          : ROSTER_REFRESH_MS,
+      );
+    };
+    const scheduleInvalidationRefresh = () => {
+      if (!active || invalidationTimer) return;
+      invalidationTimer = setTimeout(() => {
+        invalidationTimer = undefined;
+        void refresh();
+      }, LOBBY_INVALIDATION_DEBOUNCE_MS);
+    };
+    const connectRealtime = () => {
+      if (!active) return;
+      try {
+        realtime = openMultiplayerLobbyRealtime({
+          instanceId: room.instance.id,
+          generation: room.instance.generation,
+          onConnected: () => {
+            // Do not reset backoff for a socket that opens and immediately drops. Apart from
+            // avoiding a reconnect storm, this keeps the edge's ten-connects-per-minute limiter
+            // available for genuine tab/network recovery. A minute-long connection is considered
+            // stable and earns the fast first retry again.
+            if (reconnectStableTimer) clearTimeout(reconnectStableTimer);
+            reconnectStableTimer = setTimeout(() => {
+              reconnectStableTimer = undefined;
+              reconnectAttempt = 0;
+            }, LOBBY_RECONNECT_STABLE_MS);
+          },
+          onChanged: scheduleInvalidationRefresh,
+          onDisconnected: () => {
+            realtime = undefined;
+            if (reconnectStableTimer) {
+              clearTimeout(reconnectStableTimer);
+              reconnectStableTimer = undefined;
+            }
+            // A host leave/room abort can close all DO sockets before a final invalidation frame.
+            // Reconcile once immediately so peers do not wait for the slow resilience poll.
+            scheduleInvalidationRefresh();
+            if (!active || reconnectTimer) return;
+            const delay =
+              LOBBY_RECONNECT_DELAYS_MS[
+                Math.min(reconnectAttempt, LOBBY_RECONNECT_DELAYS_MS.length - 1)
+              ];
+            reconnectAttempt += 1;
+            reconnectTimer = setTimeout(() => {
+              reconnectTimer = undefined;
+              connectRealtime();
+            }, delay);
+          },
+        });
+      } catch {
+        if (!active || reconnectTimer) return;
+        const delay =
+          LOBBY_RECONNECT_DELAYS_MS[
+            Math.min(reconnectAttempt, LOBBY_RECONNECT_DELAYS_MS.length - 1)
+          ];
+        reconnectAttempt += 1;
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = undefined;
+          connectRealtime();
+        }, delay);
       }
     };
 
-    void refresh();
+    void poll();
+    connectRealtime();
     return () => {
       active = false;
-      if (timer) clearTimeout(timer);
+      realtime?.close();
+      if (pollTimer) clearTimeout(pollTimer);
+      if (invalidationTimer) clearTimeout(invalidationTimer);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (reconnectStableTimer) clearTimeout(reconnectStableTimer);
     };
-  }, [onRoomChange, room]);
+  }, [room.instance.generation, room.instance.id, room.participant.id]);
 
   useEffect(() => {
     if (!copied) return;
@@ -215,6 +317,7 @@ export function MultiplayerRoomLobby({
     return Array.from({ length: slotCount }, (_, slotIndex) => bySeat.get(slotIndex));
   }, [players, room.instance.maxPlayers]);
   const allReady = multiplayerLobbyCanStart(players, minPlayers);
+  const hasMinimumPlayers = players.length >= minPlayers;
   const selfPlayer = players.find((player) => player.participantId === room.participant.id);
   const selfReady = (selfPlayer?.status ?? room.participant.status) === "READY";
 
@@ -249,7 +352,7 @@ export function MultiplayerRoomLobby({
   }, [allReady, busy, isHost, onRoomChange, room.instance.generation, room.instance.id]);
 
   const toggleReady = useCallback(async () => {
-    if (busy) return;
+    if (isHost || busy) return;
     const nextReady = !selfReady;
     setBusy("READY");
     setError(null);
@@ -272,7 +375,7 @@ export function MultiplayerRoomLobby({
     } finally {
       setBusy(null);
     }
-  }, [busy, onRoomChange, room.instance.generation, room.instance.id, selfReady]);
+  }, [busy, isHost, onRoomChange, room.instance.generation, room.instance.id, selfReady]);
 
   const leave = useCallback(async () => {
     if (busy) return;
@@ -303,8 +406,8 @@ export function MultiplayerRoomLobby({
             </p>
             <h3 className="mt-2 text-2xl font-black text-text-primary">{title}</h3>
             <p className="mt-2 text-sm text-text-secondary">
-              입장하면 기본으로 준비 완료됩니다. 각 플레이어가 준비 상태를 확인한 뒤 방장이 경기를
-              시작합니다.
+              플레이어는 입장 시 기본으로 준비 완료됩니다. 방장은 별도 준비 없이 경기 시작으로
+              참가를 확정합니다.
             </p>
           </div>
           <div className="flex max-w-full flex-wrap items-center gap-2">
@@ -365,7 +468,11 @@ export function MultiplayerRoomLobby({
               allReady ? "bg-emerald-400/10 text-emerald-300" : "bg-amber-300/10 text-amber-200"
             }`}
           >
-            {allReady ? "시작 준비 완료" : "플레이어를 기다리는 중"}
+            {allReady
+              ? "경기 시작 가능"
+              : hasMinimumPlayers
+                ? "플레이어 준비를 기다리는 중"
+                : "플레이어를 기다리는 중"}
           </span>
         </div>
 
@@ -381,38 +488,37 @@ export function MultiplayerRoomLobby({
         </div>
 
         <div className="mt-5 rounded-2xl border border-border bg-surface p-4">
-          <div className={`grid gap-3 ${isHost ? "sm:grid-cols-2" : ""}`}>
+          {isHost ? (
             <button
               type="button"
-              disabled={busy !== null}
-              onClick={() => void toggleReady()}
-              aria-pressed={selfReady}
-              className={`inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border px-5 text-base font-black transition-colors disabled:cursor-wait disabled:opacity-55 ${
-                selfReady
-                  ? "border-emerald-300/35 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/20"
-                  : "border-brand bg-brand text-white hover:bg-brand-hover"
-              }`}
+              disabled={!allReady || busy !== null}
+              onClick={() => void start()}
+              className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-brand px-5 text-base font-black text-white transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-45"
             >
-              <Check className="h-5 w-5" />
-              {busy === "READY" ? "변경 중" : selfReady ? "준비 취소" : "준비 완료"}
+              <Play className="h-5 w-5 fill-current" />
+              {busy === "START" ? "경기 시작 중" : "경기 시작"}
             </button>
-            {isHost ? (
+          ) : (
+            <>
               <button
                 type="button"
-                disabled={!allReady || busy !== null}
-                onClick={() => void start()}
-                className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-brand px-5 text-base font-black text-white transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-45"
+                disabled={busy !== null}
+                onClick={() => void toggleReady()}
+                aria-pressed={selfReady}
+                className={`inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border px-5 text-base font-black transition-colors disabled:cursor-wait disabled:opacity-55 ${
+                  selfReady
+                    ? "border-emerald-300/35 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/20"
+                    : "border-brand bg-brand text-white hover:bg-brand-hover"
+                }`}
               >
-                <Play className="h-5 w-5 fill-current" />
-                {busy === "START" ? "경기 시작 중" : "경기 시작"}
+                <Check className="h-5 w-5" />
+                {busy === "READY" ? "변경 중" : selfReady ? "준비 취소" : "준비 완료"}
               </button>
-            ) : null}
-          </div>
-          {!isHost ? (
-            <p className="py-2 text-center text-sm font-bold text-text-secondary">
-              방장이 경기를 시작할 때까지 기다려 주세요.
-            </p>
-          ) : null}
+              <p className="pt-3 text-center text-sm font-bold text-text-secondary">
+                준비 상태를 확인한 뒤 방장이 경기를 시작할 때까지 기다려 주세요.
+              </p>
+            </>
+          )}
           {error && (
             <p role="alert" className="mt-3 text-center text-sm font-semibold text-accent-red">
               {error}

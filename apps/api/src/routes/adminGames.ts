@@ -2,6 +2,9 @@ import { Hono } from "hono";
 import {
   AdminOfficialMultiplayerProfileResponseSchema,
   AdminOfficialMultiplayerProfileUpdateRequestSchema,
+  AdminManagedMultiplayerProfileRequestListResponseSchema,
+  AdminManagedMultiplayerProfileReviewRequestSchema,
+  AdminManagedMultiplayerProfileReviewResponseSchema,
   AdminGameListResponseSchema,
   AdminGameListQuerySchema,
   AdminGameToggleRequestSchema,
@@ -13,6 +16,10 @@ import {
 import {
   OfficialGameDeleteFailure,
   OfficialGameUploadFailure,
+  resolveManagedMultiplayerProfileRequestV1,
+  toOwoggManagedMultiplayerRequestV1,
+  type MultiplayerProfileRecord,
+  type MultiplayerProfileRequestRecord,
   type OfficialMultiplayerProfileFailureCode,
   type OfficialMultiplayerProfileResult,
 } from "@owogg/core";
@@ -81,6 +88,50 @@ function multiplayerProfileResponse(
   });
 }
 
+function managedMultiplayerRequestResponse(record: MultiplayerProfileRequestRecord) {
+  const resolution = resolveManagedMultiplayerProfileRequestV1(record.request);
+  if (resolution.status !== "SUPPORTED_V1") {
+    throw new Error(`Stored multiplayer request ${record.id} is not supported by V1`);
+  }
+  return {
+    id: record.id,
+    gameId: record.gameId,
+    gameVersionId: record.gameVersionId,
+    requestSchemaVersion: record.requestSchemaVersion,
+    requestHash: record.requestHash,
+    request: toOwoggManagedMultiplayerRequestV1(record.request),
+    requestedByUserId: record.requestedByUserId,
+    status: record.status,
+    reviewedByAdminId: record.reviewedByAdminId,
+    reviewedAt: record.reviewedAt,
+    decisionReasonCode: record.decisionReasonCode,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    resolution: {
+      status: "SUPPORTED_V1" as const,
+      resolvedClass: resolution.resolvedClass,
+      runtimeBackend: resolution.runtimeBackend,
+    },
+  };
+}
+
+function managedMultiplayerProfileResponse(record: MultiplayerProfileRecord | null) {
+  if (!record) return null;
+  return {
+    id: record.id,
+    profileRevision: record.profile.profileRevision,
+    enabled: record.profile.enabled,
+    resolvedClass: record.profile.resolvedClass,
+    simulationModel: record.profile.simulationModel,
+    rulesetKey: record.profile.rulesetKey,
+    rulesetRevision: record.profile.rulesetRevision,
+    minPlayers: record.profile.minPlayers,
+    maxPlayers: record.profile.maxPlayers,
+    rewardPolicyId: null,
+    updatedAt: record.updatedAt,
+  };
+}
+
 function officialUpdateFailure(error: unknown) {
   if (!(error instanceof OfficialGameUploadFailure)) throw error;
   const status =
@@ -143,6 +194,105 @@ adminGamesRouter.get("/", async (c) => {
   });
 
   return c.json(AdminGameListResponseSchema.parse(result), 200);
+});
+
+// Creator/OWOGG manifests submit only an untrusted exact-version request. This elevated route is
+// the first server-owned approval boundary; an approval derives a disabled profile and never
+// activates gameplay or grants ranking/reward policy.
+adminGamesRouter.get("/multiplayer-requests", async (c) => {
+  const admin = await requireElevatedAdmin(c);
+  if (isElevatedAdminResponse(admin)) return admin;
+  const denied = requirePermission(admin, "games.moderate");
+  if (denied) return denied;
+  const rawLimit = c.req.query("limit");
+  const limit = rawLimit === undefined ? 50 : Number(rawLimit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    return c.json(
+      { error: { code: "INVALID_REQUEST", message: "limit은 1~100 정수여야 합니다." } },
+      400,
+    );
+  }
+  const container = createContainer(c.env.DB, readB2Config(c.env));
+  const requests = await container.managedMultiplayerProfileReviewUseCases.listPending(limit);
+  return c.json(
+    AdminManagedMultiplayerProfileRequestListResponseSchema.parse({
+      requests: requests.map(managedMultiplayerRequestResponse),
+    }),
+    200,
+  );
+});
+
+adminGamesRouter.post("/multiplayer-requests/:requestId/review", async (c) => {
+  const admin = await requireElevatedAdmin(c);
+  if (isElevatedAdminResponse(admin)) return admin;
+  const denied = requirePermission(admin, "games.moderate");
+  if (denied) return denied;
+  if (!admin.account) {
+    return c.json(
+      {
+        error: {
+          code: "MANAGED_ADMIN_REQUIRED",
+          message: "감사 가능한 관리 계정으로 로그인해야 요청을 심사할 수 있습니다.",
+        },
+      },
+      403,
+    );
+  }
+  const requestId = Number(c.req.param("requestId"));
+  if (!Number.isInteger(requestId) || requestId <= 0) {
+    return c.json(
+      { error: { code: "INVALID_REQUEST", message: "요청 ID가 올바르지 않습니다." } },
+      400,
+    );
+  }
+  const body = await c.req.json().catch(() => null);
+  const parsed = AdminManagedMultiplayerProfileReviewRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json(
+      { error: { code: "INVALID_REQUEST", message: "심사 결정이 올바르지 않습니다." } },
+      400,
+    );
+  }
+  const container = createContainer(c.env.DB, readB2Config(c.env));
+  const result =
+    parsed.data.decision === "APPROVED"
+      ? await container.managedMultiplayerProfileReviewUseCases.approve({
+          requestId,
+          reviewedByAdminId: admin.account.id,
+        })
+      : await container.managedMultiplayerProfileReviewUseCases.reject({
+          requestId,
+          reviewedByAdminId: admin.account.id,
+          // The contract refinement requires a reason for rejection. Keep the controller
+          // defensive so the invariant remains explicit without a non-null assertion.
+          reasonCode: parsed.data.reasonCode ?? "UNSPECIFIED",
+        });
+  if (!result.ok) {
+    const status = result.code === "REQUEST_NOT_FOUND" ? 404 : 409;
+    return c.json(
+      {
+        error: {
+          code: result.code,
+          message:
+            result.code === "REQUEST_NOT_FOUND"
+              ? "멀티플레이 요청을 찾을 수 없습니다."
+              : result.code === "REQUEST_NOT_SUPPORTED"
+                ? "현재 V1 런타임이 지원하지 않는 요청입니다."
+                : result.code === "VERSION_NOT_ELIGIBLE"
+                  ? "게임 exact version의 게시·심사 상태가 아직 프로필 생성 조건을 충족하지 않습니다."
+                  : "이미 결정됐거나 다른 프로필과 충돌한 요청입니다.",
+        },
+      },
+      status,
+    );
+  }
+  return c.json(
+    AdminManagedMultiplayerProfileReviewResponseSchema.parse({
+      request: managedMultiplayerRequestResponse(result.request),
+      profile: managedMultiplayerProfileResponse(result.profile),
+    }),
+    200,
+  );
 });
 
 // Trusted control-plane approval for the current OWOGG live version. A ZIP cannot invoke this or

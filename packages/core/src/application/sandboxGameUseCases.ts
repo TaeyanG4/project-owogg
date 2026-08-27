@@ -10,6 +10,7 @@ import type {
   BundleArchiveWriter,
 } from "../ports/sandboxGames.js";
 import type { GameCanonicalRepository } from "../modules/game/ports/gameCanonicalRepository.js";
+import type { MultiplayerProfileRequestRepository } from "../modules/multiplayer/ports/multiplayerProfileRequestRepository.js";
 import type { GameCanonicalDocument } from "../modules/game/domain/gameCanonicalDocument.js";
 import type { SandboxGameVisibility, SandboxGameMode } from "../domain/sandboxGames.js";
 import {
@@ -34,6 +35,7 @@ import {
 import {
   GameCreatorManifestValidationError,
   extractGameCreatorManifest,
+  getManagedMultiplayerProfileRequestV1,
   parseGameCreatorManifestBytes,
 } from "../domain/gameCreatorManifest.js";
 import { mapGameCreatorManifestToCanonical } from "../domain/gameCreatorManifestCanonical.js";
@@ -180,7 +182,43 @@ export class SandboxGameUseCases {
     /** The sole canonical control-plane authority for USER metadata. */
     private gameCanonicalRepo: GameCanonicalRepository,
     private archiveWriter?: BundleArchiveWriter,
+    private multiplayerProfileRequests?: MultiplayerProfileRequestRepository,
   ) {}
+
+  private async submitDeclaredMultiplayerRequest(input: {
+    manifest: NonNullable<ReturnType<typeof extractGameCreatorManifest>>;
+    gameId: number;
+    gameVersionId: number;
+    requestedByUserId: number;
+  }): Promise<void> {
+    const request = getManagedMultiplayerProfileRequestV1(input.manifest);
+    if (!request) return;
+    if (!this.multiplayerProfileRequests) {
+      throw new SandboxGameUseCaseFailure("PUBLISH_FAILED");
+    }
+    try {
+      const submitted = await this.multiplayerProfileRequests.submit({
+        gameId: input.gameId,
+        gameVersionId: input.gameVersionId,
+        requestedByUserId: input.requestedByUserId,
+        request,
+        nowIso: new Date().toISOString(),
+      });
+      if (submitted.status === "REJECTED") {
+        console.error(
+          `multiplayer profile request rejected for gameId=${input.gameId} versionId=${input.gameVersionId}: ${submitted.code}`,
+        );
+        throw new SandboxGameUseCaseFailure("PUBLISH_FAILED");
+      }
+    } catch (error) {
+      if (error instanceof SandboxGameUseCaseFailure) throw error;
+      console.error(
+        `multiplayer profile request failed for gameId=${input.gameId} versionId=${input.gameVersionId}:`,
+        error instanceof Error ? error.message : error,
+      );
+      throw new SandboxGameUseCaseFailure("PUBLISH_FAILED");
+    }
+  }
 
   async getById(id: number): Promise<SandboxGameRecord | null> {
     return this.repo.findById(id);
@@ -324,9 +362,11 @@ export class SandboxGameUseCases {
 
     return this.uploadPreparedVersion({
       gameId: game.id,
+      requestedByUserId: game.developerUserId,
       bytes: input.bytes,
       contentType: input.contentType,
       prepared: publishablePrepared,
+      manifest,
       ...(logoFile ? { logoFile } : {}),
     });
   }
@@ -561,9 +601,11 @@ export class SandboxGameUseCases {
 
     const version = await this.uploadPreparedVersion({
       gameId: game.id,
+      requestedByUserId: input.developerUserId,
       bytes: input.bytes,
       contentType: input.contentType,
       prepared: publishablePrepared,
+      manifest,
       logoFile,
     });
 
@@ -578,9 +620,11 @@ export class SandboxGameUseCases {
    * as the same typed PUBLISH_FAILED, not a silent partial success. */
   private async uploadPreparedVersion(input: {
     gameId: number;
+    requestedByUserId: number;
     bytes: ArrayBuffer;
     contentType?: string | undefined;
     prepared: PreparedBundle;
+    manifest: NonNullable<ReturnType<typeof extractGameCreatorManifest>>;
     logoFile?: PreparedBundleFile | undefined;
   }): Promise<SandboxGameVersionRecord> {
     const contentHash = await sha256Hex(input.bytes);
@@ -646,7 +690,14 @@ export class SandboxGameUseCases {
     // A publish failure here leaves a real, valid version row that simply isn't servable yet
     // (FAILED), recoverable with republishVersion — so it is surfaced as its own error rather than
     // undoing the upload the developer just paid for.
-    return this.publishOrFail(version, input.prepared);
+    const published = await this.publishOrFail(version, input.prepared);
+    await this.submitDeclaredMultiplayerRequest({
+      manifest: input.manifest,
+      gameId: input.gameId,
+      gameVersionId: published.id,
+      requestedByUserId: input.requestedByUserId,
+    });
+    return published;
   }
 
   /** Storage-level publish failures become a single typed code. The underlying provider message is
@@ -714,7 +765,14 @@ export class SandboxGameUseCases {
         }
       : preparedWithMetadata;
 
-    return this.publishOrFail(version, prepared);
+    const published = await this.publishOrFail(version, prepared);
+    await this.submitDeclaredMultiplayerRequest({
+      manifest,
+      gameId: game.id,
+      gameVersionId: published.id,
+      requestedByUserId: game.developerUserId,
+    });
+    return published;
   }
 
   private async synchronizeCanonicalFromVersion(

@@ -176,10 +176,14 @@ export class D1MultiplayerProfileRepository implements MultiplayerProfileReposit
       .first<Record<string, unknown>>();
     if (!version) return { status: "REJECTED", code: "GAME_VERSION_NOT_FOUND" };
 
-    if (version.publisher_type === "USER") {
-      if (version.moderation_status !== "APPROVED" || input.sourceRequestId === null) {
-        return { status: "REJECTED", code: "SOURCE_REQUEST_INVALID" };
-      }
+    if (version.publisher_type !== "USER" && version.publisher_type !== "OWOGG") {
+      return { status: "REJECTED", code: "SOURCE_REQUEST_INVALID" };
+    }
+    if (version.publisher_type === "USER" && version.moderation_status !== "APPROVED") {
+      return { status: "REJECTED", code: "SOURCE_REQUEST_INVALID" };
+    }
+
+    if (input.sourceRequestId !== null) {
       const request = await new D1MultiplayerProfileRequestRepository(this.db).findById(
         input.sourceRequestId,
       );
@@ -188,7 +192,9 @@ export class D1MultiplayerProfileRepository implements MultiplayerProfileReposit
         request.status !== "APPROVED" ||
         request.gameId !== profile.gameId ||
         request.gameVersionId !== profile.gameVersionId ||
-        request.requestHash !== profile.sourceRequestHash
+        request.requestHash !== profile.sourceRequestHash ||
+        (version.publisher_type === "USER" && request.requestedByUserId === null) ||
+        (version.publisher_type === "OWOGG" && request.requestedByUserId !== null)
       ) {
         return { status: "REJECTED", code: "SOURCE_REQUEST_INVALID" };
       }
@@ -202,7 +208,6 @@ export class D1MultiplayerProfileRepository implements MultiplayerProfileReposit
       }
     } else if (
       version.publisher_type !== "OWOGG" ||
-      input.sourceRequestId !== null ||
       profile.sourceRequestHash !== null ||
       !profile.rulesetKey.startsWith("official:")
     ) {

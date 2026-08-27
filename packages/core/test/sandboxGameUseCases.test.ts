@@ -20,6 +20,11 @@ import { SANDBOX_GAME_POLICY } from "../src/domain/sandboxGames.js";
 import type { SandboxGameBundleManifest } from "../src/domain/sandboxGameBundle.js";
 import { OWOGG_GAME_CREATOR_MANIFEST_FILENAME } from "../src/domain/gameCreatorManifest.js";
 import type { GameCanonicalRepository } from "../src/modules/game/ports/gameCanonicalRepository.js";
+import type {
+  MultiplayerProfileRequestRecord,
+  MultiplayerProfileRequestRepository,
+  SubmitMultiplayerProfileRequestInput,
+} from "../src/modules/multiplayer/ports/multiplayerProfileRequestRepository.js";
 import {
   GAME_CANONICAL_SCHEMA_VERSION,
   parseGameCanonicalDocument,
@@ -46,6 +51,44 @@ function creatorManifestBytes(game: Record<string, unknown>): Uint8Array {
       game,
       progression: { type: "none" },
       result: { score: null },
+    }),
+  );
+}
+
+function multiplayerCreatorManifestBytes(slug = "my-game"): Uint8Array {
+  return bytes(
+    JSON.stringify({
+      $schema: "https://owogg.com/schemas/manifest/v2.json",
+      schemaVersion: 2,
+      game: {
+        slug,
+        title: "Online Grid",
+        genre: "board",
+        mode: "multi",
+        playModes: ["online-multi"],
+      },
+      progression: { type: "none" },
+      result: { score: null },
+      leaderboard: { enabled: false },
+      multiplayer: {
+        requestVersion: 1,
+        kind: "managed-template",
+        template: { id: "turn-grid", version: 1 },
+        players: { min: 2, max: 2 },
+        requirements: {
+          simulation: "turn",
+          lifecycle: "match",
+          persistence: "match",
+          latency: "relaxed",
+          reconnect: "resume",
+          hiddenInformation: false,
+          simultaneousResponse: false,
+          joinInProgress: false,
+          spectators: false,
+        },
+        config: { boardWidth: 15, boardHeight: 15, winLength: 5 },
+        client: { protocolVersion: 1 },
+      },
     }),
   );
 }
@@ -416,9 +459,69 @@ function createFakeCanonicalRepo(): GameCanonicalRepository & {
   };
 }
 
+function createFakeMultiplayerProfileRequests(): MultiplayerProfileRequestRepository & {
+  submissions: SubmitMultiplayerProfileRequestInput[];
+  rejectNext: boolean;
+} {
+  let nextId = 1;
+  const records = new Map<number, MultiplayerProfileRequestRecord>();
+  return {
+    submissions: [],
+    rejectNext: false,
+    async submit(input) {
+      this.submissions.push(input);
+      if (this.rejectNext) {
+        this.rejectNext = false;
+        return { status: "REJECTED", code: "REQUEST_CONFLICT" };
+      }
+      const existing = [...records.values()].find(
+        (record) => record.gameVersionId === input.gameVersionId,
+      );
+      if (existing) return { status: "REPLAYED", record: existing };
+      const now = input.nowIso;
+      const record: MultiplayerProfileRequestRecord = {
+        id: nextId++,
+        gameId: input.gameId,
+        gameVersionId: input.gameVersionId,
+        requestSchemaVersion: 1,
+        requestHash: "a".repeat(64),
+        requestJson: "{}",
+        request: input.request,
+        requestedByUserId: input.requestedByUserId,
+        status: "PENDING_REVIEW",
+        reviewedByAdminId: null,
+        reviewedAt: null,
+        decisionReasonCode: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      records.set(record.id, record);
+      return { status: "CREATED", record };
+    },
+    async findById(requestId) {
+      return records.get(requestId) ?? null;
+    },
+    async findByExactVersion(gameVersionId) {
+      return [...records.values()].find((record) => record.gameVersionId === gameVersionId) ?? null;
+    },
+    async listPending(limit) {
+      return [...records.values()]
+        .filter((record) => record.status === "PENDING_REVIEW")
+        .slice(0, limit);
+    },
+    async review() {
+      throw new Error("not used");
+    },
+    async withdraw() {
+      throw new Error("not used");
+    },
+  };
+}
+
 function createUseCases(
   entries?: Record<string, Uint8Array>,
   canonicalRepo: ReturnType<typeof createFakeCanonicalRepo> = createFakeCanonicalRepo(),
+  multiplayerProfileRequests?: MultiplayerProfileRequestRepository,
 ) {
   const repo = createFakeRepo();
   const storage = createFakeStorage();
@@ -434,7 +537,14 @@ function createUseCases(
       return bytes("rebuilt-archive").buffer as ArrayBuffer;
     },
   };
-  const useCases = new SandboxGameUseCases(repo, storage, publisher, canonicalRepo, archiveWriter);
+  const useCases = new SandboxGameUseCases(
+    repo,
+    storage,
+    publisher,
+    canonicalRepo,
+    archiveWriter,
+    multiplayerProfileRequests,
+  );
   return {
     useCases,
     repo,
@@ -1489,6 +1599,76 @@ test("uploadVersion publishes each bundle file as its own versioned object and r
   assert.ok(storage.putKeys.includes(`games/${game.id}/${version.id}/index.html`));
   assert.ok(storage.putKeys.includes(`games/${game.id}/${version.id}/Build/game.wasm`));
   assert.ok(storage.putKeys.includes(`games/${game.id}/${version.id}/owogg.json`));
+});
+
+test("owogg.json v2 upload stores its managed request against the exact USER version", async () => {
+  const requests = createFakeMultiplayerProfileRequests();
+  const entries = {
+    ...MINIMAL_BUNDLE,
+    [OWOGG_GAME_CREATOR_MANIFEST_FILENAME]: multiplayerCreatorManifestBytes(),
+  };
+  const { useCases } = createUseCases(entries, createFakeCanonicalRepo(), requests);
+  const game = await useCases.createGame({
+    slug: "my-game",
+    developerUserId: 7,
+    title: "Online Grid",
+    shortDescription: null,
+    description: null,
+    genre: "board",
+    mode: "multi",
+  });
+
+  const version = await useCases.uploadVersion({
+    gameId: game.id,
+    actingUserId: 7,
+    isAdmin: false,
+    bytes: new ArrayBuffer(10),
+  });
+
+  assert.equal(version.publishStatus, "READY");
+  assert.equal(requests.submissions.length, 1);
+  assert.equal(requests.submissions[0]?.gameId, game.id);
+  assert.equal(requests.submissions[0]?.gameVersionId, version.id);
+  assert.equal(requests.submissions[0]?.requestedByUserId, 7);
+  assert.equal(requests.submissions[0]?.request.template.id, "turn-grid");
+});
+
+test("a failed managed-request insert is retryable through exact-version republish", async () => {
+  const requests = createFakeMultiplayerProfileRequests();
+  requests.rejectNext = true;
+  const entries = {
+    ...MINIMAL_BUNDLE,
+    [OWOGG_GAME_CREATOR_MANIFEST_FILENAME]: multiplayerCreatorManifestBytes(),
+  };
+  const { useCases, repo } = createUseCases(entries, createFakeCanonicalRepo(), requests);
+  const game = await useCases.createGame({
+    slug: "my-game",
+    developerUserId: 7,
+    title: "Online Grid",
+    shortDescription: null,
+    description: null,
+    genre: "board",
+    mode: "multi",
+  });
+
+  await assert.rejects(
+    () =>
+      useCases.uploadVersion({
+        gameId: game.id,
+        actingUserId: 7,
+        isAdmin: false,
+        bytes: new ArrayBuffer(10),
+      }),
+    (error: unknown) =>
+      error instanceof SandboxGameUseCaseFailure && error.code === "PUBLISH_FAILED",
+  );
+  const version = [...repo.versions.values()][0];
+  assert.ok(version);
+  assert.equal(version.publishStatus, "READY");
+
+  const repaired = await useCases.republishVersion(version.id);
+  assert.equal(repaired.id, version.id);
+  assert.equal(requests.submissions.length, 2);
 });
 
 test("publishing writes a manifest listing every file with its size and content type", async () => {

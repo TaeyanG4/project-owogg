@@ -2,12 +2,17 @@ import type {
   HostToGameMultiplayerMessage,
   MultiInitMessage,
 } from "../bridge/multiplayerProtocol.js";
+import type { OwoggMultiplayerRequest } from "./multiplayerManifest.js";
 
-/** Public, engine-neutral OWOGG Game Creator Manifest v1 contract. */
+/** Public, engine-neutral OWOGG Game Creator Manifest contracts. */
 
 export const OWOGG_GAME_CREATOR_MANIFEST_SCHEMA_URL =
   "https://owogg.com/schemas/manifest/v1.json" as const;
 export const OWOGG_GAME_CREATOR_MANIFEST_VERSION = 1 as const;
+export const OWOGG_GAME_CREATOR_MANIFEST_V2_SCHEMA_URL =
+  "https://owogg.com/schemas/manifest/v2.json" as const;
+export const OWOGG_GAME_CREATOR_MANIFEST_V2_VERSION = 2 as const;
+export const OWOGG_GAME_CREATOR_MANIFEST_SUPPORTED_VERSIONS = [1, 2] as const;
 export const OWOGG_GAME_CREATOR_MANIFEST_FILENAME = "owogg.json" as const;
 
 export type OwoggInputMethod = "keyboard" | "mouse" | "touch" | "gamepad";
@@ -21,6 +26,7 @@ export type OwoggAchievementScope = "session" | "lifetime";
 export type OwoggAchievementSource = "score" | "outcome" | "progression" | "metric" | "event";
 export type OwoggAchievementAggregate = "max" | "min" | "sum" | "count";
 export type OwoggComparisonOperator = "==" | "!=" | ">" | ">=" | "<" | "<=";
+export type OwoggPlayMode = "single" | "local-multi" | "online-multi";
 
 export interface OwoggRangeDefinition {
   readonly min: number;
@@ -37,6 +43,11 @@ export interface OwoggManifestGame {
   readonly shortDescription?: string | undefined;
   readonly description?: string | undefined;
   readonly tags?: readonly string[] | undefined;
+}
+
+export interface OwoggManifestGameV2 extends OwoggManifestGame {
+  /** Explicit launch modes. `mode` remains the coarse catalog value for v1 UI compatibility. */
+  readonly playModes: readonly OwoggPlayMode[];
 }
 
 export interface OwoggManifestPresentation {
@@ -94,9 +105,8 @@ export interface OwoggAchievementDefinition {
   readonly condition: OwoggAchievementCondition;
 }
 
-export interface OwoggGameCreatorManifest {
+interface OwoggGameCreatorManifestCommon {
   readonly $schema?: string | undefined;
-  readonly schemaVersion: typeof OWOGG_GAME_CREATOR_MANIFEST_VERSION;
   readonly game: OwoggManifestGame;
   readonly input?: readonly OwoggInputMethod[] | undefined;
   readonly presentation?: OwoggManifestPresentation | undefined;
@@ -107,6 +117,23 @@ export interface OwoggGameCreatorManifest {
   readonly events?: Readonly<Record<string, OwoggEventDefinition>> | undefined;
   readonly achievements?: readonly OwoggAchievementDefinition[] | undefined;
 }
+
+/** Immutable legacy manifest. `game.mode: "multi"` is coarse/local metadata only. */
+export interface OwoggGameCreatorManifestV1 extends OwoggGameCreatorManifestCommon {
+  readonly schemaVersion: typeof OWOGG_GAME_CREATOR_MANIFEST_VERSION;
+}
+
+/**
+ * Manifest v2 adds an untrusted managed multiplayer request. Online service remains disabled until
+ * OWOGG creates and enables a matching exact-version approved profile.
+ */
+export interface OwoggGameCreatorManifestV2 extends Omit<OwoggGameCreatorManifestCommon, "game"> {
+  readonly schemaVersion: typeof OWOGG_GAME_CREATOR_MANIFEST_V2_VERSION;
+  readonly game: OwoggManifestGameV2;
+  readonly multiplayer?: OwoggMultiplayerRequest | undefined;
+}
+
+export type OwoggGameCreatorManifest = OwoggGameCreatorManifestV1 | OwoggGameCreatorManifestV2;
 
 /** Canonical subset needed by the host/result validator after registration metadata is projected. */
 export interface OwoggRuntimeContract {

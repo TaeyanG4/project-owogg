@@ -7,6 +7,48 @@ export const MULTIPLAYER_INTERNAL_PROTOCOL_HEADER = "X-Owogg-Multiplayer-Protoco
 export const MULTIPLAYER_INTERNAL_CONNECT_PATH = "/internal/multiplayer/connect";
 export const MULTIPLAYER_INTERNAL_LEAVE_PATH = "/internal/multiplayer/leave";
 export const MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH = "/internal/multiplayer/rematch-changed";
+export const MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH = "/internal/multiplayer/lobby-connect";
+export const MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH = "/internal/multiplayer/lobby-changed";
+export const MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER = "X-Owogg-Multiplayer-Lobby-Claims";
+
+export interface VerifiedMultiplayerLobbyClaims {
+  readonly instanceId: string;
+  readonly participantId: string;
+  readonly userId: number;
+  readonly generation: number;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function isOpaqueId(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{8,128}$/.test(value);
+}
+
+function parseVerifiedMultiplayerLobbyClaims(
+  value: unknown,
+): VerifiedMultiplayerLobbyClaims | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const source = value as Record<string, unknown>;
+  const keys = Object.keys(source);
+  if (
+    keys.length !== 4 ||
+    !keys.every((key) => ["instanceId", "participantId", "userId", "generation"].includes(key)) ||
+    !isOpaqueId(source.instanceId) ||
+    !isOpaqueId(source.participantId) ||
+    !isPositiveInteger(source.userId) ||
+    !isPositiveInteger(source.generation)
+  ) {
+    return null;
+  }
+  return {
+    instanceId: source.instanceId,
+    participantId: source.participantId,
+    userId: source.userId,
+    generation: source.generation,
+  };
+}
 
 function bytesToBase64Url(bytes: Uint8Array): string {
   let binary = "";
@@ -44,6 +86,31 @@ export function decodeVerifiedMultiplayerClaims(
   if (!bytes) return null;
   try {
     return parseMultiplayerJoinTicketClaims(
+      JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)),
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** Encodes only the identity already authenticated by the outer Worker. No session cookie or
+ * gameplay ticket is forwarded into the Durable Object. */
+export function encodeVerifiedMultiplayerLobbyClaims(
+  claims: VerifiedMultiplayerLobbyClaims,
+): string {
+  const parsed = parseVerifiedMultiplayerLobbyClaims(claims);
+  if (!parsed) throw new RangeError("invalid verified multiplayer lobby claims");
+  return bytesToBase64Url(new TextEncoder().encode(JSON.stringify(parsed)));
+}
+
+export function decodeVerifiedMultiplayerLobbyClaims(
+  encoded: string | null | undefined,
+): VerifiedMultiplayerLobbyClaims | null {
+  if (!encoded) return null;
+  const bytes = base64UrlToBytes(encoded);
+  if (!bytes) return null;
+  try {
+    return parseVerifiedMultiplayerLobbyClaims(
       JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)),
     );
   } catch {

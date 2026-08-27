@@ -1,8 +1,16 @@
 import {
   MULTIPLAYER_PROTOCOL_VERSION,
+  parseApprovedMultiplayerProfileV1,
   type ApprovedMultiplayerProfileV1,
   type MultiplayerRuntimeBackend,
 } from "./multiplayerProfile.js";
+import {
+  OWOGG_MULTIPLAYER_MANAGED_TEMPLATE_IDS,
+  OWOGG_MULTIPLAYER_REQUEST_VERSION,
+  type OwoggManagedMultiplayerRequestV1,
+  type OwoggMultiplayerManagedTemplateId,
+  type OwoggMultiplayerSimulation,
+} from "@owogg/game-sdk/contracts";
 import { sha256Hex } from "../../../domain/contentHash.js";
 import {
   parseMultiplayerCapabilityRequestV1,
@@ -13,13 +21,9 @@ import {
 } from "./multiplayerCapability.js";
 
 export const MULTIPLAYER_PROFILE_REQUEST_SCHEMA_VERSION = 1 as const;
-export const MULTIPLAYER_MANAGED_TEMPLATE_IDS = [
-  "turn-grid",
-  "reaction-arena",
-  "realtime-paddle",
-] as const;
+export const MULTIPLAYER_MANAGED_TEMPLATE_IDS = OWOGG_MULTIPLAYER_MANAGED_TEMPLATE_IDS;
 
-export type MultiplayerManagedTemplateId = (typeof MULTIPLAYER_MANAGED_TEMPLATE_IDS)[number];
+export type MultiplayerManagedTemplateId = OwoggMultiplayerManagedTemplateId;
 
 export interface ManagedMultiplayerProfileRequestV1 {
   readonly requestSchemaVersion: typeof MULTIPLAYER_PROFILE_REQUEST_SCHEMA_VERSION;
@@ -48,11 +52,30 @@ export type ManagedMultiplayerRequestResolutionV1 =
 
 export interface ManagedMultiplayerProfilePolicyV1 {
   readonly resolvedClass: "M1" | "M2";
+  readonly simulationModel: Extract<
+    MultiplayerCapabilityRequestV1["simulation"],
+    "turn" | "event" | "realtime"
+  >;
   readonly runtimeBackend: MultiplayerRuntimeBackend;
   readonly rulesetKey:
     "managed:turn-grid:v1" | "managed:reaction-arena:v1" | "managed:realtime-paddle:v1";
   readonly rulesetRevision: 1;
   readonly resolvedConfigJson: string;
+  readonly lifecycle: Extract<MultiplayerCapabilityRequestV1["lifecycle"], "match" | "continuous">;
+  readonly persistence: "match";
+  readonly latencyProfile: Extract<
+    MultiplayerCapabilityRequestV1["latency"],
+    "relaxed" | "interactive"
+  >;
+  readonly reconnectPolicy: MultiplayerCapabilityRequestV1["reconnect"];
+  readonly minPlayers: number;
+  readonly maxPlayers: number;
+  readonly allowedVisibility: readonly ["PRIVATE"];
+  readonly allowedJoinPolicies: readonly ["OPEN"];
+  readonly maxActionBytes: number;
+  readonly maxStateBytes: number;
+  readonly actionRateLimit: number;
+  readonly rewardPolicyId: null;
 }
 
 export class MultiplayerProfileRequestValidationError extends Error {
@@ -151,10 +174,13 @@ function assertTemplateCompatibility(
 ): void {
   if (templateId === "turn-grid") {
     if (
+      capability.players.min !== 2 ||
+      capability.players.max !== 2 ||
       capability.simulation !== "turn" ||
       capability.lifecycle !== "match" ||
       capability.persistence !== "match" ||
       capability.latency !== "relaxed" ||
+      capability.reconnect !== "resume" ||
       capability.capabilities.hiddenInformation ||
       capability.capabilities.simultaneousResponse ||
       capability.capabilities.joinInProgress ||
@@ -166,9 +192,13 @@ function assertTemplateCompatibility(
   }
   if (templateId === "reaction-arena") {
     if (
+      capability.players.min < 2 ||
+      capability.players.max > 8 ||
       capability.simulation !== "event" ||
       capability.lifecycle !== "match" ||
       capability.persistence !== "match" ||
+      capability.latency !== "interactive" ||
+      capability.reconnect !== "none" ||
       !capability.capabilities.simultaneousResponse ||
       capability.capabilities.hiddenInformation ||
       capability.capabilities.joinInProgress ||
@@ -179,10 +209,14 @@ function assertTemplateCompatibility(
     return;
   }
   if (
+    capability.players.min !== 2 ||
+    capability.players.max !== 2 ||
     capability.simulation !== "realtime" ||
     capability.lifecycle !== "continuous" ||
     capability.persistence !== "match" ||
     capability.latency !== "interactive" ||
+    capability.reconnect !== "resume" ||
+    !capability.capabilities.simultaneousResponse ||
     capability.capabilities.hiddenInformation ||
     capability.capabilities.joinInProgress ||
     capability.capabilities.spectators
@@ -198,9 +232,12 @@ export function parseManagedMultiplayerProfileRequestV1(
   const source = record(value, "multiplayer");
   exactKeys(
     source,
-    ["kind", "template", "players", "requirements", "config", "client"],
+    ["requestVersion", "kind", "template", "players", "requirements", "config", "client"],
     "multiplayer",
   );
+  if (source.requestVersion !== OWOGG_MULTIPLAYER_REQUEST_VERSION) {
+    invalid(`multiplayer.requestVersion must be ${OWOGG_MULTIPLAYER_REQUEST_VERSION}`);
+  }
   if (source.kind !== "managed-template") invalid('multiplayer.kind must be "managed-template"');
 
   const templateSource = record(source.template, "multiplayer.template");
@@ -231,6 +268,12 @@ export function parseManagedMultiplayerProfileRequestV1(
     ],
     "multiplayer.requirements",
   );
+  const requestedSimulation = enumValue(requirements, "simulation", "multiplayer.requirements", [
+    "turn",
+    "event",
+    "continuous",
+    "rollback",
+  ] as const satisfies readonly OwoggMultiplayerSimulation[]);
   let capability: MultiplayerCapabilityRequestV1;
   try {
     capability = parseMultiplayerCapabilityRequestV1({
@@ -238,7 +281,7 @@ export function parseManagedMultiplayerProfileRequestV1(
         min: integer(players, "min", "multiplayer.players", 2, 64),
         max: integer(players, "max", "multiplayer.players", 2, 64),
       },
-      simulation: requirements.simulation,
+      simulation: requestedSimulation === "continuous" ? "realtime" : requestedSimulation,
       authority: "server",
       lifecycle: requirements.lifecycle,
       persistence: requirements.persistence,
@@ -307,6 +350,46 @@ function canonicalManagedConfig(request: ManagedMultiplayerProfileRequestV1) {
         };
 }
 
+function publicSimulation(
+  simulation: MultiplayerCapabilityRequestV1["simulation"],
+): OwoggMultiplayerSimulation {
+  return simulation === "realtime" ? "continuous" : simulation;
+}
+
+/** Rebuild the normalized public `owogg.json` v2 multiplayer request object. */
+export function toOwoggManagedMultiplayerRequestV1(
+  request: ManagedMultiplayerProfileRequestV1,
+): OwoggManagedMultiplayerRequestV1 {
+  const normalized = {
+    requestVersion: OWOGG_MULTIPLAYER_REQUEST_VERSION,
+    kind: request.kind,
+    template: {
+      id: request.template.id,
+      version: request.template.version,
+    },
+    players: {
+      min: request.capability.players.min,
+      max: request.capability.players.max,
+    },
+    requirements: {
+      simulation: publicSimulation(request.capability.simulation),
+      lifecycle: request.capability.lifecycle,
+      persistence: request.capability.persistence,
+      latency: request.capability.latency,
+      reconnect: request.capability.reconnect,
+      hiddenInformation: request.capability.capabilities.hiddenInformation,
+      simultaneousResponse: request.capability.capabilities.simultaneousResponse,
+      joinInProgress: request.capability.capabilities.joinInProgress,
+      spectators: request.capability.capabilities.spectators,
+    },
+    config: canonicalManagedConfig(request),
+    client: {
+      protocolVersion: request.client.protocolVersion,
+    },
+  };
+  return normalized as OwoggManagedMultiplayerRequestV1;
+}
+
 /** Resolve the server-owned ruleset identity and config for one approved managed request. */
 export function deriveManagedMultiplayerProfilePolicyV1(
   request: ManagedMultiplayerProfileRequestV1,
@@ -315,13 +398,57 @@ export function deriveManagedMultiplayerProfilePolicyV1(
   if (resolution.status !== "SUPPORTED_V1") {
     invalid(`request cannot be approved by the V1 runtime: ${resolution.reason}`);
   }
+  const resourcePolicy =
+    request.template.id === "turn-grid"
+      ? { maxActionBytes: 1024, maxStateBytes: 8192, actionRateLimit: 5 }
+      : request.template.id === "reaction-arena"
+        ? { maxActionBytes: 512, maxStateBytes: 4096, actionRateLimit: 12 }
+        : { maxActionBytes: 256, maxStateBytes: 8192, actionRateLimit: 30 };
   return {
     resolvedClass: resolution.resolvedClass,
+    simulationModel: request.capability
+      .simulation as ManagedMultiplayerProfilePolicyV1["simulationModel"],
     runtimeBackend: resolution.runtimeBackend,
     rulesetKey: `managed:${request.template.id}:v1`,
     rulesetRevision: 1,
     resolvedConfigJson: JSON.stringify(canonicalManagedConfig(request)),
+    lifecycle: request.capability.lifecycle as ManagedMultiplayerProfilePolicyV1["lifecycle"],
+    persistence: "match",
+    latencyProfile: request.capability
+      .latency as ManagedMultiplayerProfilePolicyV1["latencyProfile"],
+    reconnectPolicy: request.capability.reconnect,
+    minPlayers: request.capability.players.min,
+    maxPlayers: request.capability.players.max,
+    allowedVisibility: ["PRIVATE"],
+    allowedJoinPolicies: ["OPEN"],
+    ...resourcePolicy,
+    rewardPolicyId: null,
   };
+}
+
+/**
+ * Builds the only trusted profile shape that may result from a managed request. The profile always
+ * starts disabled; activation remains a separate audited control-plane decision after the exact
+ * game version has passed moderation and Staging validation.
+ */
+export function buildApprovedManagedMultiplayerProfileV1(input: {
+  readonly gameId: number;
+  readonly gameVersionId: number;
+  readonly requestHash: string;
+  readonly profileRevision: number;
+  readonly request: ManagedMultiplayerProfileRequestV1;
+}): ApprovedMultiplayerProfileV1 {
+  const policy = deriveManagedMultiplayerProfilePolicyV1(input.request);
+  return parseApprovedMultiplayerProfileV1({
+    profileVersion: 1,
+    gameId: input.gameId,
+    gameVersionId: input.gameVersionId,
+    sourceRequestHash: input.requestHash,
+    profileRevision: input.profileRevision,
+    protocolVersion: MULTIPLAYER_PROTOCOL_VERSION,
+    ...policy,
+    enabled: false,
+  });
 }
 
 /**
@@ -333,20 +460,25 @@ export function assertManagedMultiplayerProfileMatchesRequestV1(
   profile: ApprovedMultiplayerProfileV1,
 ): void {
   const policy = deriveManagedMultiplayerProfilePolicyV1(request);
-  const capability = request.capability;
   if (
     profile.resolvedClass !== policy.resolvedClass ||
+    profile.simulationModel !== policy.simulationModel ||
     profile.runtimeBackend !== policy.runtimeBackend ||
     profile.rulesetKey !== policy.rulesetKey ||
     profile.rulesetRevision !== policy.rulesetRevision ||
     profile.resolvedConfigJson !== policy.resolvedConfigJson ||
-    profile.simulationModel !== capability.simulation ||
-    profile.lifecycle !== capability.lifecycle ||
-    profile.persistence !== capability.persistence ||
-    profile.latencyProfile !== capability.latency ||
-    profile.reconnectPolicy !== capability.reconnect ||
-    profile.minPlayers !== capability.players.min ||
-    profile.maxPlayers !== capability.players.max
+    profile.lifecycle !== policy.lifecycle ||
+    profile.persistence !== policy.persistence ||
+    profile.latencyProfile !== policy.latencyProfile ||
+    profile.reconnectPolicy !== policy.reconnectPolicy ||
+    profile.minPlayers !== policy.minPlayers ||
+    profile.maxPlayers !== policy.maxPlayers ||
+    JSON.stringify(profile.allowedVisibility) !== JSON.stringify(policy.allowedVisibility) ||
+    JSON.stringify(profile.allowedJoinPolicies) !== JSON.stringify(policy.allowedJoinPolicies) ||
+    profile.maxActionBytes !== policy.maxActionBytes ||
+    profile.maxStateBytes !== policy.maxStateBytes ||
+    profile.actionRateLimit !== policy.actionRateLimit ||
+    profile.rewardPolicyId !== policy.rewardPolicyId
   ) {
     invalid("approved profile does not match the server-resolved managed template policy");
   }
@@ -361,6 +493,7 @@ export function serializeManagedMultiplayerProfileRequestV1(
   request: ManagedMultiplayerProfileRequestV1,
 ): string {
   const parsed = parseManagedMultiplayerProfileRequestV1({
+    requestVersion: OWOGG_MULTIPLAYER_REQUEST_VERSION,
     kind: request.kind,
     template: {
       id: request.template.id,
@@ -371,7 +504,7 @@ export function serializeManagedMultiplayerProfileRequestV1(
       max: request.capability.players.max,
     },
     requirements: {
-      simulation: request.capability.simulation,
+      simulation: publicSimulation(request.capability.simulation),
       lifecycle: request.capability.lifecycle,
       persistence: request.capability.persistence,
       latency: request.capability.latency,
@@ -387,34 +520,7 @@ export function serializeManagedMultiplayerProfileRequestV1(
     },
   });
 
-  const config = canonicalManagedConfig(parsed);
-
-  return JSON.stringify({
-    kind: parsed.kind,
-    template: {
-      id: parsed.template.id,
-      version: parsed.template.version,
-    },
-    players: {
-      min: parsed.capability.players.min,
-      max: parsed.capability.players.max,
-    },
-    requirements: {
-      simulation: parsed.capability.simulation,
-      lifecycle: parsed.capability.lifecycle,
-      persistence: parsed.capability.persistence,
-      latency: parsed.capability.latency,
-      reconnect: parsed.capability.reconnect,
-      hiddenInformation: parsed.capability.capabilities.hiddenInformation,
-      simultaneousResponse: parsed.capability.capabilities.simultaneousResponse,
-      joinInProgress: parsed.capability.capabilities.joinInProgress,
-      spectators: parsed.capability.capabilities.spectators,
-    },
-    config,
-    client: {
-      protocolVersion: parsed.client.protocolVersion,
-    },
-  });
+  return JSON.stringify(toOwoggManagedMultiplayerRequestV1(parsed));
 }
 
 export async function hashManagedMultiplayerProfileRequestV1(

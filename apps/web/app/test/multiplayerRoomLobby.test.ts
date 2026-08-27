@@ -18,10 +18,11 @@ function player(seatIndex: number, status: "JOINED" | "READY" = "READY"): Multip
   };
 }
 
-test("the host can start only after the minimum number of players are all ready", () => {
+test("host readiness is implicit while every ordinary player must be ready", () => {
   assert.equal(multiplayerLobbyCanStart([player(0)], 2), false);
   assert.equal(multiplayerLobbyCanStart([player(0), player(1, "JOINED")], 2), false);
   assert.equal(multiplayerLobbyCanStart([player(0), player(1)], 2), true);
+  assert.equal(multiplayerLobbyCanStart([player(0, "JOINED"), player(1)], 2), true);
   assert.equal(multiplayerLobbyCanStart([player(0), player(1), player(2)], 4), false);
 });
 

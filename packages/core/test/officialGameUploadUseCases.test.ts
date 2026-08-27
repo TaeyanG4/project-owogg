@@ -18,6 +18,9 @@ import {
   type OfficialGameDeletionPlan,
   type OfficialGameDeletionDisposition,
   type OfficialGameLifecycleRepository,
+  type MultiplayerProfileRequestRecord,
+  type MultiplayerProfileRequestRepository,
+  type SubmitMultiplayerProfileRequestInput,
 } from "../src/index.js";
 
 const encoder = new TextEncoder();
@@ -164,6 +167,58 @@ class FakeOfficialRepository implements OfficialGameUploadRepository {
   }
 }
 
+class FakeMultiplayerProfileRequests implements MultiplayerProfileRequestRepository {
+  readonly submissions: SubmitMultiplayerProfileRequestInput[] = [];
+  rejectNext = false;
+  private record: MultiplayerProfileRequestRecord | null = null;
+
+  async submit(input: SubmitMultiplayerProfileRequestInput) {
+    this.submissions.push(input);
+    if (this.rejectNext) {
+      this.rejectNext = false;
+      return { status: "REJECTED" as const, code: "REQUEST_CONFLICT" as const };
+    }
+    if (this.record) return { status: "REPLAYED" as const, record: this.record };
+    this.record = {
+      id: 1,
+      gameId: input.gameId,
+      gameVersionId: input.gameVersionId,
+      requestSchemaVersion: 1,
+      requestHash: "a".repeat(64),
+      requestJson: "{}",
+      request: input.request,
+      requestedByUserId: input.requestedByUserId,
+      status: "PENDING_REVIEW",
+      reviewedByAdminId: null,
+      reviewedAt: null,
+      decisionReasonCode: null,
+      createdAt: input.nowIso,
+      updatedAt: input.nowIso,
+    };
+    return { status: "CREATED" as const, record: this.record };
+  }
+
+  async findById(requestId: number) {
+    return this.record?.id === requestId ? this.record : null;
+  }
+
+  async findByExactVersion(gameVersionId: number) {
+    return this.record?.gameVersionId === gameVersionId ? this.record : null;
+  }
+
+  async listPending() {
+    return this.record ? [this.record] : [];
+  }
+
+  async review(): Promise<never> {
+    throw new Error("not used");
+  }
+
+  async withdraw(): Promise<never> {
+    throw new Error("not used");
+  }
+}
+
 const files = {
   "index.html": encoder.encode("<html>game</html>"),
   "owogg.logo.svg": encoder.encode("<svg/>"),
@@ -194,6 +249,56 @@ const archives: BundleArchiveReader = {
   read: () => files,
 };
 
+function multiplayerArchives(): BundleArchiveReader {
+  const multiplayerFiles = {
+    ...files,
+    "owogg.json": encoder.encode(
+      JSON.stringify({
+        $schema: "https://owogg.com/schemas/manifest/v2.json",
+        schemaVersion: 2,
+        game: {
+          slug: "admin-game",
+          title: "관리자 온라인 게임",
+          genre: "board",
+          mode: "multi",
+          playModes: ["online-multi"],
+        },
+        progression: { type: "none" },
+        result: { score: null },
+        leaderboard: { enabled: false },
+        multiplayer: {
+          requestVersion: 1,
+          kind: "managed-template",
+          template: { id: "turn-grid", version: 1 },
+          players: { min: 2, max: 2 },
+          requirements: {
+            simulation: "turn",
+            lifecycle: "match",
+            persistence: "match",
+            latency: "relaxed",
+            reconnect: "resume",
+            hiddenInformation: false,
+            simultaneousResponse: false,
+            joinInProgress: false,
+            spectators: false,
+          },
+          config: { boardWidth: 15, boardHeight: 15, winLength: 5 },
+          client: { protocolVersion: 1 },
+        },
+      }),
+    ),
+  };
+  return {
+    readMetadata: () =>
+      Object.entries(multiplayerFiles).map(([path, bytes]) => ({
+        path,
+        declaredSize: bytes.byteLength,
+        compressedSize: bytes.byteLength,
+      })),
+    read: () => multiplayerFiles,
+  };
+}
+
 test("admin upload publishes one OWOGG D1/B2 game and ignores archive authority spoofing", async () => {
   const repository = new FakeOfficialRepository();
   const storage = new FakeStorage();
@@ -213,6 +318,63 @@ test("admin upload publishes one OWOGG D1/B2 game and ignores archive authority 
   assert.ok(storage.objects.has("games/7/11/index.html"));
   assert.ok(storage.objects.has("games/7/11/.owogg-manifest.json"));
   assert.ok(storage.objects.has("games/7/logo.svg"));
+});
+
+test("official owogg.json v2 upload submits the same managed request with no Creator identity", async () => {
+  const repository = new FakeOfficialRepository();
+  const storage = new FakeStorage();
+  const canonicals = new FakeCanonicals();
+  const requests = new FakeMultiplayerProfileRequests();
+  const publication = new GamePublicationService(repository, storage, multiplayerArchives());
+  const useCases = new OfficialGameUploadUseCases(
+    repository,
+    storage,
+    canonicals,
+    publication,
+    undefined,
+    requests,
+  );
+
+  const result = await useCases.upload({ bytes: new Uint8Array([1, 2, 3]).buffer });
+
+  assert.equal(result.slug, "admin-game");
+  assert.equal(requests.submissions.length, 1);
+  assert.equal(requests.submissions[0]?.gameId, 7);
+  assert.equal(requests.submissions[0]?.gameVersionId, 11);
+  assert.equal(requests.submissions[0]?.requestedByUserId, null);
+  assert.equal(requests.submissions[0]?.request.template.id, "turn-grid");
+  assert.equal(repository.activated?.versionId, 11);
+});
+
+test("official managed-request conflict fails closed before the version becomes live", async () => {
+  const repository = new FakeOfficialRepository();
+  const storage = new FakeStorage();
+  const canonicals = new FakeCanonicals();
+  const requests = new FakeMultiplayerProfileRequests();
+  requests.rejectNext = true;
+  const publication = new GamePublicationService(repository, storage, multiplayerArchives());
+  const useCases = new OfficialGameUploadUseCases(
+    repository,
+    storage,
+    canonicals,
+    publication,
+    undefined,
+    requests,
+  );
+
+  await assert.rejects(
+    () => useCases.upload({ bytes: new Uint8Array([1, 2, 3]).buffer }),
+    (error: unknown) =>
+      error instanceof OfficialGameUploadFailure && error.code === "PUBLISH_FAILED",
+  );
+  assert.equal(repository.version?.publishStatus, "FAILED");
+  assert.equal(repository.activated, null);
+  assert.equal(canonicals.document, null);
+
+  const retried = await useCases.upload({ bytes: new Uint8Array([1, 2, 3]).buffer });
+  assert.equal(retried.versionId, 11);
+  assert.equal(repository.activated?.versionId, 11);
+  assert.equal(requests.submissions.length, 2);
 });
 
 test("admin upload distinguishes a real slug conflict from a D1 publication failure", async () => {

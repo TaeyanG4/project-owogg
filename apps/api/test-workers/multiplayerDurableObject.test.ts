@@ -6,7 +6,11 @@ import {
   runInDurableObject,
 } from "cloudflare:test";
 import { beforeAll, test } from "vitest";
-import { MULTIPLAYER_HEARTBEAT_REQUEST, MULTIPLAYER_HEARTBEAT_RESPONSE } from "@owogg/contracts";
+import {
+  MULTIPLAYER_HEARTBEAT_REQUEST,
+  MULTIPLAYER_HEARTBEAT_RESPONSE,
+  MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
+} from "@owogg/contracts";
 import {
   MULTIPLAYER_PLAYER_CONNECTION_CHANGED_EVENT,
   MULTIPLAYER_REMATCH_CHANGED_EVENT,
@@ -33,10 +37,16 @@ import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_CONNECT_PATH,
   MULTIPLAYER_INTERNAL_LEAVE_PATH,
+  MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER,
+  MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH,
+  MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH,
   MULTIPLAYER_INTERNAL_PROTOCOL_HEADER,
   MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH,
   decodeVerifiedMultiplayerClaims,
+  decodeVerifiedMultiplayerLobbyClaims,
   encodeVerifiedMultiplayerClaims,
+  encodeVerifiedMultiplayerLobbyClaims,
+  type VerifiedMultiplayerLobbyClaims,
 } from "../src/multiplayer/internalProtocol.js";
 
 const GAME_ID = 81_001;
@@ -209,6 +219,27 @@ function internalRequest(ticketClaims: MultiplayerJoinTicketClaims): Request {
   });
 }
 
+function internalLobbyRequest(lobbyClaims: VerifiedMultiplayerLobbyClaims): Request {
+  return new Request(`https://example.com${MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH}`, {
+    headers: {
+      Upgrade: "websocket",
+      [MULTIPLAYER_INTERNAL_PROTOCOL_HEADER]: MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
+      [MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER]: encodeVerifiedMultiplayerLobbyClaims(lobbyClaims),
+    },
+  });
+}
+
+function internalLobbyNotificationRequest(instanceId: string, generation: number): Request {
+  return new Request(`https://example.com${MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      [MULTIPLAYER_INTERNAL_PROTOCOL_HEADER]: MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
+    },
+    body: JSON.stringify({ instanceId, generation }),
+  });
+}
+
 function internalRematchNotificationRequest(generation: number): Request {
   return new Request(`https://example.com${MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH}`, {
     method: "POST",
@@ -367,6 +398,27 @@ async function connect(ticketClaims: MultiplayerJoinTicketClaims): Promise<{
   if (!socket) {
     throw new Error(`expected WebSocket upgrade, received ${response.status}`);
   }
+  socket.accept();
+  return { socket, response };
+}
+
+async function connectLobby(lobbyClaims: VerifiedMultiplayerLobbyClaims): Promise<{
+  readonly socket: WebSocket;
+  readonly response: Response;
+}> {
+  const id = env.MULTIPLAYER_INSTANCES.idFromName(lobbyClaims.instanceId);
+  const stub = env.MULTIPLAYER_INSTANCES.get(id);
+  const request = internalLobbyRequest(lobbyClaims);
+  if (
+    decodeVerifiedMultiplayerLobbyClaims(
+      request.headers.get(MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER),
+    ) === null
+  ) {
+    throw new Error("test harness failed to round-trip verified lobby claims");
+  }
+  const response = await stub.fetch(request.url, { headers: request.headers });
+  const socket = response.webSocket;
+  if (!socket) throw new Error(`expected lobby WebSocket upgrade, received ${response.status}`);
   socket.accept();
   return { socket, response };
 }
@@ -590,6 +642,54 @@ test("SQLite DO consumes one nonce and persists only minimal connection authorit
       },
     ]);
   });
+  socket.close(1000, "done");
+});
+
+test("lobby sockets receive ordered invalidations without gameplay state or credentials", async ({
+  expect,
+}) => {
+  const lobbyClaims: VerifiedMultiplayerLobbyClaims = {
+    instanceId: "workers_lobby_instance_0001",
+    participantId: "participant_lobby_workers_0001",
+    userId: HOST_USER_ID,
+    generation: 2,
+  };
+  const { socket, response } = await connectLobby(lobbyClaims);
+  expect(response.status).toBe(101);
+  expect(response.headers.get("Sec-WebSocket-Protocol")).toBeNull();
+
+  const stub = env.MULTIPLAYER_INSTANCES.get(
+    env.MULTIPLAYER_INSTANCES.idFromName(lobbyClaims.instanceId),
+  );
+  const firstMessage = nextMessage(socket, "first lobby invalidation");
+  const first = await stub.fetch(
+    internalLobbyNotificationRequest(lobbyClaims.instanceId, lobbyClaims.generation),
+  );
+  expect(first.status).toBe(204);
+  await expect(firstMessage).resolves.toEqual({
+    type: "LOBBY_CHANGED",
+    v: 1,
+    instanceId: lobbyClaims.instanceId,
+    generation: lobbyClaims.generation,
+    sequence: 1,
+  });
+
+  const secondMessage = nextMessage(socket, "second lobby invalidation");
+  const second = await stub.fetch(
+    internalLobbyNotificationRequest(lobbyClaims.instanceId, lobbyClaims.generation),
+  );
+  expect(second.status).toBe(204);
+  await expect(secondMessage).resolves.toEqual({
+    type: "LOBBY_CHANGED",
+    v: 1,
+    instanceId: lobbyClaims.instanceId,
+    generation: lobbyClaims.generation,
+    sequence: 2,
+  });
+
+  const heartbeat = nextRawMessage(socket, "lobby hibernation heartbeat response");
+  socket.send(MULTIPLAYER_HEARTBEAT_REQUEST);
+  await expect(heartbeat).resolves.toBe(MULTIPLAYER_HEARTBEAT_RESPONSE);
   socket.close(1000, "done");
 });
 

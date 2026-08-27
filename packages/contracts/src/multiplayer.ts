@@ -5,6 +5,9 @@ import { z } from "zod";
  * game instance. */
 export const MULTIPLAYER_HEARTBEAT_REQUEST = "owogg.multiplayer.heartbeat.v1";
 export const MULTIPLAYER_HEARTBEAT_RESPONSE = "owogg.multiplayer.heartbeat-ack.v1";
+/** Parent-only lobby update channel. It carries invalidation signals only; roster identity remains
+ * behind the authenticated HTTP roster endpoint and never enters a game iframe. */
+export const MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL = "owogg.multiplayer.lobby.v1";
 
 const OpaqueIdSchema = z.string().regex(/^[A-Za-z0-9_-]{8,128}$/);
 const StableIdentifierSchema = z.string().regex(/^[a-z0-9][a-z0-9._:/-]{0,95}$/);
@@ -16,6 +19,17 @@ const GameSlugSchema = z
 const IdempotencyKeySchema = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/);
 const PublicRoomCodeSchema = z.string().regex(/^[A-Za-z0-9_-]{12,64}$/);
 const InviteTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{32,128}$/);
+
+export const MultiplayerLobbyChangedMessageSchema = z
+  .object({
+    type: z.literal("LOBBY_CHANGED"),
+    v: z.literal(1),
+    instanceId: OpaqueIdSchema,
+    generation: z.number().int().positive(),
+    sequence: z.number().int().positive(),
+  })
+  .strict();
+export type MultiplayerLobbyChangedMessage = z.infer<typeof MultiplayerLobbyChangedMessageSchema>;
 
 export const MultiplayerRuntimeStatusResponseSchema = z
   .object({
@@ -150,6 +164,129 @@ export const AdminOfficialMultiplayerProfileResponseSchema = z.discriminatedUnio
 ]);
 export type AdminOfficialMultiplayerProfileResponse = z.infer<
   typeof AdminOfficialMultiplayerProfileResponseSchema
+>;
+
+const ManagedMultiplayerManifestRequestSchema = z
+  .object({
+    requestVersion: z.literal(1),
+    kind: z.literal("managed-template"),
+    template: z
+      .object({
+        id: z.enum(["turn-grid", "reaction-arena", "realtime-paddle"]),
+        version: z.literal(1),
+      })
+      .strict(),
+    players: z
+      .object({ min: z.number().int().min(2).max(64), max: z.number().int().min(2).max(64) })
+      .strict(),
+    requirements: z
+      .object({
+        simulation: z.enum(["turn", "event", "continuous", "rollback"]),
+        lifecycle: z.enum(["match", "continuous", "persistent"]),
+        persistence: z.enum(["none", "match", "player", "world"]),
+        latency: z.enum(["relaxed", "interactive", "critical"]),
+        reconnect: z.enum(["none", "rejoin", "resume"]),
+        hiddenInformation: z.boolean(),
+        simultaneousResponse: z.boolean(),
+        joinInProgress: z.boolean(),
+        spectators: z.boolean(),
+      })
+      .strict(),
+    config: z.record(z.number().int()).refine((value) => Object.keys(value).length <= 8),
+    client: z.object({ protocolVersion: z.literal(1) }).strict(),
+  })
+  .strict();
+
+const AdminManagedMultiplayerProfileRequestSchema = z
+  .object({
+    id: z.number().int().positive(),
+    gameId: z.number().int().positive(),
+    gameVersionId: z.number().int().positive(),
+    requestSchemaVersion: z.literal(1),
+    requestHash: z.string().regex(/^[a-f0-9]{64}$/),
+    request: ManagedMultiplayerManifestRequestSchema,
+    requestedByUserId: z.number().int().positive().nullable(),
+    status: z.enum(["PENDING_REVIEW", "APPROVED", "REJECTED", "WITHDRAWN"]),
+    reviewedByAdminId: z.number().int().positive().nullable(),
+    reviewedAt: z.string().datetime().nullable(),
+    decisionReasonCode: z
+      .string()
+      .regex(/^[A-Z][A-Z0-9_]{0,63}$/)
+      .nullable(),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+    resolution: z
+      .object({
+        status: z.literal("SUPPORTED_V1"),
+        resolvedClass: z.enum(["M1", "M2"]),
+        runtimeBackend: z.literal("durable-object"),
+      })
+      .strict(),
+  })
+  .strict();
+
+const AdminManagedMultiplayerProfileSchema = z
+  .object({
+    id: z.number().int().positive(),
+    profileRevision: z.number().int().positive(),
+    enabled: z.boolean(),
+    resolvedClass: z.enum(["M1", "M2"]),
+    simulationModel: z.enum(["turn", "event", "realtime"]),
+    rulesetKey: StableIdentifierSchema,
+    rulesetRevision: z.number().int().positive(),
+    minPlayers: z.number().int().min(2).max(8),
+    maxPlayers: z.number().int().min(2).max(8),
+    rewardPolicyId: z.null(),
+    updatedAt: z.string().datetime(),
+  })
+  .strict();
+
+export const AdminManagedMultiplayerProfileRequestListResponseSchema = z
+  .object({ requests: z.array(AdminManagedMultiplayerProfileRequestSchema).max(100) })
+  .strict();
+export type AdminManagedMultiplayerProfileRequestListResponse = z.infer<
+  typeof AdminManagedMultiplayerProfileRequestListResponseSchema
+>;
+
+export const AdminManagedMultiplayerProfileReviewRequestSchema = z
+  .object({
+    decision: z.enum(["APPROVED", "REJECTED"]),
+    reasonCode: z
+      .string()
+      .trim()
+      .regex(/^[A-Z][A-Z0-9_]{0,63}$/)
+      .nullable()
+      .optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.decision === "APPROVED" && value.reasonCode != null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["reasonCode"],
+        message: "reasonCode is forbidden for approval",
+      });
+    }
+    if (value.decision === "REJECTED" && value.reasonCode == null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["reasonCode"],
+        message: "reasonCode is required for rejection",
+      });
+    }
+  });
+export type AdminManagedMultiplayerProfileReviewRequest = z.infer<
+  typeof AdminManagedMultiplayerProfileReviewRequestSchema
+>;
+
+export const AdminManagedMultiplayerProfileReviewResponseSchema = z
+  .object({
+    request: AdminManagedMultiplayerProfileRequestSchema,
+    profile: AdminManagedMultiplayerProfileSchema.nullable(),
+  })
+  .strict();
+export type AdminManagedMultiplayerProfileReviewResponse = z.infer<
+  typeof AdminManagedMultiplayerProfileReviewResponseSchema
 >;
 
 export const MultiplayerJoinTicketRequestSchema = z

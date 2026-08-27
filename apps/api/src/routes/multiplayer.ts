@@ -17,6 +17,7 @@ import {
   MultiplayerRuntimeStatusResponseSchema,
   MultiplayerSetReadyRequestSchema,
   MultiplayerStartRoomRequestSchema,
+  MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
 } from "@owogg/contracts";
 import {
   MULTIPLAYER_ERROR_HTTP_STATUS,
@@ -38,9 +39,13 @@ import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_CONNECT_PATH,
   MULTIPLAYER_INTERNAL_LEAVE_PATH,
+  MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER,
+  MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH,
+  MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH,
   MULTIPLAYER_INTERNAL_PROTOCOL_HEADER,
   MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH,
   encodeVerifiedMultiplayerClaims,
+  encodeVerifiedMultiplayerLobbyClaims,
 } from "../multiplayer/internalProtocol.js";
 import type { ApiEnv } from "./auth.js";
 
@@ -72,6 +77,7 @@ const PUBLIC_MESSAGES: Readonly<Record<MultiplayerErrorCode, string>> = {
   RATE_LIMITED: "요청이 너무 잦습니다. 잠시 후 다시 시도해주세요.",
   INTERNAL_RETRYABLE: "일시적인 오류가 발생했습니다. 다시 시도해주세요.",
 };
+const INSTANCE_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
 
 function failure(c: Context<ApiEnv>, code: MultiplayerErrorCode) {
   return c.json(
@@ -104,7 +110,16 @@ async function takeRateLimit(
 function requestRateKey(
   c: Context<ApiEnv>,
   operation:
-    "create" | "join" | "ready" | "start" | "leave" | "invite" | "roster" | "ticket" | "socket",
+    | "create"
+    | "join"
+    | "ready"
+    | "start"
+    | "leave"
+    | "invite"
+    | "roster"
+    | "lobby"
+    | "ticket"
+    | "socket",
 ): string {
   // Keep callers behind the same home/campus/mobile NAT independent while never exposing the
   // full bearer credential to Cloudflare rate-limit logs. This mirrors the platform-wide write
@@ -202,6 +217,31 @@ function notifyRematchChange(c: Context<ApiEnv>, instanceId: string, generation:
   } catch {
     // Hono's direct unit-test request helper has no ExecutionContext. The already-started promise
     // remains harmless; production Workers always attach it to waitUntil.
+  }
+}
+
+function notifyLobbyChange(c: Context<ApiEnv>, instanceId: string, generation: number): void {
+  const namespace = c.env.MULTIPLAYER_INSTANCES;
+  if (!namespace) return;
+  const notification = namespace
+    .get(namespace.idFromName(instanceId))
+    .fetch(
+      new Request(`https://multiplayer.internal${MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          [MULTIPLAYER_INTERNAL_PROTOCOL_HEADER]: MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
+        },
+        body: JSON.stringify({ instanceId, generation }),
+      }),
+    )
+    .then(() => undefined)
+    .catch(() => undefined);
+  try {
+    c.executionCtx.waitUntil(notification);
+  } catch {
+    // Hono's direct request helper has no ExecutionContext. The request is already in flight and
+    // production Workers always attach it to waitUntil.
   }
 }
 
@@ -389,6 +429,7 @@ multiplayerRouter.post("/instances/join", async (c) => {
     inviteToken: parsed.data.inviteToken,
   });
   if (!result.ok) return failure(c, result.code);
+  notifyLobbyChange(c, result.instance.id, result.instance.generation);
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomResponseSchema.parse({
@@ -486,6 +527,7 @@ multiplayerRouter.post("/instances/:instanceId/ready", async (c) => {
     ready: parsed.data.ready,
   });
   if (!result.ok) return failure(c, result.code);
+  notifyLobbyChange(c, result.instance.id, result.instance.generation);
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomResponseSchema.parse({
@@ -526,6 +568,7 @@ multiplayerRouter.post("/instances/:instanceId/start", async (c) => {
     expectedGeneration: parsed.data.expectedGeneration,
   });
   if (!result.ok) return failure(c, result.code);
+  notifyLobbyChange(c, result.instance.id, result.instance.generation);
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomResponseSchema.parse({
@@ -635,6 +678,7 @@ multiplayerRouter.post("/instances/:instanceId/leave", async (c) => {
   ]);
   if (!instance) return failure(c, "INSTANCE_NOT_FOUND");
   if (!participant) return failure(c, "NOT_PARTICIPANT");
+  notifyLobbyChange(c, instance.id, instance.generation);
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomResponseSchema.parse({
@@ -688,6 +732,80 @@ multiplayerRouter.post("/instances/:instanceId/invites", async (c) => {
     }),
     result.replayed ? 200 : 201,
   );
+});
+
+multiplayerRouter.get("/instances/:instanceId/lobby-socket", async (c) => {
+  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED)) {
+    return failure(c, "MULTIPLAYER_UNAVAILABLE");
+  }
+  const config = readMultiplayerRuntimeConfig(c.env);
+  const namespace = c.env.MULTIPLAYER_INSTANCES;
+  if (!config || !namespace || !c.env.MULTIPLAYER_RATE_LIMITER) {
+    return failure(c, "MULTIPLAYER_UNAVAILABLE");
+  }
+  if (c.req.header("Upgrade")?.toLowerCase() !== "websocket") {
+    return failure(c, "INVALID_REQUEST");
+  }
+  if (!isTrustedMultiplayerSocketRequest(c.req.raw, config)) {
+    return failure(c, "FORBIDDEN");
+  }
+  if (c.req.header("Sec-WebSocket-Protocol")?.trim() !== MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL) {
+    return failure(c, "INVALID_REQUEST");
+  }
+
+  const rateLimit = await takeRateLimit(c.env, requestRateKey(c, "lobby"));
+  if (rateLimit === "DENIED") return failure(c, "RATE_LIMITED");
+  if (rateLimit === "UNAVAILABLE") return failure(c, "MULTIPLAYER_UNAVAILABLE");
+
+  const sessionId = getCookie(c, "owogg_session");
+  if (!sessionId) return failure(c, "UNAUTHENTICATED");
+  const instanceId = c.req.param("instanceId");
+  if (!INSTANCE_ID_PATTERN.test(instanceId)) return failure(c, "INVALID_REQUEST");
+
+  const container = createContainer(c.env.DB, readB2Config(c.env));
+  const authenticated = await container.sessionRepo.findSession(sessionId);
+  if (!authenticated) return failure(c, "UNAUTHENTICATED");
+  const [instance, participant] = await Promise.all([
+    container.multiplayerInstanceRepo.findById(instanceId),
+    container.multiplayerInstanceRepo.findParticipant(instanceId, authenticated.user.id),
+  ]);
+  if (!instance) return failure(c, "INSTANCE_NOT_FOUND");
+  if (instance.status !== "LOBBY" && instance.status !== "STARTING") {
+    return failure(c, "INSTANCE_NOT_JOINABLE");
+  }
+  if (!participant || (participant.status !== "JOINED" && participant.status !== "READY")) {
+    return failure(c, "NOT_PARTICIPANT");
+  }
+
+  // The outer edge authenticates the session and roster membership. The Durable Object receives
+  // only canonical verified claims; neither the session cookie nor a gameplay bearer is copied.
+  const internalRequest = new Request(
+    `https://multiplayer.internal${MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH}`,
+    {
+      method: "GET",
+      headers: {
+        Upgrade: "websocket",
+        [MULTIPLAYER_INTERNAL_PROTOCOL_HEADER]: MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
+        [MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER]: encodeVerifiedMultiplayerLobbyClaims({
+          instanceId,
+          participantId: participant.id,
+          userId: authenticated.user.id,
+          generation: instance.generation,
+        }),
+      },
+    },
+  );
+  try {
+    const response = await namespace.get(namespace.idFromName(instanceId)).fetch(internalRequest);
+    if (response.status !== 101 || !response.webSocket) return response;
+    return new Response(null, {
+      status: 101,
+      webSocket: response.webSocket,
+      headers: { "Sec-WebSocket-Protocol": MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL },
+    });
+  } catch {
+    return failure(c, "INTERNAL_RETRYABLE");
+  }
 });
 
 multiplayerRouter.post("/instances/:instanceId/ticket", async (c) => {

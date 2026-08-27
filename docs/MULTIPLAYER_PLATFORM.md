@@ -233,7 +233,7 @@ delete는 lease보다 우선하며 관련 match를 audit 가능한 reason으로 
 - 기존 v1 single/local game의 결과·플레이 흐름은 유지한다.
 - approved online profile에는 generic score session과 `/api/scores/:slug` 리더보드를 열지 않는다.
 
-### 계획된 v2 request
+### v2 request beta
 
 `owogg.json` v2는 권한이 아니라 Creator의 요청이다.
 
@@ -249,6 +249,7 @@ delete는 lease보다 우선하며 관련 match를 audit 가능한 reason으로 
     "playModes": ["online-multi"]
   },
   "multiplayer": {
+    "requestVersion": 1,
     "kind": "managed-template",
     "template": { "id": "turn-grid", "version": 1 },
     "players": { "min": 2, "max": 2 },
@@ -931,12 +932,12 @@ host가 최소 인원 확인 뒤 수동 시작하도록 변경했으며, 오목�
 
 ### Phase 8 — Creator managed-template beta
 
-- [ ] manifest v2 SDK/parser/schema/canonical projection
-- [ ] template registry와 strict config validators
-- [ ] profile request/review/Admin UI
+- [x] manifest v2 SDK/parser/schema/canonical projection
+- [x] template registry와 strict config validators
+- [ ] profile request/review/Admin UI (exact-version 저장·심사 API 완료, 운영 UI·활성화 UX 대기)
 - [ ] Creator Center template form/local two-player preview
-- [ ] USER identity 유지와 server-approved runtime profile
-- [ ] no custom server/URL/reward security tests
+- [x] USER identity 유지와 server-approved runtime profile
+- [x] no custom server/URL/reward security tests
 
 완료 Gate: Creator ZIP이 서버 권한을 스스로 얻지 못하고 approved exact version만 online 활성화된다.
 

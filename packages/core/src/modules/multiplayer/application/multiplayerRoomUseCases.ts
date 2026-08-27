@@ -314,17 +314,11 @@ export class MultiplayerRoomUseCases {
           }
           instance = current;
         }
-        const ready = await this.readyParticipant({
-          userId: input.userId,
-          instanceId: instance.id,
-          expectedGeneration: instance.generation,
-        });
-        if (!ready.ok) return ready;
         return {
           ok: true,
           replayed: created.status === "REPLAYED",
-          instance: ready.instance,
-          participant: ready.participant,
+          instance,
+          participant: created.host,
         };
       }
       return { ok: false, code: "INTERNAL_RETRYABLE" };
@@ -358,6 +352,16 @@ export class MultiplayerRoomUseCases {
       if (joined.status === "REJECTED") return { ok: false, code: joined.code };
       const current = await this.dependencies.instances.findById(instance.id);
       if (!current) return { ok: false, code: "INTERNAL_RETRYABLE" };
+      // Re-entering through the room code can replay the host seat. Host readiness is represented
+      // by the start command, so only ordinary players inherit the lobby's default READY state.
+      if (joined.participant.role === "HOST") {
+        return {
+          ok: true,
+          replayed: true,
+          instance: current,
+          participant: joined.participant,
+        };
+      }
       const ready = await this.readyParticipant({
         userId: input.userId,
         instanceId: current.id,
@@ -434,8 +438,8 @@ export class MultiplayerRoomUseCases {
     return this.setParticipantReady({ ...input, ready: true });
   }
 
-  /** Shared lobby readiness control. Joining defaults to READY, while this explicit operation lets
-   * a player opt out before the host starts. It is intentionally game-agnostic. */
+  /** Shared lobby readiness control. Players join READY and may opt out before start. The host has
+   * no separate ready state in the lobby: their start command is the readiness confirmation. */
   async setParticipantReady(
     input: SetMultiplayerParticipantReadyInput,
   ): Promise<ReadyMultiplayerParticipantResult> {
@@ -474,6 +478,7 @@ export class MultiplayerRoomUseCases {
       if (instance.status !== "LOBBY") {
         return { ok: false, code: "INSTANCE_NOT_JOINABLE" };
       }
+      if (participant.role === "HOST") return { ok: false, code: "FORBIDDEN" };
 
       const nowIso = this.now().toISOString();
       const nextStatus = input.ready ? "READY" : "JOINED";
@@ -518,11 +523,11 @@ export class MultiplayerRoomUseCases {
       if (instance.generation !== input.expectedGeneration) {
         return { ok: false, code: "STALE_GENERATION" };
       }
-      const participant = await this.dependencies.instances.findParticipant(
+      let participant = await this.dependencies.instances.findParticipant(
         instance.id,
         input.userId,
       );
-      if (!participant || participant.status !== "READY") {
+      if (!participant || (participant.status !== "JOINED" && participant.status !== "READY")) {
         return { ok: false, code: "NOT_PARTICIPANT" };
       }
       if (participant.role !== "HOST") return { ok: false, code: "FORBIDDEN" };
@@ -552,12 +557,32 @@ export class MultiplayerRoomUseCases {
       );
       if (
         activeParticipants.length < profileRecord.profile.minPlayers ||
-        activeParticipants.some((candidate) => candidate.status !== "READY")
+        activeParticipants.some(
+          (candidate) => candidate.role !== "HOST" && candidate.status !== "READY",
+        )
       ) {
         return { ok: false, code: "PLAYERS_NOT_READY" };
       }
 
       const nowIso = this.now().toISOString();
+      if (participant.status === "JOINED") {
+        const readyHost = await this.dependencies.instances.transitionParticipant({
+          instanceId: instance.id,
+          expectedInstanceGeneration: instance.generation,
+          userId: input.userId,
+          expectedStatus: "JOINED",
+          nextStatus: "READY",
+          readyAt: nowIso,
+          leftAt: null,
+          nowIso,
+        });
+        participant =
+          readyHost ??
+          (await this.dependencies.instances.findParticipant(instance.id, input.userId));
+        if (!participant || participant.status !== "READY") {
+          return { ok: false, code: "STALE_GENERATION" };
+        }
+      }
       if (instance.status === "LOBBY") {
         await this.dependencies.instances.transition({
           instanceId: instance.id,
@@ -806,7 +831,7 @@ export class MultiplayerRoomUseCases {
           requested.instance.id,
         );
         for (const candidate of participants) {
-          if (candidate.status !== "JOINED") continue;
+          if (candidate.status !== "JOINED" || candidate.role === "HOST") continue;
           const ready = await this.dependencies.instances.transitionParticipant({
             instanceId: requested.instance.id,
             expectedInstanceGeneration: requested.instance.generation,

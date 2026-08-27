@@ -286,6 +286,7 @@ test("self-join replays the host seat instead of creating a self-match participa
   if (joined.ok) {
     assert.equal(joined.replayed, true);
     assert.equal(joined.participant.id, created.participant.id);
+    assert.equal(joined.participant.status, "JOINED");
   }
   assert.equal((await instances.listParticipants(created.instance.id)).length, 1);
 });
@@ -293,7 +294,7 @@ test("self-join replays the host seat instead of creating a self-match participa
 test("participants enter READY while only the host start request creates one ACTIVE match", async () => {
   const { rooms, matches, instances } = harness();
   const created = await createRoom(rooms);
-  assert.equal(created.participant.status, "READY");
+  assert.equal(created.participant.status, "JOINED");
   const prematureStart = await rooms.startRoom({
     userId: 1,
     instanceId: created.instance.id,
@@ -318,12 +319,13 @@ test("participants enter READY while only the host start request creates one ACT
   if (!joined.ok) return;
   assert.equal(joined.participant.status, "READY");
 
-  const [hostReady, playerReady] = await Promise.all([
-    rooms.readyParticipant({ userId: 1, instanceId: created.instance.id, expectedGeneration: 1 }),
-    rooms.readyParticipant({ userId: 2, instanceId: created.instance.id, expectedGeneration: 1 }),
-  ]);
-  assert.equal(hostReady.ok, true);
-  assert.equal(playerReady.ok, true);
+  const hostReady = await rooms.setParticipantReady({
+    userId: 1,
+    instanceId: created.instance.id,
+    expectedGeneration: 1,
+    ready: true,
+  });
+  assert.deepEqual(hostReady, { ok: false, code: "FORBIDDEN" });
   assert.equal((await instances.findById(created.instance.id))?.status, "LOBBY");
   assert.equal(await matches.findMatchByInstanceGeneration(created.instance.id, 1), null);
   const playerStart = await rooms.startRoom({
@@ -338,6 +340,8 @@ test("participants enter READY while only the host start request creates one ACT
     expectedGeneration: 1,
   });
   assert.equal(started.ok, true);
+  if (!started.ok) return;
+  assert.equal(started.participant.status, "READY");
   const instance = await instances.findById(created.instance.id);
   assert.equal(instance?.status, "ACTIVE");
   const match = await matches.findMatchByInstanceGeneration(created.instance.id, 1);
@@ -377,7 +381,7 @@ test("a PRIVATE OPEN room accepts its opaque room code without an invite token",
     (await instances.listParticipants(created.instance.id)).map(
       (participant) => participant.status,
     ),
-    ["READY", "READY"],
+    ["JOINED", "READY"],
   );
 });
 
@@ -400,11 +404,6 @@ test("one rematch request waits while two exact participants open one next gener
   });
   assert.equal(joined.ok, true);
   if (!joined.ok) return;
-  await Promise.all([
-    rooms.readyParticipant({ userId: 1, instanceId: created.instance.id, expectedGeneration: 1 }),
-    rooms.readyParticipant({ userId: 2, instanceId: created.instance.id, expectedGeneration: 1 }),
-  ]);
-
   const started = await rooms.startRoom({
     userId: 1,
     instanceId: created.instance.id,
@@ -481,7 +480,7 @@ test("one rematch request waits while two exact participants open one next gener
     (await instances.listParticipants(created.instance.id)).map(
       (participant) => participant.status,
     ),
-    ["READY", "READY"],
+    ["JOINED", "READY"],
   );
   assert.equal((await instances.findLease(created.instance.id))?.generation, 2);
 

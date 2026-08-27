@@ -69,6 +69,7 @@ import {
   RuntimeGameAvailability,
   MultiplayerAdmissionUseCases,
   OfficialMultiplayerProfileUseCases,
+  ManagedMultiplayerProfileReviewUseCases,
   MultiplayerRoomUseCases,
   MultiplayerLegacyFlowGate,
   type UserRepository,
@@ -154,6 +155,7 @@ export interface AppContainer {
   multiplayerMatchRepo: MultiplayerMatchRepository;
   multiplayerAdmissionUseCases: MultiplayerAdmissionUseCases;
   officialMultiplayerProfileUseCases: OfficialMultiplayerProfileUseCases;
+  managedMultiplayerProfileReviewUseCases: ManagedMultiplayerProfileReviewUseCases;
   multiplayerRoomUseCases: MultiplayerRoomUseCases;
   multiplayerLegacyFlowGate: MultiplayerLegacyFlowGate;
   publicGameMetricsUseCases: PublicGameMetricsUseCases;
@@ -256,6 +258,10 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     runtimeGames: runtimeGameRegistry,
     profiles: multiplayerProfileRepo,
   });
+  const managedMultiplayerProfileReviewUseCases = new ManagedMultiplayerProfileReviewUseCases({
+    requests: multiplayerProfileRequestRepo,
+    profiles: multiplayerProfileRepo,
+  });
   const runtimeGameAvailability = new RuntimeGameAvailability(
     gameIdentityRepo,
     gameVersionRepo,
@@ -321,6 +327,7 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     gamePublicationService,
     gameCanonicalRepo,
     gameBundleArchiveCodec,
+    multiplayerProfileRequestRepo,
   );
   const officialGamePublicationService = new GamePublicationService(
     officialGameUploadRepo,
@@ -333,6 +340,7 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     gameCanonicalRepo,
     officialGamePublicationService,
     gameBundleArchiveCodec,
+    multiplayerProfileRequestRepo,
   );
   const officialGameLifecycleUseCases = new OfficialGameLifecycleUseCases(
     officialGameLifecycleRepo,
@@ -392,6 +400,7 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     multiplayerMatchRepo,
     multiplayerAdmissionUseCases,
     officialMultiplayerProfileUseCases,
+    managedMultiplayerProfileReviewUseCases,
     multiplayerRoomUseCases,
     multiplayerLegacyFlowGate,
     publicGameMetricsUseCases,
