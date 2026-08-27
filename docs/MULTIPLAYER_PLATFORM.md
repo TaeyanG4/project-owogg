@@ -143,13 +143,14 @@ domain class에 Cloudflare나 D1 이름을 하드코딩하지 않는다.
 ```text
 OwOGG Web / GameHost
  ├─ Auth, create, join, ready, roster, start ── API Worker ── D1
+ ├─ Lobby signal WebSocket ────────────────── MultiplayerLobbySignalObject (stateless/hibernating)
  ├─ Active-match WebSocket ─────────────────── MultiplayerInstanceObject
  │                                       └─ allowlisted official/template ruleset
  └─ MessageChannel ───────────────────── sandbox game iframe
 
 B2: exact version static bundle
 D1: game/version/profile/instance/participant/result/reward
-DO: authorized active instance sockets and live authoritative state
+DO: stateless lobby signal sockets + authorized active-match sockets/live authoritative state
 ```
 
 ### 영속 authority
@@ -162,6 +163,7 @@ DO: authorized active instance sockets and live authoritative state
 ### 활성 authority
 
 - D1 control plane: lobby membership, 기본 READY, host start, generation과 exact-version lease
+- Lobby signal DO: D1 commit 뒤 최소 delta/invalidation fan-out만 담당하며 authority/storage/alarm 없음
 - 한 active Instance에 하나의 Durable Object
 - DO: connections, active match state, sequence, reconnect deadline과 backpressure
 - M1 accepted action 또는 phase boundary를 DO SQLite에 저장
@@ -651,15 +653,22 @@ per-frame raw logging
 
 ### 권장
 
-- turn waiting은 Hibernation API를 사용한다. 대기실은 gameplay realtime transport가 아니라 D1 control
-  plane이므로 Durable Object를 만들지 않는다.
-- 대기실 roster는 foreground 15초, background 120초 간격에 ±10% jitter를 적용해 한 번씩만 조회하고
-  focus 복귀 때 즉시 동기화한다. 한 요청이 진행 중일 때 중복 요청하지 않으며 `429`는 120초, 일시적
-  network/5xx는 60초로 backoff하고 ACTIVE/종료 즉시 중단한다.
+- 공용 대기실은 전용 `MultiplayerLobbySignalObject`의 Hibernation WebSocket을 사용한다. 이 객체는
+  D1을 읽거나 쓰지 않고, DO storage·alarm·timer·게임 규칙을 갖지 않으며 변경 알림만 fan-out한다.
+  D1이 roster와 준비 상태의 유일한 정본이다.
+- Join/Ready/Start/대기실 Leave는 먼저 D1에서 확정한다. READY는 `participantId/status/changedAt`만
+  전송해 즉시 repaint하고, 입장·퇴장·시작은 credential-free invalidation을 보내 수신자가 인증된
+  roster를 한 번 조회한다. 알림 실패는 D1 mutation을 되돌리지 않는다.
+- socket 정상 상태에서는 foreground 5분 무결성 확인과 focus 복귀 시에만 roster를 조회한다. 연결
+  장애 때만 `0→15→30→60→120초` fallback 조회와 `5→15→30→60→120초` 재연결을 사용하며 hidden
+  탭은 최소 120초 간격을 적용한다. 한 요청이 진행 중이면 한 번의 trailing refresh로 합치고 `429`는
+  120초 대기한다.
+- 대기실 heartbeat는 120초이며 Hibernation auto-response가 처리하므로 객체를 깨우거나 duration을
+  만들지 않는다. application state·event sequence를 DO에 저장하지 않고, 재연결 시 full roster 한
+  번으로 유실된 알림을 복구한다.
 - active gameplay heartbeat는 30초 간격과 Hibernation auto-response를 사용하고 terminal/abort/leave 즉시
-  중단한다. 대기실에는 WebSocket과 heartbeat가 모두 없다.
-- Join/Ready/Start와 대기실 Leave는 D1에서만 처리한다. 명시적 Leave가 진행 중 match의 즉시 기권을
-  확정해야 할 때만 Durable Object control request를 사용한다.
+  중단한다. 명시적 Leave가 진행 중 match의 즉시 기권을 확정해야 할 때만 gameplay Durable Object
+  control request를 사용한다.
 - gameplay message마다 `last_seen_at`을 갱신하지 않는다. Hibernation WebSocket의 close/error와
   connection generation이 접속 권위이며, 연결 시각과 실제 disconnect 시각만 저장해 action당 DO SQL
   write 1개를 제거한다. 1초 action burst window는 메모리에 두고, turn/revision/action-id/D1 action ledger와
@@ -706,9 +715,10 @@ write 50M이 포함되며 초과 단가는 request `$0.15/M`, duration `$12.50/M
 WebSocket upgrade와 alarm은 각각 request 1개이고 client→DO message는 과금에서 20:1로 환산한다. DO
 dashboard의 message metric은 20:1 전 원시 개수이므로 quota 계산과 직접 비교하지 않는다.
 
-대기실 DO 0은 전체 요청 0이라는 뜻은 아니다. 두 플레이어가 모두 foreground이면 roster HTTP/D1 조회는
-분당 최대 약 8회, 둘 다 background이면 약 1회다. 이는 DO request/write 고갈을 막는 대신 일반 Worker
-request와 D1 read로 비용 축을 옮긴 의도적 절충이다. 실제 D1 과금은 반환 행 수가 아니라 스캔한
+휴면 중인 대기실 socket은 duration을 소비하지 않는다. 정상 연결에서는 참가자당 최초 roster 1회와
+foreground 5분당 무결성 조회 1회만 D1을 사용하며, READY 변경은 추가 D1 조회 없이 작은 delta로
+반영한다. 대기실 DO request는 참가자별 upgrade, 실제 상태 변경 notification, client heartbeat의 20:1
+환산분에 한정되고 DO SQLite read/write와 alarm은 0이다. 실제 D1 과금은 반환 행 수가 아니라 스캔한
 `rows_read`를 사용하므로 [D1 공식 가격/계측 기준](https://developers.cloudflare.com/d1/platform/pricing/)의
 query meta와 dashboard로 별도 측정한다.
 
@@ -716,21 +726,22 @@ query meta와 dashboard로 별도 측정한다.
 식의 DO request에 포함되지 않는다.
 
 ```text
-fixed DO fetch/upgrade = 2
-  host/player gameplay upgrade 2
+fixed DO fetch/upgrade = 약 6
+  lobby signal upgrade 2 + join/start notification 2 + host/player gameplay upgrade 2
 normal lifecycle alarm = 약 1
   rematch expiry 1 (disconnect/finalization retry가 없는 정상 완료 기준)
-client WebSocket messages = N + 3 + 2*floor(T/30)
-  N moves + game ready 2 + stone selection 1 + 30초 heartbeat 2인
+client WebSocket messages = N + 3 + 2*floor(T/30) + 2*floor(W/120)
+  N moves + game ready 2 + stone selection 1 + gameplay 30초 heartbeat 2인
+  + lobby waiting W초 동안 120초 heartbeat 2인
 
-billable DO requests ≈ 3 + (N + 3 + 2*floor(T/30)) / 20
+billable DO requests ≈ 7 + (N + 3 + 2*floor(T/30) + 2*floor(W/120)) / 20
 ```
 
-| 경기 가정         | raw client message | billable DO request | request 한도만 본 Free 경기/일 |
-| ----------------- | -----------------: | ------------------: | -----------------------------: |
-| 5분·40수          |                 63 |                6.15 |                         16,260 |
-| 10분·60수 기준    |                103 |                8.15 |                         12,269 |
-| 20분·100수 장기전 |                183 |               12.15 |                          8,230 |
+| 경기 가정(대기 2분) | raw client message | billable DO request | request 한도만 본 Free 경기/일 |
+| ------------------- | -----------------: | ------------------: | -----------------------------: |
+| 5분·40수            |                 65 |               10.25 |                          9,756 |
+| 10분·60수 기준      |                105 |               12.25 |                          8,163 |
+| 20분·100수 장기전   |                185 |               16.25 |                          6,153 |
 
 요청보다 먼저 도달할 가능성이 큰 한도는 SQLite/D1 write다. 현재 정상 착수는 DO에서 authoritative
 checkpoint 1행만 쓰고, D1에서는 match revision과 append-only action을 쓴다. 복구 시 동일한 runtime
@@ -971,32 +982,17 @@ host가 최소 인원 확인 뒤 수동 시작하도록 변경했으며, 오목�
 종료 경로가 30초 Durable Object alarm을 예약하며 일시적인 결과 저장 실패도 다음 alarm을 명시적으로
 재예약한다.
 
-2026-08-28 실시간 로비 전달 보정은 브라우저가 101 upgrade를 받은 뒤 별도 sync frame으로 현재
-event sequence를 요청한다. 외부 Worker는 인증·참가자 검증 후 Durable Object의 WebSocket 응답을
-다시 감싸지 않고 직접 전달하며, alarm 예약은 upgrade 응답을 막지 않는 background 작업으로 둔다.
-READY 변경은 D1에서 먼저 확정한 뒤 DO에 최소 상태 delta를 전송하므로 실시간 채널 장애가 사용자
-READY 요청 자체를 503으로 바꾸지 않는다. socket이 정상인 동안 반복 roster 조회는 없고, 연결 장애
-시에만 제한된 backoff 조회로 복구한다.
+2026-08-28 최종 대기실 전달 구조는 중간 단계였던 고정 roster polling과 상태 보유 lobby DO를 모두
+대체한다. 별도 `MultiplayerLobbySignalObject`는 인증된 참가자의 Hibernation WebSocket attachment만
+사용하며 storage, alarm, event sequence, lifecycle mirror, D1 repository를 갖지 않는다. READY 변경은
+D1에서 먼저 확정한 뒤 `waitUntil` notification으로 최소 delta를 보내고, Join/Leave/Start는 invalidation만
+보낸다. 공급자 장애가 mutation 응답을 실패시키지 않으며 재접속 후 full roster가 유실분을 복구한다.
 
-초기 WebSocket upgrade가 실패하면 같은 탭에서는 즉시 재연결을 반복하지 않고 제한된 roster
-폴링으로 전환한다. 한 번 정상 연결됐던 소켓의 네트워크 단절만 지수형 재연결 대상으로 삼으며,
-READY 이후 DO 알림은 `waitUntil`로 분리해 공급자 quota 장애가 쓰기 응답 지연이나 실패로 전파되지
-않게 한다. 이는 무료 tier 소진 시 `503 → 재연결 → roster 429` 연쇄를 차단하는 비용 안전장치다.
-
-2026-08-28 비용 보정은 idle lobby의 15초 application heartbeat를 제거했다. 따라서 2시간 동안 열린
-대기실 참가자 한 명당 약 480개의 반복 inbound message가 0개가 되며, 연결과 sequence sync 이후에는
-실제 상태 변경만 DO를 사용한다. gameplay heartbeat도 30초로 낮추고 terminal/abort/leave에서 즉시
-해제한다. 중복 Join/Ready notify와 Leave의 두 번째 DO fetch를 제거하고, provider 장애 뒤 WebSocket
-재접속은 유한 예산으로 제한한다. gameplay message별 진단용 `last_seen_at` write도 제거해 정상 착수당
-DO SQLite write를 3개 수준에서 rate-limit 1개와 authoritative checkpoint 1개 수준으로 낮춘다. 접속
-ticket별 30초 nonce-cleanup alarm도 제거해 정상 경기당 alarm invocation을 줄인다.
-
-2026-08-28 추가 최소화에서는 대기실 WebSocket/DO notify/lobby alarm을 완전히 제거했다. 대기실은 15초
-foreground·120초 background D1 control-plane 조회만 사용하므로, 방을 만들고 대기하거나 아무도 없는
-방이 만료될 때 DO request/write는 0이다. 대기실 만료와 version lease 해제는 기존 6시간 bounded D1
-cleanup이 담당한다. action rate window는 비권위 burst guard로 메모리에 옮기고 동일 runtime checkpoint
-write를 생략해 정상 착수의 DO SQLite write를 2개 수준에서 1개 수준으로 낮춘다. 제거된 lobby protocol,
-internal endpoint, event sequence/lifecycle table, Web client와 테스트도 함께 삭제했다.
+socket 정상 상태의 D1 조회는 최초/재접속/focus/5분 무결성 확인뿐이다. 장애 중 fallback roster와
+재연결은 각각 120초까지 증가하고 hidden 탭은 최소 120초를 사용해 `503 → 재연결 폭주 → roster 429`
+연쇄를 막는다. 120초 heartbeat는 DO auto-response가 처리해 idle duration과 storage write를 만들지
+않는다. gameplay 쪽은 기존처럼 30초 heartbeat를 terminal/abort/leave에서 즉시 해제하고, message별
+`last_seen_at`, nonce-cleanup 전용 alarm, 비권위 action-rate SQLite write는 만들지 않는다.
 
 같은 변경의 안전 보정으로 gameplay frame을 큐에 넣기 전에 크기·개수·속도를 제한하고, 새 rejected
 action은 D1 원장에 기록하지 않는다. 정상 action은 기존처럼 revision CAS와 payload hash를 통과한 뒤

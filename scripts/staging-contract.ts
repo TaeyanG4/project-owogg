@@ -246,17 +246,29 @@ export function validateWranglerStagingContracts(
     expectedOrigin: string,
   ): void => {
     const bindings = environment.durable_objects?.bindings ?? [];
+    const expectedBindings = [
+      { name: "MULTIPLAYER_INSTANCES", className: "MultiplayerInstanceObject" },
+      { name: "MULTIPLAYER_LOBBY_SIGNALS", className: "MultiplayerLobbySignalObject" },
+    ] as const;
     if (
-      bindings.length !== 1 ||
-      bindings[0]?.name !== "MULTIPLAYER_INSTANCES" ||
-      bindings[0]?.class_name !== "MultiplayerInstanceObject" ||
-      bindings[0]?.script_name !== undefined
+      bindings.length !== expectedBindings.length ||
+      expectedBindings.some(
+        (expected) =>
+          !bindings.some(
+            (binding) =>
+              binding.name === expected.name &&
+              binding.class_name === expected.className &&
+              binding.script_name === undefined,
+          ),
+      )
     ) {
-      errors.push(`${label} multiplayer Durable Object must be an environment-local self binding`);
+      errors.push(`${label} multiplayer Durable Objects must be environment-local self bindings`);
     }
-    const exported = environment.exports?.MultiplayerInstanceObject;
-    if (exported?.type !== "durable-object" || exported.storage !== "sqlite") {
-      errors.push(`${label} MultiplayerInstanceObject must be exported with SQLite storage`);
+    for (const expected of expectedBindings) {
+      const exported = environment.exports?.[expected.className];
+      if (exported?.type !== "durable-object" || exported.storage !== "sqlite") {
+        errors.push(`${label} ${expected.className} must be exported with SQLite storage`);
+      }
     }
     if (environment.vars?.MULTIPLAYER_ENABLED !== "false") {
       errors.push(`${label} multiplayer must remain feature-disabled in committed config`);

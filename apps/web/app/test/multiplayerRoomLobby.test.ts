@@ -3,11 +3,15 @@ import test from "node:test";
 import type { MultiplayerRoomPlayer } from "@owogg/contracts";
 import {
   multiplayerLobbyCanStart,
-  multiplayerLobbyJitteredDelay,
-  multiplayerLobbyPollingDelay,
   multiplayerLobbyRosterSounds,
   multiplayerLobbySlotCount,
 } from "../features/game/runtime/MultiplayerRoomLobby";
+import {
+  MULTIPLAYER_LOBBY_SIGNAL_INITIAL_FALLBACK_MS,
+  MULTIPLAYER_LOBBY_SIGNAL_RECONCILE_MS,
+  multiplayerLobbyRecoveryRefreshDelay,
+  multiplayerLobbySignalReconnectDelay,
+} from "../features/game/runtime/multiplayerLobbySignal";
 
 function player(seatIndex: number, status: "JOINED" | "READY" = "READY"): MultiplayerRoomPlayer {
   return {
@@ -36,12 +40,17 @@ test("the shared lobby renders profile-sized slots and is future-safe up to sixt
   assert.equal(multiplayerLobbySlotCount(20, 20), 16);
 });
 
-test("the lobby polls slowly and backs off further while the tab is hidden", () => {
-  assert.equal(multiplayerLobbyPollingDelay("visible"), 15_000);
-  assert.equal(multiplayerLobbyPollingDelay("hidden"), 120_000);
-  assert.equal(multiplayerLobbyJitteredDelay(10_000, 0), 9_000);
-  assert.equal(multiplayerLobbyJitteredDelay(10_000, 0.5), 10_000);
-  assert.equal(multiplayerLobbyJitteredDelay(10_000, 1), 11_000);
+test("the signal channel replaces fixed polling with bounded recovery and slow reconciliation", () => {
+  assert.equal(MULTIPLAYER_LOBBY_SIGNAL_INITIAL_FALLBACK_MS, 1_500);
+  assert.equal(MULTIPLAYER_LOBBY_SIGNAL_RECONCILE_MS, 300_000);
+  assert.deepEqual(
+    [0, 1, 2, 3, 4, 99].map(multiplayerLobbySignalReconnectDelay),
+    [5_000, 15_000, 30_000, 60_000, 120_000, 120_000],
+  );
+  assert.deepEqual(
+    [0, 1, 2, 3, 4, 99].map(multiplayerLobbyRecoveryRefreshDelay),
+    [0, 15_000, 30_000, 60_000, 120_000, 120_000],
+  );
 });
 
 test("lobby sounds announce only other players entering and leaving after the initial roster", () => {

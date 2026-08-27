@@ -1,4 +1,5 @@
 export { MultiplayerInstanceObject } from "../src/multiplayer/MultiplayerInstanceObject.js";
+export { MultiplayerLobbySignalObject } from "../src/multiplayer/MultiplayerLobbySignalObject.js";
 
 export default {
   fetch(): Response {

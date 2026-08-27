@@ -72,9 +72,11 @@ test("Wrangler Staging environments isolate routes, D1, rate limits, Durable Obj
   assert.notEqual(api.env?.staging?.d1_databases?.[0]?.database_id, PRODUCTION.d1Id);
   assert.deepEqual(api.durable_objects?.bindings, [
     { name: "MULTIPLAYER_INSTANCES", class_name: "MultiplayerInstanceObject" },
+    { name: "MULTIPLAYER_LOBBY_SIGNALS", class_name: "MultiplayerLobbySignalObject" },
   ]);
   assert.deepEqual(api.env?.staging?.durable_objects?.bindings, [
     { name: "MULTIPLAYER_INSTANCES", class_name: "MultiplayerInstanceObject" },
+    { name: "MULTIPLAYER_LOBBY_SIGNALS", class_name: "MultiplayerLobbySignalObject" },
   ]);
   assert.equal(api.vars?.MULTIPLAYER_ENABLED, "false");
   assert.equal(api.env?.staging?.vars?.MULTIPLAYER_ENABLED, "false");

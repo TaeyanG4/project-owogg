@@ -2,6 +2,7 @@
 import { app, scheduledHandler } from "./app.js";
 
 export { MultiplayerInstanceObject } from "./multiplayer/MultiplayerInstanceObject.js";
+export { MultiplayerLobbySignalObject } from "./multiplayer/MultiplayerLobbySignalObject.js";
 
 export default {
   fetch: app.fetch,

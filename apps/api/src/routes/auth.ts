@@ -99,6 +99,8 @@ export type ApiEnv = {
     MULTIPLAYER_SOCKET_ORIGIN?: string;
     /** Environment-local self binding. Optional in types so disabled/unconfigured previews boot. */
     MULTIPLAYER_INSTANCES?: DurableObjectNamespace;
+    /** Hibernatable waiting-room invalidation fan-out; it owns no game or roster state. */
+    MULTIPLAYER_LOBBY_SIGNALS?: DurableObjectNamespace;
     /** Multiplayer state-changing operation abuse limiter. Required whenever multiplayer is enabled. */
     MULTIPLAYER_RATE_LIMITER?: {
       limit(options: { key: string }): Promise<{ success: boolean }>;

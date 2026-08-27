@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Check, Copy, Crown, Link2, LogOut, Play, UserRound, UsersRound } from "lucide-react";
-import type { MultiplayerRoomPlayer, MultiplayerRoomResponse } from "@owogg/contracts";
+import type {
+  MultiplayerLobbySignalChange,
+  MultiplayerRoomPlayer,
+  MultiplayerRoomResponse,
+} from "@owogg/contracts";
 import {
   fetchMultiplayerRoomRoster,
   leaveMultiplayerRoom,
@@ -9,11 +13,17 @@ import {
 } from "./multiplayerRoomApi";
 import { playMultiplayerLobbySound, type MultiplayerLobbySound } from "./multiplayerLobbySound";
 import { ApiClientError } from "../../../lib/api/errors";
+import {
+  MULTIPLAYER_LOBBY_SIGNAL_INITIAL_FALLBACK_MS,
+  MULTIPLAYER_LOBBY_SIGNAL_RECONCILE_MS,
+  multiplayerLobbyRecoveryRefreshDelay,
+  multiplayerLobbySignalReconnectDelay,
+  openMultiplayerLobbySignal,
+  type MultiplayerLobbySignalHandle,
+} from "./multiplayerLobbySignal";
 
-const FOREGROUND_ROSTER_REFRESH_MS = 15_000;
-const BACKGROUND_ROSTER_REFRESH_MS = 120_000;
-const TRANSIENT_ROSTER_RETRY_MS = 60_000;
 const RATE_LIMIT_ROSTER_RETRY_MS = 120_000;
+const BACKGROUND_RECOVERY_MS = 120_000;
 const MAX_RENDERED_LOBBY_SLOTS = 16;
 
 export function multiplayerLobbyCanStart(
@@ -28,18 +38,6 @@ export function multiplayerLobbyCanStart(
 
 export function multiplayerLobbySlotCount(maxPlayers: number, occupiedPlayers: number): number {
   return Math.min(Math.max(maxPlayers, occupiedPlayers), MAX_RENDERED_LOBBY_SLOTS);
-}
-
-export function multiplayerLobbyPollingDelay(visibilityState: DocumentVisibilityState): number {
-  return visibilityState === "hidden" ? BACKGROUND_ROSTER_REFRESH_MS : FOREGROUND_ROSTER_REFRESH_MS;
-}
-
-export function multiplayerLobbyJitteredDelay(
-  delayMs: number,
-  randomValue = Math.random(),
-): number {
-  const boundedRandom = Math.min(1, Math.max(0, randomValue));
-  return Math.round(delayMs * (0.9 + boundedRandom * 0.2));
 }
 
 export function multiplayerLobbyRosterSounds(
@@ -178,6 +176,7 @@ export function MultiplayerRoomLobby({
   const [copied, setCopied] = useState<"CODE" | "LINK" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const previousParticipantIdsRef = useRef<ReadonlySet<string> | null>(null);
+  const latestPlayersRef = useRef<readonly MultiplayerRoomPlayer[]>([]);
   const latestRoomRef = useRef(room);
   const onRoomChangeRef = useRef(onRoomChange);
   latestRoomRef.current = room;
@@ -186,27 +185,85 @@ export function MultiplayerRoomLobby({
 
   useEffect(() => {
     let active = true;
-    let pollTimer: ReturnType<typeof setTimeout> | undefined;
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let initialFallbackTimer: ReturnType<typeof setTimeout> | undefined;
+    let roomExpiryTimer: ReturnType<typeof setTimeout> | undefined;
+    let signalHandle: MultiplayerLobbySignalHandle | undefined;
+    let signalConnected = false;
     let terminalRoom = false;
     let refreshInFlight = false;
+    let refreshPending = false;
+    let reconnectAttempt = 0;
+    let recoveryRefreshAttempt = 0;
+    const readyChangedAt = new Map<string, string>();
     previousParticipantIdsRef.current = null;
+    latestPlayersRef.current = [];
 
-    const schedulePoll = (delay?: number) => {
+    const clearRefreshTimer = () => {
+      if (!refreshTimer) return;
+      clearTimeout(refreshTimer);
+      refreshTimer = undefined;
+    };
+    const markRoomExpired = () => {
       if (!active || terminalRoom) return;
-      if (pollTimer) clearTimeout(pollTimer);
-      const visibilityState =
-        typeof document === "undefined" ? "visible" : document.visibilityState;
-      const baseDelay = delay ?? multiplayerLobbyPollingDelay(visibilityState);
-      pollTimer = setTimeout(() => {
-        pollTimer = undefined;
+      terminalRoom = true;
+      clearRefreshTimer();
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = undefined;
+      }
+      signalHandle?.close();
+      signalHandle = undefined;
+      setError("대기실이 만료되었습니다. 새 방을 만들어 주세요.");
+    };
+    const scheduleRoomExpiry = (expiresAt: number) => {
+      const remaining = expiresAt - Date.now();
+      if (remaining <= 0) {
+        markRoomExpired();
+        return;
+      }
+      roomExpiryTimer = setTimeout(
+        () => {
+          roomExpiryTimer = undefined;
+          scheduleRoomExpiry(expiresAt);
+        },
+        Math.min(remaining, 2_147_483_647),
+      );
+    };
+    const scheduleRefresh = (delay: number) => {
+      if (!active || terminalRoom) return;
+      clearRefreshTimer();
+      refreshTimer = setTimeout(() => {
+        refreshTimer = undefined;
         void refresh();
-      }, multiplayerLobbyJitteredDelay(baseDelay));
+      }, delay);
+    };
+    const scheduleSteadyStateRefresh = () => {
+      if (!active || terminalRoom) return;
+      if (signalConnected) {
+        if (document.visibilityState !== "hidden") {
+          scheduleRefresh(MULTIPLAYER_LOBBY_SIGNAL_RECONCILE_MS);
+        }
+        return;
+      }
+      const baseDelay = multiplayerLobbyRecoveryRefreshDelay(recoveryRefreshAttempt++);
+      scheduleRefresh(
+        document.visibilityState === "hidden"
+          ? Math.max(baseDelay, BACKGROUND_RECOVERY_MS)
+          : baseDelay,
+      );
     };
 
     const refresh = async () => {
-      if (refreshInFlight || !active || terminalRoom) return;
+      if (!active || terminalRoom) return;
+      if (refreshInFlight) {
+        refreshPending = true;
+        return;
+      }
+      clearRefreshTimer();
       refreshInFlight = true;
-      let nextDelay: number | undefined;
+      let nextDelay: number | null = null;
       try {
         const roster = await fetchMultiplayerRoomRoster(room.instance.id);
         if (!active || roster.generation !== room.instance.generation) return;
@@ -219,19 +276,26 @@ export function MultiplayerRoomLobby({
           roster.players.map((player) => player.participantId),
         );
         rosterSounds.forEach(playMultiplayerLobbySound);
+        latestPlayersRef.current = roster.players;
         setPlayers(roster.players);
+        readyChangedAt.clear();
         setError(null);
+        const rosterExpiresAt = Date.parse(roster.instance.expiresAt);
+        if (Number.isFinite(rosterExpiresAt) && rosterExpiresAt <= Date.now()) {
+          markRoomExpired();
+          return;
+        }
         if (roster.instance.status === "ACTIVE") {
           terminalRoom = true;
+          signalHandle?.close();
+          signalHandle = undefined;
           onRoomChangeRef.current({ ...latestRoomRef.current, instance: roster.instance });
           return;
         }
         if (["ABORTED", "CLOSED", "EXPIRED"].includes(roster.instance.status)) {
           terminalRoom = true;
-          if (pollTimer) {
-            clearTimeout(pollTimer);
-            pollTimer = undefined;
-          }
+          signalHandle?.close();
+          signalHandle = undefined;
           setError("대기실이 종료되었습니다. 새 방을 만들어 주세요.");
           return;
         }
@@ -241,35 +305,157 @@ export function MultiplayerRoomLobby({
           nextDelay =
             reason instanceof ApiClientError && reason.code === "RATE_LIMITED"
               ? RATE_LIMIT_ROSTER_RETRY_MS
-              : TRANSIENT_ROSTER_RETRY_MS;
+              : multiplayerLobbyRecoveryRefreshDelay(recoveryRefreshAttempt++);
         } else {
           setError(messageFor(reason));
         }
       } finally {
         refreshInFlight = false;
-        schedulePoll(nextDelay);
+        if (active && !terminalRoom) {
+          if (refreshPending) {
+            refreshPending = false;
+            scheduleRefresh(0);
+          } else if (nextDelay !== null) {
+            scheduleRefresh(
+              document.visibilityState === "hidden"
+                ? Math.max(nextDelay, BACKGROUND_RECOVERY_MS)
+                : nextDelay,
+            );
+          } else {
+            scheduleSteadyStateRefresh();
+          }
+        }
       }
     };
-    const handleVisibilityChange = () => {
-      if (typeof document === "undefined" || document.visibilityState === "hidden") {
-        schedulePoll();
+
+    const applySignalChange = (change: MultiplayerLobbySignalChange) => {
+      if (change.kind === "INVALIDATE") {
+        scheduleRefresh(50);
         return;
       }
-      if (pollTimer) {
-        clearTimeout(pollTimer);
-        pollTimer = undefined;
+      const previousChangedAt = readyChangedAt.get(change.participantId);
+      if (previousChangedAt && previousChangedAt >= change.changedAt) return;
+      readyChangedAt.set(change.participantId, change.changedAt);
+      const knownParticipant = latestPlayersRef.current.some(
+        (player) => player.participantId === change.participantId,
+      );
+      if (knownParticipant) {
+        const nextPlayers = latestPlayersRef.current.map((player) =>
+          player.participantId === change.participantId
+            ? { ...player, status: change.status }
+            : player,
+        );
+        latestPlayersRef.current = nextPlayers;
+        setPlayers(nextPlayers);
       }
+      // A roster read that began before this committed mutation may still return its older view.
+      // One trailing read closes that race; steady-state ready changes otherwise need no D1 read.
+      if (!knownParticipant || refreshInFlight) {
+        refreshPending = refreshInFlight;
+        if (!refreshInFlight) scheduleRefresh(0);
+      }
+    };
+
+    const scheduleReconnect = () => {
+      if (!active || terminalRoom || reconnectTimer) return;
+      const baseDelay = multiplayerLobbySignalReconnectDelay(reconnectAttempt++);
+      const delay =
+        document.visibilityState === "hidden"
+          ? Math.max(baseDelay, BACKGROUND_RECOVERY_MS)
+          : baseDelay;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = undefined;
+        connectSignal();
+      }, delay);
+    };
+
+    const connectSignal = () => {
+      if (!active || terminalRoom || signalHandle) return;
+      try {
+        const handle = openMultiplayerLobbySignal({
+          instanceId: room.instance.id,
+          generation: room.instance.generation,
+          onConnected: () => {
+            if (!active || signalHandle !== handle) return;
+            signalConnected = true;
+            reconnectAttempt = 0;
+            recoveryRefreshAttempt = 0;
+            if (initialFallbackTimer) {
+              clearTimeout(initialFallbackTimer);
+              initialFallbackTimer = undefined;
+            }
+            void refresh();
+          },
+          onChanged: (change) => {
+            if (!active || signalHandle !== handle) return;
+            applySignalChange(change);
+          },
+          onDisconnected: () => {
+            if (!active || signalHandle !== handle) return;
+            signalHandle = undefined;
+            signalConnected = false;
+            if (initialFallbackTimer) {
+              clearTimeout(initialFallbackTimer);
+              initialFallbackTimer = undefined;
+            }
+            handle.close();
+            scheduleSteadyStateRefresh();
+            scheduleReconnect();
+          },
+        });
+        signalHandle = handle;
+      } catch {
+        signalConnected = false;
+        if (initialFallbackTimer) {
+          clearTimeout(initialFallbackTimer);
+          initialFallbackTimer = undefined;
+        }
+        scheduleSteadyStateRefresh();
+        scheduleReconnect();
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        clearRefreshTimer();
+        if (!signalConnected) scheduleSteadyStateRefresh();
+        return;
+      }
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = undefined;
+      }
+      if (!signalHandle) connectSignal();
       void refresh();
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    void refresh();
+    const expiresAt = Date.parse(room.instance.expiresAt);
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+      markRoomExpired();
+    } else {
+      scheduleRoomExpiry(expiresAt);
+    }
+    if (!terminalRoom) {
+      initialFallbackTimer = setTimeout(() => {
+        initialFallbackTimer = undefined;
+        // This is the first recovery read when the socket handshake is slow or unavailable. The
+        // following successful fallback must advance to 15 seconds, not schedule another 0ms read.
+        recoveryRefreshAttempt = Math.max(1, recoveryRefreshAttempt);
+        void refresh();
+      }, MULTIPLAYER_LOBBY_SIGNAL_INITIAL_FALLBACK_MS);
+      connectSignal();
+    }
     return () => {
       active = false;
       document.removeEventListener("visibilitychange", handleVisibilityChange);
-      if (pollTimer) clearTimeout(pollTimer);
+      clearRefreshTimer();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (initialFallbackTimer) clearTimeout(initialFallbackTimer);
+      if (roomExpiryTimer) clearTimeout(roomExpiryTimer);
+      signalHandle?.close();
     };
-  }, [room.instance.generation, room.instance.id, room.participant.id]);
+  }, [room.instance.expiresAt, room.instance.generation, room.instance.id, room.participant.id]);
 
   useEffect(() => {
     if (!copied) return;
@@ -331,11 +517,13 @@ export function MultiplayerRoomLobby({
       const updatedStatus: MultiplayerRoomPlayer["status"] =
         updated.participant.status === "READY" ? "READY" : "JOINED";
       setPlayers((current) => {
-        return current.map((player) =>
+        const nextPlayers = current.map((player) =>
           player.participantId === updated.participant.id
             ? { ...player, status: updatedStatus }
             : player,
         );
+        latestPlayersRef.current = nextPlayers;
+        return nextPlayers;
       });
       onRoomChange(updated);
     } catch (reason) {

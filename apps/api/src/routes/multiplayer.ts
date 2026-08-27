@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
 import {
+  MULTIPLAYER_LOBBY_SIGNAL_PROTOCOL,
   MultiplayerCreateInviteRequestSchema,
   MultiplayerCreateInviteResponseSchema,
   MultiplayerCreateRoomRequestSchema,
@@ -17,6 +18,7 @@ import {
   MultiplayerRuntimeStatusResponseSchema,
   MultiplayerSetReadyRequestSchema,
   MultiplayerStartRoomRequestSchema,
+  type MultiplayerLobbySignalChange,
 } from "@owogg/contracts";
 import {
   MULTIPLAYER_ERROR_HTTP_STATUS,
@@ -38,8 +40,12 @@ import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_CONNECT_PATH,
   MULTIPLAYER_INTERNAL_LEAVE_PATH,
+  MULTIPLAYER_INTERNAL_LOBBY_SIGNAL_CLAIMS_HEADER,
+  MULTIPLAYER_INTERNAL_LOBBY_SIGNAL_CONNECT_PATH,
+  MULTIPLAYER_INTERNAL_LOBBY_SIGNAL_NOTIFY_PATH,
   MULTIPLAYER_INTERNAL_PROTOCOL_HEADER,
   MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH,
+  encodeVerifiedMultiplayerLobbySignalClaims,
   encodeVerifiedMultiplayerClaims,
 } from "../multiplayer/internalProtocol.js";
 import type { ApiEnv } from "./auth.js";
@@ -72,6 +78,7 @@ const PUBLIC_MESSAGES: Readonly<Record<MultiplayerErrorCode, string>> = {
   RATE_LIMITED: "요청이 너무 잦습니다. 잠시 후 다시 시도해주세요.",
   INTERNAL_RETRYABLE: "일시적인 오류가 발생했습니다. 다시 시도해주세요.",
 };
+const INSTANCE_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
 function failure(c: Context<ApiEnv>, code: MultiplayerErrorCode) {
   return c.json(
     { error: { code, message: PUBLIC_MESSAGES[code] } },
@@ -83,6 +90,7 @@ function runtimeReady(env: ApiEnv["Bindings"]): boolean {
   return Boolean(
     readMultiplayerRuntimeConfig(env) &&
     env.MULTIPLAYER_INSTANCES &&
+    env.MULTIPLAYER_LOBBY_SIGNALS &&
     env.MULTIPLAYER_RATE_LIMITER &&
     env.MULTIPLAYER_RECOVERY_RATE_LIMITER,
   );
@@ -108,7 +116,16 @@ async function takeRateLimit(
 function requestRateKey(
   c: Context<ApiEnv>,
   operation:
-    "create" | "join" | "ready" | "start" | "leave" | "invite" | "roster" | "ticket" | "socket",
+    | "create"
+    | "join"
+    | "ready"
+    | "start"
+    | "leave"
+    | "invite"
+    | "roster"
+    | "ticket"
+    | "socket"
+    | "lobby-signal",
 ): string {
   // Keep callers behind the same home/campus/mobile NAT independent while never exposing the
   // full bearer credential to Cloudflare rate-limit logs. This mirrors the platform-wide write
@@ -206,6 +223,55 @@ function notifyRematchChange(c: Context<ApiEnv>, instanceId: string, generation:
   } catch {
     // Hono's direct unit-test request helper has no ExecutionContext. The already-started promise
     // remains harmless; production Workers always attach it to waitUntil.
+  }
+}
+
+function notifyLobbySignal(
+  c: Context<ApiEnv>,
+  instanceId: string,
+  generation: number,
+  change: MultiplayerLobbySignalChange = { kind: "INVALIDATE" },
+  delivery: {
+    readonly revokeParticipantId?: string;
+    readonly closeRoom?: boolean;
+  } = {},
+): void {
+  const namespace = c.env.MULTIPLAYER_LOBBY_SIGNALS;
+  if (!namespace) return;
+  const notification = namespace
+    .get(namespace.idFromName(instanceId))
+    .fetch(
+      new Request(`https://multiplayer.internal${MULTIPLAYER_INTERNAL_LOBBY_SIGNAL_NOTIFY_PATH}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          [MULTIPLAYER_INTERNAL_PROTOCOL_HEADER]: MULTIPLAYER_LOBBY_SIGNAL_PROTOCOL,
+        },
+        body: JSON.stringify({
+          instanceId,
+          generation,
+          change,
+          revokeParticipantId: delivery.revokeParticipantId ?? null,
+          closeRoom: delivery.closeRoom ?? false,
+        }),
+      }),
+    )
+    .then((response) => {
+      if (!response.ok) throw new Error(`lobby signal rejected (${response.status})`);
+    })
+    .catch((error: unknown) => {
+      // The D1 mutation already committed. Reconnect and the slow integrity refresh recover any
+      // missed signal, so a notification-provider failure must not roll the action back.
+      console.warn("[multiplayer:lobby-signal-failed]", {
+        instanceId,
+        generation,
+        reason: error instanceof Error ? error.message : "unknown",
+      });
+    });
+  try {
+    c.executionCtx.waitUntil(notification);
+  } catch {
+    // Direct Hono unit tests do not expose an ExecutionContext. The promise is already guarded.
   }
 }
 
@@ -393,6 +459,9 @@ multiplayerRouter.post("/instances/join", async (c) => {
     inviteToken: parsed.data.inviteToken,
   });
   if (!result.ok) return failure(c, result.code);
+  if (!result.replayed) {
+    notifyLobbySignal(c, result.instance.id, result.instance.generation);
+  }
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomResponseSchema.parse({
@@ -490,6 +559,14 @@ multiplayerRouter.post("/instances/:instanceId/ready", async (c) => {
     ready: parsed.data.ready,
   });
   if (!result.ok) return failure(c, result.code);
+  if (result.state === "WAITING" && result.changed) {
+    notifyLobbySignal(c, result.instance.id, result.instance.generation, {
+      kind: "PARTICIPANT_READY",
+      participantId: result.participant.id,
+      status: result.participant.status === "READY" ? "READY" : "JOINED",
+      changedAt: result.participant.updatedAt,
+    });
+  }
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomResponseSchema.parse({
@@ -530,6 +607,15 @@ multiplayerRouter.post("/instances/:instanceId/start", async (c) => {
     expectedGeneration: parsed.data.expectedGeneration,
   });
   if (!result.ok) return failure(c, result.code);
+  notifyLobbySignal(
+    c,
+    result.instance.id,
+    result.instance.generation,
+    { kind: "INVALIDATE" },
+    {
+      closeRoom: true,
+    },
+  );
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomResponseSchema.parse({
@@ -676,6 +762,18 @@ multiplayerRouter.post("/instances/:instanceId/leave", async (c) => {
   ]);
   if (!instance) return failure(c, "INSTANCE_NOT_FOUND");
   if (!participant) return failure(c, "NOT_PARTICIPANT");
+  if (!result.replayed) {
+    notifyLobbySignal(
+      c,
+      instanceId,
+      instance.generation,
+      { kind: "INVALIDATE" },
+      {
+        revokeParticipantId: participant.id,
+        closeRoom: ["ABORTED", "CLOSED", "EXPIRED"].includes(instance.status),
+      },
+    );
+  }
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomResponseSchema.parse({
@@ -729,6 +827,80 @@ multiplayerRouter.post("/instances/:instanceId/invites", async (c) => {
     }),
     result.replayed ? 200 : 201,
   );
+});
+
+multiplayerRouter.get("/instances/:instanceId/lobby-signal", async (c) => {
+  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED)) {
+    return failure(c, "MULTIPLAYER_UNAVAILABLE");
+  }
+  const config = readMultiplayerRuntimeConfig(c.env);
+  const namespace = c.env.MULTIPLAYER_LOBBY_SIGNALS;
+  if (!config || !namespace || !runtimeReady(c.env)) {
+    return failure(c, "MULTIPLAYER_UNAVAILABLE");
+  }
+  if (c.req.header("Upgrade")?.toLowerCase() !== "websocket") {
+    return failure(c, "INVALID_REQUEST");
+  }
+  if (!isTrustedMultiplayerSocketRequest(c.req.raw, config)) {
+    return failure(c, "FORBIDDEN");
+  }
+  if (c.req.header("Sec-WebSocket-Protocol")?.trim() !== MULTIPLAYER_LOBBY_SIGNAL_PROTOCOL) {
+    return failure(c, "INVALID_REQUEST");
+  }
+
+  const rateLimit = await takeRateLimit(c.env, requestRateKey(c, "lobby-signal"), "RECOVERY");
+  if (rateLimit === "DENIED") return failure(c, "RATE_LIMITED");
+  if (rateLimit === "UNAVAILABLE") return failure(c, "MULTIPLAYER_UNAVAILABLE");
+
+  const sessionId = getCookie(c, "owogg_session");
+  if (!sessionId) return failure(c, "UNAUTHENTICATED");
+  const instanceId = c.req.param("instanceId");
+  if (!INSTANCE_ID_PATTERN.test(instanceId)) return failure(c, "INVALID_REQUEST");
+
+  const container = createContainer(c.env.DB, readB2Config(c.env));
+  const authenticated = await container.sessionRepo.findSession(sessionId);
+  if (!authenticated) return failure(c, "UNAUTHENTICATED");
+  const [instance, participant] = await Promise.all([
+    container.multiplayerInstanceRepo.findById(instanceId),
+    container.multiplayerInstanceRepo.findParticipant(instanceId, authenticated.user.id),
+  ]);
+  if (!instance) return failure(c, "INSTANCE_NOT_FOUND");
+  if (instance.status !== "LOBBY") return failure(c, "INSTANCE_NOT_JOINABLE");
+  const expiresAt = Date.parse(instance.expiresAt);
+  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+    return failure(c, "INSTANCE_NOT_JOINABLE");
+  }
+  if (!participant || (participant.status !== "JOINED" && participant.status !== "READY")) {
+    return failure(c, "NOT_PARTICIPANT");
+  }
+
+  const internalRequest = new Request(
+    `https://multiplayer.internal${MULTIPLAYER_INTERNAL_LOBBY_SIGNAL_CONNECT_PATH}`,
+    {
+      method: "GET",
+      headers: {
+        Upgrade: "websocket",
+        [MULTIPLAYER_INTERNAL_PROTOCOL_HEADER]: MULTIPLAYER_LOBBY_SIGNAL_PROTOCOL,
+        [MULTIPLAYER_INTERNAL_LOBBY_SIGNAL_CLAIMS_HEADER]:
+          encodeVerifiedMultiplayerLobbySignalClaims({
+            instanceId,
+            participantId: participant.id,
+            generation: instance.generation,
+          }),
+      },
+    },
+  );
+  try {
+    const response = await namespace.get(namespace.idFromName(instanceId)).fetch(internalRequest);
+    if (response.status !== 101 || !response.webSocket) return response;
+    return new Response(null, {
+      status: 101,
+      webSocket: response.webSocket,
+      headers: { "Sec-WebSocket-Protocol": MULTIPLAYER_LOBBY_SIGNAL_PROTOCOL },
+    });
+  } catch {
+    return failure(c, "INTERNAL_RETRYABLE");
+  }
 });
 
 multiplayerRouter.post("/instances/:instanceId/ticket", async (c) => {

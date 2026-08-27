@@ -16,8 +16,8 @@ function getAudioContext(): AudioContext | null {
 
 /**
  * Creates/resumes the shared lobby AudioContext while a create/join click still carries browser
- * user activation. Later roster polling can then play a short arrival/departure cue without
- * shipping or downloading audio assets.
+ * user activation. Later signal-driven roster reconciliation can then play a short
+ * arrival/departure cue without shipping or downloading audio assets.
  */
 export function primeMultiplayerLobbySound(): void {
   const context = getAudioContext();

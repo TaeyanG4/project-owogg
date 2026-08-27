@@ -5,6 +5,9 @@ import { z } from "zod";
  * game instance. */
 export const MULTIPLAYER_HEARTBEAT_REQUEST = "owogg.multiplayer.heartbeat.v1";
 export const MULTIPLAYER_HEARTBEAT_RESPONSE = "owogg.multiplayer.heartbeat-ack.v1";
+/** Parent-only waiting-room signal channel. Authentication remains in the OwOGG session cookie;
+ * the channel carries no session, ticket, global user id, nickname, or avatar. */
+export const MULTIPLAYER_LOBBY_SIGNAL_PROTOCOL = "owogg.multiplayer.lobby-signal.v1";
 
 const OpaqueIdSchema = z.string().regex(/^[A-Za-z0-9_-]{8,128}$/);
 const StableIdentifierSchema = z.string().regex(/^[a-z0-9][a-z0-9._:/-]{0,95}$/);
@@ -16,6 +19,44 @@ const GameSlugSchema = z
 const IdempotencyKeySchema = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/);
 const PublicRoomCodeSchema = z.string().regex(/^[A-Za-z0-9_-]{12,64}$/);
 const InviteTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{32,128}$/);
+
+export const MultiplayerLobbySignalChangeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("INVALIDATE") }).strict(),
+  z
+    .object({
+      kind: z.literal("PARTICIPANT_READY"),
+      participantId: OpaqueIdSchema,
+      status: z.enum(["JOINED", "READY"]),
+      changedAt: z.string().datetime(),
+    })
+    .strict(),
+]);
+export type MultiplayerLobbySignalChange = z.infer<typeof MultiplayerLobbySignalChangeSchema>;
+
+export const MultiplayerLobbySignalConnectedMessageSchema = z
+  .object({
+    type: z.literal("LOBBY_SIGNAL_CONNECTED"),
+    v: z.literal(1),
+    instanceId: OpaqueIdSchema,
+    generation: z.number().int().positive(),
+  })
+  .strict();
+export type MultiplayerLobbySignalConnectedMessage = z.infer<
+  typeof MultiplayerLobbySignalConnectedMessageSchema
+>;
+
+export const MultiplayerLobbySignalChangedMessageSchema = z
+  .object({
+    type: z.literal("LOBBY_SIGNAL_CHANGED"),
+    v: z.literal(1),
+    instanceId: OpaqueIdSchema,
+    generation: z.number().int().positive(),
+    change: MultiplayerLobbySignalChangeSchema,
+  })
+  .strict();
+export type MultiplayerLobbySignalChangedMessage = z.infer<
+  typeof MultiplayerLobbySignalChangedMessageSchema
+>;
 
 export const MultiplayerRuntimeStatusResponseSchema = z
   .object({

@@ -34,6 +34,10 @@
         "name": "MULTIPLAYER_INSTANCES",
         "class_name": "MultiplayerInstanceObject",
       },
+      {
+        "name": "MULTIPLAYER_LOBBY_SIGNALS",
+        "class_name": "MultiplayerLobbySignalObject",
+      },
     ],
   },
   // Declarative class lifecycle is the current Wrangler replacement for legacy migrations.
@@ -41,6 +45,10 @@
   // operator stop point even while MULTIPLAYER_ENABLED remains false.
   "exports": {
     "MultiplayerInstanceObject": {
+      "type": "durable-object",
+      "storage": "sqlite",
+    },
+    "MultiplayerLobbySignalObject": {
       "type": "durable-object",
       "storage": "sqlite",
     },
@@ -122,10 +130,18 @@
             "name": "MULTIPLAYER_INSTANCES",
             "class_name": "MultiplayerInstanceObject",
           },
+          {
+            "name": "MULTIPLAYER_LOBBY_SIGNALS",
+            "class_name": "MultiplayerLobbySignalObject",
+          },
         ],
       },
       "exports": {
         "MultiplayerInstanceObject": {
+          "type": "durable-object",
+          "storage": "sqlite",
+        },
+        "MultiplayerLobbySignalObject": {
           "type": "durable-object",
           "storage": "sqlite",
         },

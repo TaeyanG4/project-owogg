@@ -7,6 +7,48 @@ export const MULTIPLAYER_INTERNAL_PROTOCOL_HEADER = "X-Owogg-Multiplayer-Protoco
 export const MULTIPLAYER_INTERNAL_CONNECT_PATH = "/internal/multiplayer/connect";
 export const MULTIPLAYER_INTERNAL_LEAVE_PATH = "/internal/multiplayer/leave";
 export const MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH = "/internal/multiplayer/rematch-changed";
+export const MULTIPLAYER_INTERNAL_LOBBY_SIGNAL_CONNECT_PATH =
+  "/internal/multiplayer/lobby-signal-connect";
+export const MULTIPLAYER_INTERNAL_LOBBY_SIGNAL_NOTIFY_PATH =
+  "/internal/multiplayer/lobby-signal-changed";
+export const MULTIPLAYER_INTERNAL_LOBBY_SIGNAL_CLAIMS_HEADER =
+  "X-Owogg-Multiplayer-Lobby-Signal-Claims";
+
+export interface VerifiedMultiplayerLobbySignalClaims {
+  readonly instanceId: string;
+  readonly participantId: string;
+  readonly generation: number;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function isOpaqueId(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{8,128}$/.test(value);
+}
+
+function parseVerifiedMultiplayerLobbySignalClaims(
+  value: unknown,
+): VerifiedMultiplayerLobbySignalClaims | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const source = value as Record<string, unknown>;
+  const keys = Object.keys(source);
+  if (
+    keys.length !== 3 ||
+    !keys.every((key) => ["instanceId", "participantId", "generation"].includes(key)) ||
+    !isOpaqueId(source.instanceId) ||
+    !isOpaqueId(source.participantId) ||
+    !isPositiveInteger(source.generation)
+  ) {
+    return null;
+  }
+  return {
+    instanceId: source.instanceId,
+    participantId: source.participantId,
+    generation: source.generation,
+  };
+}
 
 function bytesToBase64Url(bytes: Uint8Array): string {
   let binary = "";
@@ -44,6 +86,30 @@ export function decodeVerifiedMultiplayerClaims(
   if (!bytes) return null;
   try {
     return parseMultiplayerJoinTicketClaims(
+      JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)),
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** Encodes only the room membership already authenticated by the outer Worker. */
+export function encodeVerifiedMultiplayerLobbySignalClaims(
+  claims: VerifiedMultiplayerLobbySignalClaims,
+): string {
+  const parsed = parseVerifiedMultiplayerLobbySignalClaims(claims);
+  if (!parsed) throw new RangeError("invalid verified multiplayer lobby signal claims");
+  return bytesToBase64Url(new TextEncoder().encode(JSON.stringify(parsed)));
+}
+
+export function decodeVerifiedMultiplayerLobbySignalClaims(
+  encoded: string | null | undefined,
+): VerifiedMultiplayerLobbySignalClaims | null {
+  if (!encoded) return null;
+  const bytes = base64UrlToBytes(encoded);
+  if (!bytes) return null;
+  try {
+    return parseVerifiedMultiplayerLobbySignalClaims(
       JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)),
     );
   } catch {
