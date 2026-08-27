@@ -5,6 +5,7 @@ import {
   applyMultiplayerLobbyChange,
   multiplayerLobbyCanStart,
   multiplayerLobbyRosterSounds,
+  multiplayerLobbyShouldReconnect,
   multiplayerLobbySlotCount,
 } from "../features/game/runtime/MultiplayerRoomLobby";
 
@@ -33,6 +34,11 @@ test("the shared lobby renders profile-sized slots and is future-safe up to sixt
   assert.equal(multiplayerLobbySlotCount(8, 8), 8);
   assert.equal(multiplayerLobbySlotCount(16, 12), 16);
   assert.equal(multiplayerLobbySlotCount(20, 20), 16);
+});
+
+test("the lobby retries only a realtime channel that had previously connected", () => {
+  assert.equal(multiplayerLobbyShouldReconnect(false), false);
+  assert.equal(multiplayerLobbyShouldReconnect(true), true);
 });
 
 test("lobby sounds announce only other players entering and leaving after the initial roster", () => {

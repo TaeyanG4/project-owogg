@@ -42,6 +42,10 @@ export function multiplayerLobbySlotCount(maxPlayers: number, occupiedPlayers: n
   return Math.min(Math.max(maxPlayers, occupiedPlayers), MAX_RENDERED_LOBBY_SLOTS);
 }
 
+export function multiplayerLobbyShouldReconnect(realtimeEverConnected: boolean): boolean {
+  return realtimeEverConnected;
+}
+
 export function multiplayerLobbyRosterSounds(
   previousParticipantIds: ReadonlySet<string> | null,
   players: readonly MultiplayerRoomPlayer[],
@@ -212,6 +216,7 @@ export function MultiplayerRoomLobby({
     let reconnectAttempt = 0;
     let disconnectedPollAttempt = 0;
     let realtimeConnected = false;
+    let realtimeEverConnected = false;
     let realtimeRevision = 0;
     let terminalRoom = false;
     let refreshInFlight = false;
@@ -324,6 +329,7 @@ export function MultiplayerRoomLobby({
           generation: room.instance.generation,
           onConnected: () => {
             realtimeConnected = true;
+            realtimeEverConnected = true;
             disconnectedPollAttempt = 0;
             if (initialRosterTimer) {
               clearTimeout(initialRosterTimer);
@@ -372,6 +378,12 @@ export function MultiplayerRoomLobby({
             // Reconcile once immediately so peers do not wait for the slow resilience poll.
             scheduleInvalidationRefresh();
             scheduleDisconnectedPoll();
+            // A failed initial upgrade usually means the realtime service is unavailable (for
+            // example, a provider quota was exhausted). Retrying a failed handshake in every tab
+            // only burns more edge/DO requests and can push the roster fallback into its limiter.
+            // Keep the lobby functional through bounded polling; sockets that were previously
+            // healthy still use the reconnect policy for ordinary network interruptions.
+            if (!multiplayerLobbyShouldReconnect(realtimeEverConnected)) return;
             if (!active || terminalRoom || reconnectTimer) return;
             const delay =
               LOBBY_RECONNECT_DELAYS_MS[
@@ -387,16 +399,8 @@ export function MultiplayerRoomLobby({
       } catch {
         realtimeConnected = false;
         scheduleDisconnectedPoll();
-        if (!active || terminalRoom || reconnectTimer) return;
-        const delay =
-          LOBBY_RECONNECT_DELAYS_MS[
-            Math.min(reconnectAttempt, LOBBY_RECONNECT_DELAYS_MS.length - 1)
-          ];
-        reconnectAttempt += 1;
-        reconnectTimer = setTimeout(() => {
-          reconnectTimer = undefined;
-          connectRealtime();
-        }, delay);
+        // Synchronous construction failures cannot be repaired by an immediate retry. The
+        // authenticated roster fallback remains available until the component is remounted.
       }
     };
 

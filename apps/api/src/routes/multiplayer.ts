@@ -257,6 +257,21 @@ async function notifyLobbyChange(
   }
 }
 
+function deferLobbyChange(
+  c: Context<ApiEnv>,
+  instanceId: string,
+  generation: number,
+  change: MultiplayerLobbyChange = { kind: "INVALIDATE" },
+): void {
+  const notification = notifyLobbyChange(c, instanceId, generation, change);
+  try {
+    c.executionCtx.waitUntil(notification);
+  } catch {
+    // Hono's direct unit-test request helper has no ExecutionContext. notifyLobbyChange already
+    // catches provider failures, and the promise has started, so no unhandled rejection escapes.
+  }
+}
+
 type InternalLeaveResult =
   | { readonly ok: true; readonly replayed: boolean }
   | { readonly ok: false; readonly code: MultiplayerErrorCode };
@@ -539,7 +554,7 @@ multiplayerRouter.post("/instances/:instanceId/ready", async (c) => {
     ready: parsed.data.ready,
   });
   if (!result.ok) return failure(c, result.code);
-  await notifyLobbyChange(c, result.instance.id, result.instance.generation, {
+  deferLobbyChange(c, result.instance.id, result.instance.generation, {
     kind: "PARTICIPANT_READY",
     participantId: result.participant.id,
     status: result.participant.status === "READY" ? "READY" : "JOINED",

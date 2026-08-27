@@ -892,6 +892,11 @@ READY 변경은 D1에서 먼저 확정한 뒤 DO에 최소 상태 delta를 전�
 READY 요청 자체를 503으로 바꾸지 않는다. socket이 정상인 동안 반복 roster 조회는 없고, 연결 장애
 시에만 제한된 backoff 조회로 복구한다.
 
+초기 WebSocket upgrade가 실패하면 같은 탭에서는 즉시 재연결을 반복하지 않고 제한된 roster
+폴링으로 전환한다. 한 번 정상 연결됐던 소켓의 네트워크 단절만 지수형 재연결 대상으로 삼으며,
+READY 이후 DO 알림은 `waitUntil`로 분리해 공급자 quota 장애가 쓰기 응답 지연이나 실패로 전파되지
+않게 한다. 이는 무료 tier 소진 시 `503 → 재연결 → roster 429` 연쇄를 차단하는 비용 안전장치다.
+
 완료 Gate: 동시/중복 action으로 corruption이 없고 iframe이 결과·업적·XP를 위조할 수 없다.
 
 ### Phase 4 — M2 Event + Diagnostics
