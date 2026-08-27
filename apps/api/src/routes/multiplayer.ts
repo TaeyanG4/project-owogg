@@ -40,6 +40,7 @@ import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_CONNECT_PATH,
   MULTIPLAYER_INTERNAL_LEAVE_PATH,
+  MULTIPLAYER_INTERNAL_READY_PATH,
   MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH,
   MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH,
@@ -89,15 +90,20 @@ function failure(c: Context<ApiEnv>, code: MultiplayerErrorCode) {
 
 function runtimeReady(env: ApiEnv["Bindings"]): boolean {
   return Boolean(
-    readMultiplayerRuntimeConfig(env) && env.MULTIPLAYER_INSTANCES && env.MULTIPLAYER_RATE_LIMITER,
+    readMultiplayerRuntimeConfig(env) &&
+    env.MULTIPLAYER_INSTANCES &&
+    env.MULTIPLAYER_RATE_LIMITER &&
+    env.MULTIPLAYER_RECOVERY_RATE_LIMITER,
   );
 }
 
 async function takeRateLimit(
   env: ApiEnv["Bindings"],
   key: string,
+  capacity: "ACTION" | "RECOVERY" = "ACTION",
 ): Promise<"ALLOWED" | "DENIED" | "UNAVAILABLE"> {
-  const limiter = env.MULTIPLAYER_RATE_LIMITER;
+  const limiter =
+    capacity === "RECOVERY" ? env.MULTIPLAYER_RECOVERY_RATE_LIMITER : env.MULTIPLAYER_RATE_LIMITER;
   if (!limiter) return "UNAVAILABLE";
   try {
     return (await limiter.limit({ key })).success ? "ALLOWED" : "DENIED";
@@ -230,7 +236,7 @@ async function notifyLobbyChange(
   const namespace = c.env.MULTIPLAYER_INSTANCES;
   if (!namespace) return;
   try {
-    await namespace.get(namespace.idFromName(instanceId)).fetch(
+    const response = await namespace.get(namespace.idFromName(instanceId)).fetch(
       new Request(`https://multiplayer.internal${MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH}`, {
         method: "POST",
         headers: {
@@ -240,9 +246,52 @@ async function notifyLobbyChange(
         body: JSON.stringify({ instanceId, generation, change }),
       }),
     );
-  } catch {
+    if (!response.ok) throw new Error(`lobby notification rejected (${response.status})`);
+  } catch (error) {
     // The D1 mutation is already authoritative. A disconnected lobby socket reconciles from the
     // authenticated roster endpoint, so notification failure must not roll back the user action.
+    console.warn("[multiplayer:lobby-notification-failed]", {
+      instanceId,
+      generation,
+      reason: error instanceof Error ? error.message : "unknown",
+    });
+  }
+}
+
+type InternalReadyResult =
+  { readonly ok: true } | { readonly ok: false; readonly code: MultiplayerErrorCode };
+
+async function readyThroughDurableObject(
+  c: Context<ApiEnv>,
+  instanceId: string,
+  userId: number,
+  generation: number,
+  ready: boolean,
+): Promise<InternalReadyResult> {
+  const namespace = c.env.MULTIPLAYER_INSTANCES;
+  if (!namespace) return { ok: false, code: "MULTIPLAYER_UNAVAILABLE" };
+  try {
+    const response = await namespace.get(namespace.idFromName(instanceId)).fetch(
+      new Request(`https://multiplayer.internal${MULTIPLAYER_INTERNAL_READY_PATH}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          [MULTIPLAYER_INTERNAL_PROTOCOL_HEADER]: MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
+        },
+        body: JSON.stringify({ instanceId, userId, generation, ready }),
+      }),
+    );
+    const payload = (await response.json()) as unknown;
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+      return { ok: false, code: "INTERNAL_RETRYABLE" };
+    }
+    const source = payload as Record<string, unknown>;
+    if (source.ok === true) return { ok: true };
+    return source.ok === false && isMultiplayerErrorCode(source.code)
+      ? { ok: false, code: source.code }
+      : { ok: false, code: "INTERNAL_RETRYABLE" };
+  } catch {
+    return { ok: false, code: "INTERNAL_RETRYABLE" };
   }
 }
 
@@ -446,7 +495,7 @@ multiplayerRouter.get("/instances/:instanceId/roster", async (c) => {
   if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED) || !runtimeReady(c.env)) {
     return failure(c, "MULTIPLAYER_UNAVAILABLE");
   }
-  const rateLimit = await takeRateLimit(c.env, requestRateKey(c, "roster"));
+  const rateLimit = await takeRateLimit(c.env, requestRateKey(c, "roster"), "RECOVERY");
   if (rateLimit === "DENIED") return failure(c, "RATE_LIMITED");
   if (rateLimit === "UNAVAILABLE") return failure(c, "MULTIPLAYER_UNAVAILABLE");
 
@@ -521,24 +570,27 @@ multiplayerRouter.post("/instances/:instanceId/ready", async (c) => {
   const authenticated = await container.sessionRepo.findSession(sessionId);
   if (!authenticated) return failure(c, "UNAUTHENTICATED");
 
-  const result = await container.multiplayerRoomUseCases.setParticipantReady({
-    userId: authenticated.user.id,
-    instanceId: c.req.param("instanceId"),
-    expectedGeneration: parsed.data.expectedGeneration,
-    ready: parsed.data.ready,
-  });
+  const instanceId = c.req.param("instanceId");
+  const result = await readyThroughDurableObject(
+    c,
+    instanceId,
+    authenticated.user.id,
+    parsed.data.expectedGeneration,
+    parsed.data.ready,
+  );
   if (!result.ok) return failure(c, result.code);
-  await notifyLobbyChange(c, result.instance.id, result.instance.generation, {
-    kind: "PARTICIPANT_READY",
-    participantId: result.participant.id,
-    status: result.participant.status === "READY" ? "READY" : "JOINED",
-  });
+  const [instance, participant] = await Promise.all([
+    container.multiplayerInstanceRepo.findById(instanceId),
+    container.multiplayerInstanceRepo.findParticipant(instanceId, authenticated.user.id),
+  ]);
+  if (!instance) return failure(c, "INSTANCE_NOT_FOUND");
+  if (!participant) return failure(c, "NOT_PARTICIPANT");
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomResponseSchema.parse({
       replayed: false,
-      instance: publicRoom(result.instance),
-      participant: publicParticipant(result.participant),
+      instance: publicRoom(instance),
+      participant: publicParticipant(participant),
     }),
     200,
   );
@@ -745,7 +797,7 @@ multiplayerRouter.get("/instances/:instanceId/lobby-socket", async (c) => {
   }
   const config = readMultiplayerRuntimeConfig(c.env);
   const namespace = c.env.MULTIPLAYER_INSTANCES;
-  if (!config || !namespace || !c.env.MULTIPLAYER_RATE_LIMITER) {
+  if (!config || !namespace || !runtimeReady(c.env)) {
     return failure(c, "MULTIPLAYER_UNAVAILABLE");
   }
   if (c.req.header("Upgrade")?.toLowerCase() !== "websocket") {
@@ -758,7 +810,7 @@ multiplayerRouter.get("/instances/:instanceId/lobby-socket", async (c) => {
     return failure(c, "INVALID_REQUEST");
   }
 
-  const rateLimit = await takeRateLimit(c.env, requestRateKey(c, "lobby"));
+  const rateLimit = await takeRateLimit(c.env, requestRateKey(c, "lobby"), "RECOVERY");
   if (rateLimit === "DENIED") return failure(c, "RATE_LIMITED");
   if (rateLimit === "UNAVAILABLE") return failure(c, "MULTIPLAYER_UNAVAILABLE");
 
@@ -823,11 +875,11 @@ multiplayerRouter.post("/instances/:instanceId/ticket", async (c) => {
     return failure(c, "MULTIPLAYER_UNAVAILABLE");
   }
   const config = readMultiplayerRuntimeConfig(c.env);
-  if (!config || !c.env.MULTIPLAYER_INSTANCES || !c.env.MULTIPLAYER_RATE_LIMITER) {
+  if (!config || !c.env.MULTIPLAYER_INSTANCES || !runtimeReady(c.env)) {
     return failure(c, "MULTIPLAYER_UNAVAILABLE");
   }
 
-  const rateLimit = await takeRateLimit(c.env, requestRateKey(c, "ticket"));
+  const rateLimit = await takeRateLimit(c.env, requestRateKey(c, "ticket"), "RECOVERY");
   if (rateLimit === "DENIED") return failure(c, "RATE_LIMITED");
   if (rateLimit === "UNAVAILABLE") return failure(c, "MULTIPLAYER_UNAVAILABLE");
 
@@ -874,7 +926,7 @@ multiplayerRouter.get("/instances/:instanceId/socket", async (c) => {
   }
   const config = readMultiplayerRuntimeConfig(c.env);
   const namespace = c.env.MULTIPLAYER_INSTANCES;
-  if (!config || !namespace || !c.env.MULTIPLAYER_RATE_LIMITER) {
+  if (!config || !namespace || !runtimeReady(c.env)) {
     return failure(c, "MULTIPLAYER_UNAVAILABLE");
   }
   if (c.req.header("Upgrade")?.toLowerCase() !== "websocket") {
@@ -884,7 +936,7 @@ multiplayerRouter.get("/instances/:instanceId/socket", async (c) => {
     return failure(c, "FORBIDDEN");
   }
 
-  const rateLimit = await takeRateLimit(c.env, requestRateKey(c, "socket"));
+  const rateLimit = await takeRateLimit(c.env, requestRateKey(c, "socket"), "RECOVERY");
   if (rateLimit === "DENIED") return failure(c, "RATE_LIMITED");
   if (rateLimit === "UNAVAILABLE") return failure(c, "MULTIPLAYER_UNAVAILABLE");
 

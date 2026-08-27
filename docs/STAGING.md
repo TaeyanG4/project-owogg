@@ -83,9 +83,10 @@ Staging에서 반드시 남길 릴리스 증거는 대상 commit SHA/tree, CI ru
 gitignored CI 전용 `apps/api/wrangler.staging.generated.jsonc`를 만듭니다. 이후 모든 원격 D1 명령은
 그 파일과 `--remote --env staging --x-provision=false --x-auto-create=false`를 함께 사용합니다.
 
-Staging rate-limit namespace는 `91001`, `91002`, `91003`이고 Production의 `1001`, `1002`, `1003`과
-다릅니다. namespace ID는 Cloudflare 계정 전체 범위이므로 첫 배포 전에 세 ID가 다른 Worker에서
-사용되지 않는지 운영자가 확인해야 합니다.
+Staging rate-limit namespace는 `91001`, `91002`, `91003`, `91004`이고 Production의 `1001`, `1002`,
+`1003`, `1004`와 다릅니다. `91004`/`1004`는 인증된 멀티플레이 명단 복구·소켓 재연결 전용이며
+상태 변경 제한과 분리됩니다. namespace ID는 Cloudflare 계정 전체 범위이므로 첫 배포 전에 네 ID가
+다른 Worker에서 사용되지 않는지 운영자가 확인해야 합니다.
 
 ## 2. GitHub Environment `staging`
 

@@ -43,6 +43,7 @@ import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_CONNECT_PATH,
   MULTIPLAYER_INTERNAL_LEAVE_PATH,
+  MULTIPLAYER_INTERNAL_READY_PATH,
   MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH,
   MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH,
@@ -438,6 +439,22 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
         participantId: claims.participantId,
         generation: claims.generation,
       } satisfies LobbyConnectionAttachment);
+      const eventSequence = this.state.storage.sql
+        .exec<{ server_sequence: number }>(
+          `SELECT server_sequence FROM lobby_event_sequence
+           WHERE singleton = 1 AND generation = ?`,
+          claims.generation,
+        )
+        .toArray()[0]?.server_sequence;
+      server.send(
+        JSON.stringify({
+          type: "LOBBY_CONNECTED",
+          v: 1,
+          instanceId: claims.instanceId,
+          generation: claims.generation,
+          sequence: eventSequence ?? 0,
+        }),
+      );
       await this.scheduleNextAlarm(claims.expiresAt * 1_000 + 1);
       return new Response(null, { status: 101, webSocket: client });
     }
@@ -483,6 +500,55 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       }
       this.broadcastLobbyChanged(source.instanceId, source.generation, parsedChange.data);
       return new Response(null, { status: 204 });
+    }
+    if (
+      request.method === "POST" &&
+      url.pathname === MULTIPLAYER_INTERNAL_READY_PATH &&
+      request.headers.get(MULTIPLAYER_INTERNAL_PROTOCOL_HEADER) ===
+        MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL
+    ) {
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        return Response.json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
+      }
+      if (
+        typeof body !== "object" ||
+        body === null ||
+        Array.isArray(body) ||
+        Object.keys(body).length !== 4 ||
+        !("instanceId" in body) ||
+        !("userId" in body) ||
+        !("generation" in body) ||
+        !("ready" in body) ||
+        !isOpaqueId(body.instanceId) ||
+        !isPositiveInteger(body.userId) ||
+        !isPositiveInteger(body.generation) ||
+        typeof body.ready !== "boolean"
+      ) {
+        return Response.json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
+      }
+      const task = this.messageQueue.then(() =>
+        this.setLobbyParticipantReady(
+          body.userId as number,
+          body.generation as number,
+          body.instanceId as string,
+          body.ready as boolean,
+        ),
+      );
+      this.messageQueue = task.then(
+        () => undefined,
+        () => undefined,
+      );
+      try {
+        const result = await task;
+        return Response.json(result.ok ? { ok: true } : { ok: false, code: result.code }, {
+          status: result.ok ? 200 : 409,
+        });
+      } catch {
+        return Response.json({ ok: false, code: "INTERNAL_RETRYABLE" }, { status: 503 });
+      }
     }
     if (
       request.method === "POST" &&
@@ -1159,6 +1225,27 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
         connected.close(1000, "left");
       }
     }
+    return result;
+  }
+
+  private async setLobbyParticipantReady(
+    userId: number,
+    generation: number,
+    instanceId: string,
+    ready: boolean,
+  ) {
+    const result = await this.container.multiplayerRoomUseCases.setParticipantReady({
+      userId,
+      instanceId,
+      expectedGeneration: generation,
+      ready,
+    });
+    if (!result.ok) return result;
+    this.broadcastLobbyChanged(instanceId, generation, {
+      kind: "PARTICIPANT_READY",
+      participantId: result.participant.id,
+      status: result.participant.status === "READY" ? "READY" : "JOINED",
+    });
     return result;
   }
 

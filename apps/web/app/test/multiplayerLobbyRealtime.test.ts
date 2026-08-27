@@ -123,11 +123,20 @@ test("valid increasing lobby changes preserve deltas, report gaps, and keep hear
   harness.message(MULTIPLAYER_HEARTBEAT_RESPONSE);
   harness.message(
     JSON.stringify({
+      type: "LOBBY_CONNECTED",
+      v: 1,
+      instanceId: INSTANCE_ID,
+      generation: 3,
+      sequence: 6,
+    }),
+  );
+  harness.message(
+    JSON.stringify({
       type: "LOBBY_CHANGED",
       v: 1,
       instanceId: INSTANCE_ID,
       generation: 3,
-      sequence: 1,
+      sequence: 7,
       change: {
         kind: "PARTICIPANT_READY",
         participantId: "participant_lobby_test_01",
@@ -141,7 +150,7 @@ test("valid increasing lobby changes preserve deltas, report gaps, and keep hear
       v: 1,
       instanceId: INSTANCE_ID,
       generation: 3,
-      sequence: 1,
+      sequence: 7,
       change: { kind: "INVALIDATE" },
     }),
   );
@@ -151,7 +160,7 @@ test("valid increasing lobby changes preserve deltas, report gaps, and keep hear
       v: 1,
       instanceId: INSTANCE_ID,
       generation: 4,
-      sequence: 2,
+      sequence: 8,
       change: { kind: "INVALIDATE" },
     }),
   );
@@ -161,7 +170,7 @@ test("valid increasing lobby changes preserve deltas, report gaps, and keep hear
       v: 1,
       instanceId: INSTANCE_ID,
       generation: 3,
-      sequence: 3,
+      sequence: 9,
       change: { kind: "INVALIDATE" },
     }),
   );

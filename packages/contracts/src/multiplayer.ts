@@ -33,6 +33,21 @@ export const MultiplayerLobbyChangeSchema = z.discriminatedUnion("kind", [
 ]);
 export type MultiplayerLobbyChange = z.infer<typeof MultiplayerLobbyChangeSchema>;
 
+/** Establishes the authoritative event-sequence baseline for a newly admitted lobby socket.
+ * Sequence zero means that no lobby event has been emitted for this generation yet. */
+export const MultiplayerLobbyConnectedMessageSchema = z
+  .object({
+    type: z.literal("LOBBY_CONNECTED"),
+    v: z.literal(1),
+    instanceId: OpaqueIdSchema,
+    generation: z.number().int().positive(),
+    sequence: z.number().int().nonnegative(),
+  })
+  .strict();
+export type MultiplayerLobbyConnectedMessage = z.infer<
+  typeof MultiplayerLobbyConnectedMessageSchema
+>;
+
 export const MultiplayerLobbyChangedMessageSchema = z
   .object({
     type: z.literal("LOBBY_CHANGED"),

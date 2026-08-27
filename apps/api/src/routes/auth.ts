@@ -99,8 +99,14 @@ export type ApiEnv = {
     MULTIPLAYER_SOCKET_ORIGIN?: string;
     /** Environment-local self binding. Optional in types so disabled/unconfigured previews boot. */
     MULTIPLAYER_INSTANCES?: DurableObjectNamespace;
-    /** Dedicated connect/ticket abuse limiter. Required whenever multiplayer is enabled. */
+    /** Multiplayer state-changing operation abuse limiter. Required whenever multiplayer is enabled. */
     MULTIPLAYER_RATE_LIMITER?: {
+      limit(options: { key: string }): Promise<{ success: boolean }>;
+    };
+    /** Higher-capacity, separately metered limiter for authenticated roster recovery and socket
+     * reconnection. Keeping this separate prevents transport recovery from exhausting action
+     * capacity while still failing closed against reconnect floods. */
+    MULTIPLAYER_RECOVERY_RATE_LIMITER?: {
       limit(options: { key: string }): Promise<{ success: boolean }>;
     };
     GOOGLE_CLIENT_ID?: string;

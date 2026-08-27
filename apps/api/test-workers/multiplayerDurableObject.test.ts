@@ -41,6 +41,7 @@ import {
   MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH,
   MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH,
   MULTIPLAYER_INTERNAL_PROTOCOL_HEADER,
+  MULTIPLAYER_INTERNAL_READY_PATH,
   MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH,
   decodeVerifiedMultiplayerClaims,
   decodeVerifiedMultiplayerLobbyClaims,
@@ -269,6 +270,22 @@ function internalLeaveRequest(instanceId: string, userId: number, generation: nu
       [MULTIPLAYER_INTERNAL_PROTOCOL_HEADER]: MULTIPLAYER_WEBSOCKET_PROTOCOL,
     },
     body: JSON.stringify({ instanceId, userId, generation }),
+  });
+}
+
+function internalReadyRequest(
+  instanceId: string,
+  userId: number,
+  generation: number,
+  ready: boolean,
+): Request {
+  return new Request(`https://example.com${MULTIPLAYER_INTERNAL_READY_PATH}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      [MULTIPLAYER_INTERNAL_PROTOCOL_HEADER]: MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
+    },
+    body: JSON.stringify({ instanceId, userId, generation, ready }),
   });
 }
 
@@ -691,6 +708,13 @@ test("lobby sockets receive ordered invalidations without gameplay state or cred
   const { socket, response } = await connectLobby(lobbyClaims);
   expect(response.status).toBe(101);
   expect(response.headers.get("Sec-WebSocket-Protocol")).toBeNull();
+  await expect(nextMessage(socket, "lobby sequence baseline")).resolves.toEqual({
+    type: "LOBBY_CONNECTED",
+    v: 1,
+    instanceId: lobbyClaims.instanceId,
+    generation: lobbyClaims.generation,
+    sequence: 0,
+  });
 
   const stub = env.MULTIPLAYER_INSTANCES.get(
     env.MULTIPLAYER_INSTANCES.idFromName(lobbyClaims.instanceId),
@@ -735,6 +759,78 @@ test("lobby sockets receive ordered invalidations without gameplay state or cred
   socket.send(MULTIPLAYER_HEARTBEAT_REQUEST);
   await expect(heartbeat).resolves.toBe(MULTIPLAYER_HEARTBEAT_RESPONSE);
   socket.close(1000, "done");
+});
+
+test("ready mutation and lobby broadcast are serialized by the same Durable Object", async ({
+  expect,
+}) => {
+  const { rooms, instances } = roomHarness();
+  const created = await rooms.createRoom({
+    userId: HOST_USER_ID,
+    gameSlug: GAME_SLUG,
+    visibility: "PRIVATE",
+    joinPolicy: "OPEN",
+    idempotencyKey: "workers_lobby_ready_atomic_000001",
+  });
+  if (!created.ok) throw new Error(`room create failed: ${created.code}`);
+  const joined = await rooms.joinRoom({
+    userId: PLAYER_USER_ID,
+    publicCode: created.instance.publicCode,
+    inviteToken: null,
+  });
+  if (!joined.ok) throw new Error(`room join failed: ${joined.code}`);
+  const expiresAt = Math.ceil(Date.parse(created.instance.expiresAt) / 1_000);
+  const host = await connectLobby({
+    instanceId: created.instance.id,
+    participantId: created.participant.id,
+    userId: HOST_USER_ID,
+    generation: created.instance.generation,
+    expiresAt,
+  });
+  const player = await connectLobby({
+    instanceId: created.instance.id,
+    participantId: joined.participant.id,
+    userId: PLAYER_USER_ID,
+    generation: created.instance.generation,
+    expiresAt,
+  });
+  const hostChanged = nextMessageWhere(
+    host.socket,
+    "host ready delta",
+    (message) => message.type === "LOBBY_CHANGED",
+  );
+  const playerChanged = nextMessageWhere(
+    player.socket,
+    "player ready delta",
+    (message) => message.type === "LOBBY_CHANGED",
+  );
+  const stub = env.MULTIPLAYER_INSTANCES.get(
+    env.MULTIPLAYER_INSTANCES.idFromName(created.instance.id),
+  );
+  const response = await stub.fetch(
+    internalReadyRequest(created.instance.id, PLAYER_USER_ID, created.instance.generation, false),
+  );
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({ ok: true });
+  expect((await instances.findParticipant(created.instance.id, PLAYER_USER_ID))?.status).toBe(
+    "JOINED",
+  );
+  const expected = {
+    type: "LOBBY_CHANGED",
+    v: 1,
+    instanceId: created.instance.id,
+    generation: created.instance.generation,
+    sequence: 1,
+    change: {
+      kind: "PARTICIPANT_READY",
+      participantId: joined.participant.id,
+      status: "JOINED",
+    },
+  };
+  await expect(hostChanged).resolves.toEqual(expected);
+  await expect(playerChanged).resolves.toEqual(expected);
+  host.socket.close(1000, "done");
+  player.socket.close(1000, "done");
 });
 
 test("a reconnect cancels empty-lobby cleanup while a fully abandoned lobby is aborted", async ({

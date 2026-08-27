@@ -2,6 +2,7 @@ import {
   MULTIPLAYER_HEARTBEAT_REQUEST,
   MULTIPLAYER_HEARTBEAT_RESPONSE,
   MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
+  MultiplayerLobbyConnectedMessageSchema,
   MultiplayerLobbyChangedMessageSchema,
   type MultiplayerLobbyChangedMessage,
 } from "@owogg/contracts";
@@ -138,6 +139,15 @@ export function openMultiplayerLobbyRealtime(
     try {
       decoded = JSON.parse(event.data);
     } catch {
+      return;
+    }
+    const connected = MultiplayerLobbyConnectedMessageSchema.safeParse(decoded);
+    if (
+      connected.success &&
+      connected.data.instanceId === input.instanceId &&
+      connected.data.generation === input.generation
+    ) {
+      lastSequence = Math.max(lastSequence, connected.data.sequence);
       return;
     }
     const parsed = MultiplayerLobbyChangedMessageSchema.safeParse(decoded);

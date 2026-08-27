@@ -80,6 +80,11 @@
       "namespace_id": "1003",
       "simple": { "limit": 10, "period": 60 },
     },
+    {
+      "name": "MULTIPLAYER_RECOVERY_RATE_LIMITER",
+      "namespace_id": "1004",
+      "simple": { "limit": 60, "period": 60 },
+    },
   ],
   "triggers": {
     "crons": ["0 */6 * * *"],
@@ -125,7 +130,7 @@
           "storage": "sqlite",
         },
       },
-      // Account-wide namespaces intentionally distinct from Production's 1001/1002/1003.
+      // Account-wide namespaces intentionally distinct from Production's 1001/1002/1003/1004.
       "ratelimits": [
         {
           "name": "RATE_LIMITER",
@@ -141,6 +146,11 @@
           "name": "MULTIPLAYER_RATE_LIMITER",
           "namespace_id": "91003",
           "simple": { "limit": 10, "period": 60 },
+        },
+        {
+          "name": "MULTIPLAYER_RECOVERY_RATE_LIMITER",
+          "namespace_id": "91004",
+          "simple": { "limit": 60, "period": 60 },
         },
       ],
       "vars": {

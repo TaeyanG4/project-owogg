@@ -16,12 +16,14 @@ import {
   type MultiplayerLobbyRealtimeHandle,
 } from "./multiplayerLobbyRealtime";
 import { playMultiplayerLobbySound, type MultiplayerLobbySound } from "./multiplayerLobbySound";
+import { ApiClientError } from "../../../lib/api/errors";
 
 // A healthy lobby socket performs no recurring roster reads. These timers run only while the
 // socket is disconnected, bounding D1 cost without hiding changes during a transport outage.
-const DISCONNECTED_ROSTER_REFRESH_MS = 15_000;
+const DISCONNECTED_ROSTER_REFRESH_DELAYS_MS = [2_000, 2_000, 3_000, 5_000, 10_000, 15_000, 30_000];
 const BACKGROUND_DISCONNECTED_ROSTER_REFRESH_MS = 30_000;
 const LOBBY_INVALIDATION_DEBOUNCE_MS = 120;
+const LOBBY_RATE_LIMIT_RECOVERY_MS = 3_000;
 const LOBBY_RECONNECT_DELAYS_MS = [1_000, 3_000, 10_000, 30_000] as const;
 const LOBBY_RECONNECT_STABLE_MS = 60_000;
 const MAX_RENDERED_LOBBY_SLOTS = 16;
@@ -99,6 +101,15 @@ function messageFor(error: unknown): string {
   return error instanceof Error && error.message
     ? error.message
     : "대기실 상태를 확인하지 못했습니다.";
+}
+
+function isTransientLobbySyncError(error: unknown): boolean {
+  return (
+    error instanceof ApiClientError &&
+    (error.code === "RATE_LIMITED" ||
+      error.kind === "NetworkError" ||
+      (error.status !== undefined && error.status >= 500))
+  );
 }
 
 function PlayerSlot({
@@ -196,8 +207,10 @@ export function MultiplayerRoomLobby({
     let invalidationTimer: ReturnType<typeof setTimeout> | undefined;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let reconnectStableTimer: ReturnType<typeof setTimeout> | undefined;
+    let initialRosterTimer: ReturnType<typeof setTimeout> | undefined;
     let realtime: MultiplayerLobbyRealtimeHandle | undefined;
     let reconnectAttempt = 0;
+    let disconnectedPollAttempt = 0;
     let realtimeConnected = false;
     let realtimeRevision = 0;
     let terminalRoom = false;
@@ -246,7 +259,14 @@ export function MultiplayerRoomLobby({
           return;
         }
       } catch (reason) {
-        if (active) setError(messageFor(reason));
+        if (!active) return;
+        if (isTransientLobbySyncError(reason)) {
+          if (reason instanceof ApiClientError && reason.code === "RATE_LIMITED") {
+            scheduleInvalidationRefresh(LOBBY_RATE_LIMIT_RECOVERY_MS);
+          }
+          return;
+        }
+        setError(messageFor(reason));
       }
     };
     const refresh = async () => {
@@ -273,7 +293,9 @@ export function MultiplayerRoomLobby({
         () => void disconnectedPoll(),
         typeof document !== "undefined" && document.visibilityState === "hidden"
           ? BACKGROUND_DISCONNECTED_ROSTER_REFRESH_MS
-          : DISCONNECTED_ROSTER_REFRESH_MS,
+          : DISCONNECTED_ROSTER_REFRESH_DELAYS_MS[
+              Math.min(disconnectedPollAttempt++, DISCONNECTED_ROSTER_REFRESH_DELAYS_MS.length - 1)
+            ],
       );
     };
     const scheduleDisconnectedPoll = () => {
@@ -282,16 +304,18 @@ export function MultiplayerRoomLobby({
         () => void disconnectedPoll(),
         typeof document !== "undefined" && document.visibilityState === "hidden"
           ? BACKGROUND_DISCONNECTED_ROSTER_REFRESH_MS
-          : DISCONNECTED_ROSTER_REFRESH_MS,
+          : DISCONNECTED_ROSTER_REFRESH_DELAYS_MS[
+              Math.min(disconnectedPollAttempt++, DISCONNECTED_ROSTER_REFRESH_DELAYS_MS.length - 1)
+            ],
       );
     };
-    const scheduleInvalidationRefresh = () => {
+    function scheduleInvalidationRefresh(delay = LOBBY_INVALIDATION_DEBOUNCE_MS) {
       if (!active || invalidationTimer) return;
       invalidationTimer = setTimeout(() => {
         invalidationTimer = undefined;
         void refresh();
-      }, LOBBY_INVALIDATION_DEBOUNCE_MS);
-    };
+      }, delay);
+    }
     const connectRealtime = () => {
       if (!active || terminalRoom) return;
       try {
@@ -300,6 +324,11 @@ export function MultiplayerRoomLobby({
           generation: room.instance.generation,
           onConnected: () => {
             realtimeConnected = true;
+            disconnectedPollAttempt = 0;
+            if (initialRosterTimer) {
+              clearTimeout(initialRosterTimer);
+              initialRosterTimer = undefined;
+            }
             if (pollTimer) {
               clearTimeout(pollTimer);
               pollTimer = undefined;
@@ -331,6 +360,10 @@ export function MultiplayerRoomLobby({
           onDisconnected: () => {
             realtime = undefined;
             realtimeConnected = false;
+            if (initialRosterTimer) {
+              clearTimeout(initialRosterTimer);
+              initialRosterTimer = undefined;
+            }
             if (reconnectStableTimer) {
               clearTimeout(reconnectStableTimer);
               reconnectStableTimer = undefined;
@@ -367,7 +400,12 @@ export function MultiplayerRoomLobby({
       }
     };
 
-    void refresh();
+    // Prefer one roster read after authenticated socket admission. A short fallback prevents a
+    // browser/proxy handshake that stays pending from leaving the lobby visually empty.
+    initialRosterTimer = setTimeout(() => {
+      initialRosterTimer = undefined;
+      void refresh();
+    }, 2_000);
     connectRealtime();
     return () => {
       active = false;
@@ -376,6 +414,7 @@ export function MultiplayerRoomLobby({
       if (invalidationTimer) clearTimeout(invalidationTimer);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (reconnectStableTimer) clearTimeout(reconnectStableTimer);
+      if (initialRosterTimer) clearTimeout(initialRosterTimer);
     };
   }, [room.instance.generation, room.instance.id, room.participant.id]);
 
@@ -477,8 +516,8 @@ export function MultiplayerRoomLobby({
       style={frameStyle}
     >
       <section className="w-full max-w-5xl rounded-3xl border border-border bg-surface-raised p-5 shadow-2xl sm:p-7">
-        <div className="flex flex-col gap-5 border-b border-border pb-5 lg:flex-row lg:items-start lg:justify-between">
-          <div>
+        <div className="flex flex-col gap-5 border-b border-border pb-5 xl:flex-row xl:items-start xl:justify-between">
+          <div className="xl:max-w-md">
             <p className="text-xs font-black uppercase tracking-[0.24em] text-brand">
               OWOGG Multiplayer Lobby
             </p>
@@ -488,19 +527,19 @@ export function MultiplayerRoomLobby({
               참가를 확정합니다.
             </p>
           </div>
-          <div className="flex max-w-full flex-wrap items-center gap-2">
-            <span className="flex min-h-11 items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2">
+          <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 xl:w-[32rem] xl:shrink-0">
+            <span className="flex min-h-11 min-w-0 items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2">
               <span className="text-[11px] font-black uppercase tracking-wider text-text-muted">
                 방 코드
               </span>
-              <code className="text-sm font-black tracking-wide text-text-primary">
+              <code className="min-w-0 truncate text-sm font-black tracking-wide text-text-primary">
                 {room.instance.publicCode}
               </code>
             </span>
             <button
               type="button"
               onClick={() => void copyValue("CODE")}
-              className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-sm font-black text-text-primary hover:bg-surface-overlay"
+              className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-xl border border-border px-3 py-2 text-sm font-black text-text-primary hover:bg-surface-overlay"
             >
               {copied === "CODE" ? (
                 <Check className="h-4 w-4 text-emerald-300" />
@@ -512,7 +551,7 @@ export function MultiplayerRoomLobby({
             <button
               type="button"
               onClick={() => void copyValue("LINK")}
-              className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-xl border border-brand/40 bg-brand/10 px-3 py-2 text-sm font-black text-brand-light hover:bg-brand/20"
+              className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-xl border border-brand/40 bg-brand/10 px-3 py-2 text-sm font-black text-brand-light hover:bg-brand/20"
             >
               {copied === "LINK" ? (
                 <Check className="h-4 w-4 text-emerald-300" />

@@ -26,6 +26,7 @@ import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_CONNECT_PATH,
   MULTIPLAYER_INTERNAL_LEAVE_PATH,
+  MULTIPLAYER_INTERNAL_READY_PATH,
   MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH,
   MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH,
@@ -63,6 +64,7 @@ function runtimeEnv(overrides: Record<string, unknown> = {}) {
     MULTIPLAYER_SOCKET_ORIGIN: "http://localhost",
     FRONTEND_URL: "http://localhost:5173",
     MULTIPLAYER_RATE_LIMITER: limiter(),
+    MULTIPLAYER_RECOVERY_RATE_LIMITER: limiter(),
     MULTIPLAYER_INSTANCES: {
       idFromName(value: string) {
         return value;
@@ -140,7 +142,7 @@ test("multiplayer routes are inert before any environment is configured", async 
 });
 
 test("enabled flag still reports NOT_READY and fails closed when a mandatory control is absent", async () => {
-  const env = runtimeEnv({ MULTIPLAYER_RATE_LIMITER: undefined });
+  const env = runtimeEnv({ MULTIPLAYER_RECOVERY_RATE_LIMITER: undefined });
   const status = await app.request("http://localhost/api/multiplayer/status", {}, env as any);
   assert.deepEqual(await status.json(), { status: "NOT_READY", protocolVersion: 1 });
   const response = await app.request(
@@ -329,6 +331,7 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
   );
 
   const requestLimiter = limiter();
+  const recoveryLimiter = limiter();
   const lobbyNotifications: Array<{
     instanceId: string;
     generation: number;
@@ -339,6 +342,7 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
     DB: db,
     ...B2_ENV,
     MULTIPLAYER_RATE_LIMITER: requestLimiter,
+    MULTIPLAYER_RECOVERY_RATE_LIMITER: recoveryLimiter,
     MULTIPLAYER_INSTANCES: {
       idFromName(value: string) {
         return value;
@@ -363,6 +367,47 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
             if (url.pathname === MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH) {
               lobbyConnections.push(internalRequest);
               return new Response(null, { status: 204 });
+            }
+            if (url.pathname === MULTIPLAYER_INTERNAL_READY_PATH) {
+              assert.equal(
+                internalRequest.headers.get(MULTIPLAYER_INTERNAL_PROTOCOL_HEADER),
+                MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
+              );
+              const readyBody = (await internalRequest.json()) as {
+                instanceId: string;
+                userId: number;
+                generation: number;
+                ready: boolean;
+              };
+              assert.equal(readyBody.instanceId, instanceId);
+              assert.equal(readyBody.generation, 1);
+              const participant = await instances.findParticipant(instanceId, readyBody.userId);
+              assert.ok(participant);
+              if (participant.role === "HOST") {
+                return Response.json({ ok: false, code: "FORBIDDEN" }, { status: 403 });
+              }
+              const nextStatus = readyBody.ready ? "READY" : "JOINED";
+              const updated = await instances.transitionParticipant({
+                instanceId,
+                expectedInstanceGeneration: readyBody.generation,
+                userId: readyBody.userId,
+                expectedStatus: participant.status,
+                nextStatus,
+                readyAt: readyBody.ready ? nowIso : null,
+                leftAt: null,
+                nowIso,
+              });
+              assert.equal(updated?.status, nextStatus);
+              lobbyNotifications.push({
+                instanceId,
+                generation: readyBody.generation,
+                change: {
+                  kind: "PARTICIPANT_READY",
+                  participantId: participant.id,
+                  status: nextStatus,
+                },
+              });
+              return Response.json({ ok: true });
             }
             assert.equal(url.pathname, MULTIPLAYER_INTERNAL_LEAVE_PATH);
             assert.equal(
@@ -513,7 +558,11 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
     ),
     false,
   );
-  assert.ok(requestLimiter.calls.includes(`multiplayer:lobby:s:${sessionToken.slice(0, 16)}`));
+  assert.ok(recoveryLimiter.calls.includes(`multiplayer:lobby:s:${sessionToken.slice(0, 16)}`));
+  assert.equal(
+    requestLimiter.calls.some((key) => key.startsWith("multiplayer:lobby:")),
+    false,
+  );
 
   const inviteRequest = {
     ...request,
@@ -662,9 +711,9 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
     },
   ]);
   assert.equal(JSON.stringify(roster).includes("userId"), false);
-  assert.ok(requestLimiter.calls.includes(`multiplayer:roster:s:${sessionToken.slice(0, 16)}`));
+  assert.ok(recoveryLimiter.calls.includes(`multiplayer:roster:s:${sessionToken.slice(0, 16)}`));
   assert.equal(
-    requestLimiter.calls.some((key) => key.startsWith("multiplayer:roster:ip:")),
+    recoveryLimiter.calls.some((key) => key.startsWith("multiplayer:roster:ip:")),
     false,
   );
 

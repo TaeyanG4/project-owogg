@@ -6,6 +6,7 @@ export const MULTIPLAYER_INTERNAL_CLAIMS_HEADER = "X-Owogg-Multiplayer-Claims";
 export const MULTIPLAYER_INTERNAL_PROTOCOL_HEADER = "X-Owogg-Multiplayer-Protocol";
 export const MULTIPLAYER_INTERNAL_CONNECT_PATH = "/internal/multiplayer/connect";
 export const MULTIPLAYER_INTERNAL_LEAVE_PATH = "/internal/multiplayer/leave";
+export const MULTIPLAYER_INTERNAL_READY_PATH = "/internal/multiplayer/ready";
 export const MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH = "/internal/multiplayer/rematch-changed";
 export const MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH = "/internal/multiplayer/lobby-connect";
 export const MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH = "/internal/multiplayer/lobby-changed";

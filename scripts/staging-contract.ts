@@ -217,6 +217,7 @@ export function validateWranglerStagingContracts(
     "RATE_LIMITER",
     "GAME_UPLOAD_RATE_LIMITER",
     "MULTIPLAYER_RATE_LIMITER",
+    "MULTIPLAYER_RECOVERY_RATE_LIMITER",
   ];
   const productionRateLimitNames = (api.ratelimits ?? [])
     .map((binding) => binding.name)
@@ -230,8 +231,8 @@ export function validateWranglerStagingContracts(
   if (!sameMembers(stagingRateLimitNames, expectedRateLimitBindings)) {
     errors.push("Staging API rate-limit bindings do not match the required set");
   }
-  if (stagingNamespaces.length !== 3 || new Set(stagingNamespaces).size !== 3) {
-    errors.push("Staging must have three distinct rate-limit namespaces");
+  if (stagingNamespaces.length !== 4 || new Set(stagingNamespaces).size !== 4) {
+    errors.push("Staging must have four distinct rate-limit namespaces");
   }
   for (const namespace of stagingNamespaces) {
     if (productionNamespaces.has(namespace)) {
