@@ -12,12 +12,8 @@ const INSTANCE_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
 const SOCKET_OPEN = 1;
 const SOCKET_CLOSING = 2;
 const ADMISSION_TIMEOUT_MS = 10_000;
-const HEARTBEAT_INTERVAL_MS = 120_000;
-const RECONNECT_DELAYS_MS = [5_000, 15_000, 30_000, 60_000, 120_000] as const;
-const RECOVERY_REFRESH_DELAYS_MS = [0, 15_000, 30_000, 60_000, 120_000] as const;
-
-export const MULTIPLAYER_LOBBY_SIGNAL_INITIAL_FALLBACK_MS = 1_500;
-export const MULTIPLAYER_LOBBY_SIGNAL_RECONCILE_MS = 300_000;
+const HEARTBEAT_INTERVAL_MS = 300_000;
+const RECONNECT_DELAYS_MS = [5_000, 15_000, 30_000, 60_000, 300_000, 900_000] as const;
 
 export interface MultiplayerLobbySignalSocketLike {
   readonly protocol: string;
@@ -81,12 +77,7 @@ export function multiplayerLobbySignalSocketUrl(apiUrl: string, instanceId: stri
 
 export function multiplayerLobbySignalReconnectDelay(attempt: number): number {
   const index = Math.min(Math.max(0, Math.trunc(attempt)), RECONNECT_DELAYS_MS.length - 1);
-  return RECONNECT_DELAYS_MS[index] ?? 120_000;
-}
-
-export function multiplayerLobbyRecoveryRefreshDelay(attempt: number): number {
-  const index = Math.min(Math.max(0, Math.trunc(attempt)), RECOVERY_REFRESH_DELAYS_MS.length - 1);
-  return RECOVERY_REFRESH_DELAYS_MS[index] ?? 120_000;
+  return RECONNECT_DELAYS_MS[index] ?? 900_000;
 }
 
 function createBrowserSocket(url: string, protocol: string): MultiplayerLobbySignalSocketLike {

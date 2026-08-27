@@ -12,18 +12,13 @@ import {
   startMultiplayerRoom,
 } from "./multiplayerRoomApi";
 import { playMultiplayerLobbySound, type MultiplayerLobbySound } from "./multiplayerLobbySound";
-import { ApiClientError } from "../../../lib/api/errors";
 import {
-  MULTIPLAYER_LOBBY_SIGNAL_INITIAL_FALLBACK_MS,
-  MULTIPLAYER_LOBBY_SIGNAL_RECONCILE_MS,
-  multiplayerLobbyRecoveryRefreshDelay,
   multiplayerLobbySignalReconnectDelay,
   openMultiplayerLobbySignal,
   type MultiplayerLobbySignalHandle,
 } from "./multiplayerLobbySignal";
 
-const RATE_LIMIT_ROSTER_RETRY_MS = 120_000;
-const BACKGROUND_RECOVERY_MS = 120_000;
+const BACKGROUND_RECONNECT_MS = 15 * 60_000;
 const MAX_RENDERED_LOBBY_SLOTS = 16;
 
 export function multiplayerLobbyCanStart(
@@ -83,15 +78,6 @@ function messageFor(error: unknown): string {
   return error instanceof Error && error.message
     ? error.message
     : "대기실 상태를 확인하지 못했습니다.";
-}
-
-function isTransientLobbySyncError(error: unknown): boolean {
-  return (
-    error instanceof ApiClientError &&
-    (error.code === "RATE_LIMITED" ||
-      error.kind === "NetworkError" ||
-      (error.status !== undefined && error.status >= 500))
-  );
 }
 
 function PlayerSlot({
@@ -187,15 +173,12 @@ export function MultiplayerRoomLobby({
     let active = true;
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-    let initialFallbackTimer: ReturnType<typeof setTimeout> | undefined;
     let roomExpiryTimer: ReturnType<typeof setTimeout> | undefined;
     let signalHandle: MultiplayerLobbySignalHandle | undefined;
-    let signalConnected = false;
     let terminalRoom = false;
     let refreshInFlight = false;
     let refreshPending = false;
     let reconnectAttempt = 0;
-    let recoveryRefreshAttempt = 0;
     const readyChangedAt = new Map<string, string>();
     previousParticipantIdsRef.current = null;
     latestPlayersRef.current = [];
@@ -239,22 +222,6 @@ export function MultiplayerRoomLobby({
         void refresh();
       }, delay);
     };
-    const scheduleSteadyStateRefresh = () => {
-      if (!active || terminalRoom) return;
-      if (signalConnected) {
-        if (document.visibilityState !== "hidden") {
-          scheduleRefresh(MULTIPLAYER_LOBBY_SIGNAL_RECONCILE_MS);
-        }
-        return;
-      }
-      const baseDelay = multiplayerLobbyRecoveryRefreshDelay(recoveryRefreshAttempt++);
-      scheduleRefresh(
-        document.visibilityState === "hidden"
-          ? Math.max(baseDelay, BACKGROUND_RECOVERY_MS)
-          : baseDelay,
-      );
-    };
-
     const refresh = async () => {
       if (!active || terminalRoom) return;
       if (refreshInFlight) {
@@ -263,7 +230,6 @@ export function MultiplayerRoomLobby({
       }
       clearRefreshTimer();
       refreshInFlight = true;
-      let nextDelay: number | null = null;
       try {
         const roster = await fetchMultiplayerRoomRoster(room.instance.id);
         if (!active || roster.generation !== room.instance.generation) return;
@@ -301,29 +267,12 @@ export function MultiplayerRoomLobby({
         }
       } catch (reason) {
         if (!active) return;
-        if (isTransientLobbySyncError(reason)) {
-          nextDelay =
-            reason instanceof ApiClientError && reason.code === "RATE_LIMITED"
-              ? RATE_LIMIT_ROSTER_RETRY_MS
-              : multiplayerLobbyRecoveryRefreshDelay(recoveryRefreshAttempt++);
-        } else {
-          setError(messageFor(reason));
-        }
+        setError(messageFor(reason));
       } finally {
         refreshInFlight = false;
-        if (active && !terminalRoom) {
-          if (refreshPending) {
-            refreshPending = false;
-            scheduleRefresh(0);
-          } else if (nextDelay !== null) {
-            scheduleRefresh(
-              document.visibilityState === "hidden"
-                ? Math.max(nextDelay, BACKGROUND_RECOVERY_MS)
-                : nextDelay,
-            );
-          } else {
-            scheduleSteadyStateRefresh();
-          }
+        if (active && !terminalRoom && refreshPending) {
+          refreshPending = false;
+          scheduleRefresh(0);
         }
       }
     };
@@ -361,7 +310,7 @@ export function MultiplayerRoomLobby({
       const baseDelay = multiplayerLobbySignalReconnectDelay(reconnectAttempt++);
       const delay =
         document.visibilityState === "hidden"
-          ? Math.max(baseDelay, BACKGROUND_RECOVERY_MS)
+          ? Math.max(baseDelay, BACKGROUND_RECONNECT_MS)
           : baseDelay;
       reconnectTimer = setTimeout(() => {
         reconnectTimer = undefined;
@@ -377,13 +326,7 @@ export function MultiplayerRoomLobby({
           generation: room.instance.generation,
           onConnected: () => {
             if (!active || signalHandle !== handle) return;
-            signalConnected = true;
             reconnectAttempt = 0;
-            recoveryRefreshAttempt = 0;
-            if (initialFallbackTimer) {
-              clearTimeout(initialFallbackTimer);
-              initialFallbackTimer = undefined;
-            }
             void refresh();
           },
           onChanged: (change) => {
@@ -393,34 +336,18 @@ export function MultiplayerRoomLobby({
           onDisconnected: () => {
             if (!active || signalHandle !== handle) return;
             signalHandle = undefined;
-            signalConnected = false;
-            if (initialFallbackTimer) {
-              clearTimeout(initialFallbackTimer);
-              initialFallbackTimer = undefined;
-            }
             handle.close();
-            scheduleSteadyStateRefresh();
             scheduleReconnect();
           },
         });
         signalHandle = handle;
       } catch {
-        signalConnected = false;
-        if (initialFallbackTimer) {
-          clearTimeout(initialFallbackTimer);
-          initialFallbackTimer = undefined;
-        }
-        scheduleSteadyStateRefresh();
         scheduleReconnect();
       }
     };
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden") {
-        clearRefreshTimer();
-        if (!signalConnected) scheduleSteadyStateRefresh();
-        return;
-      }
+      if (document.visibilityState === "hidden") return;
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = undefined;
@@ -437,13 +364,6 @@ export function MultiplayerRoomLobby({
       scheduleRoomExpiry(expiresAt);
     }
     if (!terminalRoom) {
-      initialFallbackTimer = setTimeout(() => {
-        initialFallbackTimer = undefined;
-        // This is the first recovery read when the socket handshake is slow or unavailable. The
-        // following successful fallback must advance to 15 seconds, not schedule another 0ms read.
-        recoveryRefreshAttempt = Math.max(1, recoveryRefreshAttempt);
-        void refresh();
-      }, MULTIPLAYER_LOBBY_SIGNAL_INITIAL_FALLBACK_MS);
       connectSignal();
     }
     return () => {
@@ -451,7 +371,6 @@ export function MultiplayerRoomLobby({
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       clearRefreshTimer();
       if (reconnectTimer) clearTimeout(reconnectTimer);
-      if (initialFallbackTimer) clearTimeout(initialFallbackTimer);
       if (roomExpiryTimer) clearTimeout(roomExpiryTimer);
       signalHandle?.close();
     };

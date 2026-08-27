@@ -1502,6 +1502,31 @@ test("two timed-out participants abort the match without inventing a winner", as
   ).toBe(0);
 });
 
+test("a terminal match never re-arms a reconnect deadline", async ({ expect }) => {
+  const room = await createConnectedRoom("terminal-stale-disconnect");
+  await readyConnectedRoom(room);
+  const stub = env.MULTIPLAYER_INSTANCES.get(env.MULTIPLAYER_INSTANCES.idFromName(room.instanceId));
+
+  await runInDurableObject(stub, async (instance, state) => {
+    state.storage.sql.exec(
+      "UPDATE runtime_match SET lifecycle_status = 'COMMITTED' WHERE singleton = 1",
+    );
+    state.storage.sql.exec(
+      "UPDATE participant_connections SET disconnected_at = ?",
+      Math.floor(Date.now() / 1_000),
+    );
+    state.storage.sql.exec("DELETE FROM consumed_ticket_nonces");
+    state.storage.sql.exec("DELETE FROM rematch_window");
+    await state.storage.deleteAlarm();
+
+    await instance.alarm();
+
+    expect(await state.storage.getAlarm()).toBeNull();
+  });
+  room.hostSocket.close(1000, "done");
+  room.playerSocket.close(1000, "done");
+});
+
 test("a match participant who never establishes presence still receives the same grace", async ({
   expect,
 }) => {

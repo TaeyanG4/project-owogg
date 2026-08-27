@@ -562,26 +562,29 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     }
     const nextNonce = this.state.storage.sql
       .exec<{ expires_at: number }>(
-        "SELECT MIN(expires_at) AS expires_at FROM consumed_ticket_nonces",
+        "SELECT MIN(expires_at) AS expires_at FROM consumed_ticket_nonces WHERE expires_at > ?",
+        nowSeconds,
       )
       .toArray()[0];
     const nextExpiry = integerValue(nextNonce?.expires_at);
     if (nextExpiry !== null) await this.scheduleNextAlarm(nextExpiry * 1_000 + 1_000);
-    const meta = this.state.storage.sql
-      .exec<{ generation: number }>("SELECT generation FROM runtime_meta WHERE singleton = 1")
-      .toArray()[0];
-    if (isPositiveInteger(meta?.generation)) {
+    const activeRuntime = this.readRuntimeMatch();
+    if (activeRuntime?.lifecycle === "ACTIVE") {
       const nextDisconnect = this.state.storage.sql
         .exec<{ disconnected_at: number }>(
           `SELECT MIN(disconnected_at) AS disconnected_at
            FROM participant_connections
-           WHERE generation = ? AND disconnected_at IS NOT NULL`,
-          meta.generation,
+           WHERE generation = ?
+             AND disconnected_at IS NOT NULL
+             AND disconnected_at > ?`,
+          activeRuntime.generation,
+          nowSeconds - RECONNECT_GRACE_SECONDS,
         )
         .toArray()[0];
       const nextDisconnectedAt = integerValue(nextDisconnect?.disconnected_at);
       if (nextDisconnectedAt !== null) {
-        await this.scheduleNextAlarm((nextDisconnectedAt + RECONNECT_GRACE_SECONDS) * 1_000 + 1);
+        const deadlineMs = (nextDisconnectedAt + RECONNECT_GRACE_SECONDS) * 1_000 + 1;
+        if (deadlineMs > nowMs) await this.scheduleNextAlarm(deadlineMs);
       }
     }
   }
@@ -2571,6 +2574,20 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     attachment: ConnectionAttachment,
     nowSeconds: number,
   ): Promise<boolean> {
+    const runtime = this.readRuntimeMatch();
+    if (
+      runtime?.generation === attachment.generation &&
+      (runtime.lifecycle === "COMMITTED" || runtime.lifecycle === "ABORTED")
+    ) {
+      this.state.storage.sql.exec(
+        `DELETE FROM participant_connections
+         WHERE participant_id = ? AND generation = ? AND connection_generation = ?`,
+        attachment.participantId,
+        attachment.generation,
+        attachment.connectionGeneration,
+      );
+      return false;
+    }
     if (!this.markDisconnected(attachment, nowSeconds)) return false;
     const deadlineMs = (nowSeconds + RECONNECT_GRACE_SECONDS) * 1_000;
     this.broadcastPlayerConnection(
@@ -2623,6 +2640,10 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
   }
 
   private async scheduleNextAlarm(desiredMs: number): Promise<void> {
+    // Every caller must first process an overdue deadline in the current request. Persisting a
+    // deadline in the past makes Cloudflare invoke the object again immediately and can turn one
+    // stale row into an unbounded request loop.
+    if (!Number.isFinite(desiredMs) || desiredMs <= Date.now()) return;
     const current = await this.state.storage.getAlarm();
     // One DO has one alarm. Outside alarm(), preserve the earliest stored deadline. While alarm()
     // is executing Cloudflare returns null (until a new alarm is set), so the next persisted event

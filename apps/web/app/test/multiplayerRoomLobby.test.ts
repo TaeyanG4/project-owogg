@@ -6,12 +6,7 @@ import {
   multiplayerLobbyRosterSounds,
   multiplayerLobbySlotCount,
 } from "../features/game/runtime/MultiplayerRoomLobby";
-import {
-  MULTIPLAYER_LOBBY_SIGNAL_INITIAL_FALLBACK_MS,
-  MULTIPLAYER_LOBBY_SIGNAL_RECONCILE_MS,
-  multiplayerLobbyRecoveryRefreshDelay,
-  multiplayerLobbySignalReconnectDelay,
-} from "../features/game/runtime/multiplayerLobbySignal";
+import { multiplayerLobbySignalReconnectDelay } from "../features/game/runtime/multiplayerLobbySignal";
 
 function player(seatIndex: number, status: "JOINED" | "READY" = "READY"): MultiplayerRoomPlayer {
   return {
@@ -40,16 +35,10 @@ test("the shared lobby renders profile-sized slots and is future-safe up to sixt
   assert.equal(multiplayerLobbySlotCount(20, 20), 16);
 });
 
-test("the signal channel replaces fixed polling with bounded recovery and slow reconciliation", () => {
-  assert.equal(MULTIPLAYER_LOBBY_SIGNAL_INITIAL_FALLBACK_MS, 1_500);
-  assert.equal(MULTIPLAYER_LOBBY_SIGNAL_RECONCILE_MS, 300_000);
+test("the event-driven signal channel backs off without a roster polling fallback", () => {
   assert.deepEqual(
-    [0, 1, 2, 3, 4, 99].map(multiplayerLobbySignalReconnectDelay),
-    [5_000, 15_000, 30_000, 60_000, 120_000, 120_000],
-  );
-  assert.deepEqual(
-    [0, 1, 2, 3, 4, 99].map(multiplayerLobbyRecoveryRefreshDelay),
-    [0, 15_000, 30_000, 60_000, 120_000, 120_000],
+    [0, 1, 2, 3, 4, 5, 99].map(multiplayerLobbySignalReconnectDelay),
+    [5_000, 15_000, 30_000, 60_000, 300_000, 900_000, 900_000],
   );
 });
 

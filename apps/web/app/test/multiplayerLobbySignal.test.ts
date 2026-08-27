@@ -111,7 +111,7 @@ test("the lobby signal validates admission, applies only matching changes, and u
     }),
   );
   assert.deepEqual(connected, ["connected"]);
-  assert.equal(heartbeatDelay, 120_000);
+  assert.equal(heartbeatDelay, 300_000);
 
   socket.emit(
     "message",
