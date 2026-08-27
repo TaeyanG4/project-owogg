@@ -12,6 +12,7 @@ import type {
 } from "@owogg/contracts";
 import { MultiplayerIframeRuntime } from "./MultiplayerIframeRuntime";
 import { MultiplayerRoomLobby } from "./MultiplayerRoomLobby";
+import { primeMultiplayerLobbySound } from "./multiplayerLobbySound";
 import {
   createMultiplayerRoom,
   fetchMultiplayerGameAvailability,
@@ -228,6 +229,7 @@ export function MultiplayerGameSurface({
     ) {
       return;
     }
+    primeMultiplayerLobbySound();
     setBusy("CREATE");
     setError(null);
     try {
@@ -248,6 +250,7 @@ export function MultiplayerGameSurface({
   }, [availability, gameSlug]);
 
   const joinRoom = useCallback(async () => {
+    primeMultiplayerLobbySound();
     const normalizedPublicCode = publicCode.trim();
     const normalizedInviteToken = inviteToken.trim();
     setBusy("JOIN");

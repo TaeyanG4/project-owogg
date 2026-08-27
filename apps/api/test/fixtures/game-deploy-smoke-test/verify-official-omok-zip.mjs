@@ -75,8 +75,13 @@ if (
 ) {
   throw new Error("FAIL: official Omok must keep black/white selection inside the game bundle");
 }
-if (!htmlSource.includes('class="board-grid"') || !styleSource.includes("non-scaling-stroke")) {
-  throw new Error("FAIL: official Omok must use the fixed-width SVG board grid");
+if (
+  !htmlSource.includes('id="boardGrid"') ||
+  !gameSource.includes("nearestDevicePixelCenter") ||
+  !gameSource.includes("devicePixelRatio") ||
+  !gameSource.includes("ResizeObserver")
+) {
+  throw new Error("FAIL: official Omok must use the device-pixel-aligned canvas board grid");
 }
 if (!styleSource.includes("justify-self: center") || !styleSource.includes("overflow: hidden")) {
   throw new Error("FAIL: official Omok fullscreen layout must remain centered without scrollbars");
@@ -87,4 +92,4 @@ console.log(`  zip bytes: ${zipBytes.length}`);
 console.log(`  files: ${prepared.files.length}, entry: ${prepared.entry}`);
 console.log("  production bundle + manifest validation passed");
 console.log("  no direct storage/network/postMessage authority found in game.js");
-console.log("  in-game stone selection and fixed-width centered board UI found");
+console.log("  in-game stone selection and device-pixel-aligned centered board UI found");

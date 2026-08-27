@@ -9,6 +9,7 @@
   const BOARD_SIZE = 15;
   const BOARD_CELLS = BOARD_SIZE * BOARD_SIZE;
   const boardElement = document.getElementById("board");
+  const boardGrid = document.getElementById("boardGrid");
   const statusTitle = document.getElementById("statusTitle");
   const statusDetail = document.getElementById("statusDetail");
   const revisionLabel = document.getElementById("revisionLabel");
@@ -29,6 +30,46 @@
   let soundEnabled = true;
   let selectionPending = false;
   let audioContext = null;
+
+  function nearestDevicePixelCenter(value, limit) {
+    return Math.min(limit - 0.5, Math.max(0.5, Math.round(value - 0.5) + 0.5));
+  }
+
+  function renderBoardGrid() {
+    if (!boardGrid) return;
+    const bounds = boardGrid.getBoundingClientRect();
+    const devicePixelRatio = Math.max(1, window.devicePixelRatio || 1);
+    const pixelWidth = Math.max(1, Math.round(bounds.width * devicePixelRatio));
+    const pixelHeight = Math.max(1, Math.round(bounds.height * devicePixelRatio));
+    if (boardGrid.width !== pixelWidth) boardGrid.width = pixelWidth;
+    if (boardGrid.height !== pixelHeight) boardGrid.height = pixelHeight;
+    const context = boardGrid.getContext("2d");
+    if (!context) return;
+    context.clearRect(0, 0, pixelWidth, pixelHeight);
+    context.strokeStyle = "rgba(72, 40, 14, 0.72)";
+    context.lineWidth = 1;
+    context.lineCap = "butt";
+    context.beginPath();
+    const firstX = nearestDevicePixelCenter((0.5 / BOARD_SIZE) * pixelWidth, pixelWidth);
+    const lastX = nearestDevicePixelCenter(
+      ((BOARD_SIZE - 0.5) / BOARD_SIZE) * pixelWidth,
+      pixelWidth,
+    );
+    const firstY = nearestDevicePixelCenter((0.5 / BOARD_SIZE) * pixelHeight, pixelHeight);
+    const lastY = nearestDevicePixelCenter(
+      ((BOARD_SIZE - 0.5) / BOARD_SIZE) * pixelHeight,
+      pixelHeight,
+    );
+    for (let index = 0; index < BOARD_SIZE; index += 1) {
+      const x = nearestDevicePixelCenter(((index + 0.5) / BOARD_SIZE) * pixelWidth, pixelWidth);
+      const y = nearestDevicePixelCenter(((index + 0.5) / BOARD_SIZE) * pixelHeight, pixelHeight);
+      context.moveTo(x, firstY);
+      context.lineTo(x, lastY);
+      context.moveTo(firstX, y);
+      context.lineTo(lastX, y);
+    }
+    context.stroke();
+  }
 
   function getAudioContext() {
     if (!soundEnabled) return null;
@@ -412,6 +453,14 @@
       cells.push(cell);
     }
   }
+
+  if (boardGrid && typeof ResizeObserver === "function") {
+    const gridResizeObserver = new ResizeObserver(renderBoardGrid);
+    gridResizeObserver.observe(boardGrid);
+  } else {
+    window.addEventListener("resize", renderBoardGrid);
+  }
+  renderBoardGrid();
 
   if (!bridge) {
     setStatus("멀티플레이 브리지를 찾을 수 없습니다", "OWOGG 게임 페이지에서 다시 실행해 주세요.");

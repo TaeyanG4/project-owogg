@@ -3,6 +3,7 @@ import test from "node:test";
 import type { MultiplayerRoomPlayer } from "@owogg/contracts";
 import {
   multiplayerLobbyCanStart,
+  multiplayerLobbyRosterSounds,
   multiplayerLobbySlotCount,
 } from "../features/game/runtime/MultiplayerRoomLobby";
 
@@ -30,4 +31,27 @@ test("the shared lobby renders profile-sized slots and is future-safe up to sixt
   assert.equal(multiplayerLobbySlotCount(8, 8), 8);
   assert.equal(multiplayerLobbySlotCount(16, 12), 16);
   assert.equal(multiplayerLobbySlotCount(20, 20), 16);
+});
+
+test("lobby sounds announce only other players entering and leaving after the initial roster", () => {
+  const self = player(0);
+  const opponent = player(1);
+  assert.deepEqual(multiplayerLobbyRosterSounds(null, [self], self.participantId), []);
+  assert.deepEqual(
+    multiplayerLobbyRosterSounds(
+      new Set([self.participantId]),
+      [self, opponent],
+      self.participantId,
+    ),
+    ["JOIN"],
+  );
+  assert.deepEqual(
+    multiplayerLobbyRosterSounds(
+      new Set([self.participantId, opponent.participantId]),
+      [self],
+      self.participantId,
+    ),
+    ["LEAVE"],
+  );
+  assert.deepEqual(multiplayerLobbyRosterSounds(new Set(), [self], self.participantId), []);
 });

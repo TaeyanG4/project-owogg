@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Check, Copy, Crown, Link2, LogOut, Play, UserRound, UsersRound } from "lucide-react";
 import type { MultiplayerRoomPlayer, MultiplayerRoomResponse } from "@owogg/contracts";
 import {
@@ -6,6 +6,7 @@ import {
   leaveMultiplayerRoom,
   startMultiplayerRoom,
 } from "./multiplayerRoomApi";
+import { playMultiplayerLobbySound, type MultiplayerLobbySound } from "./multiplayerLobbySound";
 
 // Lobby state is control-plane data, not realtime gameplay. A modest cadence keeps host start
 // responsive without turning D1 roster reads into a high-frequency transport.
@@ -25,6 +26,34 @@ export function multiplayerLobbyCanStart(
 
 export function multiplayerLobbySlotCount(maxPlayers: number, occupiedPlayers: number): number {
   return Math.min(Math.max(maxPlayers, occupiedPlayers), MAX_RENDERED_LOBBY_SLOTS);
+}
+
+export function multiplayerLobbyRosterSounds(
+  previousParticipantIds: ReadonlySet<string> | null,
+  players: readonly MultiplayerRoomPlayer[],
+  selfParticipantId: string,
+): readonly MultiplayerLobbySound[] {
+  if (previousParticipantIds === null) return [];
+  const currentParticipantIds = new Set(players.map((player) => player.participantId));
+  const sounds: MultiplayerLobbySound[] = [];
+  if (
+    players.some(
+      (player) =>
+        player.participantId !== selfParticipantId &&
+        !previousParticipantIds.has(player.participantId),
+    )
+  ) {
+    sounds.push("JOIN");
+  }
+  if (
+    [...previousParticipantIds].some(
+      (participantId) =>
+        participantId !== selfParticipantId && !currentParticipantIds.has(participantId),
+    )
+  ) {
+    sounds.push("LEAVE");
+  }
+  return sounds;
 }
 
 export interface MultiplayerRoomLobbyProps {
@@ -123,6 +152,7 @@ export function MultiplayerRoomLobby({
   const [busy, setBusy] = useState<"START" | "LEAVE" | null>(null);
   const [copied, setCopied] = useState<"CODE" | "LINK" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const previousParticipantIdsRef = useRef<ReadonlySet<string> | null>(null);
   const isHost = room.participant.role === "HOST";
 
   useEffect(() => {
@@ -133,6 +163,15 @@ export function MultiplayerRoomLobby({
       try {
         const roster = await fetchMultiplayerRoomRoster(room.instance.id);
         if (!active || roster.generation !== room.instance.generation) return;
+        const rosterSounds = multiplayerLobbyRosterSounds(
+          previousParticipantIdsRef.current,
+          roster.players,
+          room.participant.id,
+        );
+        previousParticipantIdsRef.current = new Set(
+          roster.players.map((player) => player.participantId),
+        );
+        rosterSounds.forEach(playMultiplayerLobbySound);
         setPlayers(roster.players);
         setError(null);
         if (roster.instance.status === "ACTIVE") {

@@ -589,7 +589,7 @@ export function GameHost({ slug }: GameHostProps) {
   // shouldShowFullscreenControl's own doc comment.
   const showFullscreenControl = shouldShowFullscreenControl(presentation, isFullscreenApiAvailable);
   const renderedIframeFrameClassName = isFullscreen
-    ? "h-[calc(100vh-4.5rem)] w-full"
+    ? "mx-auto h-[calc(100vh-4.5rem)] w-full max-w-full"
     : iframeFrameClassName;
   // Mobile/orientation advisories — see presentationAdvisory.ts's own doc comment. Both resolvers
   // return "no advisory" outright whenever isMobileLikeEnvironment is false, so nothing here ever

@@ -350,17 +350,11 @@ h1 {
 .board-grid {
   position: absolute;
   inset: var(--board-padding);
+  display: block;
+  width: calc(100% - (var(--board-padding) * 2));
+  height: calc(100% - (var(--board-padding) * 2));
   z-index: 0;
   pointer-events: none;
-  overflow: visible;
-}
-
-.board-grid path {
-  fill: none;
-  stroke: rgba(72, 40, 14, 0.72);
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
-  shape-rendering: crispEdges;
 }
 
 .intersection:not(:disabled):hover,
