@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   MULTIPLAYER_HEARTBEAT_REQUEST,
   MULTIPLAYER_HEARTBEAT_RESPONSE,
+  MULTIPLAYER_LOBBY_SYNC_REQUEST,
   MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
 } from "@owogg/contracts";
 import {
@@ -118,8 +119,9 @@ test("valid increasing lobby changes preserve deltas, report gaps, and keep hear
   ]);
   harness.open();
   assert.equal(connected, 1);
+  assert.deepEqual(harness.sent, [MULTIPLAYER_LOBBY_SYNC_REQUEST]);
   heartbeat?.();
-  assert.deepEqual(harness.sent, [MULTIPLAYER_HEARTBEAT_REQUEST]);
+  assert.deepEqual(harness.sent, [MULTIPLAYER_LOBBY_SYNC_REQUEST, MULTIPLAYER_HEARTBEAT_REQUEST]);
   harness.message(MULTIPLAYER_HEARTBEAT_RESPONSE);
   harness.message(
     JSON.stringify({

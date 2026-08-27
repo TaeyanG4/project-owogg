@@ -1,6 +1,7 @@
 import {
   MULTIPLAYER_HEARTBEAT_REQUEST,
   MULTIPLAYER_HEARTBEAT_RESPONSE,
+  MULTIPLAYER_LOBBY_SYNC_REQUEST,
   MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
   MultiplayerLobbyConnectedMessageSchema,
   MultiplayerLobbyChangedMessageSchema,
@@ -120,6 +121,12 @@ export function openMultiplayerLobbyRealtime(
       } finally {
         signalDisconnected();
       }
+      return;
+    }
+    try {
+      socket.send(MULTIPLAYER_LOBBY_SYNC_REQUEST);
+    } catch {
+      signalDisconnected();
       return;
     }
     input.onConnected?.();

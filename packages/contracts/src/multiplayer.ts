@@ -9,6 +9,9 @@ export const MULTIPLAYER_HEARTBEAT_RESPONSE = "owogg.multiplayer.heartbeat-ack.v
  * minimal ready-state delta needed for an immediate lobby repaint. Nicknames, avatars, sessions,
  * and the full roster remain behind the authenticated HTTP endpoint and never enter a game iframe. */
 export const MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL = "owogg.multiplayer.lobby.v1";
+/** Sent once by the browser after the 101 upgrade has completed. The DO replies with the current
+ * lobby event sequence so a reconnect can distinguish a contiguous delta from a missed event. */
+export const MULTIPLAYER_LOBBY_SYNC_REQUEST = "owogg.multiplayer.lobby-sync.v1";
 
 const OpaqueIdSchema = z.string().regex(/^[A-Za-z0-9_-]{8,128}$/);
 const StableIdentifierSchema = z.string().regex(/^[a-z0-9][a-z0-9._:/-]{0,95}$/);

@@ -527,8 +527,8 @@ export function MultiplayerRoomLobby({
               참가를 확정합니다.
             </p>
           </div>
-          <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 xl:w-[32rem] xl:shrink-0">
-            <span className="flex min-h-11 min-w-0 items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2">
+          <div className="flex w-full min-w-0 flex-nowrap items-center gap-2 overflow-x-auto pb-1 xl:w-[32rem] xl:shrink-0 xl:overflow-visible xl:pb-0">
+            <span className="flex min-h-11 min-w-36 flex-1 items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2">
               <span className="text-[11px] font-black uppercase tracking-wider text-text-muted">
                 방 코드
               </span>
@@ -539,7 +539,7 @@ export function MultiplayerRoomLobby({
             <button
               type="button"
               onClick={() => void copyValue("CODE")}
-              className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-xl border border-border px-3 py-2 text-sm font-black text-text-primary hover:bg-surface-overlay"
+              className="inline-flex min-h-11 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-xl border border-border px-3 py-2 text-sm font-black text-text-primary hover:bg-surface-overlay"
             >
               {copied === "CODE" ? (
                 <Check className="h-4 w-4 text-emerald-300" />
@@ -551,7 +551,7 @@ export function MultiplayerRoomLobby({
             <button
               type="button"
               onClick={() => void copyValue("LINK")}
-              className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-xl border border-brand/40 bg-brand/10 px-3 py-2 text-sm font-black text-brand-light hover:bg-brand/20"
+              className="inline-flex min-h-11 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-xl border border-brand/40 bg-brand/10 px-3 py-2 text-sm font-black text-brand-light hover:bg-brand/20"
             >
               {copied === "LINK" ? (
                 <Check className="h-4 w-4 text-emerald-300" />

@@ -26,7 +26,6 @@ import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_CONNECT_PATH,
   MULTIPLAYER_INTERNAL_LEAVE_PATH,
-  MULTIPLAYER_INTERNAL_READY_PATH,
   MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH,
   MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH,
@@ -368,47 +367,6 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
               lobbyConnections.push(internalRequest);
               return new Response(null, { status: 204 });
             }
-            if (url.pathname === MULTIPLAYER_INTERNAL_READY_PATH) {
-              assert.equal(
-                internalRequest.headers.get(MULTIPLAYER_INTERNAL_PROTOCOL_HEADER),
-                MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
-              );
-              const readyBody = (await internalRequest.json()) as {
-                instanceId: string;
-                userId: number;
-                generation: number;
-                ready: boolean;
-              };
-              assert.equal(readyBody.instanceId, instanceId);
-              assert.equal(readyBody.generation, 1);
-              const participant = await instances.findParticipant(instanceId, readyBody.userId);
-              assert.ok(participant);
-              if (participant.role === "HOST") {
-                return Response.json({ ok: false, code: "FORBIDDEN" }, { status: 403 });
-              }
-              const nextStatus = readyBody.ready ? "READY" : "JOINED";
-              const updated = await instances.transitionParticipant({
-                instanceId,
-                expectedInstanceGeneration: readyBody.generation,
-                userId: readyBody.userId,
-                expectedStatus: participant.status,
-                nextStatus,
-                readyAt: readyBody.ready ? nowIso : null,
-                leftAt: null,
-                nowIso,
-              });
-              assert.equal(updated?.status, nextStatus);
-              lobbyNotifications.push({
-                instanceId,
-                generation: readyBody.generation,
-                change: {
-                  kind: "PARTICIPANT_READY",
-                  participantId: participant.id,
-                  status: nextStatus,
-                },
-              });
-              return Response.json({ ok: true });
-            }
             assert.equal(url.pathname, MULTIPLAYER_INTERNAL_LEAVE_PATH);
             assert.equal(
               internalRequest.headers.get(MULTIPLAYER_INTERNAL_PROTOCOL_HEADER),
@@ -541,7 +499,10 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
     lobbyConnection.headers.get(MULTIPLAYER_INTERNAL_PROTOCOL_HEADER),
     MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
   );
-  assert.equal(lobbyConnection.headers.get("Sec-WebSocket-Protocol"), null);
+  assert.equal(
+    lobbyConnection.headers.get("Sec-WebSocket-Protocol"),
+    MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
+  );
   const lobbyClaims = decodeVerifiedMultiplayerLobbyClaims(
     lobbyConnection.headers.get(MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER),
   );

@@ -20,7 +20,7 @@ export default function App() {
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <link rel="icon" href="/favicon.ico" sizes="any" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-        <link rel="manifest" href="/site.webmanifest" />
+        <link rel="manifest" href="/site.webmanifest" crossOrigin="use-credentials" />
         {/* First catalog/leaderboard and game start use separate origins. Establishing DNS/TLS
             while the SPA bundle loads removes that handshake from the user's first interaction. */}
         <link rel="preconnect" href={API_URL} crossOrigin="anonymous" />

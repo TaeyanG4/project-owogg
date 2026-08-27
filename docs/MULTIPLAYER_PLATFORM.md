@@ -885,6 +885,13 @@ host가 최소 인원 확인 뒤 수동 시작하도록 변경했으며, 오목�
 종료 경로가 30초 Durable Object alarm을 예약하며 일시적인 결과 저장 실패도 다음 alarm을 명시적으로
 재예약한다.
 
+2026-08-28 실시간 로비 전달 보정은 브라우저가 101 upgrade를 받은 뒤 별도 sync frame으로 현재
+event sequence를 요청한다. 외부 Worker는 인증·참가자 검증 후 Durable Object의 WebSocket 응답을
+다시 감싸지 않고 직접 전달하며, alarm 예약은 upgrade 응답을 막지 않는 background 작업으로 둔다.
+READY 변경은 D1에서 먼저 확정한 뒤 DO에 최소 상태 delta를 전송하므로 실시간 채널 장애가 사용자
+READY 요청 자체를 503으로 바꾸지 않는다. socket이 정상인 동안 반복 roster 조회는 없고, 연결 장애
+시에만 제한된 backoff 조회로 복구한다.
+
 완료 Gate: 동시/중복 action으로 corruption이 없고 iframe이 결과·업적·XP를 위조할 수 없다.
 
 ### Phase 4 — M2 Event + Diagnostics
