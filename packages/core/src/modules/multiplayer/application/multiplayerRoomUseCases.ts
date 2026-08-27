@@ -37,6 +37,7 @@ type RoomErrorCode = Extract<
   | "INVITE_INVALID"
   | "INVITE_EXHAUSTED"
   | "ALREADY_JOINED"
+  | "PLAYERS_NOT_READY"
   | "NOT_PARTICIPANT"
   | "STALE_GENERATION"
   | "INTERNAL_RETRYABLE"
@@ -106,6 +107,21 @@ export type ReadyMultiplayerParticipantResult =
       readonly instance: MultiplayerInstanceRecord;
       readonly participant: MultiplayerParticipantRecord;
       readonly match: MultiplayerMatchRecord | null;
+    }
+  | { readonly ok: false; readonly code: RoomErrorCode };
+
+export interface StartMultiplayerRoomInput {
+  readonly userId: number;
+  readonly instanceId: string;
+  readonly expectedGeneration: number;
+}
+
+export type StartMultiplayerRoomResult =
+  | {
+      readonly ok: true;
+      readonly instance: MultiplayerInstanceRecord;
+      readonly participant: MultiplayerParticipantRecord;
+      readonly match: MultiplayerMatchRecord;
     }
   | { readonly ok: false; readonly code: RoomErrorCode };
 
@@ -294,11 +310,17 @@ export class MultiplayerRoomUseCases {
           }
           instance = current;
         }
+        const ready = await this.readyParticipant({
+          userId: input.userId,
+          instanceId: instance.id,
+          expectedGeneration: instance.generation,
+        });
+        if (!ready.ok) return ready;
         return {
           ok: true,
           replayed: created.status === "REPLAYED",
-          instance,
-          participant: created.host,
+          instance: ready.instance,
+          participant: ready.participant,
         };
       }
       return { ok: false, code: "INTERNAL_RETRYABLE" };
@@ -332,11 +354,17 @@ export class MultiplayerRoomUseCases {
       if (joined.status === "REJECTED") return { ok: false, code: joined.code };
       const current = await this.dependencies.instances.findById(instance.id);
       if (!current) return { ok: false, code: "INTERNAL_RETRYABLE" };
+      const ready = await this.readyParticipant({
+        userId: input.userId,
+        instanceId: current.id,
+        expectedGeneration: current.generation,
+      });
+      if (!ready.ok) return ready;
       return {
         ok: true,
         replayed: joined.status === "REPLAYED",
-        instance: current,
-        participant: joined.participant,
+        instance: ready.instance,
+        participant: ready.participant,
       };
     } catch {
       return { ok: false, code: "INTERNAL_RETRYABLE" };
@@ -454,23 +482,68 @@ export class MultiplayerRoomUseCases {
       }
 
       instance = (await this.dependencies.instances.findById(instance.id)) ?? instance;
-      if (instance.status === "LOBBY") {
-        const [participants, profileRecord] = await Promise.all([
-          this.dependencies.instances.listParticipants(instance.id),
-          this.dependencies.profiles.findById(instance.profileId),
-        ]);
-        if (!profileRecord || !isSupportedMultiplayerRuntimeProfile(profileRecord.profile)) {
-          return { ok: false, code: "PROFILE_DISABLED" };
-        }
-        const activeParticipants = participants.filter(
-          (candidate) => candidate.status === "JOINED" || candidate.status === "READY",
+      return { ok: true, state: "WAITING", instance, participant, match: null };
+    } catch {
+      return { ok: false, code: "INTERNAL_RETRYABLE" };
+    }
+  }
+
+  async startRoom(input: StartMultiplayerRoomInput): Promise<StartMultiplayerRoomResult> {
+    if (
+      !isPositiveInteger(input.userId) ||
+      !INSTANCE_ID_PATTERN.test(input.instanceId) ||
+      !isPositiveInteger(input.expectedGeneration)
+    ) {
+      return { ok: false, code: "INVALID_REQUEST" };
+    }
+
+    try {
+      let instance = await this.dependencies.instances.findById(input.instanceId);
+      if (!instance) return { ok: false, code: "INSTANCE_NOT_FOUND" };
+      if (instance.generation !== input.expectedGeneration) {
+        return { ok: false, code: "STALE_GENERATION" };
+      }
+      const participant = await this.dependencies.instances.findParticipant(
+        instance.id,
+        input.userId,
+      );
+      if (!participant || participant.status !== "READY") {
+        return { ok: false, code: "NOT_PARTICIPANT" };
+      }
+      if (participant.role !== "HOST") return { ok: false, code: "FORBIDDEN" };
+
+      if (instance.status === "ACTIVE") {
+        const existing = await this.dependencies.matches.findMatchByInstanceGeneration(
+          instance.id,
+          instance.generation,
         );
-        if (
-          activeParticipants.length < profileRecord.profile.minPlayers ||
-          activeParticipants.some((candidate) => candidate.status !== "READY")
-        ) {
-          return { ok: true, state: "WAITING", instance, participant, match: null };
-        }
+        return existing
+          ? { ok: true, instance, participant, match: existing }
+          : { ok: false, code: "INTERNAL_RETRYABLE" };
+      }
+      if (instance.status !== "LOBBY" && instance.status !== "STARTING") {
+        return { ok: false, code: "INSTANCE_NOT_JOINABLE" };
+      }
+
+      const [participants, profileRecord] = await Promise.all([
+        this.dependencies.instances.listParticipants(instance.id),
+        this.dependencies.profiles.findById(instance.profileId),
+      ]);
+      if (!profileRecord || !isSupportedMultiplayerRuntimeProfile(profileRecord.profile)) {
+        return { ok: false, code: "PROFILE_DISABLED" };
+      }
+      const activeParticipants = participants.filter(
+        (candidate) => candidate.status === "JOINED" || candidate.status === "READY",
+      );
+      if (
+        activeParticipants.length < profileRecord.profile.minPlayers ||
+        activeParticipants.some((candidate) => candidate.status !== "READY")
+      ) {
+        return { ok: false, code: "PLAYERS_NOT_READY" };
+      }
+
+      const nowIso = this.now().toISOString();
+      if (instance.status === "LOBBY") {
         await this.dependencies.instances.transition({
           instanceId: instance.id,
           expectedStatus: "LOBBY",
@@ -484,36 +557,34 @@ export class MultiplayerRoomUseCases {
         instance = (await this.dependencies.instances.findById(instance.id)) ?? instance;
       }
 
-      if (instance.status === "STARTING") {
-        const matchId = `match_${(
-          await sha256Hex(
-            ["owogg.multiplayer.match.v1", instance.id, String(instance.generation)].join("\u0000"),
-          )
-        ).slice(0, 48)}`;
-        const createdMatch = await this.dependencies.matches.createPendingWithPlayers({
-          matchId,
-          instanceId: instance.id,
-          expectedGeneration: instance.generation,
-          nowIso,
-        });
-        if (createdMatch.status === "REJECTED") {
-          if (createdMatch.code === "PLAYERS_NOT_READY") {
-            const current = (await this.dependencies.instances.findById(instance.id)) ?? instance;
-            return { ok: true, state: "WAITING", instance: current, participant, match: null };
-          }
-          return { ok: false, code: "INTERNAL_RETRYABLE" };
-        }
-        await this.dependencies.instances.transition({
-          instanceId: instance.id,
-          expectedStatus: "STARTING",
-          expectedGeneration: instance.generation,
-          nextStatus: "ACTIVE",
-          nextGeneration: instance.generation,
-          closedAt: null,
-          abortCode: null,
-          nowIso,
-        });
+      const matchId = `match_${(
+        await sha256Hex(
+          ["owogg.multiplayer.match.v1", instance.id, String(instance.generation)].join("\u0000"),
+        )
+      ).slice(0, 48)}`;
+      const createdMatch = await this.dependencies.matches.createPendingWithPlayers({
+        matchId,
+        instanceId: instance.id,
+        expectedGeneration: instance.generation,
+        nowIso,
+      });
+      if (createdMatch.status === "REJECTED") {
+        return {
+          ok: false,
+          code:
+            createdMatch.code === "PLAYERS_NOT_READY" ? "PLAYERS_NOT_READY" : "INTERNAL_RETRYABLE",
+        };
       }
+      await this.dependencies.instances.transition({
+        instanceId: instance.id,
+        expectedStatus: "STARTING",
+        expectedGeneration: instance.generation,
+        nextStatus: "ACTIVE",
+        nextGeneration: instance.generation,
+        closedAt: null,
+        abortCode: null,
+        nowIso,
+      });
 
       instance = (await this.dependencies.instances.findById(instance.id)) ?? instance;
       const match = await this.dependencies.matches.findMatchByInstanceGeneration(
@@ -523,7 +594,7 @@ export class MultiplayerRoomUseCases {
       if (instance.status !== "ACTIVE" || !match || match.status !== "ACTIVE") {
         return { ok: false, code: "INTERNAL_RETRYABLE" };
       }
-      return { ok: true, state: "ACTIVE", instance, participant, match };
+      return { ok: true, instance, participant, match };
     } catch {
       return { ok: false, code: "INTERNAL_RETRYABLE" };
     }
@@ -714,6 +785,27 @@ export class MultiplayerRoomUseCases {
         nowIso,
       });
       if (requested.status === "REJECTED") return { ok: false, code: requested.code };
+      let participant = requested.participant;
+      if (requested.status === "STARTED") {
+        const participants = await this.dependencies.instances.listParticipants(
+          requested.instance.id,
+        );
+        for (const candidate of participants) {
+          if (candidate.status !== "JOINED") continue;
+          const ready = await this.dependencies.instances.transitionParticipant({
+            instanceId: requested.instance.id,
+            expectedInstanceGeneration: requested.instance.generation,
+            userId: candidate.userId,
+            expectedStatus: "JOINED",
+            nextStatus: "READY",
+            readyAt: nowIso,
+            leftAt: null,
+            nowIso,
+          });
+          if (!ready) return { ok: false, code: "INTERNAL_RETRYABLE" };
+          if (candidate.id === participant.id) participant = ready;
+        }
+      }
       const requestedBySelf = requested.requesterParticipantIds.includes(requested.participant.id);
       const requestedByOpponent = requested.requesterParticipantIds.some(
         (participantId) => participantId !== requested.participant.id,
@@ -727,7 +819,7 @@ export class MultiplayerRoomUseCases {
               ? "OPPONENT_REQUESTED"
               : "WAITING",
         instance: requested.instance,
-        participant: requested.participant,
+        participant,
         requestedBySelf,
         requestedByOpponent,
       };

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { Check, Copy, Link2, LogOut } from "lucide-react";
 import type {
   MultiplayerRematchResponse,
   MultiplayerRoomPlayer,
@@ -10,6 +11,7 @@ import {
   createMultiplayerBridgeHost,
   type MultiplayerBridgeHost,
   type MultiplayerParentConnectionState,
+  type MultiplayerPlayerConnectionState,
 } from "./multiplayerBridgeHost";
 import { MultiplayerConnectionOverlay } from "./MultiplayerConnectionOverlay";
 import {
@@ -28,33 +30,41 @@ function PlayerProfileCard({
   player,
   seatIndex,
   selfParticipantId,
+  connection,
 }: {
   readonly player: MultiplayerRoomPlayer | undefined;
   readonly seatIndex: 0 | 1;
   readonly selfParticipantId: string;
+  readonly connection?: MultiplayerPlayerConnectionState;
 }) {
   const isSelf = player?.participantId === selfParticipantId;
-  const stoneLabel = seatIndex === 0 ? "흑" : "백";
+  const participantLabel = player?.role === "HOST" ? "방장" : "플레이어";
+  const connectionLabel =
+    connection?.status === "RECONNECTING"
+      ? "재접속 대기"
+      : connection?.status === "LEFT"
+        ? "나감"
+        : connection?.status === "TIMED_OUT"
+          ? "연결 만료"
+          : null;
   return (
     <div
-      className={`flex min-w-0 items-center gap-2 ${seatIndex === 1 ? "justify-end text-right" : ""}`}
+      className={`flex min-w-0 items-center gap-2.5 ${seatIndex === 1 ? "justify-end text-right" : ""}`}
     >
       {seatIndex === 1 && (
         <span className="hidden min-w-0 sm:block">
-          <span className="block truncate text-xs font-black text-text-primary">
+          <span className="block truncate text-sm font-black text-text-primary">
             {player?.nickname ?? "상대 대기 중"}
           </span>
-          <span className="block text-[10px] font-bold text-text-muted">
-            {player ? `${stoneLabel}${isSelf ? " · 나" : ""}` : stoneLabel}
+          <span className="block text-xs font-bold text-text-muted">
+            {player
+              ? `${participantLabel}${isSelf ? " · 나" : ""}${connectionLabel ? ` · ${connectionLabel}` : ""}`
+              : `슬롯 ${seatIndex + 1}`}
           </span>
         </span>
       )}
       <span
-        className={`relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border text-xs font-black ${
-          seatIndex === 0
-            ? "border-slate-500 bg-slate-950 text-white"
-            : "border-slate-200 bg-slate-100 text-slate-900"
-        }`}
+        className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-brand/35 bg-brand/10 text-sm font-black text-text-primary"
         aria-hidden="true"
       >
         {player?.avatarUrl ? (
@@ -65,16 +75,18 @@ function PlayerProfileCard({
             className="h-full w-full object-cover"
           />
         ) : (
-          player?.nickname.trim().charAt(0) || stoneLabel
+          player?.nickname.trim().charAt(0) || String(seatIndex + 1)
         )}
       </span>
       {seatIndex === 0 && (
         <span className="hidden min-w-0 sm:block">
-          <span className="block truncate text-xs font-black text-text-primary">
+          <span className="block truncate text-sm font-black text-text-primary">
             {player?.nickname ?? "플레이어 대기 중"}
           </span>
-          <span className="block text-[10px] font-bold text-text-muted">
-            {player ? `${stoneLabel}${isSelf ? " · 나" : ""}` : stoneLabel}
+          <span className="block text-xs font-bold text-text-muted">
+            {player
+              ? `${participantLabel}${isSelf ? " · 나" : ""}${connectionLabel ? ` · ${connectionLabel}` : ""}`
+              : `슬롯 ${seatIndex + 1}`}
           </span>
         </span>
       )}
@@ -82,17 +94,64 @@ function PlayerProfileCard({
   );
 }
 
-export function multiplayerTerminalLabel(result: unknown, viewerSeatIndex: number): string {
+export function multiplayerTerminalLabel(result: unknown, viewer: number | string): string {
   if (typeof result !== "object" || result === null || Array.isArray(result)) return "경기 종료";
   const terminal = result as Record<string, unknown>;
   if (terminal.kind === "DRAW") return "무승부";
   if (
+    terminal.kind === "FORFEIT" &&
+    typeof terminal.winnerParticipantId === "string" &&
+    typeof viewer === "string"
+  ) {
+    return terminal.winnerParticipantId === viewer ? "기권승" : "기권패";
+  }
+  if (
+    terminal.kind === "WIN" &&
+    typeof terminal.winnerParticipantId === "string" &&
+    typeof viewer === "string"
+  ) {
+    return terminal.winnerParticipantId === viewer ? "승리" : "패배";
+  }
+  if (
     terminal.kind === "WIN" &&
     (terminal.winnerSeatIndex === 0 || terminal.winnerSeatIndex === 1)
   ) {
-    return terminal.winnerSeatIndex === viewerSeatIndex ? "승리" : "패배";
+    return terminal.winnerSeatIndex === viewer ? "승리" : "패배";
   }
   return "경기 종료";
+}
+
+function PeerConnectionNotice({ state }: { readonly state: MultiplayerPlayerConnectionState }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (state.status !== "RECONNECTING") return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [state.status]);
+
+  if (state.status === "CONNECTED") return null;
+  const seconds =
+    state.status === "RECONNECTING"
+      ? Math.max(0, Math.ceil((Date.parse(state.reconnectDeadlineAt) - now) / 1_000))
+      : 0;
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={`border-b px-4 py-2.5 text-center text-sm font-bold ${
+        state.status === "RECONNECTING"
+          ? "border-amber-300/20 bg-amber-300/10 text-amber-100"
+          : "border-red-300/20 bg-red-400/10 text-red-200"
+      }`}
+    >
+      {state.status === "RECONNECTING"
+        ? `상대 네트워크 연결이 불안정합니다. ${seconds}초 동안 재접속을 기다립니다.`
+        : state.status === "LEFT"
+          ? "상대가 게임에서 나갔습니다."
+          : "상대가 30초 안에 재접속하지 않아 기권 처리되었습니다."}
+    </div>
+  );
 }
 
 export function multiplayerRoomClipboardValue(
@@ -158,6 +217,9 @@ export function MultiplayerIframeRuntime({
   const [copied, setCopied] = useState<"CODE" | "LINK" | null>(null);
   const [leaving, setLeaving] = useState(false);
   const [players, setPlayers] = useState<readonly MultiplayerRoomPlayer[]>([]);
+  const [playerConnections, setPlayerConnections] = useState<
+    ReadonlyMap<string, MultiplayerPlayerConnectionState>
+  >(new Map());
   const [rematchState, setRematchState] = useState<
     "CHECKING" | "AVAILABLE" | "WAITING" | "OPPONENT_REQUESTED" | "STARTING" | "UNAVAILABLE"
   >("CHECKING");
@@ -215,6 +277,7 @@ export function MultiplayerIframeRuntime({
     reconnectAttemptRef.current = 0;
     setRetryKey(0);
     setPlayers([]);
+    setPlayerConnections(new Map());
     setRematchState("CHECKING");
     setRematchBusy(false);
     setRematchError(null);
@@ -329,6 +392,13 @@ export function MultiplayerIframeRuntime({
               onConnectionState: handleConnectionState,
               onRosterChange: refreshRoster,
               onRematchChange: refreshRematch,
+              onPlayerConnectionChange: (state) => {
+                setPlayerConnections((current) => {
+                  const next = new Map(current);
+                  next.set(state.participantId, state);
+                  return next;
+                });
+              },
             },
           );
         })
@@ -362,18 +432,22 @@ export function MultiplayerIframeRuntime({
 
   const leave = useCallback(async () => {
     setLeaving(true);
-    if (
-      connectionState.status !== "DISCONNECTED" &&
-      connectionState.status !== "TERMINAL_COMMITTED" &&
-      connectionState.status !== "ABORTED"
-    ) {
-      bridgeRef.current?.leave();
-    }
     try {
       await leaveMultiplayerRoom({
         instanceId: room.instance.id,
         expectedGeneration: room.instance.generation,
       });
+    } catch {
+      // The authenticated HTTP control path is authoritative and serializes through the same
+      // Durable Object as gameplay. Only fall back to the already-authenticated socket if the
+      // HTTP response is lost; sending both concurrently can turn a forfeit into an abort race.
+      if (
+        connectionState.status !== "DISCONNECTED" &&
+        connectionState.status !== "TERMINAL_COMMITTED" &&
+        connectionState.status !== "ABORTED"
+      ) {
+        bridgeRef.current?.leave();
+      }
     } finally {
       closeCurrent();
       onExit();
@@ -423,7 +497,7 @@ export function MultiplayerIframeRuntime({
           공식 경기 결과
         </p>
         <p className="mt-2 text-4xl font-black text-text-primary">
-          {multiplayerTerminalLabel(connectionState.result, room.participant.seatIndex)}
+          {multiplayerTerminalLabel(connectionState.result, room.participant.id)}
         </p>
       </div>
     ) : undefined;
@@ -473,6 +547,12 @@ export function MultiplayerIframeRuntime({
 
   const leftPlayer = players.find((player) => player.seatIndex === 0);
   const rightPlayer = players.find((player) => player.seatIndex === 1);
+  const leftConnection = leftPlayer ? playerConnections.get(leftPlayer.participantId) : undefined;
+  const rightConnection = rightPlayer
+    ? playerConnections.get(rightPlayer.participantId)
+    : undefined;
+  const opponent = players.find((player) => player.participantId !== room.participant.id);
+  const opponentConnection = opponent ? playerConnections.get(opponent.participantId) : undefined;
   const connectionLabel =
     connectionState.status === "CONNECTED"
       ? "서버 연결됨"
@@ -486,56 +566,84 @@ export function MultiplayerIframeRuntime({
 
   return (
     <div className="w-full bg-[#08090d]">
-      <div className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 border-b border-white/10 bg-surface-raised px-3 py-2 sm:px-4">
+      <div className="grid min-h-20 grid-cols-2 items-center gap-3 border-b border-white/10 bg-surface-raised px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:px-4">
         <PlayerProfileCard
           player={leftPlayer}
           seatIndex={0}
           selfParticipantId={room.participant.id}
+          {...(leftConnection ? { connection: leftConnection } : {})}
         />
-        <div className="flex flex-col items-center gap-1">
-          <div className="flex flex-wrap items-center justify-center gap-1.5 text-[10px] font-bold text-text-secondary sm:text-[11px]">
-            <span className="whitespace-nowrap rounded-full border border-border bg-surface px-2 py-1">
-              방 코드 {room.instance.publicCode}
+        <div className="order-3 col-span-2 flex min-w-0 flex-col items-center gap-2 sm:order-none sm:col-span-1">
+          <div className="flex max-w-full flex-wrap items-stretch justify-center gap-2">
+            <span className="flex min-h-11 items-center gap-2 rounded-xl border border-border bg-surface px-3.5 py-2">
+              <span className="text-xs font-black uppercase tracking-wider text-text-muted">
+                방 코드
+              </span>
+              <code className="whitespace-nowrap text-base font-black tracking-wide text-text-primary">
+                {room.instance.publicCode}
+              </code>
             </span>
             <button
               type="button"
               onClick={() => void copyRoom("CODE")}
-              className="cursor-pointer rounded-full border border-border px-2 py-1 hover:bg-surface-overlay"
+              className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-border bg-surface px-3.5 py-2 text-sm font-black text-text-primary transition-colors hover:border-brand/40 hover:bg-surface-overlay"
             >
-              {copied === "CODE" ? "복사됨" : "코드 복사"}
+              {copied === "CODE" ? (
+                <Check className="h-4 w-4 text-accent-green" />
+              ) : (
+                <Copy className="h-4 w-4" />
+              )}
+              {copied === "CODE" ? "코드 복사됨" : "코드 복사"}
             </button>
             {shareValue && (
               <button
                 type="button"
                 onClick={() => void copyRoom("LINK")}
-                className="cursor-pointer rounded-full border border-brand/40 px-2 py-1 text-brand-light hover:bg-brand/10"
+                className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-brand/40 bg-brand/10 px-3.5 py-2 text-sm font-black text-brand-light transition-colors hover:bg-brand/20"
               >
-                {copied === "LINK" ? "복사됨" : "링크 복사"}
+                {copied === "LINK" ? (
+                  <Check className="h-4 w-4 text-accent-green" />
+                ) : (
+                  <Link2 className="h-4 w-4" />
+                )}
+                {copied === "LINK" ? "링크 복사됨" : "링크 복사"}
               </button>
             )}
             <button
               type="button"
               disabled={leaving}
               onClick={() => void leave()}
-              className="cursor-pointer rounded-full border border-red-300/20 px-2 py-1 text-red-300 hover:bg-red-400/10 disabled:cursor-wait disabled:opacity-60"
+              className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-red-300/25 bg-red-400/5 px-3.5 py-2 text-sm font-black text-red-300 transition-colors hover:bg-red-400/15 disabled:cursor-wait disabled:opacity-60"
             >
+              <LogOut className="h-4 w-4" />
               {leaving ? "나가는 중" : "나가기"}
             </button>
           </div>
           <span
-            className={`text-[10px] font-bold ${
+            role="status"
+            className={`inline-flex items-center gap-1.5 text-sm font-bold ${
               connectionState.status === "CONNECTED" ? "text-emerald-400" : "text-text-muted"
             }`}
           >
+            <span
+              aria-hidden="true"
+              className={`h-1.5 w-1.5 rounded-full ${
+                connectionState.status === "CONNECTED" ? "bg-emerald-400" : "bg-text-muted"
+              }`}
+            />
             {connectionLabel}
           </span>
         </div>
-        <PlayerProfileCard
-          player={rightPlayer}
-          seatIndex={1}
-          selfParticipantId={room.participant.id}
-        />
+        <div className="order-2 sm:order-none">
+          <PlayerProfileCard
+            player={rightPlayer}
+            seatIndex={1}
+            selfParticipantId={room.participant.id}
+            {...(rightConnection ? { connection: rightConnection } : {})}
+          />
+        </div>
       </div>
+      {opponentConnection && <PeerConnectionNotice state={opponentConnection} />}
       <div className="relative w-full overflow-hidden">
         <GameFrame
           key={`${attemptKey}:${room.instance.generation}:${retryKey}`}

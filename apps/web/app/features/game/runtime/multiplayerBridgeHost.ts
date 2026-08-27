@@ -1,6 +1,7 @@
 import {
   MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
   MULTIPLAYER_HOST_MAX_PAYLOAD_BYTES,
+  MULTIPLAYER_PLAYER_CONNECTION_CHANGED_EVENT,
   MULTIPLAYER_REMATCH_CHANGED_EVENT,
   parseGameToHostMultiplayerMessage,
   parseHostToGameMultiplayerMessage,
@@ -44,6 +45,23 @@ export type MultiplayerParentConnectionState =
   | { readonly status: "TERMINAL_COMMITTED"; readonly result: unknown }
   | { readonly status: "ABORTED"; readonly code: MultiplayerAbortCode };
 
+export type MultiplayerPlayerConnectionState =
+  | {
+      readonly participantId: string;
+      readonly status: "CONNECTED";
+      readonly reconnectDeadlineAt: null;
+    }
+  | {
+      readonly participantId: string;
+      readonly status: "RECONNECTING";
+      readonly reconnectDeadlineAt: string;
+    }
+  | {
+      readonly participantId: string;
+      readonly status: "LEFT" | "TIMED_OUT";
+      readonly reconnectDeadlineAt: null;
+    };
+
 export interface MultiplayerBridgeHostCallbacks {
   onReady?: () => void;
   onLeave?: () => void;
@@ -54,6 +72,8 @@ export interface MultiplayerBridgeHostCallbacks {
   onRosterChange?: () => void;
   /** Parent-only hint to refetch rematch consent. It is never forwarded into the game iframe. */
   onRematchChange?: () => void;
+  /** Server-authoritative peer connectivity used only by the trusted parent room chrome. */
+  onPlayerConnectionChange?: (state: MultiplayerPlayerConnectionState) => void;
   onProtocolDrop?: (direction: "GAME_TO_HOST" | "SERVER_TO_HOST") => void;
 }
 
@@ -82,6 +102,41 @@ function hasServerSequence(
   message: HostToGameMultiplayerMessage,
 ): message is HostToGameMultiplayerMessage & { readonly serverSeq: number } {
   return "serverSeq" in message;
+}
+
+function parsePlayerConnectionState(payload: unknown): MultiplayerPlayerConnectionState | null {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return null;
+  const source = payload as Record<string, unknown>;
+  const keys = Object.keys(source);
+  if (
+    keys.length !== 3 ||
+    !keys.every((key) => ["participantId", "status", "reconnectDeadlineAt"].includes(key)) ||
+    typeof source.participantId !== "string" ||
+    !/^[A-Za-z0-9_-]{8,128}$/.test(source.participantId)
+  ) {
+    return null;
+  }
+  if (source.status === "RECONNECTING") {
+    return typeof source.reconnectDeadlineAt === "string" &&
+      Number.isFinite(Date.parse(source.reconnectDeadlineAt))
+      ? {
+          participantId: source.participantId,
+          status: "RECONNECTING",
+          reconnectDeadlineAt: source.reconnectDeadlineAt,
+        }
+      : null;
+  }
+  if (
+    (source.status === "CONNECTED" || source.status === "LEFT" || source.status === "TIMED_OUT") &&
+    source.reconnectDeadlineAt === null
+  ) {
+    return {
+      participantId: source.participantId,
+      status: source.status,
+      reconnectDeadlineAt: null,
+    };
+  }
+  return null;
 }
 
 function closeCodeToDisconnectCode(code: number): MultiplayerDisconnectCode {
@@ -234,6 +289,19 @@ export function createMultiplayerBridgeHost(
     }
     if (message.type === "MULTI_EVENT" && message.name === MULTIPLAYER_REMATCH_CHANGED_EVENT) {
       callbacks.onRematchChange?.();
+      return;
+    }
+    if (
+      message.type === "MULTI_EVENT" &&
+      message.name === MULTIPLAYER_PLAYER_CONNECTION_CHANGED_EVENT
+    ) {
+      const presence = parsePlayerConnectionState(message.payload);
+      if (!presence) {
+        notifyDrop("SERVER_TO_HOST");
+        return;
+      }
+      callbacks.onPlayerConnectionChange?.(presence);
+      callbacks.onRosterChange?.();
       return;
     }
     if (message.type === "MULTI_CONNECTED") {

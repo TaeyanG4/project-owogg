@@ -15,6 +15,7 @@ import {
   MultiplayerRoomResponseSchema,
   MultiplayerRoomRosterResponseSchema,
   MultiplayerRuntimeStatusResponseSchema,
+  MultiplayerStartRoomRequestSchema,
 } from "@owogg/contracts";
 import {
   MULTIPLAYER_ERROR_HTTP_STATUS,
@@ -35,6 +36,7 @@ import {
 import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_CONNECT_PATH,
+  MULTIPLAYER_INTERNAL_LEAVE_PATH,
   MULTIPLAYER_INTERNAL_PROTOCOL_HEADER,
   MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH,
   encodeVerifiedMultiplayerClaims,
@@ -55,6 +57,7 @@ const PUBLIC_MESSAGES: Readonly<Record<MultiplayerErrorCode, string>> = {
   INVITE_INVALID: "초대가 유효하지 않습니다.",
   INVITE_EXHAUSTED: "초대 사용 횟수가 만료되었습니다.",
   ALREADY_JOINED: "이미 참가 중입니다.",
+  PLAYERS_NOT_READY: "모든 참가자가 준비되고 최소 인원이 모여야 시작할 수 있습니다.",
   MATCH_NOT_ACTIVE: "진행 중인 매치가 아닙니다.",
   NOT_PARTICIPANT: "이 게임 방의 참가자가 아닙니다.",
   NOT_YOUR_TURN: "현재 행동할 차례가 아닙니다.",
@@ -99,9 +102,17 @@ async function takeRateLimit(
 
 function requestRateKey(
   c: Context<ApiEnv>,
-  operation: "create" | "join" | "leave" | "invite" | "roster" | "ticket" | "socket",
+  operation: "create" | "join" | "start" | "leave" | "invite" | "roster" | "ticket" | "socket",
 ): string {
-  return `multiplayer:${operation}:ip:${c.req.header("CF-Connecting-IP") ?? "unknown"}`;
+  // Keep callers behind the same home/campus/mobile NAT independent while never exposing the
+  // full bearer credential to Cloudflare rate-limit logs. This mirrors the platform-wide write
+  // limiter: authenticated traffic gets a coarse session prefix, unauthenticated traffic falls
+  // back to the edge-provided address.
+  const session = getCookie(c, "owogg_session");
+  const identity = session
+    ? `s:${session.slice(0, 16)}`
+    : `ip:${c.req.header("CF-Connecting-IP") ?? "unknown"}`;
+  return `multiplayer:${operation}:${identity}`;
 }
 
 function publicRoom(instance: {
@@ -189,6 +200,49 @@ function notifyRematchChange(c: Context<ApiEnv>, instanceId: string, generation:
   } catch {
     // Hono's direct unit-test request helper has no ExecutionContext. The already-started promise
     // remains harmless; production Workers always attach it to waitUntil.
+  }
+}
+
+type InternalLeaveResult =
+  | { readonly ok: true; readonly replayed: boolean }
+  | { readonly ok: false; readonly code: MultiplayerErrorCode };
+
+function isMultiplayerErrorCode(value: unknown): value is MultiplayerErrorCode {
+  return typeof value === "string" && Object.hasOwn(PUBLIC_MESSAGES, value);
+}
+
+async function leaveThroughDurableObject(
+  c: Context<ApiEnv>,
+  instanceId: string,
+  userId: number,
+  generation: number,
+): Promise<InternalLeaveResult> {
+  const namespace = c.env.MULTIPLAYER_INSTANCES;
+  if (!namespace) return { ok: false, code: "MULTIPLAYER_UNAVAILABLE" };
+  try {
+    const response = await namespace.get(namespace.idFromName(instanceId)).fetch(
+      new Request(`https://multiplayer.internal${MULTIPLAYER_INTERNAL_LEAVE_PATH}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          [MULTIPLAYER_INTERNAL_PROTOCOL_HEADER]: MULTIPLAYER_WEBSOCKET_PROTOCOL,
+        },
+        body: JSON.stringify({ instanceId, userId, generation }),
+      }),
+    );
+    const payload = (await response.json()) as unknown;
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+      return { ok: false, code: "INTERNAL_RETRYABLE" };
+    }
+    const source = payload as Record<string, unknown>;
+    if (source.ok === true && typeof source.replayed === "boolean") {
+      return { ok: true, replayed: source.replayed };
+    }
+    return source.ok === false && isMultiplayerErrorCode(source.code)
+      ? { ok: false, code: source.code }
+      : { ok: false, code: "INTERNAL_RETRYABLE" };
+  } catch {
+    return { ok: false, code: "INTERNAL_RETRYABLE" };
   }
 }
 
@@ -379,6 +433,7 @@ multiplayerRouter.get("/instances/:instanceId/roster", async (c) => {
     MultiplayerRoomRosterResponseSchema.parse({
       instanceId,
       generation: instance.generation,
+      instance: publicRoom(instance),
       players: participants.flatMap((participant, index) => {
         const user = users[index];
         return user
@@ -394,6 +449,46 @@ multiplayerRouter.get("/instances/:instanceId/roster", async (c) => {
             ]
           : [];
       }),
+    }),
+    200,
+  );
+});
+
+multiplayerRouter.post("/instances/:instanceId/start", async (c) => {
+  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED) || !runtimeReady(c.env)) {
+    return failure(c, "MULTIPLAYER_UNAVAILABLE");
+  }
+  const rateLimit = await takeRateLimit(c.env, requestRateKey(c, "start"));
+  if (rateLimit === "DENIED") return failure(c, "RATE_LIMITED");
+  if (rateLimit === "UNAVAILABLE") return failure(c, "MULTIPLAYER_UNAVAILABLE");
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return failure(c, "INVALID_REQUEST");
+  }
+  const parsed = MultiplayerStartRoomRequestSchema.safeParse(body);
+  if (!parsed.success) return failure(c, "INVALID_REQUEST");
+
+  const sessionId = getCookie(c, "owogg_session");
+  if (!sessionId) return failure(c, "UNAUTHENTICATED");
+  const container = createContainer(c.env.DB, readB2Config(c.env));
+  const authenticated = await container.sessionRepo.findSession(sessionId);
+  if (!authenticated) return failure(c, "UNAUTHENTICATED");
+
+  const result = await container.multiplayerRoomUseCases.startRoom({
+    userId: authenticated.user.id,
+    instanceId: c.req.param("instanceId"),
+    expectedGeneration: parsed.data.expectedGeneration,
+  });
+  if (!result.ok) return failure(c, result.code);
+  c.header("Cache-Control", "no-store");
+  return c.json(
+    MultiplayerRoomResponseSchema.parse({
+      replayed: false,
+      instance: publicRoom(result.instance),
+      participant: publicParticipant(result.participant),
     }),
     200,
   );
@@ -483,18 +578,26 @@ multiplayerRouter.post("/instances/:instanceId/leave", async (c) => {
   const container = createContainer(c.env.DB, readB2Config(c.env));
   const authenticated = await container.sessionRepo.findSession(sessionId);
   if (!authenticated) return failure(c, "UNAUTHENTICATED");
-  const result = await container.multiplayerRoomUseCases.leaveRoom({
-    userId: authenticated.user.id,
-    instanceId: c.req.param("instanceId"),
-    expectedGeneration: parsed.data.expectedGeneration,
-  });
+  const instanceId = c.req.param("instanceId");
+  const result = await leaveThroughDurableObject(
+    c,
+    instanceId,
+    authenticated.user.id,
+    parsed.data.expectedGeneration,
+  );
   if (!result.ok) return failure(c, result.code);
+  const [instance, participant] = await Promise.all([
+    container.multiplayerInstanceRepo.findById(instanceId),
+    container.multiplayerInstanceRepo.findParticipant(instanceId, authenticated.user.id),
+  ]);
+  if (!instance) return failure(c, "INSTANCE_NOT_FOUND");
+  if (!participant) return failure(c, "NOT_PARTICIPANT");
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomResponseSchema.parse({
       replayed: result.replayed,
-      instance: publicRoom(result.instance),
-      participant: publicParticipant(result.participant),
+      instance: publicRoom(instance),
+      participant: publicParticipant(participant),
     }),
     200,
   );

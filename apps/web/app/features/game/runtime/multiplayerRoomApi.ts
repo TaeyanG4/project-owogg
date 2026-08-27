@@ -62,6 +62,20 @@ export function fetchMultiplayerRoomRoster(
   );
 }
 
+export function startMultiplayerRoom(input: {
+  readonly instanceId: string;
+  readonly expectedGeneration: number;
+}): Promise<MultiplayerRoomResponse> {
+  return apiFetch(
+    `/api/multiplayer/instances/${encodeURIComponent(input.instanceId)}/start`,
+    MultiplayerRoomResponseSchema,
+    {
+      method: "POST",
+      body: JSON.stringify({ expectedGeneration: input.expectedGeneration }),
+    },
+  );
+}
+
 export function fetchMultiplayerRematchStatus(input: {
   readonly instanceId: string;
   readonly expectedGeneration: number;

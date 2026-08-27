@@ -215,6 +215,13 @@ export const MultiplayerLeaveRoomRequestSchema = z
   .strict();
 export type MultiplayerLeaveRoomRequest = z.infer<typeof MultiplayerLeaveRoomRequestSchema>;
 
+export const MultiplayerStartRoomRequestSchema = z
+  .object({
+    expectedGeneration: z.number().int().positive(),
+  })
+  .strict();
+export type MultiplayerStartRoomRequest = z.infer<typeof MultiplayerStartRoomRequestSchema>;
+
 export const MultiplayerCreateInviteRequestSchema = z
   .object({
     expectedGeneration: z.number().int().positive(),
@@ -289,6 +296,7 @@ export const MultiplayerRoomRosterResponseSchema = z
   .object({
     instanceId: OpaqueIdSchema,
     generation: z.number().int().positive(),
+    instance: MultiplayerRoomInstanceSchema,
     players: z.array(MultiplayerRoomPlayerSchema).max(8),
   })
   .strict();

@@ -5,6 +5,7 @@ export const MULTIPLAYER_INTERNAL_CLAIMS_HEADER = "X-Owogg-Multiplayer-Claims";
 /** Separates the trusted Worker→DO hop from the browser's subprotocol negotiation. */
 export const MULTIPLAYER_INTERNAL_PROTOCOL_HEADER = "X-Owogg-Multiplayer-Protocol";
 export const MULTIPLAYER_INTERNAL_CONNECT_PATH = "/internal/multiplayer/connect";
+export const MULTIPLAYER_INTERNAL_LEAVE_PATH = "/internal/multiplayer/leave";
 export const MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH = "/internal/multiplayer/rematch-changed";
 
 function bytesToBase64Url(bytes: Uint8Array): string {

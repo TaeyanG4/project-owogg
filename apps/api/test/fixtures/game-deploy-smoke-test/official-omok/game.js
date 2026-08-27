@@ -16,6 +16,10 @@
   const stoneLabel = document.getElementById("stoneLabel");
   const soundToggle = document.getElementById("soundToggle");
   const soundLabel = document.getElementById("soundLabel");
+  const stoneSelector = document.getElementById("stoneSelector");
+  const stoneSelectorDetail = document.getElementById("stoneSelectorDetail");
+  const stoneChoiceActions = document.getElementById("stoneChoiceActions");
+  const stoneChoiceButtons = Array.from(document.querySelectorAll("[data-stone]"));
   const bridge = window.OWOGG && window.OWOGG.multiplayer;
   const cells = [];
 
@@ -23,6 +27,7 @@
   let pendingActionId = null;
   let connectionState = "CONNECTING";
   let soundEnabled = true;
+  let selectionPending = false;
   let audioContext = null;
 
   function getAudioContext() {
@@ -114,6 +119,16 @@
     ) {
       return null;
     }
+    if (
+      !value.stoneSelection ||
+      typeof value.stoneSelection !== "object" ||
+      Array.isArray(value.stoneSelection) ||
+      (value.stoneSelection.status !== "PENDING" && value.stoneSelection.status !== "LOCKED") ||
+      typeof value.stoneSelection.canSelect !== "boolean" ||
+      (value.stoneSelection.status === "LOCKED" && value.stoneSelection.canSelect)
+    ) {
+      return null;
+    }
     if (value.lastMove !== null && !validCoordinate(value.lastMove)) return null;
     if (
       value.winningLine !== null &&
@@ -147,9 +162,9 @@
   function renderStoneBadge() {
     const marker = stoneBadge.querySelector(".stone");
     marker.className = "stone";
-    if (!view) {
+    if (!view || view.stoneSelection.status === "PENDING") {
       marker.classList.add("stone-neutral");
-      stoneLabel.textContent = "좌석 확인 중";
+      stoneLabel.textContent = view ? "돌 선택 대기" : "좌석 확인 중";
       return;
     }
     if (view.yourStone === "BLACK") {
@@ -161,11 +176,34 @@
     }
   }
 
+  function renderStoneSelector() {
+    const selecting = view && view.stoneSelection.status === "PENDING";
+    stoneSelector.hidden = !selecting;
+    if (!selecting) return;
+    const canSelect = view.stoneSelection.canSelect;
+    stoneChoiceActions.hidden = !canSelect;
+    stoneSelectorDetail.textContent = canSelect
+      ? selectionPending
+        ? "선택을 서버에서 확인하고 있습니다."
+        : "사용할 돌을 선택하세요. 서버가 좌석과 첫 수를 확정합니다."
+      : "방장이 흑돌과 백돌을 선택하고 있습니다.";
+    stoneChoiceButtons.forEach(function (button) {
+      button.disabled = selectionPending;
+    });
+  }
+
   function renderStatus() {
     if (!view) {
       if (connectionState === "CONNECTED") {
         setStatus("상대와 준비를 맞추는 중입니다", "공식 상태가 도착하면 판이 열립니다.");
       }
+      return;
+    }
+    if (view.stoneSelection.status === "PENDING") {
+      setStatus(
+        view.stoneSelection.canSelect ? "사용할 돌을 선택하세요" : "방장의 돌 선택을 기다립니다",
+        "선택 결과는 서버가 두 플레이어에게 동시에 적용합니다.",
+      );
       return;
     }
     if (view.status === "WON") {
@@ -191,6 +229,7 @@
   function renderBoard() {
     const canMove = Boolean(
       view &&
+      view.stoneSelection.status === "LOCKED" &&
       view.status === "ACTIVE" &&
       view.nextSeatIndex === view.yourSeatIndex &&
       pendingActionId === null,
@@ -226,6 +265,7 @@
   }
 
   function render() {
+    renderStoneSelector();
     renderStoneBadge();
     renderStatus();
     renderBoard();
@@ -253,6 +293,7 @@
       const previousView = view;
       view = nextView;
       pendingActionId = null;
+      selectionPending = false;
       render();
       if (previousView && nextView.revision > previousView.revision) {
         if (previousView.status === "ACTIVE" && nextView.status !== "ACTIVE") {
@@ -301,6 +342,7 @@
     if (
       !bridge ||
       !view ||
+      view.stoneSelection.status !== "LOCKED" ||
       view.status !== "ACTIVE" ||
       view.nextSeatIndex !== view.yourSeatIndex ||
       pendingActionId !== null ||
@@ -320,6 +362,26 @@
     render();
   }
 
+  function selectStone(stone) {
+    getAudioContext();
+    if (
+      !bridge ||
+      !view ||
+      view.stoneSelection.status !== "PENDING" ||
+      !view.stoneSelection.canSelect ||
+      selectionPending ||
+      (stone !== "BLACK" && stone !== "WHITE")
+    ) {
+      return;
+    }
+    if (!bridge.input({ kind: "OMOK_SELECT_STONE", stone: stone })) {
+      setStatus("돌 선택을 보내지 못했습니다", "연결 상태를 확인한 뒤 다시 선택하세요.");
+      return;
+    }
+    selectionPending = true;
+    render();
+  }
+
   soundToggle.addEventListener("click", function () {
     soundEnabled = !soundEnabled;
     if (soundEnabled) {
@@ -329,15 +391,17 @@
     renderSoundToggle();
   });
 
+  stoneChoiceButtons.forEach(function (button) {
+    button.addEventListener("click", function () {
+      selectStone(button.getAttribute("data-stone"));
+    });
+  });
+
   for (let y = 0; y < BOARD_SIZE; y += 1) {
     for (let x = 0; x < BOARD_SIZE; x += 1) {
       const cell = document.createElement("button");
       cell.type = "button";
       cell.className = "intersection";
-      if (x === 0) cell.classList.add("edge-left");
-      if (x === BOARD_SIZE - 1) cell.classList.add("edge-right");
-      if (y === 0) cell.classList.add("edge-top");
-      if (y === BOARD_SIZE - 1) cell.classList.add("edge-bottom");
       cell.setAttribute("role", "gridcell");
       cell.setAttribute("aria-rowindex", String(y + 1));
       cell.setAttribute("aria-colindex", String(x + 1));

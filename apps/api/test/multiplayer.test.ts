@@ -23,6 +23,7 @@ import { app } from "../src/app.js";
 import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_CONNECT_PATH,
+  MULTIPLAYER_INTERNAL_LEAVE_PATH,
   MULTIPLAYER_INTERNAL_PROTOCOL_HEADER,
   decodeVerifiedMultiplayerClaims,
 } from "../src/multiplayer/internalProtocol.js";
@@ -242,11 +243,16 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
   const nowIso = now.toISOString();
   const expiresAt = new Date(now.getTime() + 60 * 60 * 1000).toISOString();
   const sessionToken = "api-multiplayer-session-token-123456";
+  const playerSessionToken = "api-multiplayer-player-session-123456";
 
   raw.prepare("INSERT INTO users (id, nickname) VALUES (7, 'Host')").run();
+  raw.prepare("INSERT INTO users (id, nickname) VALUES (8, 'Player')").run();
   raw
     .prepare("INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, 7, ?, ?)")
     .run(sessionToken, nowIso, expiresAt);
+  raw
+    .prepare("INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, 8, ?, ?)")
+    .run(playerSessionToken, nowIso, expiresAt);
   raw
     .prepare(
       `INSERT INTO games (
@@ -282,7 +288,8 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
     )
     .run(nowIso, nowIso);
 
-  const created = await new D1MultiplayerInstanceRepository(db).createWithHostAndLease({
+  const instances = new D1MultiplayerInstanceRepository(db);
+  const created = await instances.createWithHostAndLease({
     instanceId: INSTANCE_ID,
     publicCode: "APITICKET001",
     createdByUserId: 7,
@@ -301,8 +308,78 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
     nowIso,
   });
   assert.equal(created.status, "CREATED");
+  assert.equal(
+    await instances.transition({
+      instanceId: INSTANCE_ID,
+      expectedStatus: "CREATED",
+      expectedGeneration: 1,
+      nextStatus: "LOBBY",
+      nextGeneration: 1,
+      closedAt: null,
+      abortCode: null,
+      nowIso,
+    }),
+    true,
+  );
 
-  const env = runtimeEnv({ DB: db, ...B2_ENV });
+  const requestLimiter = limiter();
+  const env = runtimeEnv({
+    DB: db,
+    ...B2_ENV,
+    MULTIPLAYER_RATE_LIMITER: requestLimiter,
+    MULTIPLAYER_INSTANCES: {
+      idFromName(value: string) {
+        return value;
+      },
+      get(instanceId: string) {
+        return {
+          fetch: async (internalRequest: Request) => {
+            const url = new URL(internalRequest.url);
+            assert.equal(url.pathname, MULTIPLAYER_INTERNAL_LEAVE_PATH);
+            assert.equal(
+              internalRequest.headers.get(MULTIPLAYER_INTERNAL_PROTOCOL_HEADER),
+              MULTIPLAYER_WEBSOCKET_PROTOCOL,
+            );
+            const leaveBody = (await internalRequest.json()) as {
+              instanceId: string;
+              userId: number;
+              generation: number;
+            };
+            assert.deepEqual(leaveBody, { instanceId, userId: 7, generation: 1 });
+            const participant = await instances.findParticipant(instanceId, leaveBody.userId);
+            assert.equal(participant?.status, "READY");
+            const left = await instances.transitionParticipant({
+              instanceId,
+              expectedInstanceGeneration: leaveBody.generation,
+              userId: leaveBody.userId,
+              expectedStatus: "READY",
+              nextStatus: "LEFT",
+              readyAt: null,
+              leftAt: nowIso,
+              nowIso,
+            });
+            assert.equal(left?.status, "LEFT");
+            // This API unit stub verifies the authenticated control handoff only. Durable Object
+            // tests exercise the real COMMITTED forfeit and CLOSED room transition.
+            assert.equal(
+              await instances.transition({
+                instanceId,
+                expectedStatus: "ACTIVE",
+                expectedGeneration: leaveBody.generation,
+                nextStatus: "ABORTED",
+                nextGeneration: leaveBody.generation,
+                closedAt: nowIso,
+                abortCode: "PARTICIPANT_LEFT",
+                nowIso,
+              }),
+              true,
+            );
+            return Response.json({ ok: true, replayed: false });
+          },
+        };
+      },
+    },
+  });
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () =>
     new Response(
@@ -402,6 +479,49 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
   assert.equal(inviteReplay.replayed, true);
   assert.equal(inviteReplay.inviteToken, invite.inviteToken);
 
+  const joinedResponse = await app.request(
+    "http://localhost/api/multiplayer/instances/join",
+    {
+      ...request,
+      headers: {
+        ...request.headers,
+        Cookie: `owogg_session=${playerSessionToken}`,
+      },
+      body: JSON.stringify({ publicCode: "APITICKET001", inviteToken: invite.inviteToken }),
+    },
+    env as any,
+  );
+  const joinedJson = await joinedResponse.json();
+  assert.equal(joinedResponse.status, 200, JSON.stringify(joinedJson));
+  const joined = MultiplayerRoomResponseSchema.parse(joinedJson);
+  assert.equal(joined.instance.status, "LOBBY");
+  assert.equal(joined.participant.status, "READY");
+
+  const hostReady = await instances.transitionParticipant({
+    instanceId: INSTANCE_ID,
+    expectedInstanceGeneration: 1,
+    userId: 7,
+    expectedStatus: "JOINED",
+    nextStatus: "READY",
+    readyAt: nowIso,
+    leftAt: null,
+    nowIso,
+  });
+  assert.equal(hostReady?.status, "READY");
+
+  const startResponse = await app.request(
+    `http://localhost/api/multiplayer/instances/${INSTANCE_ID}/start`,
+    {
+      ...request,
+      body: JSON.stringify({ expectedGeneration: 1 }),
+    },
+    env as any,
+  );
+  assert.equal(startResponse.status, 200);
+  const started = MultiplayerRoomResponseSchema.parse(await startResponse.json());
+  assert.equal(started.instance.status, "ACTIVE");
+  assert.equal(started.participant.role, "HOST");
+
   const rosterResponse = await app.request(
     `http://localhost/api/multiplayer/instances/${INSTANCE_ID}/roster`,
     {
@@ -416,17 +536,31 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
   assert.equal(rosterResponse.status, 200);
   const roster = MultiplayerRoomRosterResponseSchema.parse(await rosterResponse.json());
   assert.equal(roster.instanceId, INSTANCE_ID);
+  assert.equal(roster.instance.status, "ACTIVE");
   assert.deepEqual(roster.players, [
     {
       participantId: "participant_api_host_0001",
       role: "HOST",
       seatIndex: 0,
-      status: "JOINED",
+      status: "READY",
       nickname: "Host",
+      avatarUrl: null,
+    },
+    {
+      participantId: joined.participant.id,
+      role: "PLAYER",
+      seatIndex: 1,
+      status: "READY",
+      nickname: "Player",
       avatarUrl: null,
     },
   ]);
   assert.equal(JSON.stringify(roster).includes("userId"), false);
+  assert.ok(requestLimiter.calls.includes(`multiplayer:roster:s:${sessionToken.slice(0, 16)}`));
+  assert.equal(
+    requestLimiter.calls.some((key) => key.startsWith("multiplayer:roster:ip:")),
+    false,
+  );
 
   const response = await app.request(
     `http://localhost/api/multiplayer/instances/${INSTANCE_ID}/ticket`,
@@ -481,6 +615,6 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
   assert.equal(
     raw.prepare("SELECT abort_code FROM multiplayer_instances WHERE id = ?").get(INSTANCE_ID)
       ?.abort_code,
-    "INSUFFICIENT_PLAYERS",
+    "PARTICIPANT_LEFT",
   );
 });

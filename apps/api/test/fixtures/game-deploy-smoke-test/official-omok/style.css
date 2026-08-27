@@ -27,6 +27,9 @@ body {
 body {
   height: 100vh;
   height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  place-items: stretch center;
   background:
     radial-gradient(circle at 15% 10%, rgba(124, 58, 237, 0.2), transparent 34rem),
     radial-gradient(circle at 90% 80%, rgba(14, 165, 233, 0.13), transparent 30rem), #08090d;
@@ -41,7 +44,8 @@ button {
   height: 100vh;
   height: 100dvh;
   min-height: 0;
-  margin: 0 auto;
+  margin: 0;
+  justify-self: center;
   padding: clamp(16px, min(3vw, 3vh), 30px);
   display: flex;
   flex-direction: column;
@@ -169,9 +173,133 @@ h1 {
   width: 100%;
   flex: 1;
   min-height: 0;
+  position: relative;
   display: grid;
   place-items: center;
   overflow: hidden;
+}
+
+.stone-selector {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(8, 9, 13, 0.64);
+  backdrop-filter: blur(7px);
+}
+
+.stone-selector[hidden] {
+  display: none;
+}
+
+.stone-selector-card {
+  width: min(100%, 470px);
+  padding: clamp(20px, 4vw, 30px);
+  border: 1px solid rgba(167, 139, 250, 0.3);
+  border-radius: 24px;
+  background: rgba(20, 22, 30, 0.96);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.58);
+  text-align: center;
+}
+
+.selector-eyebrow {
+  margin: 0 0 6px;
+  color: #a78bfa;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.22em;
+}
+
+.stone-selector h2 {
+  margin: 0;
+  font-size: clamp(21px, 4vw, 28px);
+}
+
+.stone-selector-card > p:not(.selector-eyebrow) {
+  margin: 9px 0 0;
+  color: #a7adba;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.stone-choice-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.stone-choice {
+  min-height: 90px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 17px;
+  background: rgba(8, 9, 13, 0.7);
+  color: #f8fafc;
+  cursor: pointer;
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease;
+}
+
+.stone-choice:hover,
+.stone-choice:focus-visible {
+  transform: translateY(-2px);
+  border-color: rgba(167, 139, 250, 0.72);
+  background: rgba(124, 58, 237, 0.16);
+}
+
+.stone-choice:focus-visible {
+  outline: 2px solid #8b5cf6;
+  outline-offset: 2px;
+}
+
+.stone-choice:disabled {
+  cursor: wait;
+  opacity: 0.55;
+  transform: none;
+}
+
+.stone-choice strong,
+.stone-choice small {
+  display: block;
+  text-align: left;
+}
+
+.stone-choice strong {
+  font-size: 15px;
+}
+
+.stone-choice small {
+  margin-top: 3px;
+  color: #8f96a5;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.choice-piece {
+  width: 31px;
+  height: 31px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  box-shadow: 0 5px 12px rgba(0, 0, 0, 0.45);
+}
+
+.choice-piece.black {
+  border: 1px solid #747b8a;
+  background: radial-gradient(circle at 35% 30%, #626977, #090b10 62%);
+}
+
+.choice-piece.white {
+  border: 1px solid #fff;
+  background: radial-gradient(circle at 35% 30%, #fff, #dce1e8 70%);
 }
 
 .board {
@@ -219,43 +347,20 @@ h1 {
   z-index: 1;
 }
 
-.intersection::before,
-.intersection::after {
-  content: "";
+.board-grid {
   position: absolute;
+  inset: var(--board-padding);
   z-index: 0;
-  background: rgba(72, 40, 14, 0.72);
   pointer-events: none;
+  overflow: visible;
 }
 
-.intersection::before {
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 1px;
-}
-
-.intersection::after {
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 1px;
-}
-
-.intersection.edge-left::before {
-  left: 50%;
-}
-
-.intersection.edge-right::before {
-  right: 50%;
-}
-
-.intersection.edge-top::after {
-  top: 50%;
-}
-
-.intersection.edge-bottom::after {
-  bottom: 50%;
+.board-grid path {
+  fill: none;
+  stroke: rgba(72, 40, 14, 0.72);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  shape-rendering: crispEdges;
 }
 
 .intersection:not(:disabled):hover,
@@ -366,6 +471,14 @@ footer {
 
   .board {
     width: min(100%, calc(100dvh - 255px));
+  }
+
+  .stone-choice-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .stone-choice {
+    min-height: 68px;
   }
 }
 

@@ -1,9 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
+  MULTIPLAYER_PLAYER_CONNECTION_CHANGED_EVENT,
   MULTIPLAYER_REMATCH_CHANGED_EVENT,
   parseGameToHostMultiplayerMessage,
   type MultiActionMessage,
+  type MultiInputMessage,
   type MultiplayerActionRejectionCode,
 } from "@owogg/game-sdk/bridge";
 import {
@@ -33,6 +35,7 @@ import { createContainer, type AppContainer } from "../container.js";
 import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_CONNECT_PATH,
+  MULTIPLAYER_INTERNAL_LEAVE_PATH,
   MULTIPLAYER_INTERNAL_PROTOCOL_HEADER,
   MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH,
   decodeVerifiedMultiplayerClaims,
@@ -46,6 +49,8 @@ const RUNTIME_UNAVAILABLE_CLOSE_CODE = 1013;
 const ACTION_RATE_WINDOW_MS = 1_000;
 const FINALIZATION_RETRY_BASE_MS = 2_000;
 const FINALIZATION_RETRY_MAX_MS = 60_000;
+const RECONNECT_GRACE_MS = 30_000;
+const RECONNECT_GRACE_SECONDS = RECONNECT_GRACE_MS / 1_000;
 const textEncoder = new TextEncoder();
 
 interface MultiplayerDurableObjectEnv {
@@ -80,6 +85,34 @@ interface RuntimeMatch {
   readonly terminalResultJson: string | null;
   readonly finalizationAttempts: number;
 }
+
+type OmokRuntimeConfiguration =
+  | { readonly status: "PENDING"; readonly blackParticipantId: null }
+  | { readonly status: "LOCKED"; readonly blackParticipantId: string };
+
+type CanonicalTerminalResult =
+  | (Extract<OmokTerminalResult, { readonly kind: "WIN" }> & {
+      readonly winnerParticipantId: string;
+      readonly loserParticipantId: string;
+      readonly reason: null;
+    })
+  | (Extract<OmokTerminalResult, { readonly kind: "DRAW" }> & {
+      readonly winnerParticipantId: null;
+      readonly loserParticipantId: null;
+      readonly reason: null;
+    })
+  | {
+      readonly kind: "FORFEIT";
+      readonly revision: number;
+      readonly winnerSeatIndex: 0 | 1;
+      readonly loserSeatIndex: 0 | 1;
+      readonly winnerParticipantId: string;
+      readonly loserParticipantId: string;
+      readonly winningLine: null;
+      readonly reason: "LEFT" | "DISCONNECTED";
+    };
+
+type PlayerConnectionStatus = "CONNECTED" | "RECONNECTING" | "LEFT" | "TIMED_OUT";
 
 type AdmissionResult =
   | { readonly ok: true; readonly previousConnectionGeneration: number | null }
@@ -162,6 +195,10 @@ function abortCodeForClient(
 function stablePayloadJson(payload: unknown): string {
   const action = parseOmokAction(payload);
   return action ? JSON.stringify({ x: action.x, y: action.y }) : JSON.stringify(payload);
+}
+
+function isOpaqueId(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{8,128}$/.test(value);
 }
 
 async function sha256Hex(value: string): Promise<string> {
@@ -259,6 +296,14 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
           finalization_attempts INTEGER NOT NULL DEFAULT 0,
           updated_at INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS runtime_game_config (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          generation INTEGER NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('LOCKED')),
+          black_participant_id TEXT NOT NULL,
+          selected_by_participant_id TEXT NOT NULL,
+          selected_at INTEGER NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS participant_rate_windows (
           participant_id TEXT NOT NULL,
           generation INTEGER NOT NULL,
@@ -277,6 +322,52 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
 
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (
+      request.method === "POST" &&
+      url.pathname === MULTIPLAYER_INTERNAL_LEAVE_PATH &&
+      request.headers.get(MULTIPLAYER_INTERNAL_PROTOCOL_HEADER) === MULTIPLAYER_WEBSOCKET_PROTOCOL
+    ) {
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        return Response.json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
+      }
+      if (
+        typeof body !== "object" ||
+        body === null ||
+        Array.isArray(body) ||
+        Object.keys(body).length !== 3 ||
+        !("instanceId" in body) ||
+        !("userId" in body) ||
+        !("generation" in body) ||
+        !isOpaqueId(body.instanceId) ||
+        !isPositiveInteger(body.userId) ||
+        !isPositiveInteger(body.generation)
+      ) {
+        return Response.json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
+      }
+      const task = this.messageQueue.then(() =>
+        this.leaveParticipant(
+          body.userId as number,
+          body.generation as number,
+          body.instanceId as string,
+        ),
+      );
+      this.messageQueue = task.then(
+        () => undefined,
+        () => undefined,
+      );
+      try {
+        const result = await task;
+        return Response.json(
+          result.ok ? { ok: true, replayed: result.replayed } : { ok: false, code: result.code },
+          { status: result.ok ? 200 : 409 },
+        );
+      } catch {
+        return Response.json({ ok: false, code: "INTERNAL_RETRYABLE" }, { status: 503 });
+      }
+    }
     if (
       request.method === "POST" &&
       url.pathname === MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH &&
@@ -349,6 +440,8 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     );
     try {
       await this.sendReconnectState(server, attachment);
+      this.sendPresenceSnapshot(server, attachment);
+      this.broadcastPlayerConnection(claims.participantId, "CONNECTED", null);
     } catch {
       this.disconnectUnavailable(server, attachment);
     }
@@ -367,12 +460,32 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
 
   override webSocketClose(socket: WebSocket): void {
     const attachment = this.readAttachment(socket);
-    if (attachment) this.markDisconnected(attachment, Math.floor(Date.now() / 1_000));
+    if (!attachment) return;
+    const nowSeconds = Math.ceil(Date.now() / 1_000);
+    if (this.markDisconnected(attachment, nowSeconds)) {
+      const deadlineMs = (nowSeconds + RECONNECT_GRACE_SECONDS) * 1_000;
+      this.broadcastPlayerConnection(
+        attachment.participantId,
+        "RECONNECTING",
+        new Date(deadlineMs).toISOString(),
+      );
+      this.ctx.waitUntil(this.scheduleNextAlarm(deadlineMs + 1));
+    }
   }
 
   override webSocketError(socket: WebSocket): void {
     const attachment = this.readAttachment(socket);
-    if (attachment) this.markDisconnected(attachment, Math.floor(Date.now() / 1_000));
+    if (!attachment) return;
+    const nowSeconds = Math.ceil(Date.now() / 1_000);
+    if (this.markDisconnected(attachment, nowSeconds)) {
+      const deadlineMs = (nowSeconds + RECONNECT_GRACE_SECONDS) * 1_000;
+      this.broadcastPlayerConnection(
+        attachment.participantId,
+        "RECONNECTING",
+        new Date(deadlineMs).toISOString(),
+      );
+      this.ctx.waitUntil(this.scheduleNextAlarm(deadlineMs + 1));
+    }
   }
 
   override async alarm(): Promise<void> {
@@ -391,6 +504,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       "DELETE FROM participant_rate_windows WHERE window_started_at < ?",
       nowMs - 60_000,
     );
+    await this.resolveExpiredDisconnects(nowSeconds);
     const runtime = this.readRuntimeMatch();
     if (runtime?.lifecycle === "TERMINAL_PENDING") {
       try {
@@ -422,6 +536,18 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       .toArray()[0];
     const nextExpiry = integerValue(nextNonce?.expires_at);
     if (nextExpiry !== null) await this.scheduleNextAlarm(nextExpiry * 1_000 + 1_000);
+    const nextDisconnect = this.state.storage.sql
+      .exec<{ disconnected_at: number }>(
+        `SELECT MIN(disconnected_at) AS disconnected_at
+         FROM participant_connections
+         WHERE generation = ? AND disconnected_at IS NOT NULL`,
+        this.generation(),
+      )
+      .toArray()[0];
+    const nextDisconnectedAt = integerValue(nextDisconnect?.disconnected_at);
+    if (nextDisconnectedAt !== null) {
+      await this.scheduleNextAlarm((nextDisconnectedAt + RECONNECT_GRACE_SECONDS) * 1_000 + 1);
+    }
   }
 
   private async handleWebSocketMessage(
@@ -478,8 +604,8 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
         await this.handleAction(authority, attachment, socket, parsed);
         return;
       case "MULTI_INPUT":
-        socket.close(POLICY_CLOSE_CODE, "input unsupported by ruleset");
-        this.markDisconnected(attachment, nowSeconds);
+        await this.handleGameConfigurationInput(authority, attachment, socket, parsed);
+        return;
     }
   }
 
@@ -553,8 +679,15 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       return;
     }
     const action = parseOmokAction(message.payload);
+    const gameSeatIndex = this.gameSeatIndex(authority);
     const transition = action
-      ? applyOmokAction(runtime.state, authority.seatIndex, action, message.expectedRevision)
+      ? this.readOmokConfiguration(runtime.generation).status === "LOCKED"
+        ? applyOmokAction(runtime.state, gameSeatIndex, action, message.expectedRevision)
+        : {
+            ok: false as const,
+            code: "MATCH_NOT_ACTIVE" as const,
+            currentRevision: runtime.state.revision,
+          }
       : {
           ok: false as const,
           code: "ACTION_INVALID" as const,
@@ -655,6 +788,69 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     if (stored.state.status !== "ACTIVE") await this.beginTerminalCommit(runtime);
   }
 
+  private async handleGameConfigurationInput(
+    authority: ParticipantAuthority,
+    attachment: ConnectionAttachment,
+    socket: WebSocket,
+    message: MultiInputMessage,
+  ): Promise<void> {
+    const payload = message.payload;
+    const validPayload =
+      typeof payload === "object" &&
+      payload !== null &&
+      !Array.isArray(payload) &&
+      Object.keys(payload).length === 2 &&
+      Object.keys(payload).every((key) => ["kind", "stone"].includes(key)) &&
+      (payload as Record<string, unknown>).kind === "OMOK_SELECT_STONE" &&
+      ((payload as Record<string, unknown>).stone === "BLACK" ||
+        (payload as Record<string, unknown>).stone === "WHITE");
+    if (!validPayload || authority.role !== "HOST") {
+      socket.close(POLICY_CLOSE_CODE, "invalid game configuration");
+      return;
+    }
+    const match = await this.container.multiplayerMatchRepo.findMatchByInstanceGeneration(
+      this.instanceId(),
+      attachment.generation,
+    );
+    if (!match || match.status !== "ACTIVE") return;
+    const runtime = await this.ensureRuntimeMatch(match);
+    if (
+      runtime.lifecycle !== "ACTIVE" ||
+      runtime.state.revision !== 0 ||
+      this.readOmokConfiguration(runtime.generation).status === "LOCKED"
+    ) {
+      await this.sendState(socket, runtime, "MULTI_SYNC");
+      return;
+    }
+    if (!this.consumeActionRate(authority, runtime.actionRateLimit, Date.now())) return;
+
+    const participants = (
+      await this.container.multiplayerInstanceRepo.listParticipants(this.instanceId())
+    ).filter((participant) => participant.status === "JOINED" || participant.status === "READY");
+    const opponent = participants.find((participant) => participant.id !== authority.participantId);
+    if (!opponent || participants.length !== 2) {
+      socket.close(POLICY_CLOSE_CODE, "invalid game configuration authority");
+      return;
+    }
+    const stone = (payload as { readonly stone: "BLACK" | "WHITE" }).stone;
+    const blackParticipantId = stone === "BLACK" ? authority.participantId : opponent.id;
+    const written = this.state.storage.sql.exec(
+      `INSERT OR IGNORE INTO runtime_game_config (
+         singleton, generation, status, black_participant_id,
+         selected_by_participant_id, selected_at
+       ) VALUES (1, ?, 'LOCKED', ?, ?, ?)`,
+      runtime.generation,
+      blackParticipantId,
+      authority.participantId,
+      Date.now(),
+    );
+    if (written.rowsWritten !== 1) {
+      await this.sendState(socket, runtime, "MULTI_SYNC");
+      return;
+    }
+    await this.broadcastState(runtime, "MULTI_SYNC");
+  }
+
   private async recordAndSendRejectedAction(
     runtime: RuntimeMatch,
     authority: ParticipantAuthority,
@@ -714,24 +910,61 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     attachment: ConnectionAttachment,
     socket: WebSocket,
   ): Promise<void> {
-    const result = await this.container.multiplayerRoomUseCases.leaveRoom({
-      userId: authority.userId,
-      instanceId: this.instanceId(),
-      expectedGeneration: authority.generation,
-    });
-    this.markDisconnected(attachment, Math.floor(Date.now() / 1_000));
+    const result = await this.leaveParticipant(authority.userId, authority.generation);
     if (!result.ok) {
       this.disconnectUnavailable(socket, attachment);
-      return;
     }
+  }
+
+  private async leaveParticipant(userId: number, generation: number, requestedInstanceId?: string) {
+    const instanceId = requestedInstanceId ?? this.instanceId();
+    const participant = await this.container.multiplayerInstanceRepo.findParticipant(
+      instanceId,
+      userId,
+    );
+    const match = await this.container.multiplayerMatchRepo.findMatchByInstanceGeneration(
+      instanceId,
+      generation,
+    );
+    if (
+      participant &&
+      (participant.status === "JOINED" || participant.status === "READY") &&
+      match?.status === "ACTIVE"
+    ) {
+      await this.ensureInternalControlContext(instanceId, generation);
+      const runtime = await this.ensureRuntimeMatch(match);
+      if (runtime.lifecycle === "ACTIVE") {
+        this.broadcastPlayerConnection(participant.id, "LEFT", null);
+        await this.beginForfeitCommit(runtime, participant.id, "LEFT");
+        if (this.readRuntimeMatch()?.lifecycle !== "COMMITTED") {
+          return { ok: false as const, code: "INTERNAL_RETRYABLE" as const };
+        }
+      } else if (runtime.lifecycle === "TERMINAL_PENDING") {
+        await this.commitTerminalResult(runtime);
+        if (this.readRuntimeMatch()?.lifecycle !== "COMMITTED") {
+          return { ok: false as const, code: "INTERNAL_RETRYABLE" as const };
+        }
+      }
+    }
+    const result = await this.container.multiplayerRoomUseCases.leaveRoom({
+      userId,
+      instanceId,
+      expectedGeneration: generation,
+    });
+    if (!result.ok) return result;
     if (result.instance.status === "ABORTED") {
       const runtime = this.readRuntimeMatch();
       if (runtime) this.persistRuntimeMatch({ ...runtime, lifecycle: "ABORTED" });
       this.broadcastAbort(abortCodeForClient(result.instance.abortCode));
       for (const connected of this.state.getWebSockets()) connected.close(1000, "match aborted");
-      return;
+      return result;
     }
-    socket.close(1000, "left");
+    if (participant) {
+      for (const connected of this.state.getWebSockets(participantTag(participant.id))) {
+        connected.close(1000, "left");
+      }
+    }
+    return result;
   }
 
   private async sendReconnectState(
@@ -756,6 +989,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     }
     if (match.status === "PENDING") return;
     let runtime = await this.ensureRuntimeMatch(match);
+    await this.ensureExpectedParticipantConnections(runtime);
     runtime = await this.sendState(socket, runtime, "MULTI_SYNC");
     if (match.status === "COMMITTED" && runtime.terminalResultJson) {
       if (match.committedAt) {
@@ -861,10 +1095,11 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
   private async beginTerminalCommit(runtime: RuntimeMatch): Promise<void> {
     const terminal = getOmokTerminalResult(runtime.state);
     if (!terminal) throw new Error("terminal Omok state has no result");
+    const canonical = await this.canonicalizeOmokTerminalResult(terminal);
     let pending = this.persistRuntimeMatch({
       ...runtime,
       lifecycle: "TERMINAL_PENDING",
-      terminalResultJson: JSON.stringify(terminal),
+      terminalResultJson: JSON.stringify(canonical),
     });
     pending = this.reserveServerSequence(pending);
     this.broadcastTerminalPending(pending);
@@ -872,8 +1107,15 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
   }
 
   private async commitTerminalResult(runtime: RuntimeMatch): Promise<void> {
-    const terminal = getOmokTerminalResult(runtime.state);
+    const terminal = await this.readCanonicalTerminalResult(runtime);
     if (!terminal || !runtime.terminalResultJson) throw new Error("terminal result unavailable");
+    const canonicalTerminalJson = JSON.stringify(terminal);
+    if (runtime.terminalResultJson !== canonicalTerminalJson) {
+      runtime = this.persistRuntimeMatch({
+        ...runtime,
+        terminalResultJson: canonicalTerminalJson,
+      });
+    }
     const [players, participants] = await Promise.all([
       this.container.multiplayerMatchRepo.listPlayers(runtime.matchId),
       this.container.multiplayerInstanceRepo.listParticipants(this.instanceId()),
@@ -887,8 +1129,13 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       if (!participant || (participant.seatIndex !== 0 && participant.seatIndex !== 1)) {
         throw new Error("invalid Omok player seat");
       }
-      const outcome = this.playerOutcome(terminal, participant.seatIndex);
+      const outcome = this.playerOutcome(terminal, participant.id);
       const placement = outcome === "WIN" ? 1 : outcome === "LOSS" ? 2 : null;
+      const gameSeatIndex = this.gameSeatIndexForParticipant(
+        participant.id,
+        participant.seatIndex,
+        runtime.generation,
+      );
       return {
         userId: player.userId,
         participantId: player.participantId,
@@ -898,7 +1145,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
           schemaVersion: 1,
           matchId: runtime.matchId,
           generation: runtime.generation,
-          seatIndex: participant.seatIndex,
+          seatIndex: gameSeatIndex,
           outcome,
           placement,
           terminalRevision: terminal.revision,
@@ -910,8 +1157,8 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     const committed = await this.container.multiplayerMatchRepo.finalize({
       matchId: runtime.matchId,
       expectedStateRevision: runtime.state.revision,
-      terminalResultJson: runtime.terminalResultJson,
-      terminalResultHash: await sha256Hex(runtime.terminalResultJson),
+      terminalResultJson: canonicalTerminalJson,
+      terminalResultHash: await sha256Hex(canonicalTerminalJson),
       players: finalPlayers,
       nowIso: new Date().toISOString(),
     });
@@ -938,9 +1185,185 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     }
   }
 
-  private playerOutcome(terminal: OmokTerminalResult, seatIndex: 0 | 1): "WIN" | "LOSS" | "DRAW" {
+  private async canonicalizeOmokTerminalResult(
+    terminal: OmokTerminalResult,
+  ): Promise<CanonicalTerminalResult> {
+    if (terminal.kind === "DRAW") {
+      return {
+        ...terminal,
+        winnerParticipantId: null,
+        loserParticipantId: null,
+        reason: null,
+      };
+    }
+    const participants = await this.container.multiplayerInstanceRepo.listParticipants(
+      this.instanceId(),
+    );
+    const generation = this.generation();
+    const winner = participants.find(
+      (participant) =>
+        this.gameSeatIndexForParticipant(participant.id, participant.seatIndex, generation) ===
+        terminal.winnerSeatIndex,
+    );
+    const loser = participants.find(
+      (participant) =>
+        this.gameSeatIndexForParticipant(participant.id, participant.seatIndex, generation) ===
+        terminal.loserSeatIndex,
+    );
+    if (!winner || !loser) throw new Error("terminal participant mapping unavailable");
+    return {
+      ...terminal,
+      winnerParticipantId: winner.id,
+      loserParticipantId: loser.id,
+      reason: null,
+    };
+  }
+
+  private async readCanonicalTerminalResult(
+    runtime: RuntimeMatch,
+  ): Promise<CanonicalTerminalResult | null> {
+    if (!runtime.terminalResultJson) return null;
+    let value: unknown;
+    try {
+      value = JSON.parse(runtime.terminalResultJson);
+    } catch {
+      return null;
+    }
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+    const source = value as Record<string, unknown>;
+    if (source.kind === "FORFEIT") {
+      if (
+        source.revision !== runtime.state.revision ||
+        (source.winnerSeatIndex !== 0 && source.winnerSeatIndex !== 1) ||
+        (source.loserSeatIndex !== 0 && source.loserSeatIndex !== 1) ||
+        source.winnerSeatIndex === source.loserSeatIndex ||
+        !isOpaqueId(source.winnerParticipantId) ||
+        !isOpaqueId(source.loserParticipantId) ||
+        source.winnerParticipantId === source.loserParticipantId ||
+        source.winningLine !== null ||
+        (source.reason !== "LEFT" && source.reason !== "DISCONNECTED")
+      ) {
+        return null;
+      }
+      const participants = await this.container.multiplayerInstanceRepo.listParticipants(
+        this.instanceId(),
+      );
+      const winner = participants.find(
+        (participant) => participant.id === source.winnerParticipantId,
+      );
+      const loser = participants.find(
+        (participant) => participant.id === source.loserParticipantId,
+      );
+      if (
+        !winner ||
+        !loser ||
+        (winner.seatIndex !== 0 && winner.seatIndex !== 1) ||
+        (loser.seatIndex !== 0 && loser.seatIndex !== 1) ||
+        this.gameSeatIndexForParticipant(winner.id, winner.seatIndex, runtime.generation) !==
+          source.winnerSeatIndex ||
+        this.gameSeatIndexForParticipant(loser.id, loser.seatIndex, runtime.generation) !==
+          source.loserSeatIndex
+      ) {
+        return null;
+      }
+      return {
+        kind: "FORFEIT",
+        revision: runtime.state.revision,
+        winnerSeatIndex: source.winnerSeatIndex,
+        loserSeatIndex: source.loserSeatIndex,
+        winnerParticipantId: source.winnerParticipantId,
+        loserParticipantId: source.loserParticipantId,
+        winningLine: null,
+        reason: source.reason,
+      };
+    }
+
+    const authoritative = getOmokTerminalResult(runtime.state);
+    if (!authoritative || source.kind !== authoritative.kind) return null;
+    if (
+      source.revision !== authoritative.revision ||
+      source.winnerSeatIndex !== authoritative.winnerSeatIndex ||
+      source.winningLine === undefined
+    ) {
+      return null;
+    }
+    if (authoritative.kind === "DRAW") {
+      return this.canonicalizeOmokTerminalResult(authoritative);
+    }
+    if (source.loserSeatIndex !== authoritative.loserSeatIndex) return null;
+    const canonical = await this.canonicalizeOmokTerminalResult(authoritative);
+    if (canonical.kind !== "WIN") return null;
+    if (
+      source.winnerParticipantId !== undefined &&
+      source.winnerParticipantId !== canonical.winnerParticipantId
+    ) {
+      return null;
+    }
+    if (
+      source.loserParticipantId !== undefined &&
+      source.loserParticipantId !== canonical.loserParticipantId
+    ) {
+      return null;
+    }
+    return canonical;
+  }
+
+  private async beginForfeitCommit(
+    runtime: RuntimeMatch,
+    loserParticipantId: string,
+    reason: "LEFT" | "DISCONNECTED",
+  ): Promise<void> {
+    const participants = await this.container.multiplayerInstanceRepo.listParticipants(
+      this.instanceId(),
+    );
+    const loser = participants.find((participant) => participant.id === loserParticipantId);
+    const winner = participants.find(
+      (participant) =>
+        participant.id !== loserParticipantId &&
+        (participant.status === "JOINED" || participant.status === "READY"),
+    );
+    if (
+      !loser ||
+      !winner ||
+      (loser.seatIndex !== 0 && loser.seatIndex !== 1) ||
+      (winner.seatIndex !== 0 && winner.seatIndex !== 1)
+    ) {
+      throw new Error("forfeit participant mapping unavailable");
+    }
+    const terminal: CanonicalTerminalResult = {
+      kind: "FORFEIT",
+      revision: runtime.state.revision,
+      winnerSeatIndex: this.gameSeatIndexForParticipant(
+        winner.id,
+        winner.seatIndex,
+        runtime.generation,
+      ),
+      loserSeatIndex: this.gameSeatIndexForParticipant(
+        loser.id,
+        loser.seatIndex,
+        runtime.generation,
+      ),
+      winnerParticipantId: winner.id,
+      loserParticipantId: loser.id,
+      winningLine: null,
+      reason,
+    };
+    let pending = this.persistRuntimeMatch({
+      ...runtime,
+      lifecycle: "TERMINAL_PENDING",
+      terminalResultJson: JSON.stringify(terminal),
+    });
+    pending = this.reserveServerSequence(pending);
+    this.broadcastTerminalPending(pending);
+    await this.commitTerminalResult(pending);
+  }
+
+  private playerOutcome(
+    terminal: CanonicalTerminalResult,
+    participantId: string,
+  ): "WIN" | "LOSS" | "DRAW" {
     if (terminal.kind === "DRAW") return "DRAW";
-    return terminal.winnerSeatIndex === seatIndex ? "WIN" : "LOSS";
+    return terminal.winnerParticipantId === participantId ? "WIN" : "LOSS";
   }
 
   private async enterRematchWindow(generation: number): Promise<void> {
@@ -1004,6 +1427,132 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     );
   }
 
+  /** Initializes the same trusted runtime identity that a verified socket ticket would establish.
+   * This keeps the authenticated HTTP leave path authoritative even if a player exits before the
+   * browser manages to open its first WebSocket. */
+  private async ensureInternalControlContext(
+    instanceId: string,
+    generation: number,
+  ): Promise<void> {
+    const instance = await this.container.multiplayerInstanceRepo.findById(instanceId);
+    if (!instance || instance.generation !== generation) {
+      throw new Error("internal multiplayer context is stale");
+    }
+    const profileRecord = await this.container.multiplayerProfileRepo.findById(instance.profileId);
+    if (
+      !profileRecord ||
+      !isSupportedMultiplayerRuntimeProfile(profileRecord.profile) ||
+      profileRecord.profile.gameVersionId !== instance.gameVersionId ||
+      profileRecord.profile.profileRevision !== instance.profileRevision
+    ) {
+      throw new Error("unsupported internal multiplayer context");
+    }
+
+    const nowSeconds = Math.floor(Date.now() / 1_000);
+    const meta = this.state.storage.sql
+      .exec<{
+        instance_id: string;
+        game_version_id: number;
+        profile_revision: number;
+        generation: number;
+      }>(
+        `SELECT instance_id, game_version_id, profile_revision, generation
+         FROM runtime_meta WHERE singleton = 1`,
+      )
+      .toArray()[0];
+    if (meta) {
+      if (
+        meta.instance_id !== instance.id ||
+        meta.game_version_id !== instance.gameVersionId ||
+        meta.profile_revision !== instance.profileRevision ||
+        generation < meta.generation ||
+        generation > meta.generation + 1
+      ) {
+        throw new Error("internal multiplayer context mismatch");
+      }
+      if (generation === meta.generation + 1) {
+        this.state.storage.sql.exec(
+          `UPDATE runtime_meta
+           SET generation = ?, lifecycle_status = 'INERT', state_schema_version = ?, updated_at = ?
+           WHERE singleton = 1 AND generation = ?`,
+          generation,
+          STATE_SCHEMA_VERSION,
+          nowSeconds,
+          meta.generation,
+        );
+        this.state.storage.sql.exec("DELETE FROM runtime_match");
+        this.state.storage.sql.exec("DELETE FROM runtime_game_config");
+        this.state.storage.sql.exec("DELETE FROM participant_rate_windows");
+        this.state.storage.sql.exec("DELETE FROM rematch_window");
+      }
+    } else {
+      this.state.storage.sql.exec(
+        `INSERT INTO runtime_meta (
+           singleton, instance_id, game_version_id, profile_revision, generation,
+           state_schema_version, lifecycle_status, created_at, updated_at
+         ) VALUES (1, ?, ?, ?, ?, ?, 'INERT', ?, ?)`,
+        instance.id,
+        instance.gameVersionId,
+        instance.profileRevision,
+        generation,
+        STATE_SCHEMA_VERSION,
+        nowSeconds,
+        nowSeconds,
+      );
+    }
+
+    const runtimeAuthority = this.readRuntimeAuthority();
+    if (
+      runtimeAuthority &&
+      (runtimeAuthority.profileId !== instance.profileId ||
+        runtimeAuthority.rulesetKey !== profileRecord.profile.rulesetKey ||
+        runtimeAuthority.rulesetRevision !== profileRecord.profile.rulesetRevision)
+    ) {
+      throw new Error("internal multiplayer authority mismatch");
+    }
+    if (!runtimeAuthority) {
+      this.state.storage.sql.exec(
+        `INSERT INTO runtime_authority (
+           singleton, profile_id, ruleset_key, ruleset_revision, created_at, updated_at
+         ) VALUES (1, ?, ?, ?, ?, ?)`,
+        instance.profileId,
+        profileRecord.profile.rulesetKey,
+        profileRecord.profile.rulesetRevision,
+        nowSeconds,
+        nowSeconds,
+      );
+    }
+
+    const participants = (
+      await this.container.multiplayerInstanceRepo.listParticipants(instance.id)
+    ).filter((participant) => participant.status === "JOINED" || participant.status === "READY");
+    for (const participant of participants) {
+      if (participant.seatIndex !== 0 && participant.seatIndex !== 1) {
+        throw new Error("invalid internal Omok participant seat");
+      }
+      this.state.storage.sql.exec(
+        `INSERT OR IGNORE INTO participant_authority (
+           participant_id, generation, user_id, role, seat_index, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?)`,
+        participant.id,
+        generation,
+        participant.userId,
+        participant.role,
+        participant.seatIndex,
+        nowSeconds,
+      );
+      const authority = this.currentAuthority(participant.id, generation);
+      if (
+        !authority ||
+        authority.userId !== participant.userId ||
+        authority.role !== participant.role ||
+        authority.seatIndex !== participant.seatIndex
+      ) {
+        throw new Error("internal participant authority mismatch");
+      }
+    }
+  }
+
   private consumeAdmission(
     claims: MultiplayerJoinTicketClaims,
     nowSeconds: number,
@@ -1044,6 +1593,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
           meta.generation,
         );
         this.state.storage.sql.exec("DELETE FROM runtime_match");
+        this.state.storage.sql.exec("DELETE FROM runtime_game_config");
         this.state.storage.sql.exec("DELETE FROM participant_rate_windows");
         this.state.storage.sql.exec("DELETE FROM rematch_window");
       }
@@ -1227,6 +1777,61 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       role: row.role,
       seatIndex: row.seat_index,
       generation: row.generation,
+    };
+  }
+
+  private readOmokConfiguration(generation: number): OmokRuntimeConfiguration {
+    const row = this.state.storage.sql
+      .exec<{
+        generation: number;
+        status: string;
+        black_participant_id: string;
+      }>(
+        `SELECT generation, status, black_participant_id
+         FROM runtime_game_config WHERE singleton = 1`,
+      )
+      .toArray()[0];
+    if (!row) return { status: "PENDING", blackParticipantId: null };
+    if (
+      row.generation !== generation ||
+      row.status !== "LOCKED" ||
+      !isOpaqueId(row.black_participant_id)
+    ) {
+      throw new Error("invalid persisted Omok configuration");
+    }
+    return { status: "LOCKED", blackParticipantId: row.black_participant_id };
+  }
+
+  private gameSeatIndex(authority: ParticipantAuthority): 0 | 1 {
+    const configuration = this.readOmokConfiguration(authority.generation);
+    if (configuration.status === "PENDING") return authority.seatIndex;
+    return configuration.blackParticipantId === authority.participantId ? 0 : 1;
+  }
+
+  private gameSeatIndexForParticipant(
+    participantId: string,
+    fallbackSeatIndex: number,
+    generation: number,
+  ): 0 | 1 {
+    const configuration = this.readOmokConfiguration(generation);
+    if (configuration.status === "LOCKED") {
+      return configuration.blackParticipantId === participantId ? 0 : 1;
+    }
+    if (fallbackSeatIndex !== 0 && fallbackSeatIndex !== 1) {
+      throw new Error("invalid Omok participant seat");
+    }
+    return fallbackSeatIndex;
+  }
+
+  private projectRuntimeState(state: OmokStateV1, authority: ParticipantAuthority) {
+    const configuration = this.readOmokConfiguration(authority.generation);
+    const projected = projectOmokState(state, this.gameSeatIndex(authority));
+    return {
+      ...projected,
+      stoneSelection: {
+        status: configuration.status,
+        canSelect: configuration.status === "PENDING" && authority.role === "HOST",
+      },
     };
   }
 
@@ -1451,7 +2056,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
         generation: runtime.generation,
         serverSeq,
         revision: runtime.state.revision,
-        payload: projectOmokState(runtime.state, authority.seatIndex),
+        payload: this.projectRuntimeState(runtime.state, authority),
       });
       if (textEncoder.encode(message).byteLength > runtime.maxStateBytes) {
         socket.close(RUNTIME_UNAVAILABLE_CLOSE_CODE, "state limit exceeded");
@@ -1477,7 +2082,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       generation: sequenced.generation,
       serverSeq: sequenced.serverSeq,
       revision: sequenced.state.revision,
-      payload: projectOmokState(sequenced.state, authority.seatIndex),
+      payload: this.projectRuntimeState(sequenced.state, authority),
     });
     if (textEncoder.encode(message).byteLength > sequenced.maxStateBytes) {
       socket.close(RUNTIME_UNAVAILABLE_CLOSE_CODE, "state limit exceeded");
@@ -1542,7 +2147,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     );
   }
 
-  private broadcastTerminalCommitted(runtime: RuntimeMatch, result: OmokTerminalResult): void {
+  private broadcastTerminalCommitted(runtime: RuntimeMatch, result: CanonicalTerminalResult): void {
     for (const socket of this.state.getWebSockets()) {
       this.sendTerminalCommitted(socket, runtime, result);
     }
@@ -1564,6 +2169,228 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       if (!attachment || attachment.generation !== sequenced.generation) continue;
       socket.send(message);
     }
+  }
+
+  private playerConnectionMessage(
+    runtime: RuntimeMatch,
+    participantId: string,
+    status: PlayerConnectionStatus,
+    reconnectDeadlineAt: string | null,
+  ): string {
+    return JSON.stringify({
+      type: "MULTI_EVENT",
+      v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
+      generation: runtime.generation,
+      serverSeq: runtime.serverSeq,
+      name: MULTIPLAYER_PLAYER_CONNECTION_CHANGED_EVENT,
+      payload: { participantId, status, reconnectDeadlineAt },
+    });
+  }
+
+  private broadcastPlayerConnection(
+    participantId: string,
+    status: PlayerConnectionStatus,
+    reconnectDeadlineAt: string | null,
+  ): void {
+    const current = this.readRuntimeMatch();
+    if (!current || current.lifecycle !== "ACTIVE") return;
+    const runtime = this.reserveServerSequence(current);
+    const message = this.playerConnectionMessage(
+      runtime,
+      participantId,
+      status,
+      reconnectDeadlineAt,
+    );
+    for (const socket of this.state.getWebSockets()) {
+      if (socket.readyState !== 1) continue;
+      const attachment = this.readAttachment(socket);
+      if (!attachment || attachment.generation !== runtime.generation) continue;
+      socket.send(message);
+    }
+  }
+
+  private sendPresenceSnapshot(socket: WebSocket, attachment: ConnectionAttachment): void {
+    if (socket.readyState !== 1) return;
+    const rows = this.state.storage.sql
+      .exec<{
+        participant_id: string;
+        disconnected_at: number | null;
+      }>(
+        `SELECT participant_id, disconnected_at
+         FROM participant_connections
+         WHERE generation = ?
+         ORDER BY participant_id`,
+        attachment.generation,
+      )
+      .toArray();
+    for (const row of rows) {
+      const current = this.readRuntimeMatch();
+      if (!current || current.lifecycle !== "ACTIVE") return;
+      const runtime = this.reserveServerSequence(current);
+      const disconnectedAt = integerValue(row.disconnected_at);
+      const reconnectDeadlineAt =
+        disconnectedAt === null
+          ? null
+          : new Date((disconnectedAt + RECONNECT_GRACE_SECONDS) * 1_000).toISOString();
+      socket.send(
+        this.playerConnectionMessage(
+          runtime,
+          row.participant_id,
+          disconnectedAt === null ? "CONNECTED" : "RECONNECTING",
+          reconnectDeadlineAt,
+        ),
+      );
+    }
+  }
+
+  private async ensureExpectedParticipantConnections(runtime: RuntimeMatch): Promise<void> {
+    if (runtime.lifecycle !== "ACTIVE") return;
+    const participants = (
+      await this.container.multiplayerInstanceRepo.listParticipants(this.instanceId())
+    ).filter((participant) => participant.status === "JOINED" || participant.status === "READY");
+    if (participants.length !== 2) {
+      throw new Error("Omok runtime requires exactly two active participants");
+    }
+
+    const nowSeconds = Math.ceil(Date.now() / 1_000);
+    for (const participant of participants) {
+      if (participant.seatIndex !== 0 && participant.seatIndex !== 1) {
+        throw new Error("invalid Omok participant seat");
+      }
+      this.state.storage.sql.exec(
+        `INSERT OR IGNORE INTO participant_authority (
+           participant_id, generation, user_id, role, seat_index, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?)`,
+        participant.id,
+        runtime.generation,
+        participant.userId,
+        participant.role,
+        participant.seatIndex,
+        nowSeconds,
+      );
+      const authority = this.currentAuthority(participant.id, runtime.generation);
+      if (
+        !authority ||
+        authority.userId !== participant.userId ||
+        authority.role !== participant.role ||
+        authority.seatIndex !== participant.seatIndex
+      ) {
+        throw new Error("participant authority does not match the active room");
+      }
+      this.state.storage.sql.exec(
+        `INSERT INTO participant_connections (
+           participant_id, user_id, role, generation, connection_generation,
+           connected_at, last_seen_at, disconnected_at
+         ) VALUES (?, ?, ?, ?, 0, ?, ?, ?)
+         ON CONFLICT(participant_id) DO UPDATE SET
+           user_id = excluded.user_id,
+           role = excluded.role,
+           generation = excluded.generation,
+           connection_generation = 0,
+           connected_at = excluded.connected_at,
+           last_seen_at = excluded.last_seen_at,
+           disconnected_at = excluded.disconnected_at
+         WHERE participant_connections.generation < excluded.generation`,
+        participant.id,
+        participant.userId,
+        participant.role,
+        runtime.generation,
+        nowSeconds,
+        nowSeconds,
+        nowSeconds,
+      );
+    }
+    const nextMissing = this.state.storage.sql
+      .exec<{ disconnected_at: number }>(
+        `SELECT MIN(disconnected_at) AS disconnected_at
+         FROM participant_connections
+         WHERE generation = ? AND disconnected_at IS NOT NULL`,
+        runtime.generation,
+      )
+      .toArray()[0];
+    const disconnectedAt = integerValue(nextMissing?.disconnected_at);
+    if (disconnectedAt !== null) {
+      await this.scheduleNextAlarm((disconnectedAt + RECONNECT_GRACE_SECONDS) * 1_000 + 1);
+    }
+  }
+
+  private async resolveExpiredDisconnects(nowSeconds: number): Promise<void> {
+    const runtime = this.readRuntimeMatch();
+    if (!runtime || runtime.lifecycle !== "ACTIVE") return;
+    const connections = this.state.storage.sql
+      .exec<{ participant_id: string; disconnected_at: number | null }>(
+        `SELECT participant_id, disconnected_at
+         FROM participant_connections
+         WHERE generation = ?
+         ORDER BY participant_id`,
+        runtime.generation,
+      )
+      .toArray();
+    const expired = connections.filter((row) => {
+      const disconnectedAt = integerValue(row.disconnected_at);
+      return disconnectedAt !== null && disconnectedAt <= nowSeconds - RECONNECT_GRACE_SECONDS;
+    });
+    if (expired.length === 0) return;
+    const firstExpired = expired[0];
+
+    const connected = new Set(
+      connections.filter((row) => row.disconnected_at === null).map((row) => row.participant_id),
+    );
+    for (const row of expired) {
+      this.broadcastPlayerConnection(row.participant_id, "TIMED_OUT", null);
+    }
+    if (
+      expired.length === 1 &&
+      firstExpired &&
+      [...connected].some((participantId) => participantId !== firstExpired.participant_id)
+    ) {
+      await this.beginForfeitCommit(runtime, firstExpired.participant_id, "DISCONNECTED");
+    } else if (connected.size === 0) {
+      if (connections.some((row) => !expired.includes(row))) {
+        const nextDeadline = Math.min(
+          ...connections.flatMap((row) => {
+            const disconnectedAt = integerValue(row.disconnected_at);
+            return disconnectedAt === null || disconnectedAt <= nowSeconds - RECONNECT_GRACE_SECONDS
+              ? []
+              : [(disconnectedAt + RECONNECT_GRACE_SECONDS) * 1_000 + 1];
+          }),
+        );
+        if (Number.isFinite(nextDeadline)) await this.scheduleNextAlarm(nextDeadline);
+        return;
+      }
+
+      const instance = await this.container.multiplayerInstanceRepo.findById(this.instanceId());
+      if (instance?.status === "ACTIVE" && instance.generation === runtime.generation) {
+        const nowIso = new Date(nowSeconds * 1_000).toISOString();
+        const aborted = await this.container.multiplayerInstanceRepo.transition({
+          instanceId: instance.id,
+          expectedStatus: "ACTIVE",
+          expectedGeneration: runtime.generation,
+          nextStatus: "ABORTED",
+          nextGeneration: runtime.generation,
+          closedAt: nowIso,
+          abortCode: "PARTICIPANT_LEFT",
+          nowIso,
+        });
+        if (!aborted) {
+          await this.scheduleNextAlarm(Date.now() + FINALIZATION_RETRY_BASE_MS);
+          return;
+        }
+        this.persistRuntimeMatch({ ...runtime, lifecycle: "ABORTED" });
+        this.broadcastAbort("PARTICIPANT_LEFT");
+        for (const socket of this.state.getWebSockets()) {
+          socket.close(1000, "all participants disconnected");
+        }
+      }
+    }
+    this.state.storage.sql.exec(
+      `DELETE FROM participant_connections
+       WHERE generation = ?
+         AND disconnected_at IS NOT NULL
+         AND disconnected_at <= ?`,
+      runtime.generation,
+      nowSeconds - RECONNECT_GRACE_SECONDS,
+    );
   }
 
   private sendTerminalCommitted(socket: WebSocket, runtime: RuntimeMatch, result: unknown): void {
@@ -1658,8 +2485,8 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     );
   }
 
-  private markDisconnected(attachment: ConnectionAttachment, nowSeconds: number): void {
-    this.state.storage.sql.exec(
+  private markDisconnected(attachment: ConnectionAttachment, nowSeconds: number): boolean {
+    const result = this.state.storage.sql.exec(
       `UPDATE participant_connections
        SET last_seen_at = ?, disconnected_at = ?
        WHERE participant_id = ? AND generation = ? AND connection_generation = ?
@@ -1679,6 +2506,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
          )`,
       nowSeconds,
     );
+    return result.rowsWritten === 1;
   }
 
   private disconnectUnavailable(socket: WebSocket, attachment: ConnectionAttachment): void {

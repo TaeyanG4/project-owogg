@@ -2,7 +2,10 @@ import { env } from "cloudflare:workers";
 import { applyD1Migrations, evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { beforeAll, test } from "vitest";
 import { MULTIPLAYER_HEARTBEAT_REQUEST, MULTIPLAYER_HEARTBEAT_RESPONSE } from "@owogg/contracts";
-import { MULTIPLAYER_REMATCH_CHANGED_EVENT } from "@owogg/game-sdk/bridge";
+import {
+  MULTIPLAYER_PLAYER_CONNECTION_CHANGED_EVENT,
+  MULTIPLAYER_REMATCH_CHANGED_EVENT,
+} from "@owogg/game-sdk/bridge";
 import {
   OMOK_ACTION_LEDGER_SCHEMA_VERSION,
   MULTIPLAYER_TICKET_AUDIENCE,
@@ -24,6 +27,7 @@ import {
 import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_CONNECT_PATH,
+  MULTIPLAYER_INTERNAL_LEAVE_PATH,
   MULTIPLAYER_INTERNAL_PROTOCOL_HEADER,
   MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH,
   decodeVerifiedMultiplayerClaims,
@@ -211,6 +215,17 @@ function internalRematchNotificationRequest(generation: number): Request {
   });
 }
 
+function internalLeaveRequest(instanceId: string, userId: number, generation: number): Request {
+  return new Request(`https://example.com${MULTIPLAYER_INTERNAL_LEAVE_PATH}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      [MULTIPLAYER_INTERNAL_PROTOCOL_HEADER]: MULTIPLAYER_WEBSOCKET_PROTOCOL,
+    },
+    body: JSON.stringify({ instanceId, userId, generation }),
+  });
+}
+
 async function nextMessage(socket: WebSocket, label = "WebSocket message"): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error(`timed out waiting for ${label}`)), 2_000);
@@ -375,6 +390,12 @@ async function createConnectedRoom(key: string): Promise<{
     inviteToken: null,
   });
   if (!joined.ok) throw new Error(`room join failed: ${joined.code}`);
+  const started = await rooms.startRoom({
+    userId: HOST_USER_ID,
+    instanceId: created.instance.id,
+    expectedGeneration: created.instance.generation,
+  });
+  if (!started.ok) throw new Error(`room start failed: ${started.code}`);
 
   const hostParticipant = await instances.advanceConnectionGeneration({
     instanceId: created.instance.id,
@@ -433,11 +454,55 @@ async function createConnectedRoom(key: string): Promise<{
   };
 }
 
-async function readyConnectedRoom(room: Awaited<ReturnType<typeof createConnectedRoom>>) {
-  const hostSync = nextMessage(room.hostSocket, "host initial sync");
-  const playerSync = nextMessage(room.playerSocket, "player initial sync");
+async function readyConnectedRoom(
+  room: Awaited<ReturnType<typeof createConnectedRoom>>,
+  hostStone: "BLACK" | "WHITE" = "BLACK",
+) {
+  const hostPending = nextMessageWhere(
+    room.hostSocket,
+    "host pending stone selection",
+    (message) =>
+      message.type === "MULTI_SYNC" &&
+      (message.payload as { stoneSelection?: { status?: string } } | undefined)?.stoneSelection
+        ?.status === "PENDING",
+  );
+  const playerPending = nextMessageWhere(
+    room.playerSocket,
+    "player pending stone selection",
+    (message) =>
+      message.type === "MULTI_SYNC" &&
+      (message.payload as { stoneSelection?: { status?: string } } | undefined)?.stoneSelection
+        ?.status === "PENDING",
+  );
   room.hostSocket.send(JSON.stringify({ type: "MULTI_READY", v: 1, generation: 1 }));
   room.playerSocket.send(JSON.stringify({ type: "MULTI_READY", v: 1, generation: 1 }));
+  await Promise.all([hostPending, playerPending]);
+
+  const hostSync = nextMessageWhere(
+    room.hostSocket,
+    "host locked stone selection",
+    (message) =>
+      message.type === "MULTI_SYNC" &&
+      (message.payload as { stoneSelection?: { status?: string } } | undefined)?.stoneSelection
+        ?.status === "LOCKED",
+  );
+  const playerSync = nextMessageWhere(
+    room.playerSocket,
+    "player locked stone selection",
+    (message) =>
+      message.type === "MULTI_SYNC" &&
+      (message.payload as { stoneSelection?: { status?: string } } | undefined)?.stoneSelection
+        ?.status === "LOCKED",
+  );
+  room.hostSocket.send(
+    JSON.stringify({
+      type: "MULTI_INPUT",
+      v: 1,
+      generation: 1,
+      clientSeq: 1,
+      payload: { kind: "OMOK_SELECT_STONE", stone: hostStone },
+    }),
+  );
   return Promise.all([hostSync, playerSync]);
 }
 
@@ -626,6 +691,52 @@ test("runtime rejects gameplay without matching D1 control-plane state and retur
         .one().lifecycle_status,
     ).toBe("INERT");
   });
+});
+
+test("the host chooses white inside Omok and the server assigns black's first turn to the opponent", async ({
+  expect,
+}) => {
+  const room = await createConnectedRoom("white-selection");
+  const [hostView, playerView] = await readyConnectedRoom(room, "WHITE");
+  expect(hostView).toMatchObject({
+    type: "MULTI_SYNC",
+    revision: 0,
+    payload: {
+      yourSeatIndex: 1,
+      yourStone: "WHITE",
+      nextSeatIndex: 0,
+      stoneSelection: { status: "LOCKED", canSelect: false },
+    },
+  });
+  expect(playerView).toMatchObject({
+    type: "MULTI_SYNC",
+    revision: 0,
+    payload: {
+      yourSeatIndex: 0,
+      yourStone: "BLACK",
+      nextSeatIndex: 0,
+      stoneSelection: { status: "LOCKED", canSelect: false },
+    },
+  });
+
+  const [hostState, playerState] = await playAcceptedMove(room, {
+    actor: "PLAYER",
+    clientSeq: 1,
+    clientActionId: "workers_white_selection_move_01",
+    expectedRevision: 0,
+    x: 7,
+    y: 7,
+  });
+  expect(hostState).toMatchObject({
+    revision: 1,
+    payload: { yourSeatIndex: 1, board: expect.stringContaining("B") },
+  });
+  expect(playerState).toMatchObject({
+    revision: 1,
+    payload: { yourSeatIndex: 0, board: expect.stringContaining("B") },
+  });
+  room.hostSocket.close(1000, "done");
+  room.playerSocket.close(1000, "done");
 });
 
 test("two D1 participants ready, exchange authoritative Omok actions, reject replay abuse, and resume", async ({
@@ -1074,42 +1185,58 @@ test("reconnect repairs a D1-committed action missing from the DO checkpoint", a
   resumed.socket.close(1000, "done");
 });
 
-test("explicit leave aborts the active match for every participant without rewards", async ({
+test("explicit leave is an immediate server-authoritative forfeit without rewards", async ({
   expect,
 }) => {
   const room = await createConnectedRoom("leave");
   await readyConnectedRoom(room);
-  const hostAborted = nextMessageWhere(
+  const hostTerminal = nextMessageWhere(
     room.hostSocket,
-    "host participant-left abort",
-    (message) => message.type === "MULTI_ABORTED",
+    "host participant-left terminal",
+    (message) => message.type === "MULTI_TERMINAL_COMMITTED",
   );
-  const playerAborted = nextMessageWhere(
+  const playerTerminal = nextMessageWhere(
     room.playerSocket,
-    "player participant-left abort",
-    (message) => message.type === "MULTI_ABORTED",
+    "player participant-left terminal",
+    (message) => message.type === "MULTI_TERMINAL_COMMITTED",
   );
   room.hostSocket.send(JSON.stringify({ type: "MULTI_LEAVE", v: 1, generation: 1 }));
-  await expect(hostAborted).resolves.toMatchObject({
-    type: "MULTI_ABORTED",
-    code: "PARTICIPANT_LEFT",
+  await expect(hostTerminal).resolves.toMatchObject({
+    type: "MULTI_TERMINAL_COMMITTED",
+    result: { kind: "FORFEIT", loserParticipantId: room.hostClaims.participantId, reason: "LEFT" },
   });
-  await expect(playerAborted).resolves.toMatchObject({
-    type: "MULTI_ABORTED",
-    code: "PARTICIPANT_LEFT",
+  await expect(playerTerminal).resolves.toMatchObject({
+    type: "MULTI_TERMINAL_COMMITTED",
+    result: {
+      kind: "FORFEIT",
+      winnerParticipantId: room.playerClaims.participantId,
+      reason: "LEFT",
+    },
   });
 
+  await expect
+    .poll(async () => (await room.instances.findById(room.instanceId))?.status)
+    .toBe("CLOSED");
   expect(await room.instances.findById(room.instanceId)).toMatchObject({
-    status: "ABORTED",
-    abortCode: "PARTICIPANT_LEFT",
+    status: "CLOSED",
+    abortCode: null,
   });
   const match = await room.matches.findMatchByInstanceGeneration(room.instanceId, 1);
-  expect(match).toMatchObject({ status: "ABORTED", abortCode: "PARTICIPANT_LEFT" });
+  expect(match).toMatchObject({ status: "COMMITTED", abortCode: null });
   const players = await room.matches.listPlayers(match?.id ?? "missing");
   expect(players).toHaveLength(2);
   expect(
-    players.every((player) => player.resultStatus === "ABORTED" && player.outcome === "ABORTED"),
-  ).toBe(true);
+    players.find((player) => player.participantId === room.hostClaims.participantId),
+  ).toMatchObject({
+    resultStatus: "COMMITTED",
+    outcome: "LOSS",
+  });
+  expect(
+    players.find((player) => player.participantId === room.playerClaims.participantId),
+  ).toMatchObject({
+    resultStatus: "COMMITTED",
+    outcome: "WIN",
+  });
   expect(
     (
       await env.DB.prepare(
@@ -1119,6 +1246,301 @@ test("explicit leave aborts the active match for every participant without rewar
         .first<{ count: number }>()
     )?.count,
   ).toBe(0);
+});
+
+test("authenticated HTTP leave uses the same authoritative forfeit path", async ({ expect }) => {
+  const room = await createConnectedRoom("http-leave");
+  await readyConnectedRoom(room);
+  const playerTerminal = nextMessageWhere(
+    room.playerSocket,
+    "HTTP leave terminal",
+    (message) => message.type === "MULTI_TERMINAL_COMMITTED",
+  );
+  const stub = env.MULTIPLAYER_INSTANCES.get(env.MULTIPLAYER_INSTANCES.idFromName(room.instanceId));
+
+  const response = await stub.fetch(internalLeaveRequest(room.instanceId, HOST_USER_ID, 1));
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({ ok: true, replayed: false });
+  await expect(playerTerminal).resolves.toMatchObject({
+    type: "MULTI_TERMINAL_COMMITTED",
+    result: {
+      kind: "FORFEIT",
+      winnerParticipantId: room.playerClaims.participantId,
+      loserParticipantId: room.hostClaims.participantId,
+      reason: "LEFT",
+    },
+  });
+  await expect
+    .poll(async () => (await room.instances.findById(room.instanceId))?.status)
+    .toBe("CLOSED");
+  expect(await room.instances.findById(room.instanceId)).toMatchObject({
+    status: "CLOSED",
+    abortCode: null,
+  });
+  expect(await room.matches.findMatchByInstanceGeneration(room.instanceId, 1)).toMatchObject({
+    status: "COMMITTED",
+    abortCode: null,
+  });
+});
+
+test("HTTP leave initializes authority before the first gameplay socket opens", async ({
+  expect,
+}) => {
+  const { rooms, instances, matches } = roomHarness();
+  const created = await rooms.createRoom({
+    userId: HOST_USER_ID,
+    gameSlug: GAME_SLUG,
+    visibility: "PRIVATE",
+    joinPolicy: "OPEN",
+    idempotencyKey: "workers_http_no_socket_000001",
+  });
+  if (!created.ok) throw new Error(`room create failed: ${created.code}`);
+  const joined = await rooms.joinRoom({
+    userId: PLAYER_USER_ID,
+    publicCode: created.instance.publicCode,
+    inviteToken: null,
+  });
+  if (!joined.ok) throw new Error(`room join failed: ${joined.code}`);
+  const started = await rooms.startRoom({
+    userId: HOST_USER_ID,
+    instanceId: created.instance.id,
+    expectedGeneration: created.instance.generation,
+  });
+  if (!started.ok) throw new Error(`room start failed: ${started.code}`);
+
+  const stub = env.MULTIPLAYER_INSTANCES.get(
+    env.MULTIPLAYER_INSTANCES.idFromName(created.instance.id),
+  );
+  const response = await stub.fetch(
+    internalLeaveRequest(created.instance.id, HOST_USER_ID, created.instance.generation),
+  );
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({ ok: true, replayed: false });
+  expect(await instances.findById(created.instance.id)).toMatchObject({
+    status: "CLOSED",
+    abortCode: null,
+  });
+  const match = await matches.findMatchByInstanceGeneration(created.instance.id, 1);
+  expect(match).toMatchObject({ status: "COMMITTED", abortCode: null });
+  expect(JSON.parse(match?.terminalResultJson ?? "null")).toMatchObject({
+    kind: "FORFEIT",
+    loserParticipantId: created.participant.id,
+    winnerParticipantId: joined.participant.id,
+    reason: "LEFT",
+  });
+});
+
+test("HTTP leave also closes a lobby that never created runtime state", async ({ expect }) => {
+  const { rooms, instances } = roomHarness();
+  const created = await rooms.createRoom({
+    userId: HOST_USER_ID,
+    gameSlug: GAME_SLUG,
+    visibility: "PRIVATE",
+    joinPolicy: "OPEN",
+    idempotencyKey: "workers_lobby_leave_00000001",
+  });
+  if (!created.ok) throw new Error(`room create failed: ${created.code}`);
+  const stub = env.MULTIPLAYER_INSTANCES.get(
+    env.MULTIPLAYER_INSTANCES.idFromName(created.instance.id),
+  );
+  const response = await stub.fetch(
+    internalLeaveRequest(created.instance.id, HOST_USER_ID, created.instance.generation),
+  );
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({ ok: true, replayed: false });
+  expect(await instances.findById(created.instance.id)).toMatchObject({
+    status: "ABORTED",
+    abortCode: "INSUFFICIENT_PLAYERS",
+  });
+});
+
+test("network loss announces a 30 second grace and then commits a forfeit win", async ({
+  expect,
+}) => {
+  const room = await createConnectedRoom("disconnect-grace");
+  await readyConnectedRoom(room);
+  const reconnecting = nextMessageWhere(
+    room.hostSocket,
+    "opponent reconnect grace",
+    (message) =>
+      message.type === "MULTI_EVENT" &&
+      message.name === MULTIPLAYER_PLAYER_CONNECTION_CHANGED_EVENT &&
+      (message.payload as { status?: string } | undefined)?.status === "RECONNECTING",
+  );
+  const disconnectedAt = Date.now();
+  room.playerSocket.close(1011, "network lost");
+  const reconnectingMessage = await reconnecting;
+  expect(reconnectingMessage).toMatchObject({
+    payload: {
+      participantId: room.playerClaims.participantId,
+      status: "RECONNECTING",
+    },
+  });
+  const reconnectDeadlineAt = (reconnectingMessage.payload as { reconnectDeadlineAt?: unknown })
+    .reconnectDeadlineAt;
+  expect(typeof reconnectDeadlineAt).toBe("string");
+  expect(Date.parse(String(reconnectDeadlineAt))).toBeGreaterThanOrEqual(disconnectedAt + 30_000);
+
+  const committed = nextMessageWhere(
+    room.hostSocket,
+    "disconnect forfeit commit",
+    (message) => message.type === "MULTI_TERMINAL_COMMITTED",
+  );
+  const stub = env.MULTIPLAYER_INSTANCES.get(env.MULTIPLAYER_INSTANCES.idFromName(room.instanceId));
+  await runInDurableObject(stub, async (instance, state) => {
+    state.storage.sql.exec(
+      `UPDATE participant_connections
+       SET disconnected_at = ?
+       WHERE participant_id = ?`,
+      Math.floor(Date.now() / 1_000) - 31,
+      room.playerClaims.participantId,
+    );
+    await instance.alarm();
+  });
+  await expect(committed).resolves.toMatchObject({
+    type: "MULTI_TERMINAL_COMMITTED",
+    result: {
+      kind: "FORFEIT",
+      winnerParticipantId: room.hostClaims.participantId,
+      loserParticipantId: room.playerClaims.participantId,
+      reason: "DISCONNECTED",
+    },
+  });
+  expect(await room.matches.findMatchByInstanceGeneration(room.instanceId, 1)).toMatchObject({
+    status: "COMMITTED",
+  });
+  room.hostSocket.close(1000, "done");
+});
+
+test("two timed-out participants abort the match without inventing a winner", async ({
+  expect,
+}) => {
+  const room = await createConnectedRoom("both-disconnected");
+  await readyConnectedRoom(room);
+  const stub = env.MULTIPLAYER_INSTANCES.get(env.MULTIPLAYER_INSTANCES.idFromName(room.instanceId));
+  room.hostSocket.close(1011, "host network lost");
+  room.playerSocket.close(1011, "player network lost");
+  await expect
+    .poll(() =>
+      runInDurableObject(
+        stub,
+        async (_instance, state) =>
+          state.storage.sql
+            .exec<{ count: number }>(
+              "SELECT COUNT(*) AS count FROM participant_connections WHERE disconnected_at IS NOT NULL",
+            )
+            .one().count,
+      ),
+    )
+    .toBe(2);
+
+  await runInDurableObject(stub, async (instance, state) => {
+    state.storage.sql.exec(
+      "UPDATE participant_connections SET disconnected_at = ?",
+      Math.floor(Date.now() / 1_000) - 31,
+    );
+    await instance.alarm();
+  });
+  expect(await room.instances.findById(room.instanceId)).toMatchObject({
+    status: "ABORTED",
+    abortCode: "PARTICIPANT_LEFT",
+  });
+  const match = await room.matches.findMatchByInstanceGeneration(room.instanceId, 1);
+  expect(match).toMatchObject({
+    status: "ABORTED",
+    terminalResultJson: null,
+    abortCode: "PARTICIPANT_LEFT",
+  });
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM multiplayer_reward_outbox WHERE match_id = ?",
+      )
+        .bind(match?.id)
+        .first<{ count: number }>()
+    )?.count,
+  ).toBe(0);
+});
+
+test("a match participant who never establishes presence still receives the same grace", async ({
+  expect,
+}) => {
+  const room = await createConnectedRoom("missing-presence");
+  await readyConnectedRoom(room);
+  const stub = env.MULTIPLAYER_INSTANCES.get(env.MULTIPLAYER_INSTANCES.idFromName(room.instanceId));
+
+  await runInDurableObject(stub, async (_instance, state) => {
+    for (const socket of state.getWebSockets(`participant:${room.playerClaims.participantId}`)) {
+      socket.close(1011, "browser stopped before runtime mount");
+    }
+    state.storage.sql.exec(
+      "DELETE FROM participant_connections WHERE participant_id = ?",
+      room.playerClaims.participantId,
+    );
+  });
+
+  const resumedHostParticipant = await room.instances.advanceConnectionGeneration({
+    instanceId: room.instanceId,
+    expectedInstanceGeneration: 1,
+    userId: HOST_USER_ID,
+    expectedConnectionGeneration: room.hostClaims.connectionGeneration,
+    nowIso: new Date().toISOString(),
+  });
+  if (!resumedHostParticipant) throw new Error("host reconnection generation failed");
+  const resumedHost = await connect(
+    claims(room.instanceId, {
+      ...room.hostClaims,
+      jti: `workers_missing_presence_${crypto.randomUUID()}`,
+      connectionGeneration: resumedHostParticipant.connectionGeneration,
+    }),
+  );
+  await expect(
+    nextMessage(resumedHost.socket, "resumed host acknowledgement"),
+  ).resolves.toMatchObject({
+    type: "MULTI_CONNECTED",
+    connectionGeneration: resumedHostParticipant.connectionGeneration,
+  });
+  const missingPresence = await nextMessageWhere(
+    resumedHost.socket,
+    "missing player reconnect grace",
+    (message) =>
+      message.type === "MULTI_EVENT" &&
+      message.name === MULTIPLAYER_PLAYER_CONNECTION_CHANGED_EVENT &&
+      (message.payload as { participantId?: string; status?: string } | undefined)
+        ?.participantId === room.playerClaims.participantId &&
+      (message.payload as { status?: string } | undefined)?.status === "RECONNECTING",
+  );
+  expect(missingPresence).toMatchObject({
+    payload: {
+      participantId: room.playerClaims.participantId,
+      status: "RECONNECTING",
+    },
+  });
+
+  const committed = nextMessageWhere(
+    resumedHost.socket,
+    "missing player forfeit commit",
+    (message) => message.type === "MULTI_TERMINAL_COMMITTED",
+  );
+  await runInDurableObject(stub, async (instance, state) => {
+    state.storage.sql.exec(
+      `UPDATE participant_connections
+       SET disconnected_at = ?
+       WHERE participant_id = ?`,
+      Math.floor(Date.now() / 1_000) - 31,
+      room.playerClaims.participantId,
+    );
+    await instance.alarm();
+  });
+  await expect(committed).resolves.toMatchObject({
+    result: {
+      kind: "FORFEIT",
+      winnerParticipantId: room.hostClaims.participantId,
+      loserParticipantId: room.playerClaims.participantId,
+      reason: "DISCONNECTED",
+    },
+  });
+  resumedHost.socket.close(1000, "done");
 });
 
 test("DO rejects expired and cross-instance claims without accepting a socket", async ({

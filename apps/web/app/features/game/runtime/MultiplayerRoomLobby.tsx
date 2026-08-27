@@ -1,0 +1,339 @@
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { Check, Copy, Crown, Link2, LogOut, Play, UserRound, UsersRound } from "lucide-react";
+import type { MultiplayerRoomPlayer, MultiplayerRoomResponse } from "@owogg/contracts";
+import {
+  fetchMultiplayerRoomRoster,
+  leaveMultiplayerRoom,
+  startMultiplayerRoom,
+} from "./multiplayerRoomApi";
+
+// Lobby state is control-plane data, not realtime gameplay. A modest cadence keeps host start
+// responsive without turning D1 roster reads into a high-frequency transport.
+// MULTIPLAYER_RATE_LIMITER permits ten requests per minute for each operation/session key.
+// One immediate read plus a 6.5 second cadence remains below that ceiling without collective
+// throttling for players sharing an IP. Hidden tabs back off further to keep D1 cost bounded.
+const ROSTER_REFRESH_MS = 6_500;
+const BACKGROUND_ROSTER_REFRESH_MS = 15_000;
+const MAX_RENDERED_LOBBY_SLOTS = 16;
+
+export function multiplayerLobbyCanStart(
+  players: readonly MultiplayerRoomPlayer[],
+  minPlayers: number,
+): boolean {
+  return players.length >= minPlayers && players.every((player) => player.status === "READY");
+}
+
+export function multiplayerLobbySlotCount(maxPlayers: number, occupiedPlayers: number): number {
+  return Math.min(Math.max(maxPlayers, occupiedPlayers), MAX_RENDERED_LOBBY_SLOTS);
+}
+
+export interface MultiplayerRoomLobbyProps {
+  readonly title: string;
+  readonly room: MultiplayerRoomResponse;
+  readonly minPlayers: number;
+  readonly shareValue: string;
+  readonly frameClassName?: string;
+  readonly frameStyle?: CSSProperties;
+  readonly onRoomChange: (room: MultiplayerRoomResponse) => void;
+  readonly onExit: () => void;
+}
+
+function messageFor(error: unknown): string {
+  return error instanceof Error && error.message
+    ? error.message
+    : "대기실 상태를 확인하지 못했습니다.";
+}
+
+function PlayerSlot({
+  player,
+  slotIndex,
+  isSelf,
+}: {
+  readonly player: MultiplayerRoomPlayer | undefined;
+  readonly slotIndex: number;
+  readonly isSelf: boolean;
+}) {
+  if (!player) {
+    return (
+      <div className="flex min-h-24 items-center gap-3 rounded-2xl border border-dashed border-border bg-surface/40 px-4 py-3 text-text-muted">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border bg-surface">
+          <UserRound className="h-5 w-5" />
+        </span>
+        <span>
+          <span className="block text-xs font-black uppercase tracking-wider">
+            슬롯 {slotIndex + 1}
+          </span>
+          <span className="mt-1 block text-sm font-semibold">플레이어 대기 중</span>
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-h-24 items-center gap-3 rounded-2xl border border-brand/25 bg-brand/5 px-4 py-3 shadow-sm">
+      <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-surface text-sm font-black text-text-primary">
+        {player.avatarUrl ? (
+          <img
+            src={player.avatarUrl}
+            alt=""
+            referrerPolicy="no-referrer"
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          player.nickname.slice(0, 1).toUpperCase()
+        )}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <strong className="truncate text-sm text-text-primary">{player.nickname}</strong>
+          {isSelf && <span className="shrink-0 text-xs font-black text-brand-light">나</span>}
+        </span>
+        <span className="mt-1 flex flex-wrap items-center gap-1.5">
+          <span className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-bold text-text-secondary">
+            {player.role === "HOST" ? <Crown className="h-3 w-3 text-amber-300" /> : null}
+            {player.role === "HOST" ? "방장" : `플레이어 ${slotIndex + 1}`}
+          </span>
+          {player.status === "READY" ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-400/10 px-2 py-0.5 text-[11px] font-black text-emerald-300">
+              <Check className="h-3 w-3" /> 준비 완료
+            </span>
+          ) : (
+            <span className="inline-flex items-center rounded-full bg-amber-300/10 px-2 py-0.5 text-[11px] font-black text-amber-200">
+              준비 확인 중
+            </span>
+          )}
+        </span>
+      </span>
+    </div>
+  );
+}
+
+/** Shared parent-owned waiting room. Game iframes are mounted only after the host starts a match. */
+export function MultiplayerRoomLobby({
+  title,
+  room,
+  minPlayers,
+  shareValue,
+  frameClassName,
+  frameStyle,
+  onRoomChange,
+  onExit,
+}: MultiplayerRoomLobbyProps) {
+  const [players, setPlayers] = useState<readonly MultiplayerRoomPlayer[]>([]);
+  const [busy, setBusy] = useState<"START" | "LEAVE" | null>(null);
+  const [copied, setCopied] = useState<"CODE" | "LINK" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const isHost = room.participant.role === "HOST";
+
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const refresh = async () => {
+      try {
+        const roster = await fetchMultiplayerRoomRoster(room.instance.id);
+        if (!active || roster.generation !== room.instance.generation) return;
+        setPlayers(roster.players);
+        setError(null);
+        if (roster.instance.status === "ACTIVE") {
+          onRoomChange({ ...room, instance: roster.instance });
+          return;
+        }
+        if (["ABORTED", "CLOSED", "EXPIRED"].includes(roster.instance.status)) {
+          setError("대기실이 종료되었습니다. 새 방을 만들어 주세요.");
+          return;
+        }
+      } catch (reason) {
+        if (active) setError(messageFor(reason));
+      }
+      if (active) {
+        timer = setTimeout(
+          () => void refresh(),
+          typeof document !== "undefined" && document.visibilityState === "hidden"
+            ? BACKGROUND_ROSTER_REFRESH_MS
+            : ROSTER_REFRESH_MS,
+        );
+      }
+    };
+
+    void refresh();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [onRoomChange, room]);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(null), 1_800);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  const slots = useMemo(() => {
+    const slotCount = multiplayerLobbySlotCount(room.instance.maxPlayers, players.length);
+    const bySeat = new Map(players.map((player) => [player.seatIndex, player]));
+    return Array.from({ length: slotCount }, (_, slotIndex) => bySeat.get(slotIndex));
+  }, [players, room.instance.maxPlayers]);
+  const allReady = multiplayerLobbyCanStart(players, minPlayers);
+
+  const copyValue = useCallback(
+    async (kind: "CODE" | "LINK") => {
+      try {
+        await navigator.clipboard.writeText(
+          kind === "CODE" ? room.instance.publicCode : shareValue,
+        );
+        setCopied(kind);
+      } catch {
+        setError("클립보드에 복사하지 못했습니다.");
+      }
+    },
+    [room.instance.publicCode, shareValue],
+  );
+
+  const start = useCallback(async () => {
+    if (!isHost || !allReady || busy) return;
+    setBusy("START");
+    setError(null);
+    try {
+      const started = await startMultiplayerRoom({
+        instanceId: room.instance.id,
+        expectedGeneration: room.instance.generation,
+      });
+      onRoomChange(started);
+    } catch (reason) {
+      setError(messageFor(reason));
+      setBusy(null);
+    }
+  }, [allReady, busy, isHost, onRoomChange, room.instance.generation, room.instance.id]);
+
+  const leave = useCallback(async () => {
+    if (busy) return;
+    setBusy("LEAVE");
+    setError(null);
+    try {
+      await leaveMultiplayerRoom({
+        instanceId: room.instance.id,
+        expectedGeneration: room.instance.generation,
+      });
+      onExit();
+    } catch (reason) {
+      setError(messageFor(reason));
+      setBusy(null);
+    }
+  }, [busy, onExit, room.instance.generation, room.instance.id]);
+
+  return (
+    <div
+      className={`${frameClassName ?? ""} flex w-full items-center justify-center bg-[#09090b] p-4 sm:p-6`}
+      style={frameStyle}
+    >
+      <section className="w-full max-w-5xl rounded-3xl border border-border bg-surface-raised p-5 shadow-2xl sm:p-7">
+        <div className="flex flex-col gap-5 border-b border-border pb-5 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.24em] text-brand">
+              OWOGG Multiplayer Lobby
+            </p>
+            <h3 className="mt-2 text-2xl font-black text-text-primary">{title}</h3>
+            <p className="mt-2 text-sm text-text-secondary">
+              참가자는 입장과 동시에 준비 완료됩니다. 방장이 경기를 시작합니다.
+            </p>
+          </div>
+          <div className="flex max-w-full flex-wrap items-center gap-2">
+            <span className="flex min-h-11 items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2">
+              <span className="text-[11px] font-black uppercase tracking-wider text-text-muted">
+                방 코드
+              </span>
+              <code className="text-sm font-black tracking-wide text-text-primary">
+                {room.instance.publicCode}
+              </code>
+            </span>
+            <button
+              type="button"
+              onClick={() => void copyValue("CODE")}
+              className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-sm font-black text-text-primary hover:bg-surface-overlay"
+            >
+              {copied === "CODE" ? (
+                <Check className="h-4 w-4 text-emerald-300" />
+              ) : (
+                <Copy className="h-4 w-4" />
+              )}
+              {copied === "CODE" ? "복사됨" : "코드 복사"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void copyValue("LINK")}
+              className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-xl border border-brand/40 bg-brand/10 px-3 py-2 text-sm font-black text-brand-light hover:bg-brand/20"
+            >
+              {copied === "LINK" ? (
+                <Check className="h-4 w-4 text-emerald-300" />
+              ) : (
+                <Link2 className="h-4 w-4" />
+              )}
+              {copied === "LINK" ? "복사됨" : "링크 복사"}
+            </button>
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() => void leave()}
+              className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-xl border border-red-300/25 bg-red-400/5 px-3 py-2 text-sm font-black text-red-300 hover:bg-red-400/15 disabled:cursor-wait disabled:opacity-60"
+            >
+              <LogOut className="h-4 w-4" />
+              {busy === "LEAVE" ? "나가는 중" : "나가기"}
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+          <div className="inline-flex items-center gap-2 text-sm font-bold text-text-secondary">
+            <UsersRound className="h-5 w-5 text-brand-light" />
+            <span>
+              {players.length}/{room.instance.maxPlayers}명 · 시작 최소 {minPlayers}명
+            </span>
+          </div>
+          <span
+            role="status"
+            className={`rounded-full px-3 py-1.5 text-xs font-black ${
+              allReady ? "bg-emerald-400/10 text-emerald-300" : "bg-amber-300/10 text-amber-200"
+            }`}
+          >
+            {allReady ? "시작 준비 완료" : "플레이어를 기다리는 중"}
+          </span>
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {slots.map((player, index) => (
+            <PlayerSlot
+              key={player?.participantId ?? `empty-${index}`}
+              player={player}
+              slotIndex={index}
+              isSelf={player?.participantId === room.participant.id}
+            />
+          ))}
+        </div>
+
+        <div className="mt-5 rounded-2xl border border-border bg-surface p-4">
+          {isHost ? (
+            <button
+              type="button"
+              disabled={!allReady || busy !== null}
+              onClick={() => void start()}
+              className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-brand px-5 text-base font-black text-white transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <Play className="h-5 w-5 fill-current" />
+              {busy === "START" ? "경기 시작 중" : "경기 시작"}
+            </button>
+          ) : (
+            <p className="py-2 text-center text-sm font-bold text-text-secondary">
+              방장이 경기를 시작할 때까지 기다려 주세요.
+            </p>
+          )}
+          {error && (
+            <p role="alert" className="mt-3 text-center text-sm font-semibold text-accent-red">
+              {error}
+            </p>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}

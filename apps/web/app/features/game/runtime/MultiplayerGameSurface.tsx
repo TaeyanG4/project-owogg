@@ -11,17 +11,13 @@ import type {
   MultiplayerRoomResponse,
 } from "@owogg/contracts";
 import { MultiplayerIframeRuntime } from "./MultiplayerIframeRuntime";
+import { MultiplayerRoomLobby } from "./MultiplayerRoomLobby";
 import {
   createMultiplayerRoom,
   fetchMultiplayerGameAvailability,
   joinMultiplayerRoom,
 } from "./multiplayerRoomApi";
 import type { MultiplayerRuntimeResolution } from "./multiplayerRuntimeResolution";
-
-type AvailableMultiplayerGame = Extract<
-  MultiplayerGameAvailabilityResponse,
-  { readonly status: "AVAILABLE" }
->;
 
 export interface MultiplayerGameSurfaceProps {
   readonly gameSlug: string;
@@ -163,6 +159,7 @@ export function MultiplayerGameSurface({
   const [busy, setBusy] = useState<"CREATE" | "JOIN" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const createIdempotencyRef = useRef(newIdempotencyKey());
+  const pendingAutoJoinRef = useRef<string | null>(null);
 
   const discover = useCallback(() => {
     let active = true;
@@ -205,6 +202,9 @@ export function MultiplayerGameSurface({
   useEffect(() => {
     if (typeof window === "undefined") return;
     const sharedRoom = readMultiplayerRoomShareValue(window.location.href);
+    pendingAutoJoinRef.current = PUBLIC_ROOM_CODE_PATTERN.test(sharedRoom.publicCode)
+      ? `${sharedRoom.publicCode}\u0000${sharedRoom.inviteToken}`
+      : null;
     setPublicCode(sharedRoom.publicCode);
     setInviteToken(sharedRoom.inviteToken);
   }, [gameSlug]);
@@ -257,9 +257,7 @@ export function MultiplayerGameSurface({
         publicCode: normalizedPublicCode,
         inviteToken: normalizedInviteToken || null,
       });
-      // Consumed one-use invites are not re-shareable. Only the room creator keeps the freshly
-      // issued invite link; a joined participant can still copy the public room locator.
-      setShareValue(undefined);
+      setShareValue(roomShareValue(joined.instance.publicCode));
       setRoom(joined);
       if (typeof window !== "undefined") {
         window.history.replaceState(
@@ -275,6 +273,22 @@ export function MultiplayerGameSurface({
     }
   }, [inviteToken, publicCode]);
 
+  useEffect(() => {
+    if (
+      room ||
+      busy !== null ||
+      availability === "LOADING" ||
+      availability === "ERROR" ||
+      availability.status !== "AVAILABLE"
+    ) {
+      return;
+    }
+    const pending = pendingAutoJoinRef.current;
+    if (pending !== `${publicCode}\u0000${inviteToken}`) return;
+    pendingAutoJoinRef.current = null;
+    void joinRoom();
+  }, [availability, busy, inviteToken, joinRoom, publicCode, room]);
+
   if (
     availability !== "LOADING" &&
     availability !== "ERROR" &&
@@ -283,6 +297,29 @@ export function MultiplayerGameSurface({
     return fallback;
   }
   if (room) {
+    if (room.instance.status !== "ACTIVE" && room.instance.status !== "CLOSING") {
+      const minPlayers =
+        availability !== "LOADING" &&
+        availability !== "ERROR" &&
+        availability.status === "AVAILABLE"
+          ? availability.profile.minPlayers
+          : 2;
+      return (
+        <MultiplayerRoomLobby
+          title={title}
+          room={room}
+          minPlayers={minPlayers}
+          shareValue={shareValue ?? roomShareValue(room.instance.publicCode)}
+          {...(frameClassName ? { frameClassName } : {})}
+          {...(frameStyle ? { frameStyle } : {})}
+          onRoomChange={setRoom}
+          onExit={() => {
+            setRoom(null);
+            setShareValue(undefined);
+          }}
+        />
+      );
+    }
     return (
       <MultiplayerIframeRuntime
         src={src}
@@ -302,10 +339,6 @@ export function MultiplayerGameSurface({
     );
   }
 
-  const available =
-    availability !== "LOADING" && availability !== "ERROR"
-      ? (availability as AvailableMultiplayerGame)
-      : null;
   return (
     <div
       className={`${frameClassName ?? ""} flex w-full items-center justify-center bg-[#09090b] p-5`}
@@ -315,7 +348,7 @@ export function MultiplayerGameSurface({
         <p className="text-xs font-black uppercase tracking-[0.24em] text-brand">
           OWOGG Multiplayer
         </p>
-        <h3 className="mt-2 text-2xl font-black text-text-primary">온라인 경기</h3>
+        <h3 className="mt-2 text-2xl font-black text-text-primary">{title}</h3>
         {availability === "LOADING" ? (
           <p className="mt-4 text-sm text-text-secondary">
             멀티플레이 사용 가능 여부를 확인 중입니다.
@@ -336,8 +369,7 @@ export function MultiplayerGameSurface({
         ) : (
           <>
             <p className="mt-2 text-sm text-text-secondary">
-              {available?.profile.minPlayers}~{available?.profile.maxPlayers}명 · 서버 권위형{" "}
-              {available?.profile.resolvedClass}
+              새 방을 만들거나 받은 링크와 방 코드로 바로 참가하세요.
             </p>
             <button
               type="button"

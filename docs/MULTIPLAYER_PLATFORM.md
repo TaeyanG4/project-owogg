@@ -128,6 +128,11 @@ Creator와 game bundle은 class/backend를 선택하지 않는다. safe capabili
 - latency SLO
 - load-test 결과
 
+공용 대기실 UI는 향후 2~~16인 profile을 다시 만들지 않고 표시할 수 있도록 16개 슬롯까지 구성한다.
+다만 현재 D1 schema/profile/result 계약의 V1 운영 상한은 8명이다. 9~~16인 활성화는 UI 숫자만 늘리는
+변경이 아니라 fanout·match result write·부하 Gate를 통과한 새 migration/contract revision으로
+올린다. 현재 공식 오목 profile은 정확히 2명이다.
+
 V1 runtime resolver는 M1/M2를 공통 Durable Object transport/lifecycle shell에 연결할 수 있지만,
 domain class에 Cloudflare나 D1 이름을 하드코딩하지 않는다.
 
@@ -156,8 +161,9 @@ DO: authorized active instance sockets and live authoritative state
 
 ### 활성 authority
 
-- 한 Instance에 하나의 Durable Object
-- lobby, connections, ready state, active match state, sequence와 backpressure
+- D1 control plane: lobby membership, 기본 READY, host start, generation과 exact-version lease
+- 한 active Instance에 하나의 Durable Object
+- DO: connections, active match state, sequence, reconnect deadline과 backpressure
 - M1 accepted action 또는 phase boundary를 DO SQLite에 저장
 - M2 continuous tick은 memory에서 실행하고 D1에 frame/tick을 저장하지 않음
 - DO가 재시작된 active realtime match는 V1에서 `ABORTED_INFRA`, reward 없음
@@ -340,14 +346,25 @@ append-only로 저장한다. 한 명만 요청하면 대기하고, 두 번째 �
 `+1` 한 뒤 참가자를 `JOINED`로 되돌린다. DO는 상대 요청을 기존 socket에 parent-only control event로
 알리고, Web은 유실 복구용 15초 폴링만 사용한다.
 
+모든 profile은 게임 iframe 바깥의 공용 대기실을 사용한다. 참가자는 입장 성공과 같은 use-case에서
+기본 `READY`가 되고 iframe은 아직 mount하지 않는다. 최소 인원이 모두 `READY`인 경우에만 host의
+명시적 시작 요청이 `LOBBY → STARTING → ACTIVE`와 match 생성을 수행한다. 돌·팀·캐릭터처럼 게임마다
+다른 선택은 공용 방 생성/참가 화면에 넣지 않고 ACTIVE 뒤 해당 게임의 서버 검증 설정 단계에서
+처리한다.
+
 ### 참가자 연결
 
 - `(instance_id, user_id)` unique
 - Instance-scoped opaque participant ID 사용
 - 재접속마다 connection generation 증가
 - 이전 ticket/socket/iframe generation의 message 거절
+- 명시적 나가기는 즉시 server-authoritative forfeit로 확정하고 상대에게 `LEFT`를 알린다.
+- `resume` profile의 예기치 않은 연결 손실은 최소 30초 동안 `RECONNECTING`으로 유지하고, 그 안에
+  더 높은 connection generation으로 돌아오지 않으면 `TIMED_OUT`과 server-authoritative forfeit를
+  확정한다. 활성 match 참가자가 iframe mount 전 사라진 경우도 같은 유예를 적용한다. 두 참가자가
+  모두 유예를 넘기면 승자를 만들지 않고 match를 `ABORTED`·무보상으로 정리한다.
 - V1 Reaction은 reconnect `none`: disconnect 즉시 abort
-- M1 Advanced는 reconnect `resume`
+- 공식 오목과 M1 Advanced는 reconnect `resume`
 - lobby host는 authority가 아니다. host leave 정책은 profile/lifecycle에 따라 close 또는 deterministic
   transfer로 결정하고 구현 전 acceptance에 고정한다.
 
@@ -632,6 +649,8 @@ per-frame raw logging
 ### 권장
 
 - lobby/turn waiting은 Hibernation API 사용
+- 현재 D1 기반 공용 lobby 복구 조회는 foreground 6.5초, background 15초로 제한하고 ACTIVE/종료 즉시
+  중단한다. 이는 gameplay transport가 아니며 4인 fanout 단계에서는 DO event push로 교체·계측한다.
 - protocol ping/auto-response 사용
 - M2 input은 최신 방향 state로 coalesce
 - snapshot은 변화가 있을 때만 보내고 slow client는 resync
@@ -822,8 +841,11 @@ slow client
 
 - [x] official `omokRules`
 - [x] create/join/ready/action/sync와 공식 `PRIVATE + OPEN` 코드 참가
+- [x] iframe 바깥 공용 대기실, 입장 즉시 READY, 최소 인원 검증과 host 수동 시작
 - [x] server winner와 typed conflict resync
 - [x] reconnect resume
+- [x] 명시적 LEFT 즉시 기권승, 예기치 않은 연결 손실 30초 유예와 timeout 기권승
+- [x] 오목 내부 host 흑돌/백돌 선택과 서버 고정 participant↔stone mapping
 - [x] parent-only 좌우 프로필, 방 제어 header, nested scrollbar 제거와 오목판/화점 UI
 - [x] Web Audio 착수·종료음과 사용자 소리 on/off
 - [x] 2분 양방향 재대결 동의, exact generation 재시작과 socket 알림/안전 폴링
@@ -846,10 +868,11 @@ Staging 상태(2026-08-27): `official-omok` exact version을 D1/B2에 게시했�
 연결 상태와 나가기를 소유해 게임 제목을 가리지 않으며 iframe 문서와 frame 양쪽의 nested scroll을
 차단했다. 오목판 끝선·화점 5개와 합성 착수/승패음을 추가했고, `COMMITTED` 뒤 양쪽 동의로만 정확히
 한 generation을 여는 재대결을 D1/DO에 구현했다. 상대 요청은 socket control hint로 즉시 갱신하고
-15초 폴링은 유실 복구에만 사용한다. 대상 DB/Web/Workers 테스트, official ZIP 검증, 데스크톱·모바일
-시각 QA와 전체 `pnpm verify`를 통과했다. 이 tree의 새 Staging 배포·두 사용자 acceptance가 남아 있다. 배포 뒤
-갱신된 official 오목 ZIP을 D1/B2에 새 exact version으로 게시하고 관리자 화면에서 기존 프로필을
-`코드 참가로 갱신`한 후 검증한다.
+15초 폴링은 유실 복구에만 사용한다. 이어서 공용 대기실을 추가해 참가자를 기본 READY로 만들고
+host가 최소 인원 확인 뒤 수동 시작하도록 변경했으며, 오목의 흑/백 선택은 공용 방 화면이 아닌 게임
+내부에서 서버가 확정한다. 명시적 leave는 즉시 기권승, 예기치 않은 연결 손실은 최소 30초 재접속 유예
+뒤 기권승으로 공통 처리한다. 대상 DB/API/Web/Workers 테스트와 official ZIP 검증은 통과 중이며, 전체
+`pnpm verify`, 새 Staging 배포, 갱신 ZIP 게시와 두 사용자 acceptance가 남아 있다.
 
 완료 Gate: 동시/중복 action으로 corruption이 없고 iframe이 결과·업적·XP를 위조할 수 없다.
 

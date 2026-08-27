@@ -22,6 +22,20 @@ test("canonical Omok result is projected to the viewer without rendering raw ter
   assert.equal(multiplayerTerminalLabel({ kind: "WIN", winnerSeatIndex: 0 }, 0), "승리");
   assert.equal(multiplayerTerminalLabel({ kind: "WIN", winnerSeatIndex: 0 }, 1), "패배");
   assert.equal(multiplayerTerminalLabel({ kind: "DRAW" }, 1), "무승부");
+  assert.equal(
+    multiplayerTerminalLabel(
+      { kind: "FORFEIT", winnerParticipantId: "participant_host_0001" },
+      "participant_host_0001",
+    ),
+    "기권승",
+  );
+  assert.equal(
+    multiplayerTerminalLabel(
+      { kind: "FORFEIT", winnerParticipantId: "participant_host_0001" },
+      "participant_player_0001",
+    ),
+    "기권패",
+  );
   assert.equal(multiplayerTerminalLabel({ hidden: "server-only" }, 0), "경기 종료");
 });
 

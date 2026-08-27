@@ -47,7 +47,10 @@ if (!prepared.files.some((file) => file.path === "owogg.logo.svg")) {
   throw new Error("FAIL: official upload requires owogg.logo.svg");
 }
 
-const gameSource = new TextDecoder().decode(decompressed["game.js"]);
+const decoder = new TextDecoder();
+const gameSource = decoder.decode(decompressed["game.js"]);
+const htmlSource = decoder.decode(decompressed["index.html"]);
+const styleSource = decoder.decode(decompressed["style.css"]);
 const forbidden = [
   [/\blocalStorage\b/, "localStorage"],
   [/\bindexedDB\b/, "indexedDB"],
@@ -58,8 +61,25 @@ const forbidden = [
 ];
 const hits = forbidden.filter(([pattern]) => pattern.test(gameSource)).map(([, name]) => name);
 if (hits.length > 0) throw new Error(`FAIL: forbidden direct browser API(s): ${hits.join(", ")}`);
-if (!gameSource.includes("window.OWOGG") || !gameSource.includes("bridge.action")) {
+if (
+  !gameSource.includes("window.OWOGG") ||
+  !gameSource.includes("bridge.action") ||
+  !gameSource.includes("bridge.input")
+) {
   throw new Error("FAIL: game does not use the managed multiplayer browser bridge");
+}
+if (
+  !htmlSource.includes('id="stoneSelector"') ||
+  !htmlSource.includes('data-stone="BLACK"') ||
+  !htmlSource.includes('data-stone="WHITE"')
+) {
+  throw new Error("FAIL: official Omok must keep black/white selection inside the game bundle");
+}
+if (!htmlSource.includes('class="board-grid"') || !styleSource.includes("non-scaling-stroke")) {
+  throw new Error("FAIL: official Omok must use the fixed-width SVG board grid");
+}
+if (!styleSource.includes("justify-self: center") || !styleSource.includes("overflow: hidden")) {
+  throw new Error("FAIL: official Omok fullscreen layout must remain centered without scrollbars");
 }
 
 console.log(`PASS: ${zipPath}`);
@@ -67,3 +87,4 @@ console.log(`  zip bytes: ${zipBytes.length}`);
 console.log(`  files: ${prepared.files.length}, entry: ${prepared.entry}`);
 console.log("  production bundle + manifest validation passed");
 console.log("  no direct storage/network/postMessage authority found in game.js");
+console.log("  in-game stone selection and fixed-width centered board UI found");
