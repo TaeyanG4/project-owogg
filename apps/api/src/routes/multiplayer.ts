@@ -898,7 +898,11 @@ multiplayerRouter.get("/instances/:instanceId/lobby-signal", async (c) => {
       webSocket: response.webSocket,
       headers: { "Sec-WebSocket-Protocol": MULTIPLAYER_LOBBY_SIGNAL_PROTOCOL },
     });
-  } catch {
+  } catch (error) {
+    console.error("[multiplayer:lobby-signal-connect-failed]", {
+      name: error instanceof Error ? error.name : "UnknownError",
+      message: error instanceof Error ? error.message : String(error),
+    });
     return failure(c, "INTERNAL_RETRYABLE");
   }
 });
