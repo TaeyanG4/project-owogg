@@ -5,13 +5,6 @@ import { z } from "zod";
  * game instance. */
 export const MULTIPLAYER_HEARTBEAT_REQUEST = "owogg.multiplayer.heartbeat.v1";
 export const MULTIPLAYER_HEARTBEAT_RESPONSE = "owogg.multiplayer.heartbeat-ack.v1";
-/** Parent-only lobby update channel. It carries either a credential-free invalidation or the
- * minimal ready-state delta needed for an immediate lobby repaint. Nicknames, avatars, sessions,
- * and the full roster remain behind the authenticated HTTP endpoint and never enter a game iframe. */
-export const MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL = "owogg.multiplayer.lobby.v1";
-/** Sent once by the browser after the 101 upgrade has completed. The DO replies with the current
- * lobby event sequence so a reconnect can distinguish a contiguous delta from a missed event. */
-export const MULTIPLAYER_LOBBY_SYNC_REQUEST = "owogg.multiplayer.lobby-sync.v1";
 
 const OpaqueIdSchema = z.string().regex(/^[A-Za-z0-9_-]{8,128}$/);
 const StableIdentifierSchema = z.string().regex(/^[a-z0-9][a-z0-9._:/-]{0,95}$/);
@@ -23,45 +16,6 @@ const GameSlugSchema = z
 const IdempotencyKeySchema = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/);
 const PublicRoomCodeSchema = z.string().regex(/^[A-Za-z0-9_-]{12,64}$/);
 const InviteTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{32,128}$/);
-
-export const MultiplayerLobbyChangeSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("INVALIDATE") }).strict(),
-  z
-    .object({
-      kind: z.literal("PARTICIPANT_READY"),
-      participantId: OpaqueIdSchema,
-      status: z.enum(["JOINED", "READY"]),
-    })
-    .strict(),
-]);
-export type MultiplayerLobbyChange = z.infer<typeof MultiplayerLobbyChangeSchema>;
-
-/** Establishes the authoritative event-sequence baseline for a newly admitted lobby socket.
- * Sequence zero means that no lobby event has been emitted for this generation yet. */
-export const MultiplayerLobbyConnectedMessageSchema = z
-  .object({
-    type: z.literal("LOBBY_CONNECTED"),
-    v: z.literal(1),
-    instanceId: OpaqueIdSchema,
-    generation: z.number().int().positive(),
-    sequence: z.number().int().nonnegative(),
-  })
-  .strict();
-export type MultiplayerLobbyConnectedMessage = z.infer<
-  typeof MultiplayerLobbyConnectedMessageSchema
->;
-
-export const MultiplayerLobbyChangedMessageSchema = z
-  .object({
-    type: z.literal("LOBBY_CHANGED"),
-    v: z.literal(1),
-    instanceId: OpaqueIdSchema,
-    generation: z.number().int().positive(),
-    sequence: z.number().int().positive(),
-    change: MultiplayerLobbyChangeSchema,
-  })
-  .strict();
-export type MultiplayerLobbyChangedMessage = z.infer<typeof MultiplayerLobbyChangedMessageSchema>;
 
 export const MultiplayerRuntimeStatusResponseSchema = z
   .object({

@@ -135,6 +135,11 @@ export interface LeaveMultiplayerRoomInput {
   readonly userId: number;
   readonly instanceId: string;
   readonly expectedGeneration: number;
+  /**
+   * Pins a REST waiting-room leave to the phase observed by its caller. Gameplay authority leaves
+   * omit this and are serialized through the instance Durable Object.
+   */
+  readonly expectedInstanceStatus?: "CREATED" | "LOBBY";
 }
 
 export type LeaveMultiplayerRoomResult =
@@ -657,6 +662,9 @@ export class MultiplayerRoomUseCases {
       if (instance.generation !== input.expectedGeneration) {
         return { ok: false, code: "STALE_GENERATION" };
       }
+      if (input.expectedInstanceStatus && instance.status !== input.expectedInstanceStatus) {
+        return { ok: false, code: "STALE_GENERATION" };
+      }
       let participant = await this.dependencies.instances.findParticipant(
         instance.id,
         input.userId,
@@ -674,6 +682,7 @@ export class MultiplayerRoomUseCases {
       const left = await this.dependencies.instances.transitionParticipant({
         instanceId: instance.id,
         expectedInstanceGeneration: instance.generation,
+        expectedInstanceStatus: input.expectedInstanceStatus ?? instance.status,
         userId: input.userId,
         expectedStatus: previousStatus,
         nextStatus: "LEFT",

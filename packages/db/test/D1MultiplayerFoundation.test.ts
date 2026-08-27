@@ -1598,6 +1598,21 @@ test("D1 multiplayer instance repository atomically creates, replays, conflicts,
     }),
     false,
   );
+  assert.equal(
+    await repository.transitionParticipant({
+      instanceId: input.instanceId,
+      expectedInstanceGeneration: 1,
+      expectedInstanceStatus: "CREATED",
+      userId: 1,
+      expectedStatus: "JOINED",
+      nextStatus: "LEFT",
+      readyAt: null,
+      leftAt: LATER,
+      nowIso: LATER,
+    }),
+    null,
+  );
+  assert.equal((await repository.findParticipant(input.instanceId, 1))?.status, "JOINED");
   await assert.rejects(
     () =>
       repository.transition({

@@ -659,6 +659,7 @@ export class D1MultiplayerInstanceRepository implements MultiplayerInstanceRepos
              SELECT 1 FROM multiplayer_instances instance
              WHERE instance.id = multiplayer_participants.instance_id
                AND instance.generation = ?
+               AND (? IS NULL OR instance.status = ?)
                AND (? <> 'READY' OR instance.status = 'LOBBY')
                AND (
                  ? <> 'LEFT'
@@ -695,6 +696,8 @@ export class D1MultiplayerInstanceRepository implements MultiplayerInstanceRepos
         input.userId,
         input.expectedStatus,
         input.expectedInstanceGeneration,
+        input.expectedInstanceStatus ?? null,
+        input.expectedInstanceStatus ?? null,
         input.nextStatus,
         input.expectedStatus,
         input.nextStatus,

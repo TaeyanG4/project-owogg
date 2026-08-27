@@ -396,7 +396,11 @@ export class D1MultiplayerMatchRepository implements MultiplayerMatchRepository 
     if (!this.isValidActionInput(input)) {
       return { status: "REJECTED", code: "INVALID_INPUT", currentRevision: null };
     }
-    const existing = await this.findAction(input.matchId, input.userId, input.clientActionId);
+    const existing = await this.findActionByClientId(
+      input.matchId,
+      input.userId,
+      input.clientActionId,
+    );
     if (existing) return this.replayAction(existing, input.payloadHash);
 
     let insertResult: D1Result | undefined;
@@ -466,7 +470,11 @@ export class D1MultiplayerMatchRepository implements MultiplayerMatchRepository 
       // Typed classification below prevents raw SQL details from becoming an API contract.
     }
 
-    const recorded = await this.findAction(input.matchId, input.userId, input.clientActionId);
+    const recorded = await this.findActionByClientId(
+      input.matchId,
+      input.userId,
+      input.clientActionId,
+    );
     if (recorded) {
       if (recorded.payloadHash !== input.payloadHash) {
         return {
@@ -700,7 +708,7 @@ export class D1MultiplayerMatchRepository implements MultiplayerMatchRepository 
     };
   }
 
-  private async findAction(
+  async findActionByClientId(
     matchId: string,
     userId: number,
     clientActionId: string,

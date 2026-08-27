@@ -31,40 +31,31 @@ import {
   type OmokTerminalResult,
 } from "@owogg/core";
 import type { D1Database } from "@cloudflare/workers-types";
-import {
-  MULTIPLAYER_HEARTBEAT_REQUEST,
-  MULTIPLAYER_HEARTBEAT_RESPONSE,
-  MULTIPLAYER_LOBBY_SYNC_REQUEST,
-  MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
-  MultiplayerLobbyChangeSchema,
-  type MultiplayerLobbyChange,
-} from "@owogg/contracts";
+import { MULTIPLAYER_HEARTBEAT_REQUEST, MULTIPLAYER_HEARTBEAT_RESPONSE } from "@owogg/contracts";
 import { createContainer, type AppContainer } from "../container.js";
 import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_CONNECT_PATH,
   MULTIPLAYER_INTERNAL_LEAVE_PATH,
-  MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER,
-  MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH,
-  MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH,
   MULTIPLAYER_INTERNAL_PROTOCOL_HEADER,
   MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH,
   decodeVerifiedMultiplayerClaims,
-  decodeVerifiedMultiplayerLobbyClaims,
 } from "./internalProtocol.js";
 
 const STATE_SCHEMA_VERSION = 2;
 const REPLACED_CONNECTION_CLOSE_CODE = 4001;
 const STALE_CONNECTION_CLOSE_CODE = 4002;
-const INSTANCE_EXPIRED_CLOSE_CODE = 4003;
 const POLICY_CLOSE_CODE = 1008;
 const RUNTIME_UNAVAILABLE_CLOSE_CODE = 1013;
 const ACTION_RATE_WINDOW_MS = 1_000;
+const INGRESS_RATE_LIMIT = 12;
+const MAX_QUEUED_MESSAGES_PER_SOCKET = 16;
+const MAX_QUEUED_MESSAGES_PER_OBJECT = 64;
+const MAX_CLIENT_MESSAGE_BYTES = 4 * 1024;
 const FINALIZATION_RETRY_BASE_MS = 2_000;
 const FINALIZATION_RETRY_MAX_MS = 60_000;
 const RECONNECT_GRACE_MS = 30_000;
 const RECONNECT_GRACE_SECONDS = RECONNECT_GRACE_MS / 1_000;
-const LOBBY_EMPTY_GRACE_SECONDS = 60;
 const textEncoder = new TextEncoder();
 
 interface MultiplayerDurableObjectEnv {
@@ -75,19 +66,6 @@ interface ConnectionAttachment {
   readonly participantId: string;
   readonly generation: number;
   readonly connectionGeneration: number;
-}
-
-interface LobbyConnectionAttachment {
-  readonly kind: "LOBBY";
-  readonly participantId: string;
-  readonly generation: number;
-}
-
-interface LobbyLifecycleRecord {
-  readonly instanceId: string;
-  readonly generation: number;
-  readonly expiresAt: number;
-  readonly emptyDeadline: number | null;
 }
 
 interface ParticipantAuthority {
@@ -174,36 +152,8 @@ function parseAttachment(value: unknown): ConnectionAttachment | null {
   };
 }
 
-function parseLobbyAttachment(value: unknown): LobbyConnectionAttachment | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  const source = value as Record<string, unknown>;
-  const keys = Object.keys(source);
-  if (
-    keys.length !== 3 ||
-    !keys.every((key) => ["kind", "participantId", "generation"].includes(key)) ||
-    source.kind !== "LOBBY" ||
-    !isOpaqueId(source.participantId) ||
-    !isPositiveInteger(source.generation)
-  ) {
-    return null;
-  }
-  return {
-    kind: "LOBBY",
-    participantId: source.participantId,
-    generation: source.generation,
-  };
-}
-
 function participantTag(participantId: string): string {
   return `participant:${participantId}`;
-}
-
-function lobbyGenerationTag(generation: number): string {
-  return `lobby:generation:${generation}`;
-}
-
-function lobbyParticipantTag(participantId: string): string {
-  return `lobby:participant:${participantId}`;
 }
 
 function integerValue(value: unknown): number | null {
@@ -268,6 +218,17 @@ async function sha256Hex(value: string): Promise<string> {
 export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableObjectEnv> {
   private readonly container: AppContainer;
   private messageQueue: Promise<void> = Promise.resolve();
+  private queuedMessageCount = 0;
+  private readonly queuedMessagesBySocket = new WeakMap<WebSocket, number>();
+  private readonly readyConnections = new Set<string>();
+  private readonly ingressRateWindows = new Map<
+    string,
+    { windowStartedAt: number; messageCount: number }
+  >();
+  private readonly actionRateWindows = new Map<
+    string,
+    { windowStartedAt: number; actionCount: number }
+  >();
 
   constructor(
     private readonly state: DurableObjectState,
@@ -359,29 +320,10 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
           selected_by_participant_id TEXT NOT NULL,
           selected_at INTEGER NOT NULL
         );
-        CREATE TABLE IF NOT EXISTS participant_rate_windows (
-          participant_id TEXT NOT NULL,
-          generation INTEGER NOT NULL,
-          window_started_at INTEGER NOT NULL,
-          action_count INTEGER NOT NULL,
-          PRIMARY KEY (participant_id, generation)
-        );
         CREATE TABLE IF NOT EXISTS rematch_window (
           singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
           generation INTEGER NOT NULL,
           expires_at INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS lobby_event_sequence (
-          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-          generation INTEGER NOT NULL,
-          server_sequence INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS lobby_lifecycle (
-          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-          instance_id TEXT NOT NULL,
-          generation INTEGER NOT NULL,
-          expires_at INTEGER NOT NULL,
-          empty_deadline INTEGER
         );
       `);
     });
@@ -389,117 +331,6 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
 
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    if (
-      request.method === "GET" &&
-      url.pathname === MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH &&
-      request.headers.get(MULTIPLAYER_INTERNAL_PROTOCOL_HEADER) ===
-        MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL &&
-      request.headers.get("Upgrade")?.toLowerCase() === "websocket"
-    ) {
-      const claims = decodeVerifiedMultiplayerLobbyClaims(
-        request.headers.get(MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER),
-      );
-      if (!claims) return new Response(null, { status: 401 });
-      const nowSeconds = Math.floor(Date.now() / 1_000);
-      if (claims.expiresAt <= nowSeconds) return new Response(null, { status: 410 });
-      const existingLifecycle = this.readLobbyLifecycle();
-      if (
-        existingLifecycle &&
-        (existingLifecycle.instanceId !== claims.instanceId ||
-          existingLifecycle.generation > claims.generation)
-      ) {
-        return new Response(null, { status: 409 });
-      }
-      this.state.storage.sql.exec(
-        `INSERT INTO lobby_lifecycle (
-           singleton, instance_id, generation, expires_at, empty_deadline
-         ) VALUES (1, ?, ?, ?, NULL)
-         ON CONFLICT(singleton) DO UPDATE SET
-           instance_id = excluded.instance_id,
-           generation = excluded.generation,
-           expires_at = CASE
-             WHEN lobby_lifecycle.generation = excluded.generation
-               THEN MIN(lobby_lifecycle.expires_at, excluded.expires_at)
-             ELSE excluded.expires_at
-           END,
-           empty_deadline = NULL`,
-        claims.instanceId,
-        claims.generation,
-        claims.expiresAt,
-      );
-      const pair = new WebSocketPair();
-      const client = pair[0];
-      const server = pair[1];
-      this.state.acceptWebSocket(server, [
-        lobbyGenerationTag(claims.generation),
-        lobbyParticipantTag(claims.participantId),
-      ]);
-      server.serializeAttachment({
-        kind: "LOBBY",
-        participantId: claims.participantId,
-        generation: claims.generation,
-      } satisfies LobbyConnectionAttachment);
-      // Return the upgrade before sending application frames or waiting on alarm storage. The
-      // browser requests its sequence baseline only after `open`, which also avoids making a
-      // transient alarm failure abort an otherwise valid WebSocket handshake.
-      this.ctx.waitUntil(
-        this.scheduleNextAlarm(claims.expiresAt * 1_000 + 1).catch((error) => {
-          console.error("[multiplayer:lobby-alarm-schedule-failed]", {
-            instanceId: claims.instanceId,
-            generation: claims.generation,
-            reason: error instanceof Error ? error.message : "unknown",
-          });
-        }),
-      );
-      return new Response(null, {
-        status: 101,
-        webSocket: client,
-        headers: { "Sec-WebSocket-Protocol": MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL },
-      });
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH &&
-      request.headers.get(MULTIPLAYER_INTERNAL_PROTOCOL_HEADER) ===
-        MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL
-    ) {
-      let body: unknown;
-      try {
-        body = await request.json();
-      } catch {
-        return new Response(null, { status: 400 });
-      }
-      if (typeof body !== "object" || body === null || Array.isArray(body)) {
-        return new Response(null, { status: 400 });
-      }
-      const source = body as Record<string, unknown>;
-      const parsedChange = MultiplayerLobbyChangeSchema.safeParse(source.change);
-      if (
-        Object.keys(source).length !== 3 ||
-        !Object.hasOwn(source, "instanceId") ||
-        !Object.hasOwn(source, "generation") ||
-        !Object.hasOwn(source, "change") ||
-        !isOpaqueId(source.instanceId) ||
-        !isPositiveInteger(source.generation) ||
-        !parsedChange.success
-      ) {
-        return new Response(null, { status: 400 });
-      }
-      const meta = this.state.storage.sql
-        .exec<{ instance_id: string }>("SELECT instance_id FROM runtime_meta WHERE singleton = 1")
-        .toArray()[0];
-      const lifecycle = this.readLobbyLifecycle();
-      if (
-        (meta && meta.instance_id !== source.instanceId) ||
-        (lifecycle &&
-          (lifecycle.instanceId !== source.instanceId ||
-            lifecycle.generation !== source.generation))
-      ) {
-        return new Response(null, { status: 409 });
-      }
-      this.broadcastLobbyChanged(source.instanceId, source.generation, parsedChange.data);
-      return new Response(null, { status: 204 });
-    }
     if (
       request.method === "POST" &&
       url.pathname === MULTIPLAYER_INTERNAL_LEAVE_PATH &&
@@ -631,35 +462,52 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
   }
 
   override webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): void {
+    if (
+      typeof message !== "string" ||
+      message.length > MAX_CLIENT_MESSAGE_BYTES ||
+      textEncoder.encode(message).byteLength > MAX_CLIENT_MESSAGE_BYTES
+    ) {
+      socket.close(POLICY_CLOSE_CODE, "invalid message");
+      return;
+    }
+    const socketQueued = this.queuedMessagesBySocket.get(socket) ?? 0;
+    if (
+      socketQueued >= MAX_QUEUED_MESSAGES_PER_SOCKET ||
+      this.queuedMessageCount >= MAX_QUEUED_MESSAGES_PER_OBJECT
+    ) {
+      socket.close(RUNTIME_UNAVAILABLE_CLOSE_CODE, "message queue overloaded");
+      return;
+    }
+    this.queuedMessagesBySocket.set(socket, socketQueued + 1);
+    this.queuedMessageCount += 1;
     const task = this.messageQueue.then(() => this.handleWebSocketMessage(socket, message));
-    this.messageQueue = task.catch(async () => {
-      const attachment = this.readAttachment(socket);
-      if (attachment) await this.disconnectUnavailable(socket, attachment);
-    });
+    this.messageQueue = task
+      .catch(async () => {
+        const attachment = this.readAttachment(socket);
+        if (attachment) await this.disconnectUnavailable(socket, attachment);
+      })
+      .finally(() => {
+        const pending = this.queuedMessagesBySocket.get(socket) ?? 1;
+        if (pending <= 1) this.queuedMessagesBySocket.delete(socket);
+        else this.queuedMessagesBySocket.set(socket, pending - 1);
+        this.queuedMessageCount = Math.max(0, this.queuedMessageCount - 1);
+      });
     this.ctx.waitUntil(this.messageQueue);
   }
 
   override async webSocketClose(socket: WebSocket): Promise<void> {
     const attachment = this.readAttachment(socket);
     if (attachment) {
+      this.releaseConnectionMemory(attachment);
       await this.beginReconnectGrace(attachment, Math.ceil(Date.now() / 1_000));
-      return;
-    }
-    const lobbyAttachment = this.readLobbyAttachment(socket);
-    if (lobbyAttachment) {
-      await this.beginLobbyEmptyGrace(lobbyAttachment, Math.ceil(Date.now() / 1_000));
     }
   }
 
   override async webSocketError(socket: WebSocket): Promise<void> {
     const attachment = this.readAttachment(socket);
     if (attachment) {
+      this.releaseConnectionMemory(attachment);
       await this.beginReconnectGrace(attachment, Math.ceil(Date.now() / 1_000));
-      return;
-    }
-    const lobbyAttachment = this.readLobbyAttachment(socket);
-    if (lobbyAttachment) {
-      await this.beginLobbyEmptyGrace(lobbyAttachment, Math.ceil(Date.now() / 1_000));
     }
   }
 
@@ -675,16 +523,6 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
        WHERE disconnected_at IS NOT NULL AND disconnected_at <= ?`,
       nowSeconds - 24 * 60 * 60,
     );
-    this.state.storage.sql.exec(
-      "DELETE FROM participant_rate_windows WHERE window_started_at < ?",
-      nowMs - 60_000,
-    );
-    try {
-      await this.resolveLobbyLifecycle(nowSeconds);
-    } catch (error) {
-      console.error("[multiplayer] lobby lifecycle alarm failed:", error);
-      await this.scheduleNextAlarm(nowMs + FINALIZATION_RETRY_BASE_MS);
-    }
     try {
       await this.resolveExpiredDisconnects(nowSeconds);
     } catch {
@@ -748,50 +586,14 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     }
   }
 
-  private async handleWebSocketMessage(
-    socket: WebSocket,
-    message: string | ArrayBuffer,
-  ): Promise<void> {
-    const lobbyAttachment = this.readLobbyAttachment(socket);
-    if (lobbyAttachment) {
-      if (message !== MULTIPLAYER_LOBBY_SYNC_REQUEST) {
-        socket.close(POLICY_CLOSE_CODE, "invalid lobby message");
-        return;
-      }
-      const lifecycle = this.readLobbyLifecycle();
-      if (
-        !lifecycle ||
-        lifecycle.generation !== lobbyAttachment.generation ||
-        lifecycle.expiresAt <= Math.floor(Date.now() / 1_000)
-      ) {
-        socket.close(STALE_CONNECTION_CLOSE_CODE, "stale lobby");
-        return;
-      }
-      const eventSequence = this.state.storage.sql
-        .exec<{ server_sequence: number }>(
-          `SELECT server_sequence FROM lobby_event_sequence
-           WHERE singleton = 1 AND generation = ?`,
-          lobbyAttachment.generation,
-        )
-        .toArray()[0]?.server_sequence;
-      socket.send(
-        JSON.stringify({
-          type: "LOBBY_CONNECTED",
-          v: 1,
-          instanceId: lifecycle.instanceId,
-          generation: lobbyAttachment.generation,
-          sequence: eventSequence ?? 0,
-        }),
-      );
-      return;
-    }
+  private async handleWebSocketMessage(socket: WebSocket, message: string): Promise<void> {
     const attachment = this.readAttachment(socket);
     if (!attachment) {
       socket.close(POLICY_CLOSE_CODE, "invalid connection");
       return;
     }
-    if (typeof message !== "string" || textEncoder.encode(message).byteLength > 4 * 1024) {
-      socket.close(POLICY_CLOSE_CODE, "invalid message");
+    if (!this.consumeIngressRate(attachment, Date.now())) {
+      socket.close(POLICY_CLOSE_CODE, "message rate exceeded");
       return;
     }
     let decoded: unknown;
@@ -843,12 +645,16 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     attachment: ConnectionAttachment,
     socket: WebSocket,
   ): Promise<void> {
+    const readyKey = `${attachment.generation}:${attachment.participantId}:${attachment.connectionGeneration}`;
+    if (this.readyConnections.has(readyKey)) return;
+    this.readyConnections.add(readyKey);
     const result = await this.container.multiplayerRoomUseCases.readyParticipant({
       userId: authority.userId,
       instanceId: this.instanceId(),
       expectedGeneration: authority.generation,
     });
     if (!result.ok) {
+      this.readyConnections.delete(readyKey);
       if (result.code === "STALE_GENERATION") {
         socket.close(STALE_CONNECTION_CLOSE_CODE, "stale generation");
       } else {
@@ -856,7 +662,10 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       }
       return;
     }
-    if (result.state === "WAITING" || !result.match) return;
+    if (result.state === "WAITING" || !result.match) {
+      this.readyConnections.delete(readyKey);
+      return;
+    }
     const runtime = await this.ensureRuntimeMatch(result.match);
     await this.broadcastState(runtime, "MULTI_SYNC");
   }
@@ -867,15 +676,18 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     socket: WebSocket,
     message: MultiActionMessage,
   ): Promise<void> {
-    const match = await this.container.multiplayerMatchRepo.findMatchByInstanceGeneration(
-      this.instanceId(),
-      attachment.generation,
-    );
-    if (!match || match.status !== "ACTIVE") {
-      await this.sendActionRejection(socket, message.clientActionId, "MATCH_NOT_ACTIVE", 0);
-      return;
+    let runtime = this.readRuntimeMatch();
+    if (!runtime || runtime.generation !== attachment.generation) {
+      const match = await this.container.multiplayerMatchRepo.findMatchByInstanceGeneration(
+        this.instanceId(),
+        attachment.generation,
+      );
+      if (!match || match.status !== "ACTIVE") {
+        await this.sendActionRejection(socket, message.clientActionId, "MATCH_NOT_ACTIVE", 0);
+        return;
+      }
+      runtime = await this.ensureRuntimeMatch(match);
     }
-    let runtime = await this.ensureRuntimeMatch(match);
     if (runtime.lifecycle !== "ACTIVE") {
       await this.sendActionRejection(
         socket,
@@ -886,62 +698,104 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       return;
     }
     if (!this.consumeActionRate(authority, runtime.actionRateLimit, Date.now())) {
+      // Do not spend another persisted server sequence responding to a stream that already
+      // exceeded its approved profile. Reconnection requires a fresh, rate-limited ticket.
+      socket.close(POLICY_CLOSE_CODE, "action rate exceeded");
+      return;
+    }
+
+    const action = parseOmokAction(message.payload);
+    if (!action) {
       await this.sendActionRejection(
         socket,
         message.clientActionId,
-        "RATE_LIMITED",
+        "ACTION_INVALID",
         runtime.state.revision,
       );
       return;
     }
-
-    const payloadJson = stablePayloadJson(message.payload);
+    const payloadJson = stablePayloadJson(action);
     if (textEncoder.encode(payloadJson).byteLength > runtime.maxActionBytes) {
-      await this.recordAndSendRejectedAction(
-        runtime,
-        authority,
+      await this.sendActionRejection(
         socket,
-        message,
-        payloadJson,
+        message.clientActionId,
         "ACTION_INVALID",
+        runtime.state.revision,
       );
       return;
     }
-    const action = parseOmokAction(message.payload);
+    const payloadHash = await this.hashActionPayload(payloadJson, runtime.state.rulesetRevision);
     const gameSeatIndex = this.gameSeatIndex(authority);
-    const transition = action
-      ? this.readOmokConfiguration(runtime.generation).status === "LOCKED"
+    const transition =
+      this.readOmokConfiguration(runtime.generation).status === "LOCKED"
         ? applyOmokAction(runtime.state, gameSeatIndex, action, message.expectedRevision)
         : {
             ok: false as const,
             code: "MATCH_NOT_ACTIVE" as const,
             currentRevision: runtime.state.revision,
-          }
-      : {
-          ok: false as const,
-          code: "ACTION_INVALID" as const,
-          currentRevision: runtime.state.revision,
-        };
-    const nextServerSeq = runtime.serverSeq + 1;
-    const ledgerResponse: OmokActionLedgerResponseV1 = transition.ok
-      ? {
-          schemaVersion: OMOK_ACTION_LEDGER_SCHEMA_VERSION,
-          kind: "ACCEPTED",
-          generation: runtime.generation,
-          serverSeq: nextServerSeq,
-          clientActionId: message.clientActionId,
-          revision: transition.state.revision,
-          state: transition.state,
+          };
+    if (!transition.ok) {
+      // Rejected intents are not authoritative state and therefore do not belong in the durable
+      // D1 action ledger. Check only for a previously accepted idempotent request before returning
+      // the transient rejection; this keeps normal valid moves to one ledger path.
+      const existing = await this.container.multiplayerMatchRepo.findActionByClientId(
+        runtime.matchId,
+        authority.userId,
+        message.clientActionId,
+      );
+      if (existing) {
+        if (existing.payloadHash !== payloadHash) {
+          await this.sendActionRejection(
+            socket,
+            message.clientActionId,
+            "ACTION_ID_REUSED",
+            runtime.state.revision,
+          );
+          return;
         }
-      : {
-          schemaVersion: OMOK_ACTION_LEDGER_SCHEMA_VERSION,
-          kind: "REJECTED",
-          generation: runtime.generation,
-          serverSeq: nextServerSeq,
-          clientActionId: message.clientActionId,
-          code: transition.code,
-          currentRevision: transition.currentRevision,
-        };
+        let replayed: OmokActionLedgerResponseV1 | null = null;
+        try {
+          replayed = parseOmokActionLedgerResponse(JSON.parse(existing.responseJson));
+        } catch {
+          replayed = null;
+        }
+        if (!replayed || replayed.generation !== runtime.generation) {
+          throw new Error("invalid replayed Omok action response");
+        }
+        const refreshedMatch = await this.container.multiplayerMatchRepo.findMatch(runtime.matchId);
+        if (!refreshedMatch) throw new Error("match disappeared during action replay");
+        runtime = await this.recoverRuntimeMatch(refreshedMatch, runtime);
+        if (replayed.kind === "ACCEPTED") {
+          await this.sendState(socket, runtime, "MULTI_SYNC");
+        } else {
+          await this.sendActionRejection(
+            socket,
+            replayed.clientActionId,
+            actionCodeForClient(replayed.code),
+            runtime.state.revision,
+          );
+        }
+        return;
+      }
+      // Persisting attacker-controlled rejections would multiply D1 table and index writes.
+      await this.sendActionRejection(
+        socket,
+        message.clientActionId,
+        actionCodeForClient(transition.code),
+        transition.currentRevision,
+      );
+      return;
+    }
+    const nextServerSeq = runtime.serverSeq + 1;
+    const ledgerResponse: OmokActionLedgerResponseV1 = {
+      schemaVersion: OMOK_ACTION_LEDGER_SCHEMA_VERSION,
+      kind: "ACCEPTED",
+      generation: runtime.generation,
+      serverSeq: nextServerSeq,
+      clientActionId: message.clientActionId,
+      revision: transition.state.revision,
+      state: transition.state,
+    };
     const recorded = await this.container.multiplayerMatchRepo.recordAction({
       matchId: runtime.matchId,
       userId: authority.userId,
@@ -949,17 +803,17 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       clientSeq: message.clientSeq,
       serverSeq: nextServerSeq,
       clientActionId: message.clientActionId,
-      payloadHash: await this.hashActionPayload(payloadJson, runtime.state.rulesetRevision),
+      payloadHash,
       expectedRevision: message.expectedRevision,
-      resultRevision: transition.ok ? transition.state.revision : transition.currentRevision,
-      resultCode: transition.ok ? "ACCEPTED" : transition.code,
+      resultRevision: transition.state.revision,
+      resultCode: "ACCEPTED",
       responseJson: encodeOmokActionLedgerResponse(ledgerResponse),
       nowIso: new Date().toISOString(),
     });
 
     if (recorded.status === "REJECTED") {
       if (recorded.code === "ACTION_CONFLICT") {
-        const refreshedMatch = await this.container.multiplayerMatchRepo.findMatch(match.id);
+        const refreshedMatch = await this.container.multiplayerMatchRepo.findMatch(runtime.matchId);
         if (!refreshedMatch) throw new Error("match disappeared during action conflict");
         runtime = await this.recoverRuntimeMatch(refreshedMatch, runtime);
       }
@@ -983,7 +837,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       throw new Error("invalid authoritative Omok action response");
     }
     if (recorded.status === "REPLAYED") {
-      const refreshedMatch = await this.container.multiplayerMatchRepo.findMatch(match.id);
+      const refreshedMatch = await this.container.multiplayerMatchRepo.findMatch(runtime.matchId);
       if (!refreshedMatch) throw new Error("match disappeared during action replay");
       runtime = await this.recoverRuntimeMatch(refreshedMatch, runtime);
       if (stored.kind === "ACCEPTED") {
@@ -1037,12 +891,19 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       socket.close(POLICY_CLOSE_CODE, "invalid game configuration");
       return;
     }
-    const match = await this.container.multiplayerMatchRepo.findMatchByInstanceGeneration(
-      this.instanceId(),
-      attachment.generation,
-    );
-    if (!match || match.status !== "ACTIVE") return;
-    const runtime = await this.ensureRuntimeMatch(match);
+    let runtime = this.readRuntimeMatch();
+    if (!runtime || runtime.generation !== attachment.generation) {
+      const match = await this.container.multiplayerMatchRepo.findMatchByInstanceGeneration(
+        this.instanceId(),
+        attachment.generation,
+      );
+      if (!match || match.status !== "ACTIVE") return;
+      runtime = await this.ensureRuntimeMatch(match);
+    }
+    if (!this.consumeActionRate(authority, runtime.actionRateLimit, Date.now())) {
+      socket.close(POLICY_CLOSE_CODE, "input rate exceeded");
+      return;
+    }
     if (
       runtime.lifecycle !== "ACTIVE" ||
       runtime.state.revision !== 0 ||
@@ -1051,7 +912,6 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       await this.sendState(socket, runtime, "MULTI_SYNC");
       return;
     }
-    if (!this.consumeActionRate(authority, runtime.actionRateLimit, Date.now())) return;
 
     const participants = (
       await this.container.multiplayerInstanceRepo.listParticipants(this.instanceId())
@@ -1078,60 +938,6 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       return;
     }
     await this.broadcastState(runtime, "MULTI_SYNC");
-  }
-
-  private async recordAndSendRejectedAction(
-    runtime: RuntimeMatch,
-    authority: ParticipantAuthority,
-    socket: WebSocket,
-    message: MultiActionMessage,
-    payloadJson: string,
-    code: "ACTION_INVALID",
-  ): Promise<void> {
-    const serverSeq = runtime.serverSeq + 1;
-    const response: OmokActionLedgerResponseV1 = {
-      schemaVersion: OMOK_ACTION_LEDGER_SCHEMA_VERSION,
-      kind: "REJECTED",
-      generation: runtime.generation,
-      serverSeq,
-      clientActionId: message.clientActionId,
-      code,
-      currentRevision: runtime.state.revision,
-    };
-    const recorded = await this.container.multiplayerMatchRepo.recordAction({
-      matchId: runtime.matchId,
-      userId: authority.userId,
-      participantId: authority.participantId,
-      clientSeq: message.clientSeq,
-      serverSeq,
-      clientActionId: message.clientActionId,
-      payloadHash: await this.hashActionPayload(payloadJson, runtime.state.rulesetRevision),
-      expectedRevision: message.expectedRevision,
-      resultRevision: runtime.state.revision,
-      resultCode: code,
-      responseJson: encodeOmokActionLedgerResponse(response),
-      nowIso: new Date().toISOString(),
-    });
-    if (recorded.status === "REJECTED") {
-      await this.sendActionRejection(
-        socket,
-        message.clientActionId,
-        actionCodeForClient(recorded.code),
-        recorded.currentRevision ?? runtime.state.revision,
-      );
-      return;
-    }
-    const stored = parseOmokActionLedgerResponse(JSON.parse(recorded.action.responseJson));
-    if (!stored) throw new Error("invalid rejected Omok ledger response");
-    if (recorded.status === "RECORDED") {
-      this.persistRuntimeMatch({ ...runtime, serverSeq: stored.serverSeq });
-    }
-    await this.sendActionRejection(
-      socket,
-      stored.clientActionId,
-      stored.kind === "REJECTED" ? actionCodeForClient(stored.code) : "ACTION_CONFLICT",
-      stored.kind === "REJECTED" ? stored.currentRevision : runtime.state.revision,
-    );
   }
 
   private async handleLeave(
@@ -1181,22 +987,6 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       expectedGeneration: generation,
     });
     if (!result.ok) return result;
-    const hasPeerLobbySocket = participant
-      ? this.state
-          .getWebSockets(lobbyGenerationTag(generation))
-          .some(
-            (socket) =>
-              socket.readyState === 1 &&
-              this.readLobbyAttachment(socket)?.participantId !== participant.id,
-          )
-      : false;
-    if (!result.replayed && hasPeerLobbySocket) {
-      // The authenticated leave already entered this Durable Object. Reuse that request to
-      // invalidate remaining lobby clients instead of making the outer Worker perform a second
-      // billable DO fetch. Avoid reserving an event when only the departing participant is still
-      // attached or gameplay has already replaced the lobby channel.
-      this.broadcastLobbyChanged(instanceId, generation, { kind: "INVALIDATE" });
-    }
     if (result.instance.status === "ABORTED") {
       const runtime = this.readRuntimeMatch();
       if (runtime) this.persistRuntimeMatch({ ...runtime, lifecycle: "ABORTED" });
@@ -1205,7 +995,6 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
         "DELETE FROM participant_connections WHERE generation = ?",
         generation,
       );
-      this.state.storage.sql.exec("DELETE FROM lobby_lifecycle WHERE singleton = 1");
       for (const connected of this.state.getWebSockets()) connected.close(1000, "match aborted");
       return result;
     }
@@ -1219,9 +1008,6 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
         generation,
       );
       for (const connected of this.state.getWebSockets(participantTag(participant.id))) {
-        connected.close(1000, "left");
-      }
-      for (const connected of this.state.getWebSockets(lobbyParticipantTag(participant.id))) {
         connected.close(1000, "left");
       }
     }
@@ -1747,7 +1533,9 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
         );
         this.state.storage.sql.exec("DELETE FROM runtime_match");
         this.state.storage.sql.exec("DELETE FROM runtime_game_config");
-        this.state.storage.sql.exec("DELETE FROM participant_rate_windows");
+        this.readyConnections.clear();
+        this.ingressRateWindows.clear();
+        this.actionRateWindows.clear();
         this.state.storage.sql.exec("DELETE FROM rematch_window");
       }
     } else {
@@ -1859,7 +1647,9 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
         );
         this.state.storage.sql.exec("DELETE FROM runtime_match");
         this.state.storage.sql.exec("DELETE FROM runtime_game_config");
-        this.state.storage.sql.exec("DELETE FROM participant_rate_windows");
+        this.readyConnections.clear();
+        this.ingressRateWindows.clear();
+        this.actionRateWindows.clear();
         this.state.storage.sql.exec("DELETE FROM rematch_window");
       }
     } else {
@@ -2196,6 +1986,16 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       };
     }
     const stateJson = JSON.stringify(runtime.state);
+    if (
+      current &&
+      JSON.stringify(current.state) === stateJson &&
+      current.serverSeq === runtime.serverSeq &&
+      current.lifecycle === runtime.lifecycle &&
+      current.terminalResultJson === runtime.terminalResultJson &&
+      current.finalizationAttempts === runtime.finalizationAttempts
+    ) {
+      return current;
+    }
     if (textEncoder.encode(stateJson).byteLength > runtime.maxStateBytes) {
       throw new Error("authoritative state exceeds approved profile limit");
     }
@@ -2246,40 +2046,43 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     return this.persistRuntimeMatch({ ...base, serverSeq: base.serverSeq + 1 });
   }
 
+  private consumeIngressRate(attachment: ConnectionAttachment, nowMs: number): boolean {
+    // This guard runs before JSON parsing, authority lookup, DO SQL, or D1 access. It deliberately
+    // resets after hibernation: gameplay authority remains durable while idle objects keep no
+    // billable timer solely for abuse accounting.
+    const key = `${attachment.generation}:${attachment.participantId}:${attachment.connectionGeneration}`;
+    const window = this.ingressRateWindows.get(key);
+    if (!window || nowMs - window.windowStartedAt >= ACTION_RATE_WINDOW_MS) {
+      this.ingressRateWindows.set(key, { windowStartedAt: nowMs, messageCount: 1 });
+      return true;
+    }
+    if (window.messageCount >= INGRESS_RATE_LIMIT) return false;
+    window.messageCount += 1;
+    return true;
+  }
+
+  private releaseConnectionMemory(attachment: ConnectionAttachment): void {
+    const key = `${attachment.generation}:${attachment.participantId}:${attachment.connectionGeneration}`;
+    this.ingressRateWindows.delete(key);
+    this.readyConnections.delete(key);
+  }
+
   private consumeActionRate(
     authority: ParticipantAuthority,
     limit: number,
     nowMs: number,
   ): boolean {
-    const row = this.state.storage.sql
-      .exec<{ window_started_at: number; action_count: number }>(
-        `SELECT window_started_at, action_count FROM participant_rate_windows
-         WHERE participant_id = ? AND generation = ?`,
-        authority.participantId,
-        authority.generation,
-      )
-      .toArray()[0];
-    if (!row || nowMs - row.window_started_at >= ACTION_RATE_WINDOW_MS) {
-      this.state.storage.sql.exec(
-        `INSERT INTO participant_rate_windows (
-           participant_id, generation, window_started_at, action_count
-         ) VALUES (?, ?, ?, 1)
-         ON CONFLICT(participant_id, generation) DO UPDATE SET
-           window_started_at = excluded.window_started_at, action_count = 1`,
-        authority.participantId,
-        authority.generation,
-        nowMs,
-      );
+    // This is a burst guard, not gameplay authority. A hibernation reset can only relax the guard
+    // after inactivity; turn, revision, action-id and D1 ledger checks remain durable. Keeping the
+    // one-second window in memory avoids a DO SQLite write for every valid or invalid intent.
+    const key = `${authority.generation}:${authority.participantId}`;
+    const window = this.actionRateWindows.get(key);
+    if (!window || nowMs - window.windowStartedAt >= ACTION_RATE_WINDOW_MS) {
+      this.actionRateWindows.set(key, { windowStartedAt: nowMs, actionCount: 1 });
       return true;
     }
-    if (row.action_count >= limit) return false;
-    this.state.storage.sql.exec(
-      `UPDATE participant_rate_windows SET action_count = action_count + 1
-       WHERE participant_id = ? AND generation = ? AND window_started_at = ?`,
-      authority.participantId,
-      authority.generation,
-      row.window_started_at,
-    );
+    if (window.actionCount >= limit) return false;
+    window.actionCount += 1;
     return true;
   }
 
@@ -2417,51 +2220,6 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
   private broadcastTerminalCommitted(runtime: RuntimeMatch, result: CanonicalTerminalResult): void {
     for (const socket of this.state.getWebSockets()) {
       if (this.readAttachment(socket)) this.sendTerminalCommitted(socket, runtime, result);
-    }
-  }
-
-  private broadcastLobbyChanged(
-    instanceId: string,
-    generation: number,
-    change: MultiplayerLobbyChange,
-  ): void {
-    this.state.storage.sql.exec(
-      `INSERT INTO lobby_event_sequence (singleton, generation, server_sequence)
-       VALUES (1, ?, 1)
-       ON CONFLICT(singleton) DO UPDATE SET
-         generation = excluded.generation,
-         server_sequence = CASE
-           WHEN lobby_event_sequence.generation = excluded.generation
-             THEN lobby_event_sequence.server_sequence + 1
-           ELSE 1
-         END`,
-      generation,
-    );
-    const sequence = this.state.storage.sql
-      .exec<{ server_sequence: number }>(
-        "SELECT server_sequence FROM lobby_event_sequence WHERE singleton = 1",
-      )
-      .one().server_sequence;
-    const message = JSON.stringify({
-      type: "LOBBY_CHANGED",
-      v: 1,
-      instanceId,
-      generation,
-      sequence,
-      change,
-    });
-    for (const socket of this.state.getWebSockets(lobbyGenerationTag(generation))) {
-      if (socket.readyState !== 1) continue;
-      try {
-        socket.send(message);
-      } catch {
-        try {
-          socket.close(RUNTIME_UNAVAILABLE_CLOSE_CODE, "lobby transport unavailable");
-        } catch {
-          // The D1 state and sequence reservation remain authoritative even if a stale socket can
-          // no longer accept either a final frame or close handshake.
-        }
-      }
     }
   }
 
@@ -2783,198 +2541,6 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     } catch {
       return null;
     }
-  }
-
-  private readLobbyAttachment(socket: WebSocket): LobbyConnectionAttachment | null {
-    try {
-      return parseLobbyAttachment(socket.deserializeAttachment());
-    } catch {
-      return null;
-    }
-  }
-
-  private readLobbyLifecycle(): LobbyLifecycleRecord | null {
-    const row = this.state.storage.sql
-      .exec<{
-        instance_id: string;
-        generation: number;
-        expires_at: number;
-        empty_deadline: number | null;
-      }>(
-        `SELECT instance_id, generation, expires_at, empty_deadline
-         FROM lobby_lifecycle WHERE singleton = 1`,
-      )
-      .toArray()[0];
-    if (
-      !row ||
-      !isOpaqueId(row.instance_id) ||
-      !isPositiveInteger(row.generation) ||
-      !isPositiveInteger(row.expires_at)
-    ) {
-      return null;
-    }
-    const emptyDeadline = row.empty_deadline === null ? null : integerValue(row.empty_deadline);
-    if (row.empty_deadline !== null && emptyDeadline === null) return null;
-    return {
-      instanceId: row.instance_id,
-      generation: row.generation,
-      expiresAt: row.expires_at,
-      emptyDeadline,
-    };
-  }
-
-  private hasOpenLobbySocket(generation: number): boolean {
-    return this.state
-      .getWebSockets(lobbyGenerationTag(generation))
-      .some((socket) => socket.readyState === 1);
-  }
-
-  private async beginLobbyEmptyGrace(
-    attachment: LobbyConnectionAttachment,
-    nowSeconds: number,
-  ): Promise<boolean> {
-    const lifecycle = this.readLobbyLifecycle();
-    if (
-      !lifecycle ||
-      lifecycle.generation !== attachment.generation ||
-      this.hasOpenLobbySocket(attachment.generation)
-    ) {
-      return false;
-    }
-    const deadline = nowSeconds + LOBBY_EMPTY_GRACE_SECONDS;
-    this.state.storage.sql.exec(
-      `UPDATE lobby_lifecycle
-       SET empty_deadline = CASE
-         WHEN empty_deadline IS NULL OR empty_deadline > ? THEN ?
-         ELSE empty_deadline
-       END
-       WHERE singleton = 1 AND generation = ?`,
-      deadline,
-      deadline,
-      attachment.generation,
-    );
-    await this.scheduleNextAlarm(deadline * 1_000 + 1);
-    return true;
-  }
-
-  private async resolveLobbyLifecycle(nowSeconds: number): Promise<void> {
-    const lifecycle = this.readLobbyLifecycle();
-    if (!lifecycle) return;
-
-    if (lifecycle.expiresAt <= nowSeconds) {
-      const instance = await this.container.multiplayerInstanceRepo.findById(lifecycle.instanceId);
-      if (!instance || instance.generation !== lifecycle.generation) {
-        this.state.storage.sql.exec("DELETE FROM lobby_lifecycle WHERE singleton = 1");
-        return;
-      }
-      if (!["CLOSED", "ABORTED", "EXPIRED"].includes(instance.status)) {
-        const nowIso = new Date(nowSeconds * 1_000).toISOString();
-        const expired = await this.container.multiplayerInstanceRepo.transition({
-          instanceId: instance.id,
-          expectedStatus: instance.status,
-          expectedGeneration: instance.generation,
-          nextStatus: "EXPIRED",
-          nextGeneration: instance.generation,
-          closedAt: nowIso,
-          abortCode: null,
-          nowIso,
-        });
-        if (!expired) {
-          const concurrent = await this.container.multiplayerInstanceRepo.findById(instance.id);
-          if (
-            !concurrent ||
-            concurrent.generation !== lifecycle.generation ||
-            concurrent.status !== "EXPIRED"
-          ) {
-            await this.scheduleNextAlarm(Date.now() + FINALIZATION_RETRY_BASE_MS);
-            return;
-          }
-        }
-        const runtime = this.readRuntimeMatch();
-        if (runtime && runtime.lifecycle !== "COMMITTED") {
-          this.persistRuntimeMatch({ ...runtime, lifecycle: "ABORTED" });
-          this.broadcastAbort("INFRA_FAILURE");
-        }
-      }
-      this.broadcastLobbyChanged(lifecycle.instanceId, lifecycle.generation, {
-        kind: "INVALIDATE",
-      });
-      this.state.storage.sql.exec("DELETE FROM lobby_lifecycle WHERE singleton = 1");
-      const expiringSockets = new Set(
-        this.state.getWebSockets(lobbyGenerationTag(lifecycle.generation)),
-      );
-      for (const socket of this.state.getWebSockets()) {
-        const gameplay = this.readAttachment(socket);
-        if (gameplay?.generation === lifecycle.generation) expiringSockets.add(socket);
-      }
-      for (const socket of expiringSockets) {
-        try {
-          socket.close(INSTANCE_EXPIRED_CLOSE_CODE, "instance expired");
-        } catch {
-          // Hibernation will discard an already-dead socket; lifecycle cleanup must still commit.
-        }
-      }
-      return;
-    }
-
-    if (lifecycle.emptyDeadline !== null && lifecycle.emptyDeadline <= nowSeconds) {
-      if (this.hasOpenLobbySocket(lifecycle.generation)) {
-        this.state.storage.sql.exec(
-          "UPDATE lobby_lifecycle SET empty_deadline = NULL WHERE singleton = 1",
-        );
-      } else {
-        const instance = await this.container.multiplayerInstanceRepo.findById(
-          lifecycle.instanceId,
-        );
-        if (
-          !instance ||
-          instance.generation !== lifecycle.generation ||
-          ["CLOSED", "ABORTED", "EXPIRED"].includes(instance.status)
-        ) {
-          this.state.storage.sql.exec("DELETE FROM lobby_lifecycle WHERE singleton = 1");
-          return;
-        }
-        if (instance.status === "CREATED" || instance.status === "LOBBY") {
-          const nowIso = new Date(nowSeconds * 1_000).toISOString();
-          const aborted = await this.container.multiplayerInstanceRepo.transition({
-            instanceId: instance.id,
-            expectedStatus: instance.status,
-            expectedGeneration: instance.generation,
-            nextStatus: "ABORTED",
-            nextGeneration: instance.generation,
-            closedAt: nowIso,
-            abortCode: "INSUFFICIENT_PLAYERS",
-            nowIso,
-          });
-          if (!aborted) {
-            const concurrent = await this.container.multiplayerInstanceRepo.findById(instance.id);
-            if (
-              !concurrent ||
-              concurrent.generation !== lifecycle.generation ||
-              concurrent.status !== "ABORTED"
-            ) {
-              await this.scheduleNextAlarm(Date.now() + FINALIZATION_RETRY_BASE_MS);
-              return;
-            }
-          }
-          this.state.storage.sql.exec("DELETE FROM lobby_lifecycle WHERE singleton = 1");
-          return;
-        }
-        // STARTING/ACTIVE/CLOSING use the gameplay reconnect policy. Stop the empty-lobby timer,
-        // but retain the exact instance expiry so an abandoned active authority cannot live forever.
-        this.state.storage.sql.exec(
-          "UPDATE lobby_lifecycle SET empty_deadline = NULL WHERE singleton = 1",
-        );
-      }
-    }
-
-    const current = this.readLobbyLifecycle();
-    if (!current) return;
-    const nextSeconds =
-      current.emptyDeadline === null
-        ? current.expiresAt
-        : Math.min(current.expiresAt, current.emptyDeadline);
-    await this.scheduleNextAlarm(nextSeconds * 1_000 + 1);
   }
 
   private markDisconnected(attachment: ConnectionAttachment, nowSeconds: number): boolean {

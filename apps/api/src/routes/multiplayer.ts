@@ -17,8 +17,6 @@ import {
   MultiplayerRuntimeStatusResponseSchema,
   MultiplayerSetReadyRequestSchema,
   MultiplayerStartRoomRequestSchema,
-  MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
-  type MultiplayerLobbyChange,
 } from "@owogg/contracts";
 import {
   MULTIPLAYER_ERROR_HTTP_STATUS,
@@ -40,13 +38,9 @@ import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_CONNECT_PATH,
   MULTIPLAYER_INTERNAL_LEAVE_PATH,
-  MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER,
-  MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH,
-  MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH,
   MULTIPLAYER_INTERNAL_PROTOCOL_HEADER,
   MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH,
   encodeVerifiedMultiplayerClaims,
-  encodeVerifiedMultiplayerLobbyClaims,
 } from "../multiplayer/internalProtocol.js";
 import type { ApiEnv } from "./auth.js";
 
@@ -78,8 +72,6 @@ const PUBLIC_MESSAGES: Readonly<Record<MultiplayerErrorCode, string>> = {
   RATE_LIMITED: "요청이 너무 잦습니다. 잠시 후 다시 시도해주세요.",
   INTERNAL_RETRYABLE: "일시적인 오류가 발생했습니다. 다시 시도해주세요.",
 };
-const INSTANCE_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
-
 function failure(c: Context<ApiEnv>, code: MultiplayerErrorCode) {
   return c.json(
     { error: { code, message: PUBLIC_MESSAGES[code] } },
@@ -116,16 +108,7 @@ async function takeRateLimit(
 function requestRateKey(
   c: Context<ApiEnv>,
   operation:
-    | "create"
-    | "join"
-    | "ready"
-    | "start"
-    | "leave"
-    | "invite"
-    | "roster"
-    | "lobby"
-    | "ticket"
-    | "socket",
+    "create" | "join" | "ready" | "start" | "leave" | "invite" | "roster" | "ticket" | "socket",
 ): string {
   // Keep callers behind the same home/campus/mobile NAT independent while never exposing the
   // full bearer credential to Cloudflare rate-limit logs. This mirrors the platform-wide write
@@ -223,52 +206,6 @@ function notifyRematchChange(c: Context<ApiEnv>, instanceId: string, generation:
   } catch {
     // Hono's direct unit-test request helper has no ExecutionContext. The already-started promise
     // remains harmless; production Workers always attach it to waitUntil.
-  }
-}
-
-async function notifyLobbyChange(
-  c: Context<ApiEnv>,
-  instanceId: string,
-  generation: number,
-  change: MultiplayerLobbyChange = { kind: "INVALIDATE" },
-): Promise<void> {
-  const namespace = c.env.MULTIPLAYER_INSTANCES;
-  if (!namespace) return;
-  try {
-    const response = await namespace.get(namespace.idFromName(instanceId)).fetch(
-      new Request(`https://multiplayer.internal${MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          [MULTIPLAYER_INTERNAL_PROTOCOL_HEADER]: MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
-        },
-        body: JSON.stringify({ instanceId, generation, change }),
-      }),
-    );
-    if (!response.ok) throw new Error(`lobby notification rejected (${response.status})`);
-  } catch (error) {
-    // The D1 mutation is already authoritative. A disconnected lobby socket reconciles from the
-    // authenticated roster endpoint, so notification failure must not roll back the user action.
-    console.warn("[multiplayer:lobby-notification-failed]", {
-      instanceId,
-      generation,
-      reason: error instanceof Error ? error.message : "unknown",
-    });
-  }
-}
-
-function deferLobbyChange(
-  c: Context<ApiEnv>,
-  instanceId: string,
-  generation: number,
-  change: MultiplayerLobbyChange = { kind: "INVALIDATE" },
-): void {
-  const notification = notifyLobbyChange(c, instanceId, generation, change);
-  try {
-    c.executionCtx.waitUntil(notification);
-  } catch {
-    // Hono's direct unit-test request helper has no ExecutionContext. notifyLobbyChange already
-    // catches provider failures, and the promise has started, so no unhandled rejection escapes.
   }
 }
 
@@ -456,9 +393,6 @@ multiplayerRouter.post("/instances/join", async (c) => {
     inviteToken: parsed.data.inviteToken,
   });
   if (!result.ok) return failure(c, result.code);
-  if (!result.replayed) {
-    deferLobbyChange(c, result.instance.id, result.instance.generation);
-  }
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomResponseSchema.parse({
@@ -556,13 +490,6 @@ multiplayerRouter.post("/instances/:instanceId/ready", async (c) => {
     ready: parsed.data.ready,
   });
   if (!result.ok) return failure(c, result.code);
-  if (result.changed) {
-    deferLobbyChange(c, result.instance.id, result.instance.generation, {
-      kind: "PARTICIPANT_READY",
-      participantId: result.participant.id,
-      status: result.participant.status === "READY" ? "READY" : "JOINED",
-    });
-  }
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomResponseSchema.parse({
@@ -603,7 +530,6 @@ multiplayerRouter.post("/instances/:instanceId/start", async (c) => {
     expectedGeneration: parsed.data.expectedGeneration,
   });
   if (!result.ok) return failure(c, result.code);
-  deferLobbyChange(c, result.instance.id, result.instance.generation);
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomResponseSchema.parse({
@@ -700,12 +626,49 @@ multiplayerRouter.post("/instances/:instanceId/leave", async (c) => {
   const authenticated = await container.sessionRepo.findSession(sessionId);
   if (!authenticated) return failure(c, "UNAUTHENTICATED");
   const instanceId = c.req.param("instanceId");
-  const result = await leaveThroughDurableObject(
-    c,
-    instanceId,
-    authenticated.user.id,
-    parsed.data.expectedGeneration,
-  );
+  const currentInstance = await container.multiplayerInstanceRepo.findById(instanceId);
+  if (!currentInstance) return failure(c, "INSTANCE_NOT_FOUND");
+  let result: InternalLeaveResult;
+  if (currentInstance.status === "CREATED" || currentInstance.status === "LOBBY") {
+    const direct = await container.multiplayerRoomUseCases.leaveRoom({
+      userId: authenticated.user.id,
+      instanceId,
+      expectedGeneration: parsed.data.expectedGeneration,
+      expectedInstanceStatus: currentInstance.status,
+    });
+    if (direct.ok) {
+      result = { ok: true, replayed: direct.replayed };
+    } else if (direct.code === "STALE_GENERATION") {
+      const latest = await container.multiplayerInstanceRepo.findById(instanceId);
+      if (
+        latest &&
+        latest.generation === parsed.data.expectedGeneration &&
+        (latest.status === "STARTING" || latest.status === "ACTIVE" || latest.status === "CLOSING")
+      ) {
+        // The room crossed the gameplay authority boundary after the first read. Delegate the
+        // leave instead of mutating participant state from a stale waiting-room observation.
+        result = await leaveThroughDurableObject(
+          c,
+          instanceId,
+          authenticated.user.id,
+          parsed.data.expectedGeneration,
+        );
+      } else {
+        result = { ok: false, code: direct.code };
+      }
+    } else {
+      result = { ok: false, code: direct.code };
+    }
+  } else {
+    // Active matches still enter the authority object so a deliberate leave becomes an immediate,
+    // server-authenticated forfeit. A waiting room never creates or wakes a Durable Object.
+    result = await leaveThroughDurableObject(
+      c,
+      instanceId,
+      authenticated.user.id,
+      parsed.data.expectedGeneration,
+    );
+  }
   if (!result.ok) return failure(c, result.code);
   const [instance, participant] = await Promise.all([
     container.multiplayerInstanceRepo.findById(instanceId),
@@ -766,93 +729,6 @@ multiplayerRouter.post("/instances/:instanceId/invites", async (c) => {
     }),
     result.replayed ? 200 : 201,
   );
-});
-
-multiplayerRouter.get("/instances/:instanceId/lobby-socket", async (c) => {
-  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED)) {
-    return failure(c, "MULTIPLAYER_UNAVAILABLE");
-  }
-  const config = readMultiplayerRuntimeConfig(c.env);
-  const namespace = c.env.MULTIPLAYER_INSTANCES;
-  if (!config || !namespace || !runtimeReady(c.env)) {
-    return failure(c, "MULTIPLAYER_UNAVAILABLE");
-  }
-  if (c.req.header("Upgrade")?.toLowerCase() !== "websocket") {
-    return failure(c, "INVALID_REQUEST");
-  }
-  if (!isTrustedMultiplayerSocketRequest(c.req.raw, config)) {
-    return failure(c, "FORBIDDEN");
-  }
-  if (c.req.header("Sec-WebSocket-Protocol")?.trim() !== MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL) {
-    return failure(c, "INVALID_REQUEST");
-  }
-
-  const rateLimit = await takeRateLimit(c.env, requestRateKey(c, "lobby"), "RECOVERY");
-  if (rateLimit === "DENIED") return failure(c, "RATE_LIMITED");
-  if (rateLimit === "UNAVAILABLE") return failure(c, "MULTIPLAYER_UNAVAILABLE");
-
-  const sessionId = getCookie(c, "owogg_session");
-  if (!sessionId) return failure(c, "UNAUTHENTICATED");
-  const instanceId = c.req.param("instanceId");
-  if (!INSTANCE_ID_PATTERN.test(instanceId)) return failure(c, "INVALID_REQUEST");
-
-  const container = createContainer(c.env.DB, readB2Config(c.env));
-  const authenticated = await container.sessionRepo.findSession(sessionId);
-  if (!authenticated) return failure(c, "UNAUTHENTICATED");
-  const [instance, participant] = await Promise.all([
-    container.multiplayerInstanceRepo.findById(instanceId),
-    container.multiplayerInstanceRepo.findParticipant(instanceId, authenticated.user.id),
-  ]);
-  if (!instance) return failure(c, "INSTANCE_NOT_FOUND");
-  if (instance.status !== "LOBBY" && instance.status !== "STARTING") {
-    return failure(c, "INSTANCE_NOT_JOINABLE");
-  }
-  const expiresAt = Date.parse(instance.expiresAt);
-  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
-    return failure(c, "INSTANCE_NOT_JOINABLE");
-  }
-  if (!participant || (participant.status !== "JOINED" && participant.status !== "READY")) {
-    return failure(c, "NOT_PARTICIPANT");
-  }
-
-  // The outer edge authenticates the session and roster membership. The Durable Object receives
-  // only canonical verified claims; neither the session cookie nor a gameplay bearer is copied.
-  const internalRequest = new Request(
-    `https://multiplayer.internal${MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH}`,
-    {
-      method: "GET",
-      headers: {
-        Upgrade: "websocket",
-        "Sec-WebSocket-Protocol": MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
-        [MULTIPLAYER_INTERNAL_PROTOCOL_HEADER]: MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
-        [MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER]: encodeVerifiedMultiplayerLobbyClaims({
-          instanceId,
-          participantId: participant.id,
-          userId: authenticated.user.id,
-          generation: instance.generation,
-          expiresAt: Math.ceil(expiresAt / 1_000),
-        }),
-      },
-    },
-  );
-  try {
-    const response = await namespace.get(namespace.idFromName(instanceId)).fetch(internalRequest);
-    if (response.status !== 101 || !response.webSocket) return response;
-    if (response.headers.get("Sec-WebSocket-Protocol") !== MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL) {
-      response.webSocket.close(1011, "invalid lobby protocol response");
-      return failure(c, "INTERNAL_RETRYABLE");
-    }
-    // The lobby protocol carries no bearer token, so the authenticated edge can return the DO's
-    // upgrade response directly. Avoiding a second Response wrapper matches Cloudflare's
-    // documented proxy pattern and keeps ownership of the WebSocket endpoint unambiguous.
-    return response;
-  } catch (error) {
-    console.error("[multiplayer:lobby-connect-failed]", {
-      instanceId,
-      reason: error instanceof Error ? error.message : "unknown",
-    });
-    return failure(c, "INTERNAL_RETRYABLE");
-  }
 });
 
 multiplayerRouter.post("/instances/:instanceId/ticket", async (c) => {

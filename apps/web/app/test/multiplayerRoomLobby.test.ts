@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { MultiplayerLobbyChangedMessage, MultiplayerRoomPlayer } from "@owogg/contracts";
+import type { MultiplayerRoomPlayer } from "@owogg/contracts";
 import {
-  applyMultiplayerLobbyChange,
   multiplayerLobbyCanStart,
-  multiplayerLobbyReconnectDelay,
+  multiplayerLobbyJitteredDelay,
+  multiplayerLobbyPollingDelay,
   multiplayerLobbyRosterSounds,
   multiplayerLobbySlotCount,
 } from "../features/game/runtime/MultiplayerRoomLobby";
@@ -36,13 +36,12 @@ test("the shared lobby renders profile-sized slots and is future-safe up to sixt
   assert.equal(multiplayerLobbySlotCount(20, 20), 16);
 });
 
-test("the lobby gives only a previously healthy realtime channel a finite reconnect budget", () => {
-  assert.equal(multiplayerLobbyReconnectDelay(false, 0), null);
-  assert.deepEqual(
-    [0, 1, 2, 3, 4].map((attempt) => multiplayerLobbyReconnectDelay(true, attempt)),
-    [1_000, 3_000, 10_000, 30_000, null],
-  );
-  assert.equal(multiplayerLobbyReconnectDelay(true, -1), null);
+test("the lobby polls slowly and backs off further while the tab is hidden", () => {
+  assert.equal(multiplayerLobbyPollingDelay("visible"), 15_000);
+  assert.equal(multiplayerLobbyPollingDelay("hidden"), 120_000);
+  assert.equal(multiplayerLobbyJitteredDelay(10_000, 0), 9_000);
+  assert.equal(multiplayerLobbyJitteredDelay(10_000, 0.5), 10_000);
+  assert.equal(multiplayerLobbyJitteredDelay(10_000, 1), 11_000);
 });
 
 test("lobby sounds announce only other players entering and leaving after the initial roster", () => {
@@ -66,28 +65,4 @@ test("lobby sounds announce only other players entering and leaving after the in
     ["LEAVE"],
   );
   assert.deepEqual(multiplayerLobbyRosterSounds(new Set(), [self], self.participantId), []);
-});
-
-test("ready-state lobby deltas repaint immediately while gaps require roster reconciliation", () => {
-  const players = [player(0), player(1, "JOINED")];
-  const target = players[1];
-  assert.ok(target);
-  const message: MultiplayerLobbyChangedMessage = {
-    type: "LOBBY_CHANGED",
-    v: 1,
-    instanceId: "instance_lobby_test_01",
-    generation: 1,
-    sequence: 1,
-    change: {
-      kind: "PARTICIPANT_READY",
-      participantId: target.participantId,
-      status: "READY",
-    },
-  };
-  assert.equal(applyMultiplayerLobbyChange(players, message, false)?.[1]?.status, "READY");
-  assert.equal(applyMultiplayerLobbyChange(players, message, true), null);
-  assert.equal(
-    applyMultiplayerLobbyChange(players, { ...message, change: { kind: "INVALIDATE" } }, false),
-    null,
-  );
 });

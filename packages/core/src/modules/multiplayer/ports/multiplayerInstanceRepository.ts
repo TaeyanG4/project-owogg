@@ -113,6 +113,8 @@ export type CreateMultiplayerInviteResult =
 export interface TransitionMultiplayerParticipantInput {
   readonly instanceId: string;
   readonly expectedInstanceGeneration: number;
+  /** Optional instance-state CAS used when a participant transition is valid in one phase only. */
+  readonly expectedInstanceStatus?: MultiplayerInstanceStatus;
   readonly userId: number;
   readonly expectedStatus: MultiplayerParticipantStatus;
   readonly nextStatus: MultiplayerParticipantStatus;

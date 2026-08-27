@@ -357,6 +357,16 @@ test("participants enter READY while only the host start request creates one ACT
   assert.equal(match?.status, "ACTIVE");
   assert.equal((await matches.listPlayers(match?.id ?? "missing")).length, 2);
 
+  const staleWaitingLeave = await rooms.leaveRoom({
+    userId: 2,
+    instanceId: created.instance.id,
+    expectedGeneration: 1,
+    expectedInstanceStatus: "LOBBY",
+  });
+  assert.deepEqual(staleWaitingLeave, { ok: false, code: "STALE_GENERATION" });
+  assert.equal((await instances.findParticipant(created.instance.id, 2))?.status, "READY");
+  assert.equal((await instances.findById(created.instance.id))?.status, "ACTIVE");
+
   const left = await rooms.leaveRoom({
     userId: 2,
     instanceId: created.instance.id,

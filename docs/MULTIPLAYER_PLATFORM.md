@@ -142,8 +142,8 @@ domain class에 Cloudflare나 D1 이름을 하드코딩하지 않는다.
 
 ```text
 OwOGG Web / GameHost
- ├─ Auth, create, join, invite, ticket ── API Worker ── D1
- ├─ WebSocket ───────────────────────── MultiplayerInstanceObject
+ ├─ Auth, create, join, ready, roster, start ── API Worker ── D1
+ ├─ Active-match WebSocket ─────────────────── MultiplayerInstanceObject
  │                                       └─ allowlisted official/template ruleset
  └─ MessageChannel ───────────────────── sandbox game iframe
 
@@ -398,7 +398,9 @@ trigger 관례를 재사용한다.
 - Instance create는 HTTP idempotency key를 사용한다.
 - capacity increment, participant insert와 invite use increment를 guarded batch로 묶는다.
 - CAS update 0행은 SQL failure가 아니므로 모든 후속 statement도 선행 `changes()`에 조건부로 실행한다.
-- M1 action ledger는 payload hash, expected/applied revision과 결과를 보관한다.
+- M1 action ledger는 승인된 action의 payload hash, expected/applied revision과 결과를 보관한다.
+- 문법·규칙·turn 검증에서 거부된 새 intent는 D1에 쓰지 않는다. 같은 `clientActionId` 재전송 때만 기존
+  승인 row를 조회해 멱등 결과를 복구하며, 과거 배포가 만든 rejected row는 읽기 호환만 유지한다.
 - 동일 clientActionId + 동일 payload는 저장된 결과를 반환한다.
 - 동일 clientActionId + 다른 payload는 abuse/conflict로 거절한다.
 - stale revision은 typed error와 최신 projected revision/state를 반환한다.
@@ -639,7 +641,7 @@ Reaction Duel은 network path 차이 때문에 high-value competitive 결과로 
 ### 금지
 
 ```text
-D1 polling을 Production realtime transport로 사용
+D1 polling을 Production gameplay/frame transport로 사용
 D1에 position/tick/frame 저장
 idle room setInterval
 변화 없는 full snapshot 반복
@@ -649,20 +651,22 @@ per-frame raw logging
 
 ### 권장
 
-- lobby/turn waiting은 Hibernation API 사용
-- 정상 lobby는 WebSocket push와 연결 직후 sequence sync 1회만 사용하고 application heartbeat나 반복
-  roster 조회를 만들지 않는다. Ready/Join/Start처럼 실제 상태가 바뀔 때만 D1 확정 뒤 DO가 참가자에게
-  즉시 push한다.
-- lobby socket 장애 시에만 D1 roster 복구 조회를 foreground `2→2→3→5→10→15→30초`, background
-  30초로 backoff하고 ACTIVE/종료 즉시 중단한다. 정상 연결된 적 없는 socket은 재시도하지 않으며,
-  정상 연결 뒤 단절도 `1→3→10→30초` 네 번까지만 재연결한다.
+- turn waiting은 Hibernation API를 사용한다. 대기실은 gameplay realtime transport가 아니라 D1 control
+  plane이므로 Durable Object를 만들지 않는다.
+- 대기실 roster는 foreground 15초, background 120초 간격에 ±10% jitter를 적용해 한 번씩만 조회하고
+  focus 복귀 때 즉시 동기화한다. 한 요청이 진행 중일 때 중복 요청하지 않으며 `429`는 120초, 일시적
+  network/5xx는 60초로 backoff하고 ACTIVE/종료 즉시 중단한다.
 - active gameplay heartbeat는 30초 간격과 Hibernation auto-response를 사용하고 terminal/abort/leave 즉시
-  중단한다. lobby에는 heartbeat를 보내지 않는다.
-- replayed Join, 동일한 Ready 상태처럼 실제 변경이 없는 쓰기는 DO notify를 생략하고, Leave는 이미 DO에
-  들어온 control request 안에서 peer invalidation을 방송해 두 번째 DO fetch를 만들지 않는다.
+  중단한다. 대기실에는 WebSocket과 heartbeat가 모두 없다.
+- Join/Ready/Start와 대기실 Leave는 D1에서만 처리한다. 명시적 Leave가 진행 중 match의 즉시 기권을
+  확정해야 할 때만 Durable Object control request를 사용한다.
 - gameplay message마다 `last_seen_at`을 갱신하지 않는다. Hibernation WebSocket의 close/error와
   connection generation이 접속 권위이며, 연결 시각과 실제 disconnect 시각만 저장해 action당 DO SQL
-  write 1개를 제거한다. action rate window와 authoritative state checkpoint는 보안·복구를 위해 유지한다.
+  write 1개를 제거한다. 1초 action burst window는 메모리에 두고, turn/revision/action-id/D1 action ledger와
+  authoritative state checkpoint만 영속 보안·복구 경계로 유지한다.
+- gameplay ingress는 JSON/D1 처리 전에 4KiB frame cap, socket/object queue cap과 메모리 burst guard를
+  적용한다. profile action rate를 넘기면 연결을 닫고, 공격자가 만든 rejection을 D1 index write로
+  증폭할 수 없게 한다.
 - 30초 join-ticket nonce는 서명 만료를 edge에서 먼저 검증하고 DO 입장 시 원자 소비한다. nonce row
   삭제만을 위한 개별 alarm은 만들지 않고 다음 admission/lifecycle alarm에서 lazy cleanup한다.
 - M2 input은 최신 방향 state로 coalesce
@@ -702,31 +706,38 @@ write 50M이 포함되며 초과 단가는 request `$0.15/M`, duration `$12.50/M
 WebSocket upgrade와 alarm은 각각 request 1개이고 client→DO message는 과금에서 20:1로 환산한다. DO
 dashboard의 message metric은 20:1 전 원시 개수이므로 quota 계산과 직접 비교하지 않는다.
 
-첫 2인 오목 한 판에서 정상 경로의 보수적 request 계산은 다음과 같다.
+대기실 DO 0은 전체 요청 0이라는 뜻은 아니다. 두 플레이어가 모두 foreground이면 roster HTTP/D1 조회는
+분당 최대 약 8회, 둘 다 background이면 약 1회다. 이는 DO request/write 고갈을 막는 대신 일반 Worker
+request와 D1 read로 비용 축을 옮긴 의도적 절충이다. 실제 D1 과금은 반환 행 수가 아니라 스캔한
+`rows_read`를 사용하므로 [D1 공식 가격/계측 기준](https://developers.cloudflare.com/d1/platform/pricing/)의
+query meta와 dashboard로 별도 측정한다.
+
+첫 2인 오목 한 판에서 정상 경로의 보수적 request 계산은 다음과 같다. 대기실에서 기다리는 시간은 이
+식의 DO request에 포함되지 않는다.
 
 ```text
-fixed DO fetch/upgrade = 6
-  host/player lobby upgrade 2 + join notify 1 + start notify 1 + gameplay upgrade 2
-normal lifecycle alarm = 약 3
-  lobby→game empty-grace 정리 + rematch expiry + instance TTL
-client WebSocket messages = N + 5 + 2*floor(T/30)
-  N moves + lobby sync 2 + game ready 2 + stone selection 1 + 30초 heartbeat 2인
+fixed DO fetch/upgrade = 2
+  host/player gameplay upgrade 2
+normal lifecycle alarm = 약 1
+  rematch expiry 1 (disconnect/finalization retry가 없는 정상 완료 기준)
+client WebSocket messages = N + 3 + 2*floor(T/30)
+  N moves + game ready 2 + stone selection 1 + 30초 heartbeat 2인
 
-billable DO requests ≈ 9 + (N + 5 + 2*floor(T/30)) / 20
+billable DO requests ≈ 3 + (N + 3 + 2*floor(T/30)) / 20
 ```
 
 | 경기 가정         | raw client message | billable DO request | request 한도만 본 Free 경기/일 |
 | ----------------- | -----------------: | ------------------: | -----------------------------: |
-| 5분·40수          |                 65 |               12.25 |                          8,163 |
-| 10분·60수 기준    |                105 |               14.25 |                          7,017 |
-| 20분·100수 장기전 |                185 |               18.25 |                          5,479 |
+| 5분·40수          |                 63 |                6.15 |                         16,260 |
+| 10분·60수 기준    |                103 |                8.15 |                         12,269 |
+| 20분·100수 장기전 |                183 |               12.15 |                          8,230 |
 
-요청보다 먼저 도달할 가능성이 큰 한도는 SQLite/D1 write다. 현재 정상 착수는 DO에서 durable rate window
-1행과 authoritative checkpoint 1행을 쓰고, D1에서는 match revision과 append-only action을 쓴다. 연결,
-권위 초기화, 마지막 수와 finalization overhead를 포함한 Staging 출발 추정은 DO write
-`2*N + 40~70`, D1 write도 비슷한 규모다. 따라서 Free write 한도는 평균 60수 기준 대략
-`500~625 matches/day`이며 운영 안전 상한은 계측 전 그 절반 이하로 둔다. 인덱스 유지와 replay/forfeit
-비율에 따라 달라지므로 Cloudflare의 실제 rows-written metric으로 보정해야 한다.
+요청보다 먼저 도달할 가능성이 큰 한도는 SQLite/D1 write다. 현재 정상 착수는 DO에서 authoritative
+checkpoint 1행만 쓰고, D1에서는 match revision과 append-only action을 쓴다. 복구 시 동일한 runtime
+checkpoint는 비교 후 쓰지 않는다. 연결·권위 초기화·마지막 수·finalization overhead를 포함한 Staging
+출발 추정은 DO write `N + 30~50`, D1 write도 비슷한 규모다. 따라서 Free write 한도는 평균 60수 기준
+대략 `900~1,100 matches/day`이며 운영 안전 상한은 계측 전 그 절반 이하로 둔다. 인덱스 유지와
+replay/forfeit 비율에 따라 달라지므로 Cloudflare의 실제 rows-written metric으로 보정해야 한다.
 
 Hibernation 중 idle WebSocket은 duration이 없고 outbound message도 request 과금이 없다. duration은
 handler와 D1 I/O가 실제로 활성화한 wall time에 좌우되므로 코드만으로 확정하지 않고 Staging의
@@ -782,7 +793,7 @@ WebSocket/TCP가 하위 packet loss를 재전송으로 숨길 수 있으므로 U
 
 복구 정책:
 
-- lobby/M1: attachment + DO SQLite state로 재구성
+- lobby: D1 roster snapshot으로 재구성, M1: attachment + DO SQLite state로 재구성
 - attachment에는 최소 identity/generation만 저장
 - persisted state에 `stateSchemaVersion` 저장
 - active ruleset revision은 모든 lease가 끝날 때까지 Worker build에서 제거 금지
@@ -979,6 +990,19 @@ READY 이후 DO 알림은 `waitUntil`로 분리해 공급자 quota 장애가 쓰
 재접속은 유한 예산으로 제한한다. gameplay message별 진단용 `last_seen_at` write도 제거해 정상 착수당
 DO SQLite write를 3개 수준에서 rate-limit 1개와 authoritative checkpoint 1개 수준으로 낮춘다. 접속
 ticket별 30초 nonce-cleanup alarm도 제거해 정상 경기당 alarm invocation을 줄인다.
+
+2026-08-28 추가 최소화에서는 대기실 WebSocket/DO notify/lobby alarm을 완전히 제거했다. 대기실은 15초
+foreground·120초 background D1 control-plane 조회만 사용하므로, 방을 만들고 대기하거나 아무도 없는
+방이 만료될 때 DO request/write는 0이다. 대기실 만료와 version lease 해제는 기존 6시간 bounded D1
+cleanup이 담당한다. action rate window는 비권위 burst guard로 메모리에 옮기고 동일 runtime checkpoint
+write를 생략해 정상 착수의 DO SQLite write를 2개 수준에서 1개 수준으로 낮춘다. 제거된 lobby protocol,
+internal endpoint, event sequence/lifecycle table, Web client와 테스트도 함께 삭제했다.
+
+같은 변경의 안전 보정으로 gameplay frame을 큐에 넣기 전에 크기·개수·속도를 제한하고, 새 rejected
+action은 D1 원장에 기록하지 않는다. 정상 action은 기존처럼 revision CAS와 payload hash를 통과한 뒤
+D1에 먼저 기록되며, 동일 action 재전송은 거부 경로에서 기존 승인 row만 조회해 복구한다. 대기실
+`LOBBY → STARTING/ACTIVE`와 REST leave가 겹치면 participant update의 instance-status CAS가 실패하고
+API가 DO 권위 leave로 재위임하므로 경기 중 직접 D1 퇴장으로 canonical 기권 처리를 우회할 수 없다.
 
 완료 Gate: 동시/중복 action으로 corruption이 없고 iframe이 결과·업적·XP를 위조할 수 없다.
 

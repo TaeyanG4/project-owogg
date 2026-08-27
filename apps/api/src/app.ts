@@ -258,9 +258,9 @@ export async function scheduledHandler(
     .cleanupExpired(scheduledAt)
     .catch((err) => console.error("[admin-auth] cleanup crashed:", err));
 
-  // Exact lobby expiry is maintained by one-shot Durable Object alarms. This bounded pass is a
-  // low-frequency safety net for rooms that were created but never established a lobby socket, or
-  // whose alarm could not be delivered during an infrastructure incident.
+  // Waiting rooms remain entirely in D1 and never create a Durable Object. Reuse the existing
+  // six-hour Cron to expire abandoned rows and release version leases in bounded batches; active
+  // gameplay still owns its precise disconnect/finalization alarms inside the authority object.
   const multiplayerCleanupTask = multiplayerInstanceRepo
     .expireDueInstances(scheduledAt.toISOString(), 100)
     .then((expiredIds) => {

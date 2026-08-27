@@ -1,31 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Check, Copy, Crown, Link2, LogOut, Play, UserRound, UsersRound } from "lucide-react";
-import type {
-  MultiplayerLobbyChangedMessage,
-  MultiplayerRoomPlayer,
-  MultiplayerRoomResponse,
-} from "@owogg/contracts";
+import type { MultiplayerRoomPlayer, MultiplayerRoomResponse } from "@owogg/contracts";
 import {
   fetchMultiplayerRoomRoster,
   leaveMultiplayerRoom,
   setMultiplayerRoomReady,
   startMultiplayerRoom,
 } from "./multiplayerRoomApi";
-import {
-  openMultiplayerLobbyRealtime,
-  type MultiplayerLobbyRealtimeHandle,
-} from "./multiplayerLobbyRealtime";
 import { playMultiplayerLobbySound, type MultiplayerLobbySound } from "./multiplayerLobbySound";
 import { ApiClientError } from "../../../lib/api/errors";
 
-// A healthy lobby socket performs no recurring roster reads. These timers run only while the
-// socket is disconnected, bounding D1 cost without hiding changes during a transport outage.
-const DISCONNECTED_ROSTER_REFRESH_DELAYS_MS = [2_000, 2_000, 3_000, 5_000, 10_000, 15_000, 30_000];
-const BACKGROUND_DISCONNECTED_ROSTER_REFRESH_MS = 30_000;
-const LOBBY_INVALIDATION_DEBOUNCE_MS = 120;
-const LOBBY_RATE_LIMIT_RECOVERY_MS = 3_000;
-const LOBBY_RECONNECT_DELAYS_MS = [1_000, 3_000, 10_000, 30_000] as const;
-const LOBBY_RECONNECT_STABLE_MS = 60_000;
+const FOREGROUND_ROSTER_REFRESH_MS = 15_000;
+const BACKGROUND_ROSTER_REFRESH_MS = 120_000;
+const TRANSIENT_ROSTER_RETRY_MS = 60_000;
+const RATE_LIMIT_ROSTER_RETRY_MS = 120_000;
 const MAX_RENDERED_LOBBY_SLOTS = 16;
 
 export function multiplayerLobbyCanStart(
@@ -42,19 +30,16 @@ export function multiplayerLobbySlotCount(maxPlayers: number, occupiedPlayers: n
   return Math.min(Math.max(maxPlayers, occupiedPlayers), MAX_RENDERED_LOBBY_SLOTS);
 }
 
-export function multiplayerLobbyReconnectDelay(
-  realtimeEverConnected: boolean,
-  reconnectAttempt: number,
-): number | null {
-  if (
-    !realtimeEverConnected ||
-    !Number.isSafeInteger(reconnectAttempt) ||
-    reconnectAttempt < 0 ||
-    reconnectAttempt >= LOBBY_RECONNECT_DELAYS_MS.length
-  ) {
-    return null;
-  }
-  return LOBBY_RECONNECT_DELAYS_MS[reconnectAttempt] ?? null;
+export function multiplayerLobbyPollingDelay(visibilityState: DocumentVisibilityState): number {
+  return visibilityState === "hidden" ? BACKGROUND_ROSTER_REFRESH_MS : FOREGROUND_ROSTER_REFRESH_MS;
+}
+
+export function multiplayerLobbyJitteredDelay(
+  delayMs: number,
+  randomValue = Math.random(),
+): number {
+  const boundedRandom = Math.min(1, Math.max(0, randomValue));
+  return Math.round(delayMs * (0.9 + boundedRandom * 0.2));
 }
 
 export function multiplayerLobbyRosterSounds(
@@ -83,22 +68,6 @@ export function multiplayerLobbyRosterSounds(
     sounds.push("LEAVE");
   }
   return sounds;
-}
-
-export function applyMultiplayerLobbyChange(
-  players: readonly MultiplayerRoomPlayer[],
-  message: MultiplayerLobbyChangedMessage,
-  missedEvents: boolean,
-): readonly MultiplayerRoomPlayer[] | null {
-  const change = message.change;
-  if (missedEvents || change.kind !== "PARTICIPANT_READY") return null;
-  let matched = false;
-  const updated = players.map((player) => {
-    if (player.participantId !== change.participantId) return player;
-    matched = true;
-    return player.status === change.status ? player : { ...player, status: change.status };
-  });
-  return matched ? updated : null;
 }
 
 export interface MultiplayerRoomLobbyProps {
@@ -208,7 +177,6 @@ export function MultiplayerRoomLobby({
   const [busy, setBusy] = useState<"START" | "LEAVE" | "READY" | null>(null);
   const [copied, setCopied] = useState<"CODE" | "LINK" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const playersRef = useRef<readonly MultiplayerRoomPlayer[]>([]);
   const previousParticipantIdsRef = useRef<ReadonlySet<string> | null>(null);
   const latestRoomRef = useRef(room);
   const onRoomChangeRef = useRef(onRoomChange);
@@ -219,33 +187,29 @@ export function MultiplayerRoomLobby({
   useEffect(() => {
     let active = true;
     let pollTimer: ReturnType<typeof setTimeout> | undefined;
-    let invalidationTimer: ReturnType<typeof setTimeout> | undefined;
-    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-    let reconnectStableTimer: ReturnType<typeof setTimeout> | undefined;
-    let initialRosterTimer: ReturnType<typeof setTimeout> | undefined;
-    let realtime: MultiplayerLobbyRealtimeHandle | undefined;
-    let reconnectAttempt = 0;
-    let disconnectedPollAttempt = 0;
-    let realtimeConnected = false;
-    let realtimeEverConnected = false;
-    let realtimeRevision = 0;
     let terminalRoom = false;
     let refreshInFlight = false;
-    let refreshQueued = false;
     previousParticipantIdsRef.current = null;
-    playersRef.current = [];
 
-    const refreshOnce = async () => {
-      const startedRevision = realtimeRevision;
+    const schedulePoll = (delay?: number) => {
+      if (!active || terminalRoom) return;
+      if (pollTimer) clearTimeout(pollTimer);
+      const visibilityState =
+        typeof document === "undefined" ? "visible" : document.visibilityState;
+      const baseDelay = delay ?? multiplayerLobbyPollingDelay(visibilityState);
+      pollTimer = setTimeout(() => {
+        pollTimer = undefined;
+        void refresh();
+      }, multiplayerLobbyJitteredDelay(baseDelay));
+    };
+
+    const refresh = async () => {
+      if (refreshInFlight || !active || terminalRoom) return;
+      refreshInFlight = true;
+      let nextDelay: number | undefined;
       try {
         const roster = await fetchMultiplayerRoomRoster(room.instance.id);
         if (!active || roster.generation !== room.instance.generation) return;
-        if (startedRevision !== realtimeRevision) {
-          // A newer socket delta won the race against this HTTP snapshot. Reconcile again instead
-          // of letting an older response visually undo an immediate ready-state change.
-          refreshQueued = true;
-          return;
-        }
         const rosterSounds = multiplayerLobbyRosterSounds(
           previousParticipantIdsRef.current,
           roster.players,
@@ -255,18 +219,15 @@ export function MultiplayerRoomLobby({
           roster.players.map((player) => player.participantId),
         );
         rosterSounds.forEach(playMultiplayerLobbySound);
-        playersRef.current = roster.players;
         setPlayers(roster.players);
         setError(null);
         if (roster.instance.status === "ACTIVE") {
+          terminalRoom = true;
           onRoomChangeRef.current({ ...latestRoomRef.current, instance: roster.instance });
           return;
         }
         if (["ABORTED", "CLOSED", "EXPIRED"].includes(roster.instance.status)) {
           terminalRoom = true;
-          realtimeConnected = true;
-          realtime?.close();
-          realtime = undefined;
           if (pollTimer) {
             clearTimeout(pollTimer);
             pollTimer = undefined;
@@ -277,156 +238,36 @@ export function MultiplayerRoomLobby({
       } catch (reason) {
         if (!active) return;
         if (isTransientLobbySyncError(reason)) {
-          if (reason instanceof ApiClientError && reason.code === "RATE_LIMITED") {
-            scheduleInvalidationRefresh(LOBBY_RATE_LIMIT_RECOVERY_MS);
-          }
-          return;
+          nextDelay =
+            reason instanceof ApiClientError && reason.code === "RATE_LIMITED"
+              ? RATE_LIMIT_ROSTER_RETRY_MS
+              : TRANSIENT_ROSTER_RETRY_MS;
+        } else {
+          setError(messageFor(reason));
         }
-        setError(messageFor(reason));
-      }
-    };
-    const refresh = async () => {
-      if (refreshInFlight) {
-        refreshQueued = true;
-        return;
-      }
-      refreshInFlight = true;
-      try {
-        do {
-          refreshQueued = false;
-          await refreshOnce();
-        } while (active && refreshQueued);
       } finally {
         refreshInFlight = false;
+        schedulePoll(nextDelay);
       }
     };
-    const disconnectedPoll = async () => {
-      pollTimer = undefined;
-      if (!active || realtimeConnected) return;
-      await refresh();
-      if (!active || realtimeConnected) return;
-      pollTimer = setTimeout(
-        () => void disconnectedPoll(),
-        typeof document !== "undefined" && document.visibilityState === "hidden"
-          ? BACKGROUND_DISCONNECTED_ROSTER_REFRESH_MS
-          : DISCONNECTED_ROSTER_REFRESH_DELAYS_MS[
-              Math.min(disconnectedPollAttempt++, DISCONNECTED_ROSTER_REFRESH_DELAYS_MS.length - 1)
-            ],
-      );
-    };
-    const scheduleDisconnectedPoll = () => {
-      if (!active || terminalRoom || realtimeConnected || pollTimer) return;
-      pollTimer = setTimeout(
-        () => void disconnectedPoll(),
-        typeof document !== "undefined" && document.visibilityState === "hidden"
-          ? BACKGROUND_DISCONNECTED_ROSTER_REFRESH_MS
-          : DISCONNECTED_ROSTER_REFRESH_DELAYS_MS[
-              Math.min(disconnectedPollAttempt++, DISCONNECTED_ROSTER_REFRESH_DELAYS_MS.length - 1)
-            ],
-      );
-    };
-    function scheduleInvalidationRefresh(delay = LOBBY_INVALIDATION_DEBOUNCE_MS) {
-      if (!active || invalidationTimer) return;
-      invalidationTimer = setTimeout(() => {
-        invalidationTimer = undefined;
-        void refresh();
-      }, delay);
-    }
-    const connectRealtime = () => {
-      if (!active || terminalRoom) return;
-      try {
-        realtime = openMultiplayerLobbyRealtime({
-          instanceId: room.instance.id,
-          generation: room.instance.generation,
-          onConnected: () => {
-            realtimeConnected = true;
-            realtimeEverConnected = true;
-            disconnectedPollAttempt = 0;
-            if (initialRosterTimer) {
-              clearTimeout(initialRosterTimer);
-              initialRosterTimer = undefined;
-            }
-            if (pollTimer) {
-              clearTimeout(pollTimer);
-              pollTimer = undefined;
-            }
-            // Reconcile once after the authenticated socket is established to close the small
-            // race between the initial roster snapshot and WebSocket admission.
-            void refresh();
-            // Do not reset backoff for a socket that opens and immediately drops. Apart from
-            // avoiding a reconnect storm, this keeps the edge's ten-connects-per-minute limiter
-            // available for genuine tab/network recovery. A minute-long connection is considered
-            // stable and earns the fast first retry again.
-            if (reconnectStableTimer) clearTimeout(reconnectStableTimer);
-            reconnectStableTimer = setTimeout(() => {
-              reconnectStableTimer = undefined;
-              reconnectAttempt = 0;
-            }, LOBBY_RECONNECT_STABLE_MS);
-          },
-          onChanged: (message, missedEvents) => {
-            realtimeRevision += 1;
-            const updated = applyMultiplayerLobbyChange(playersRef.current, message, missedEvents);
-            if (updated) {
-              playersRef.current = updated;
-              setPlayers(updated);
-              setError(null);
-              return;
-            }
-            scheduleInvalidationRefresh();
-          },
-          onDisconnected: () => {
-            realtime = undefined;
-            realtimeConnected = false;
-            if (initialRosterTimer) {
-              clearTimeout(initialRosterTimer);
-              initialRosterTimer = undefined;
-            }
-            if (reconnectStableTimer) {
-              clearTimeout(reconnectStableTimer);
-              reconnectStableTimer = undefined;
-            }
-            // A host leave/room abort can close all DO sockets before a final invalidation frame.
-            // Reconcile once immediately so peers do not wait for the slow resilience poll.
-            scheduleInvalidationRefresh();
-            scheduleDisconnectedPoll();
-            // A failed initial upgrade usually means the realtime service is unavailable (for
-            // example, a provider quota was exhausted). Retrying a failed handshake in every tab
-            // only burns more edge/DO requests and can push the roster fallback into its limiter.
-            // Keep the lobby functional through bounded polling; sockets that were previously
-            // healthy still use the reconnect policy for ordinary network interruptions.
-            if (!active || terminalRoom || reconnectTimer) return;
-            const delay = multiplayerLobbyReconnectDelay(realtimeEverConnected, reconnectAttempt);
-            if (delay === null) return;
-            reconnectAttempt += 1;
-            reconnectTimer = setTimeout(() => {
-              reconnectTimer = undefined;
-              connectRealtime();
-            }, delay);
-          },
-        });
-      } catch {
-        realtimeConnected = false;
-        scheduleDisconnectedPoll();
-        // Synchronous construction failures cannot be repaired by an immediate retry. The
-        // authenticated roster fallback remains available until the component is remounted.
+    const handleVisibilityChange = () => {
+      if (typeof document === "undefined" || document.visibilityState === "hidden") {
+        schedulePoll();
+        return;
       }
+      if (pollTimer) {
+        clearTimeout(pollTimer);
+        pollTimer = undefined;
+      }
+      void refresh();
     };
 
-    // Prefer one roster read after authenticated socket admission. A short fallback prevents a
-    // browser/proxy handshake that stays pending from leaving the lobby visually empty.
-    initialRosterTimer = setTimeout(() => {
-      initialRosterTimer = undefined;
-      void refresh();
-    }, 2_000);
-    connectRealtime();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    void refresh();
     return () => {
       active = false;
-      realtime?.close();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       if (pollTimer) clearTimeout(pollTimer);
-      if (invalidationTimer) clearTimeout(invalidationTimer);
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      if (reconnectStableTimer) clearTimeout(reconnectStableTimer);
-      if (initialRosterTimer) clearTimeout(initialRosterTimer);
     };
   }, [room.instance.generation, room.instance.id, room.participant.id]);
 
@@ -490,13 +331,11 @@ export function MultiplayerRoomLobby({
       const updatedStatus: MultiplayerRoomPlayer["status"] =
         updated.participant.status === "READY" ? "READY" : "JOINED";
       setPlayers((current) => {
-        const next = current.map((player) =>
+        return current.map((player) =>
           player.participantId === updated.participant.id
             ? { ...player, status: updatedStatus }
             : player,
         );
-        playersRef.current = next;
-        return next;
       });
       onRoomChange(updated);
     } catch (reason) {

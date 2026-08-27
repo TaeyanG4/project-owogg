@@ -11,13 +11,11 @@ import {
   verifyMultiplayerJoinTicket,
 } from "@owogg/core";
 import {
-  MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
   MultiplayerCreateInviteResponseSchema,
   MultiplayerGameAvailabilityResponseSchema,
   MultiplayerJoinTicketResponseSchema,
   MultiplayerRoomResponseSchema,
   MultiplayerRoomRosterResponseSchema,
-  type MultiplayerLobbyChange,
 } from "@owogg/contracts";
 import { D1MultiplayerInstanceRepository } from "@owogg/db";
 import { createSqliteD1 } from "../../../packages/db/test/helpers/sqliteD1.js";
@@ -26,12 +24,8 @@ import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_CONNECT_PATH,
   MULTIPLAYER_INTERNAL_LEAVE_PATH,
-  MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER,
-  MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH,
-  MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH,
   MULTIPLAYER_INTERNAL_PROTOCOL_HEADER,
   decodeVerifiedMultiplayerClaims,
-  decodeVerifiedMultiplayerLobbyClaims,
 } from "../src/multiplayer/internalProtocol.js";
 
 const SECRET = "api-multiplayer-ticket-secret-32-bytes-minimum";
@@ -331,12 +325,7 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
 
   const requestLimiter = limiter();
   const recoveryLimiter = limiter();
-  const lobbyNotifications: Array<{
-    instanceId: string;
-    generation: number;
-    change: MultiplayerLobbyChange;
-  }> = [];
-  const lobbyConnections: Request[] = [];
+  let durableObjectFetches = 0;
   const env = runtimeEnv({
     DB: db,
     ...B2_ENV,
@@ -349,24 +338,8 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
       get(instanceId: string) {
         return {
           fetch: async (internalRequest: Request) => {
+            durableObjectFetches += 1;
             const url = new URL(internalRequest.url);
-            if (url.pathname === MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH) {
-              assert.equal(
-                internalRequest.headers.get(MULTIPLAYER_INTERNAL_PROTOCOL_HEADER),
-                MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
-              );
-              const notification = (await internalRequest.json()) as {
-                instanceId: string;
-                generation: number;
-                change: MultiplayerLobbyChange;
-              };
-              lobbyNotifications.push(notification);
-              return new Response(null, { status: 204 });
-            }
-            if (url.pathname === MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH) {
-              lobbyConnections.push(internalRequest);
-              return new Response(null, { status: 204 });
-            }
             assert.equal(url.pathname, MULTIPLAYER_INTERNAL_LEAVE_PATH);
             assert.equal(
               internalRequest.headers.get(MULTIPLAYER_INTERNAL_PROTOCOL_HEADER),
@@ -479,51 +452,49 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
     },
     body: JSON.stringify({ expectedConnectionGeneration: 0 }),
   };
-  const lobbySocketResponse = await app.request(
-    `http://localhost/api/multiplayer/instances/${INSTANCE_ID}/lobby-socket`,
-    {
-      headers: {
-        ...request.headers,
-        Upgrade: "websocket",
-        "Sec-WebSocket-Protocol": MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
-      },
-    },
-    env as any,
-  );
-  assert.equal(lobbySocketResponse.status, 204);
-  assert.equal(lobbyConnections.length, 1);
-  const lobbyConnection = lobbyConnections[0];
-  assert.ok(lobbyConnection);
-  assert.equal(new URL(lobbyConnection.url).pathname, MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH);
-  assert.equal(
-    lobbyConnection.headers.get(MULTIPLAYER_INTERNAL_PROTOCOL_HEADER),
-    MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
-  );
-  assert.equal(
-    lobbyConnection.headers.get("Sec-WebSocket-Protocol"),
-    MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
-  );
-  const lobbyClaims = decodeVerifiedMultiplayerLobbyClaims(
-    lobbyConnection.headers.get(MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER),
-  );
-  assert.deepEqual(lobbyClaims, {
-    instanceId: INSTANCE_ID,
-    participantId: "participant_api_host_0001",
-    userId: 7,
-    generation: 1,
-    expiresAt: Math.ceil(Date.parse(expiresAt) / 1_000),
+  const waitingInstanceId = "instance_api_lobby_leave_0001";
+  await instances.createWithHostAndLease({
+    instanceId: waitingInstanceId,
+    publicCode: "APILEAVE0001",
+    createdByUserId: 7,
+    createIdempotencyHash: "e".repeat(64),
+    gameId: 11,
+    gameVersionId: 12,
+    profileId: 13,
+    profileRevision: 2,
+    visibility: "PRIVATE",
+    joinPolicy: "INVITE_ONLY",
+    lifecycle: "match",
+    maxPlayers: 2,
+    instanceExpiresAt: expiresAt,
+    hostParticipantId: "participant_api_waiting_host_0001",
+    leaseExpiresAt: expiresAt,
+    nowIso,
   });
   assert.equal(
-    `${lobbyConnection.url}\n${[...lobbyConnection.headers].flat().join("\n")}`.includes(
-      sessionToken,
-    ),
-    false,
+    await instances.transition({
+      instanceId: waitingInstanceId,
+      expectedStatus: "CREATED",
+      expectedGeneration: 1,
+      nextStatus: "LOBBY",
+      nextGeneration: 1,
+      closedAt: null,
+      abortCode: null,
+      nowIso,
+    }),
+    true,
   );
-  assert.ok(recoveryLimiter.calls.includes(`multiplayer:lobby:s:${sessionToken.slice(0, 16)}`));
+  const waitingLeave = await app.request(
+    `http://localhost/api/multiplayer/instances/${waitingInstanceId}/leave`,
+    { ...request, body: JSON.stringify({ expectedGeneration: 1 }) },
+    env as any,
+  );
+  assert.equal(waitingLeave.status, 200);
   assert.equal(
-    requestLimiter.calls.some((key) => key.startsWith("multiplayer:lobby:")),
-    false,
+    MultiplayerRoomResponseSchema.parse(await waitingLeave.json()).instance.status,
+    "ABORTED",
   );
+  assert.equal(durableObjectFetches, 0);
 
   const inviteRequest = {
     ...request,
@@ -737,40 +708,10 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
   const left = MultiplayerRoomResponseSchema.parse(await leave.json());
   assert.equal(left.instance.status, "ABORTED");
   assert.equal(left.participant.status, "LEFT");
+  assert.equal(durableObjectFetches, 1);
   assert.equal(
     raw.prepare("SELECT abort_code FROM multiplayer_instances WHERE id = ?").get(INSTANCE_ID)
       ?.abort_code,
     "PARTICIPANT_LEFT",
-  );
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(lobbyNotifications.length, 4);
-  assert.equal(
-    lobbyNotifications.every(
-      (notification) => notification.instanceId === INSTANCE_ID && notification.generation === 1,
-    ),
-    true,
-  );
-  assert.deepEqual(
-    lobbyNotifications.filter((notification) => notification.change.kind === "PARTICIPANT_READY"),
-    [
-      {
-        instanceId: INSTANCE_ID,
-        generation: 1,
-        change: {
-          kind: "PARTICIPANT_READY",
-          participantId: joined.participant.id,
-          status: "JOINED",
-        },
-      },
-      {
-        instanceId: INSTANCE_ID,
-        generation: 1,
-        change: {
-          kind: "PARTICIPANT_READY",
-          participantId: joined.participant.id,
-          status: "READY",
-        },
-      },
-    ],
   );
 });

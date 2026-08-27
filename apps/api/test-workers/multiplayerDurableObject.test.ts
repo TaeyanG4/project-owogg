@@ -6,12 +6,7 @@ import {
   runInDurableObject,
 } from "cloudflare:test";
 import { beforeAll, test } from "vitest";
-import {
-  MULTIPLAYER_HEARTBEAT_REQUEST,
-  MULTIPLAYER_HEARTBEAT_RESPONSE,
-  MULTIPLAYER_LOBBY_SYNC_REQUEST,
-  MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
-} from "@owogg/contracts";
+import { MULTIPLAYER_HEARTBEAT_REQUEST, MULTIPLAYER_HEARTBEAT_RESPONSE } from "@owogg/contracts";
 import {
   MULTIPLAYER_PLAYER_CONNECTION_CHANGED_EVENT,
   MULTIPLAYER_REMATCH_CHANGED_EVENT,
@@ -38,16 +33,10 @@ import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
   MULTIPLAYER_INTERNAL_CONNECT_PATH,
   MULTIPLAYER_INTERNAL_LEAVE_PATH,
-  MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER,
-  MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH,
-  MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH,
   MULTIPLAYER_INTERNAL_PROTOCOL_HEADER,
   MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH,
   decodeVerifiedMultiplayerClaims,
-  decodeVerifiedMultiplayerLobbyClaims,
   encodeVerifiedMultiplayerClaims,
-  encodeVerifiedMultiplayerLobbyClaims,
-  type VerifiedMultiplayerLobbyClaims,
 } from "../src/multiplayer/internalProtocol.js";
 
 const GAME_ID = 81_001;
@@ -220,38 +209,6 @@ function internalRequest(ticketClaims: MultiplayerJoinTicketClaims): Request {
   });
 }
 
-function internalLobbyRequest(lobbyClaims: VerifiedMultiplayerLobbyClaims): Request {
-  return new Request(`https://example.com${MULTIPLAYER_INTERNAL_LOBBY_CONNECT_PATH}`, {
-    headers: {
-      Upgrade: "websocket",
-      "Sec-WebSocket-Protocol": MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
-      [MULTIPLAYER_INTERNAL_PROTOCOL_HEADER]: MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
-      [MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER]: encodeVerifiedMultiplayerLobbyClaims(lobbyClaims),
-    },
-  });
-}
-
-function internalLobbyNotificationRequest(
-  instanceId: string,
-  generation: number,
-  change:
-    | { readonly kind: "INVALIDATE" }
-    | {
-        readonly kind: "PARTICIPANT_READY";
-        readonly participantId: string;
-        readonly status: "JOINED" | "READY";
-      } = { kind: "INVALIDATE" },
-): Request {
-  return new Request(`https://example.com${MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      [MULTIPLAYER_INTERNAL_PROTOCOL_HEADER]: MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
-    },
-    body: JSON.stringify({ instanceId, generation, change }),
-  });
-}
-
 function internalRematchNotificationRequest(generation: number): Request {
   return new Request(`https://example.com${MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH}`, {
     method: "POST",
@@ -412,50 +369,6 @@ async function connect(ticketClaims: MultiplayerJoinTicketClaims): Promise<{
   }
   socket.accept();
   return { socket, response };
-}
-
-async function connectLobby(lobbyClaims: VerifiedMultiplayerLobbyClaims): Promise<{
-  readonly socket: WebSocket;
-  readonly response: Response;
-}> {
-  const id = env.MULTIPLAYER_INSTANCES.idFromName(lobbyClaims.instanceId);
-  const stub = env.MULTIPLAYER_INSTANCES.get(id);
-  const request = internalLobbyRequest(lobbyClaims);
-  if (
-    decodeVerifiedMultiplayerLobbyClaims(
-      request.headers.get(MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER),
-    ) === null
-  ) {
-    throw new Error("test harness failed to round-trip verified lobby claims");
-  }
-  const response = await stub.fetch(request.url, { headers: request.headers });
-  const socket = response.webSocket;
-  if (!socket) throw new Error(`expected lobby WebSocket upgrade, received ${response.status}`);
-  socket.accept();
-  return { socket, response };
-}
-
-async function createLobbyRoom(key: string) {
-  const { rooms, instances } = roomHarness();
-  const created = await rooms.createRoom({
-    userId: HOST_USER_ID,
-    gameSlug: GAME_SLUG,
-    visibility: "PRIVATE",
-    joinPolicy: "OPEN",
-    idempotencyKey: `workers_lobby_${key}_00000001`,
-  });
-  if (!created.ok) throw new Error(`room create failed: ${created.code}`);
-  return {
-    instances,
-    room: created,
-    claims: {
-      instanceId: created.instance.id,
-      participantId: created.participant.id,
-      userId: HOST_USER_ID,
-      generation: created.instance.generation,
-      expiresAt: Math.ceil(Date.parse(created.instance.expiresAt) / 1_000),
-    } satisfies VerifiedMultiplayerLobbyClaims,
-  };
 }
 
 async function createConnectedRoom(key: string): Promise<{
@@ -676,239 +589,17 @@ test("SQLite DO consumes one nonce and persists only minimal connection authorit
         disconnected_at: null,
       },
     ]);
+    expect(
+      state.storage.sql
+        .exec<{ name: string }>(
+          `SELECT name FROM sqlite_master
+           WHERE type = 'table'
+             AND name IN ('participant_rate_windows', 'lobby_event_sequence', 'lobby_lifecycle')`,
+        )
+        .toArray(),
+    ).toEqual([]);
   });
   socket.close(1000, "done");
-});
-
-test("lobby sockets receive ordered invalidations without gameplay state or credentials", async ({
-  expect,
-}) => {
-  const lobbyClaims: VerifiedMultiplayerLobbyClaims = {
-    instanceId: "workers_lobby_instance_0001",
-    participantId: "participant_lobby_workers_0001",
-    userId: HOST_USER_ID,
-    generation: 2,
-    expiresAt: Math.floor(Date.now() / 1_000) + 60 * 60,
-  };
-  const { socket, response } = await connectLobby(lobbyClaims);
-  expect(response.status).toBe(101);
-  expect(response.headers.get("Sec-WebSocket-Protocol")).toBe(MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL);
-  socket.send(MULTIPLAYER_LOBBY_SYNC_REQUEST);
-  await expect(nextMessage(socket, "lobby sequence baseline")).resolves.toEqual({
-    type: "LOBBY_CONNECTED",
-    v: 1,
-    instanceId: lobbyClaims.instanceId,
-    generation: lobbyClaims.generation,
-    sequence: 0,
-  });
-
-  const stub = env.MULTIPLAYER_INSTANCES.get(
-    env.MULTIPLAYER_INSTANCES.idFromName(lobbyClaims.instanceId),
-  );
-  const firstMessage = nextMessage(socket, "first lobby invalidation");
-  const first = await stub.fetch(
-    internalLobbyNotificationRequest(lobbyClaims.instanceId, lobbyClaims.generation),
-  );
-  expect(first.status).toBe(204);
-  await expect(firstMessage).resolves.toEqual({
-    type: "LOBBY_CHANGED",
-    v: 1,
-    instanceId: lobbyClaims.instanceId,
-    generation: lobbyClaims.generation,
-    sequence: 1,
-    change: { kind: "INVALIDATE" },
-  });
-
-  const secondMessage = nextMessage(socket, "second lobby invalidation");
-  const second = await stub.fetch(
-    internalLobbyNotificationRequest(lobbyClaims.instanceId, lobbyClaims.generation, {
-      kind: "PARTICIPANT_READY",
-      participantId: lobbyClaims.participantId,
-      status: "READY",
-    }),
-  );
-  expect(second.status).toBe(204);
-  await expect(secondMessage).resolves.toEqual({
-    type: "LOBBY_CHANGED",
-    v: 1,
-    instanceId: lobbyClaims.instanceId,
-    generation: lobbyClaims.generation,
-    sequence: 2,
-    change: {
-      kind: "PARTICIPANT_READY",
-      participantId: lobbyClaims.participantId,
-      status: "READY",
-    },
-  });
-
-  const heartbeat = nextRawMessage(socket, "lobby hibernation heartbeat response");
-  socket.send(MULTIPLAYER_HEARTBEAT_REQUEST);
-  await expect(heartbeat).resolves.toBe(MULTIPLAYER_HEARTBEAT_RESPONSE);
-  socket.close(1000, "done");
-});
-
-test("HTTP leave reuses its existing Durable Object request to invalidate lobby peers", async ({
-  expect,
-}) => {
-  const { rooms, instances } = roomHarness();
-  const created = await rooms.createRoom({
-    userId: HOST_USER_ID,
-    gameSlug: GAME_SLUG,
-    visibility: "PRIVATE",
-    joinPolicy: "OPEN",
-    idempotencyKey: "workers_lobby_leave_push_0001",
-  });
-  if (!created.ok) throw new Error(`room create failed: ${created.code}`);
-  const joined = await rooms.joinRoom({
-    userId: PLAYER_USER_ID,
-    publicCode: created.instance.publicCode,
-    inviteToken: null,
-  });
-  if (!joined.ok) throw new Error(`room join failed: ${joined.code}`);
-
-  const { socket } = await connectLobby({
-    instanceId: created.instance.id,
-    participantId: created.participant.id,
-    userId: HOST_USER_ID,
-    generation: created.instance.generation,
-    expiresAt: Math.ceil(Date.parse(created.instance.expiresAt) / 1_000),
-  });
-  socket.send(MULTIPLAYER_LOBBY_SYNC_REQUEST);
-  await expect(nextMessage(socket, "leave lobby sequence baseline")).resolves.toMatchObject({
-    type: "LOBBY_CONNECTED",
-    sequence: 0,
-  });
-
-  const lobbyChange = nextMessage(socket, "leave lobby invalidation");
-  const stub = env.MULTIPLAYER_INSTANCES.get(
-    env.MULTIPLAYER_INSTANCES.idFromName(created.instance.id),
-  );
-  const response = await stub.fetch(
-    internalLeaveRequest(created.instance.id, PLAYER_USER_ID, created.instance.generation),
-  );
-  expect(response.status).toBe(200);
-  await expect(response.json()).resolves.toEqual({ ok: true, replayed: false });
-  await expect(lobbyChange).resolves.toMatchObject({
-    type: "LOBBY_CHANGED",
-    instanceId: created.instance.id,
-    generation: created.instance.generation,
-    sequence: 1,
-    change: { kind: "INVALIDATE" },
-  });
-  expect(await instances.findParticipant(created.instance.id, PLAYER_USER_ID)).toMatchObject({
-    status: "LEFT",
-  });
-  socket.close(1000, "done");
-});
-
-test("a reconnect cancels empty-lobby cleanup while a fully abandoned lobby is aborted", async ({
-  expect,
-}) => {
-  const created = await createLobbyRoom("empty_cleanup");
-  const first = await connectLobby(created.claims);
-  const stub = env.MULTIPLAYER_INSTANCES.get(
-    env.MULTIPLAYER_INSTANCES.idFromName(created.room.instance.id),
-  );
-  first.socket.close(1000, "temporary disconnect");
-  await expect
-    .poll(() =>
-      runInDurableObject(
-        stub,
-        async (_instance, state) =>
-          state.storage.sql
-            .exec<{ empty_deadline: number | null }>(
-              "SELECT empty_deadline FROM lobby_lifecycle WHERE singleton = 1",
-            )
-            .toArray()[0]?.empty_deadline ?? null,
-      ),
-    )
-    .not.toBeNull();
-
-  const reconnected = await connectLobby(created.claims);
-  await expect(
-    runInDurableObject(
-      stub,
-      async (_instance, state) =>
-        state.storage.sql
-          .exec<{ empty_deadline: number | null }>(
-            "SELECT empty_deadline FROM lobby_lifecycle WHERE singleton = 1",
-          )
-          .one().empty_deadline,
-    ),
-  ).resolves.toBeNull();
-  expect(await created.instances.findById(created.room.instance.id)).toMatchObject({
-    status: "LOBBY",
-  });
-
-  reconnected.socket.close(1000, "room abandoned");
-  await expect
-    .poll(() =>
-      runInDurableObject(
-        stub,
-        async (_instance, state) =>
-          state.storage.sql
-            .exec<{ empty_deadline: number | null }>(
-              "SELECT empty_deadline FROM lobby_lifecycle WHERE singleton = 1",
-            )
-            .toArray()[0]?.empty_deadline ?? null,
-      ),
-    )
-    .not.toBeNull();
-  await runInDurableObject(stub, async (_instance, state) => {
-    state.storage.sql.exec(
-      "UPDATE lobby_lifecycle SET empty_deadline = ? WHERE singleton = 1",
-      Math.floor(Date.now() / 1_000) - 1,
-    );
-    await state.storage.setAlarm(Date.now() + 60_000);
-  });
-  expect(await runDurableObjectAlarm(stub)).toBe(true);
-  expect(await created.instances.findById(created.room.instance.id)).toMatchObject({
-    status: "ABORTED",
-    abortCode: "INSUFFICIENT_PLAYERS",
-  });
-});
-
-test("the exact lobby expiry alarm releases an otherwise connected stale room", async ({
-  expect,
-}) => {
-  const created = await createLobbyRoom("exact_expiry");
-  const connected = await connectLobby(created.claims);
-  const stub = env.MULTIPLAYER_INSTANCES.get(
-    env.MULTIPLAYER_INSTANCES.idFromName(created.room.instance.id),
-  );
-  expect(
-    await runInDurableObject(
-      stub,
-      async (_instance, state) =>
-        state.getWebSockets(`lobby:generation:${created.claims.generation}`).length,
-    ),
-  ).toBe(1);
-  await runInDurableObject(stub, async (_instance, state) => {
-    state.storage.sql.exec(
-      "UPDATE lobby_lifecycle SET expires_at = ? WHERE singleton = 1",
-      Math.floor(Date.now() / 1_000) - 1,
-    );
-    await state.storage.setAlarm(Date.now() + 60_000);
-  });
-  expect(await runDurableObjectAlarm(stub)).toBe(true);
-  expect(await created.instances.findById(created.room.instance.id)).toMatchObject({
-    status: "EXPIRED",
-    abortCode: null,
-  });
-  expect(
-    await runInDurableObject(
-      stub,
-      async (_instance, state) =>
-        state.storage.sql
-          .exec<{ count: number }>(
-            "SELECT COUNT(*) AS count FROM lobby_lifecycle WHERE singleton = 1",
-          )
-          .one().count,
-    ),
-  ).toBe(0);
-  // Miniflare retains a server-initiated hibernatable close until the client half closes. The
-  // production DO still issues its private close code after reserving the final invalidation.
-  if (connected.socket.readyState < 2) connected.socket.close(1000, "test cleanup");
 });
 
 test("new connection generation takes over and closes the old hibernatable socket", async ({
@@ -947,6 +638,18 @@ test("new connection generation takes over and closes the old hibernatable socke
   );
   expect(stale.status).toBe(409);
   second.socket.close(1000, "done");
+});
+
+test("gameplay ingress closes a socket before repeated frames can grow authority work", async ({
+  expect,
+}) => {
+  const room = await createConnectedRoom("ingress_guard");
+  const closed = nextClose(room.hostSocket);
+  for (let index = 0; index <= 12; index += 1) {
+    room.hostSocket.send(JSON.stringify({ type: "MULTI_READY", v: 1, generation: 1 }));
+  }
+  await expect(closed).resolves.toMatchObject({ code: 1008, reason: "message rate exceeded" });
+  room.playerSocket.close(1000, "done");
 });
 
 test("socket attachment and SQLite authority survive eviction and fail closed without D1 room authority", async ({
@@ -1215,7 +918,7 @@ test("two D1 participants ready, exchange authoritative Omok actions, reject rep
         .bind(match?.id)
         .first<{ count: number }>()
     )?.count,
-  ).toBe(3);
+  ).toBe(2);
 
   room.hostSocket.close(1000, "reconnect");
   const nextParticipant = await room.instances.advanceConnectionGeneration({
