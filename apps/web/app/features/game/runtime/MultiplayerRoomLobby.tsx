@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Check, Copy, Crown, Link2, LogOut, Play, UserRound, UsersRound } from "lucide-react";
-import type { MultiplayerRoomPlayer, MultiplayerRoomResponse } from "@owogg/contracts";
+import type {
+  MultiplayerLobbyChangedMessage,
+  MultiplayerRoomPlayer,
+  MultiplayerRoomResponse,
+} from "@owogg/contracts";
 import {
   fetchMultiplayerRoomRoster,
   leaveMultiplayerRoom,
@@ -13,10 +17,10 @@ import {
 } from "./multiplayerLobbyRealtime";
 import { playMultiplayerLobbySound, type MultiplayerLobbySound } from "./multiplayerLobbySound";
 
-// The lobby WebSocket carries invalidations only. These low-frequency reads are a resilience
-// fallback, not the primary transport, and keep D1/rate-limit cost bounded during idle rooms.
-const ROSTER_REFRESH_MS = 30_000;
-const BACKGROUND_ROSTER_REFRESH_MS = 60_000;
+// A healthy lobby socket performs no recurring roster reads. These timers run only while the
+// socket is disconnected, bounding D1 cost without hiding changes during a transport outage.
+const DISCONNECTED_ROSTER_REFRESH_MS = 15_000;
+const BACKGROUND_DISCONNECTED_ROSTER_REFRESH_MS = 30_000;
 const LOBBY_INVALIDATION_DEBOUNCE_MS = 120;
 const LOBBY_RECONNECT_DELAYS_MS = [1_000, 3_000, 10_000, 30_000] as const;
 const LOBBY_RECONNECT_STABLE_MS = 60_000;
@@ -62,6 +66,22 @@ export function multiplayerLobbyRosterSounds(
     sounds.push("LEAVE");
   }
   return sounds;
+}
+
+export function applyMultiplayerLobbyChange(
+  players: readonly MultiplayerRoomPlayer[],
+  message: MultiplayerLobbyChangedMessage,
+  missedEvents: boolean,
+): readonly MultiplayerRoomPlayer[] | null {
+  const change = message.change;
+  if (missedEvents || change.kind !== "PARTICIPANT_READY") return null;
+  let matched = false;
+  const updated = players.map((player) => {
+    if (player.participantId !== change.participantId) return player;
+    matched = true;
+    return player.status === change.status ? player : { ...player, status: change.status };
+  });
+  return matched ? updated : null;
 }
 
 export interface MultiplayerRoomLobbyProps {
@@ -162,6 +182,7 @@ export function MultiplayerRoomLobby({
   const [busy, setBusy] = useState<"START" | "LEAVE" | "READY" | null>(null);
   const [copied, setCopied] = useState<"CODE" | "LINK" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const playersRef = useRef<readonly MultiplayerRoomPlayer[]>([]);
   const previousParticipantIdsRef = useRef<ReadonlySet<string> | null>(null);
   const latestRoomRef = useRef(room);
   const onRoomChangeRef = useRef(onRoomChange);
@@ -177,14 +198,25 @@ export function MultiplayerRoomLobby({
     let reconnectStableTimer: ReturnType<typeof setTimeout> | undefined;
     let realtime: MultiplayerLobbyRealtimeHandle | undefined;
     let reconnectAttempt = 0;
+    let realtimeConnected = false;
+    let realtimeRevision = 0;
+    let terminalRoom = false;
     let refreshInFlight = false;
     let refreshQueued = false;
     previousParticipantIdsRef.current = null;
+    playersRef.current = [];
 
     const refreshOnce = async () => {
+      const startedRevision = realtimeRevision;
       try {
         const roster = await fetchMultiplayerRoomRoster(room.instance.id);
         if (!active || roster.generation !== room.instance.generation) return;
+        if (startedRevision !== realtimeRevision) {
+          // A newer socket delta won the race against this HTTP snapshot. Reconcile again instead
+          // of letting an older response visually undo an immediate ready-state change.
+          refreshQueued = true;
+          return;
+        }
         const rosterSounds = multiplayerLobbyRosterSounds(
           previousParticipantIdsRef.current,
           roster.players,
@@ -194,6 +226,7 @@ export function MultiplayerRoomLobby({
           roster.players.map((player) => player.participantId),
         );
         rosterSounds.forEach(playMultiplayerLobbySound);
+        playersRef.current = roster.players;
         setPlayers(roster.players);
         setError(null);
         if (roster.instance.status === "ACTIVE") {
@@ -201,6 +234,14 @@ export function MultiplayerRoomLobby({
           return;
         }
         if (["ABORTED", "CLOSED", "EXPIRED"].includes(roster.instance.status)) {
+          terminalRoom = true;
+          realtimeConnected = true;
+          realtime?.close();
+          realtime = undefined;
+          if (pollTimer) {
+            clearTimeout(pollTimer);
+            pollTimer = undefined;
+          }
           setError("대기실이 종료되었습니다. 새 방을 만들어 주세요.");
           return;
         }
@@ -223,14 +264,25 @@ export function MultiplayerRoomLobby({
         refreshInFlight = false;
       }
     };
-    const poll = async () => {
+    const disconnectedPoll = async () => {
+      pollTimer = undefined;
+      if (!active || realtimeConnected) return;
       await refresh();
-      if (!active) return;
+      if (!active || realtimeConnected) return;
       pollTimer = setTimeout(
-        () => void poll(),
+        () => void disconnectedPoll(),
         typeof document !== "undefined" && document.visibilityState === "hidden"
-          ? BACKGROUND_ROSTER_REFRESH_MS
-          : ROSTER_REFRESH_MS,
+          ? BACKGROUND_DISCONNECTED_ROSTER_REFRESH_MS
+          : DISCONNECTED_ROSTER_REFRESH_MS,
+      );
+    };
+    const scheduleDisconnectedPoll = () => {
+      if (!active || terminalRoom || realtimeConnected || pollTimer) return;
+      pollTimer = setTimeout(
+        () => void disconnectedPoll(),
+        typeof document !== "undefined" && document.visibilityState === "hidden"
+          ? BACKGROUND_DISCONNECTED_ROSTER_REFRESH_MS
+          : DISCONNECTED_ROSTER_REFRESH_MS,
       );
     };
     const scheduleInvalidationRefresh = () => {
@@ -241,12 +293,20 @@ export function MultiplayerRoomLobby({
       }, LOBBY_INVALIDATION_DEBOUNCE_MS);
     };
     const connectRealtime = () => {
-      if (!active) return;
+      if (!active || terminalRoom) return;
       try {
         realtime = openMultiplayerLobbyRealtime({
           instanceId: room.instance.id,
           generation: room.instance.generation,
           onConnected: () => {
+            realtimeConnected = true;
+            if (pollTimer) {
+              clearTimeout(pollTimer);
+              pollTimer = undefined;
+            }
+            // Reconcile once after the authenticated socket is established to close the small
+            // race between the initial roster snapshot and WebSocket admission.
+            void refresh();
             // Do not reset backoff for a socket that opens and immediately drops. Apart from
             // avoiding a reconnect storm, this keeps the edge's ten-connects-per-minute limiter
             // available for genuine tab/network recovery. A minute-long connection is considered
@@ -257,9 +317,20 @@ export function MultiplayerRoomLobby({
               reconnectAttempt = 0;
             }, LOBBY_RECONNECT_STABLE_MS);
           },
-          onChanged: scheduleInvalidationRefresh,
+          onChanged: (message, missedEvents) => {
+            realtimeRevision += 1;
+            const updated = applyMultiplayerLobbyChange(playersRef.current, message, missedEvents);
+            if (updated) {
+              playersRef.current = updated;
+              setPlayers(updated);
+              setError(null);
+              return;
+            }
+            scheduleInvalidationRefresh();
+          },
           onDisconnected: () => {
             realtime = undefined;
+            realtimeConnected = false;
             if (reconnectStableTimer) {
               clearTimeout(reconnectStableTimer);
               reconnectStableTimer = undefined;
@@ -267,7 +338,8 @@ export function MultiplayerRoomLobby({
             // A host leave/room abort can close all DO sockets before a final invalidation frame.
             // Reconcile once immediately so peers do not wait for the slow resilience poll.
             scheduleInvalidationRefresh();
-            if (!active || reconnectTimer) return;
+            scheduleDisconnectedPoll();
+            if (!active || terminalRoom || reconnectTimer) return;
             const delay =
               LOBBY_RECONNECT_DELAYS_MS[
                 Math.min(reconnectAttempt, LOBBY_RECONNECT_DELAYS_MS.length - 1)
@@ -280,7 +352,9 @@ export function MultiplayerRoomLobby({
           },
         });
       } catch {
-        if (!active || reconnectTimer) return;
+        realtimeConnected = false;
+        scheduleDisconnectedPoll();
+        if (!active || terminalRoom || reconnectTimer) return;
         const delay =
           LOBBY_RECONNECT_DELAYS_MS[
             Math.min(reconnectAttempt, LOBBY_RECONNECT_DELAYS_MS.length - 1)
@@ -293,7 +367,7 @@ export function MultiplayerRoomLobby({
       }
     };
 
-    void poll();
+    void refresh();
     connectRealtime();
     return () => {
       active = false;
@@ -362,13 +436,17 @@ export function MultiplayerRoomLobby({
         expectedGeneration: room.instance.generation,
         ready: nextReady,
       });
-      setPlayers((current) =>
-        current.map((player) =>
+      const updatedStatus: MultiplayerRoomPlayer["status"] =
+        updated.participant.status === "READY" ? "READY" : "JOINED";
+      setPlayers((current) => {
+        const next = current.map((player) =>
           player.participantId === updated.participant.id
-            ? { ...player, status: updated.participant.status === "READY" ? "READY" : "JOINED" }
+            ? { ...player, status: updatedStatus }
             : player,
-        ),
-      );
+        );
+        playersRef.current = next;
+        return next;
+      });
       onRoomChange(updated);
     } catch (reason) {
       setError(messageFor(reason));
@@ -443,15 +521,6 @@ export function MultiplayerRoomLobby({
               )}
               {copied === "LINK" ? "복사됨" : "링크 복사"}
             </button>
-            <button
-              type="button"
-              disabled={busy !== null}
-              onClick={() => void leave()}
-              className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-xl border border-red-300/25 bg-red-400/5 px-3 py-2 text-sm font-black text-red-300 hover:bg-red-400/15 disabled:cursor-wait disabled:opacity-60"
-            >
-              <LogOut className="h-4 w-4" />
-              {busy === "LEAVE" ? "나가는 중" : "나가기"}
-            </button>
           </div>
         </div>
 
@@ -488,24 +557,24 @@ export function MultiplayerRoomLobby({
         </div>
 
         <div className="mt-5 rounded-2xl border border-border bg-surface p-4">
-          {isHost ? (
-            <button
-              type="button"
-              disabled={!allReady || busy !== null}
-              onClick={() => void start()}
-              className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-brand px-5 text-base font-black text-white transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-45"
-            >
-              <Play className="h-5 w-5 fill-current" />
-              {busy === "START" ? "경기 시작 중" : "경기 시작"}
-            </button>
-          ) : (
-            <>
+          <div className="flex gap-3">
+            {isHost ? (
+              <button
+                type="button"
+                disabled={!allReady || busy !== null}
+                onClick={() => void start()}
+                className="inline-flex min-h-12 min-w-0 flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl bg-brand px-5 text-base font-black text-white transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <Play className="h-5 w-5 fill-current" />
+                {busy === "START" ? "경기 시작 중" : "경기 시작"}
+              </button>
+            ) : (
               <button
                 type="button"
                 disabled={busy !== null}
                 onClick={() => void toggleReady()}
                 aria-pressed={selfReady}
-                className={`inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border px-5 text-base font-black transition-colors disabled:cursor-wait disabled:opacity-55 ${
+                className={`inline-flex min-h-12 min-w-0 flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border px-5 text-base font-black transition-colors disabled:cursor-wait disabled:opacity-55 ${
                   selfReady
                     ? "border-emerald-300/35 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/20"
                     : "border-brand bg-brand text-white hover:bg-brand-hover"
@@ -514,11 +583,17 @@ export function MultiplayerRoomLobby({
                 <Check className="h-5 w-5" />
                 {busy === "READY" ? "변경 중" : selfReady ? "준비 취소" : "준비 완료"}
               </button>
-              <p className="pt-3 text-center text-sm font-bold text-text-secondary">
-                준비 상태를 확인한 뒤 방장이 경기를 시작할 때까지 기다려 주세요.
-              </p>
-            </>
-          )}
+            )}
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() => void leave()}
+              className="inline-flex min-h-12 min-w-28 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-xl border border-red-300/25 bg-red-400/5 px-4 text-base font-black text-red-300 transition-colors hover:bg-red-400/15 disabled:cursor-wait disabled:opacity-60"
+            >
+              <LogOut className="h-5 w-5" />
+              {busy === "LEAVE" ? "나가는 중" : "나가기"}
+            </button>
+          </div>
           {error && (
             <p role="alert" className="mt-3 text-center text-sm font-semibold text-accent-red">
               {error}

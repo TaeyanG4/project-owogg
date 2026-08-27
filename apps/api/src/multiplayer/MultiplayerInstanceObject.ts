@@ -35,6 +35,8 @@ import {
   MULTIPLAYER_HEARTBEAT_REQUEST,
   MULTIPLAYER_HEARTBEAT_RESPONSE,
   MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
+  MultiplayerLobbyChangeSchema,
+  type MultiplayerLobbyChange,
 } from "@owogg/contracts";
 import { createContainer, type AppContainer } from "../container.js";
 import {
@@ -53,6 +55,7 @@ import {
 const STATE_SCHEMA_VERSION = 2;
 const REPLACED_CONNECTION_CLOSE_CODE = 4001;
 const STALE_CONNECTION_CLOSE_CODE = 4002;
+const INSTANCE_EXPIRED_CLOSE_CODE = 4003;
 const POLICY_CLOSE_CODE = 1008;
 const RUNTIME_UNAVAILABLE_CLOSE_CODE = 1013;
 const ACTION_RATE_WINDOW_MS = 1_000;
@@ -60,6 +63,7 @@ const FINALIZATION_RETRY_BASE_MS = 2_000;
 const FINALIZATION_RETRY_MAX_MS = 60_000;
 const RECONNECT_GRACE_MS = 30_000;
 const RECONNECT_GRACE_SECONDS = RECONNECT_GRACE_MS / 1_000;
+const LOBBY_EMPTY_GRACE_SECONDS = 60;
 const textEncoder = new TextEncoder();
 
 interface MultiplayerDurableObjectEnv {
@@ -70,6 +74,19 @@ interface ConnectionAttachment {
   readonly participantId: string;
   readonly generation: number;
   readonly connectionGeneration: number;
+}
+
+interface LobbyConnectionAttachment {
+  readonly kind: "LOBBY";
+  readonly participantId: string;
+  readonly generation: number;
+}
+
+interface LobbyLifecycleRecord {
+  readonly instanceId: string;
+  readonly generation: number;
+  readonly expiresAt: number;
+  readonly emptyDeadline: number | null;
 }
 
 interface ParticipantAuthority {
@@ -153,6 +170,26 @@ function parseAttachment(value: unknown): ConnectionAttachment | null {
     participantId: source.participantId,
     generation: source.generation,
     connectionGeneration: source.connectionGeneration,
+  };
+}
+
+function parseLobbyAttachment(value: unknown): LobbyConnectionAttachment | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const source = value as Record<string, unknown>;
+  const keys = Object.keys(source);
+  if (
+    keys.length !== 3 ||
+    !keys.every((key) => ["kind", "participantId", "generation"].includes(key)) ||
+    source.kind !== "LOBBY" ||
+    !isOpaqueId(source.participantId) ||
+    !isPositiveInteger(source.generation)
+  ) {
+    return null;
+  }
+  return {
+    kind: "LOBBY",
+    participantId: source.participantId,
+    generation: source.generation,
   };
 }
 
@@ -338,6 +375,13 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
           generation INTEGER NOT NULL,
           server_sequence INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS lobby_lifecycle (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          instance_id TEXT NOT NULL,
+          generation INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL,
+          empty_deadline INTEGER
+        );
       `);
     });
   }
@@ -355,15 +399,46 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
         request.headers.get(MULTIPLAYER_INTERNAL_LOBBY_CLAIMS_HEADER),
       );
       if (!claims) return new Response(null, { status: 401 });
+      const nowSeconds = Math.floor(Date.now() / 1_000);
+      if (claims.expiresAt <= nowSeconds) return new Response(null, { status: 410 });
+      const existingLifecycle = this.readLobbyLifecycle();
+      if (
+        existingLifecycle &&
+        (existingLifecycle.instanceId !== claims.instanceId ||
+          existingLifecycle.generation > claims.generation)
+      ) {
+        return new Response(null, { status: 409 });
+      }
+      this.state.storage.sql.exec(
+        `INSERT INTO lobby_lifecycle (
+           singleton, instance_id, generation, expires_at, empty_deadline
+         ) VALUES (1, ?, ?, ?, NULL)
+         ON CONFLICT(singleton) DO UPDATE SET
+           instance_id = excluded.instance_id,
+           generation = excluded.generation,
+           expires_at = CASE
+             WHEN lobby_lifecycle.generation = excluded.generation
+               THEN MIN(lobby_lifecycle.expires_at, excluded.expires_at)
+             ELSE excluded.expires_at
+           END,
+           empty_deadline = NULL`,
+        claims.instanceId,
+        claims.generation,
+        claims.expiresAt,
+      );
       const pair = new WebSocketPair();
       const client = pair[0];
       const server = pair[1];
-      // Lobby sockets deliberately have no gameplay attachment. Hibernation callbacks therefore
-      // ignore their close/error events instead of starting an in-match reconnect grace period.
       this.state.acceptWebSocket(server, [
         lobbyGenerationTag(claims.generation),
         lobbyParticipantTag(claims.participantId),
       ]);
+      server.serializeAttachment({
+        kind: "LOBBY",
+        participantId: claims.participantId,
+        generation: claims.generation,
+      } satisfies LobbyConnectionAttachment);
+      await this.scheduleNextAlarm(claims.expiresAt * 1_000 + 1);
       return new Response(null, { status: 101, webSocket: client });
     }
     if (
@@ -378,25 +453,35 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       } catch {
         return new Response(null, { status: 400 });
       }
+      if (typeof body !== "object" || body === null || Array.isArray(body)) {
+        return new Response(null, { status: 400 });
+      }
+      const source = body as Record<string, unknown>;
+      const parsedChange = MultiplayerLobbyChangeSchema.safeParse(source.change);
       if (
-        typeof body !== "object" ||
-        body === null ||
-        Array.isArray(body) ||
-        Object.keys(body).length !== 2 ||
-        !("instanceId" in body) ||
-        !("generation" in body) ||
-        !isOpaqueId(body.instanceId) ||
-        !isPositiveInteger(body.generation)
+        Object.keys(source).length !== 3 ||
+        !Object.hasOwn(source, "instanceId") ||
+        !Object.hasOwn(source, "generation") ||
+        !Object.hasOwn(source, "change") ||
+        !isOpaqueId(source.instanceId) ||
+        !isPositiveInteger(source.generation) ||
+        !parsedChange.success
       ) {
         return new Response(null, { status: 400 });
       }
       const meta = this.state.storage.sql
         .exec<{ instance_id: string }>("SELECT instance_id FROM runtime_meta WHERE singleton = 1")
         .toArray()[0];
-      if (meta && meta.instance_id !== body.instanceId) {
+      const lifecycle = this.readLobbyLifecycle();
+      if (
+        (meta && meta.instance_id !== source.instanceId) ||
+        (lifecycle &&
+          (lifecycle.instanceId !== source.instanceId ||
+            lifecycle.generation !== source.generation))
+      ) {
         return new Response(null, { status: 409 });
       }
-      this.broadcastLobbyChanged(body.instanceId, body.generation);
+      this.broadcastLobbyChanged(source.instanceId, source.generation, parsedChange.data);
       return new Response(null, { status: 204 });
     }
     if (
@@ -537,14 +622,26 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
 
   override async webSocketClose(socket: WebSocket): Promise<void> {
     const attachment = this.readAttachment(socket);
-    if (!attachment) return;
-    await this.beginReconnectGrace(attachment, Math.ceil(Date.now() / 1_000));
+    if (attachment) {
+      await this.beginReconnectGrace(attachment, Math.ceil(Date.now() / 1_000));
+      return;
+    }
+    const lobbyAttachment = this.readLobbyAttachment(socket);
+    if (lobbyAttachment) {
+      await this.beginLobbyEmptyGrace(lobbyAttachment, Math.ceil(Date.now() / 1_000));
+    }
   }
 
   override async webSocketError(socket: WebSocket): Promise<void> {
     const attachment = this.readAttachment(socket);
-    if (!attachment) return;
-    await this.beginReconnectGrace(attachment, Math.ceil(Date.now() / 1_000));
+    if (attachment) {
+      await this.beginReconnectGrace(attachment, Math.ceil(Date.now() / 1_000));
+      return;
+    }
+    const lobbyAttachment = this.readLobbyAttachment(socket);
+    if (lobbyAttachment) {
+      await this.beginLobbyEmptyGrace(lobbyAttachment, Math.ceil(Date.now() / 1_000));
+    }
   }
 
   override async alarm(): Promise<void> {
@@ -563,6 +660,12 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       "DELETE FROM participant_rate_windows WHERE window_started_at < ?",
       nowMs - 60_000,
     );
+    try {
+      await this.resolveLobbyLifecycle(nowSeconds);
+    } catch (error) {
+      console.error("[multiplayer] lobby lifecycle alarm failed:", error);
+      await this.scheduleNextAlarm(nowMs + FINALIZATION_RETRY_BASE_MS);
+    }
     try {
       await this.resolveExpiredDisconnects(nowSeconds);
     } catch {
@@ -607,17 +710,22 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       .toArray()[0];
     const nextExpiry = integerValue(nextNonce?.expires_at);
     if (nextExpiry !== null) await this.scheduleNextAlarm(nextExpiry * 1_000 + 1_000);
-    const nextDisconnect = this.state.storage.sql
-      .exec<{ disconnected_at: number }>(
-        `SELECT MIN(disconnected_at) AS disconnected_at
-         FROM participant_connections
-         WHERE generation = ? AND disconnected_at IS NOT NULL`,
-        this.generation(),
-      )
+    const meta = this.state.storage.sql
+      .exec<{ generation: number }>("SELECT generation FROM runtime_meta WHERE singleton = 1")
       .toArray()[0];
-    const nextDisconnectedAt = integerValue(nextDisconnect?.disconnected_at);
-    if (nextDisconnectedAt !== null) {
-      await this.scheduleNextAlarm((nextDisconnectedAt + RECONNECT_GRACE_SECONDS) * 1_000 + 1);
+    if (isPositiveInteger(meta?.generation)) {
+      const nextDisconnect = this.state.storage.sql
+        .exec<{ disconnected_at: number }>(
+          `SELECT MIN(disconnected_at) AS disconnected_at
+           FROM participant_connections
+           WHERE generation = ? AND disconnected_at IS NOT NULL`,
+          meta.generation,
+        )
+        .toArray()[0];
+      const nextDisconnectedAt = integerValue(nextDisconnect?.disconnected_at);
+      if (nextDisconnectedAt !== null) {
+        await this.scheduleNextAlarm((nextDisconnectedAt + RECONNECT_GRACE_SECONDS) * 1_000 + 1);
+      }
     }
   }
 
@@ -1031,6 +1139,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
         "DELETE FROM participant_connections WHERE generation = ?",
         generation,
       );
+      this.state.storage.sql.exec("DELETE FROM lobby_lifecycle WHERE singleton = 1");
       for (const connected of this.state.getWebSockets()) connected.close(1000, "match aborted");
       return result;
     }
@@ -2245,7 +2354,11 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     }
   }
 
-  private broadcastLobbyChanged(instanceId: string, generation: number): void {
+  private broadcastLobbyChanged(
+    instanceId: string,
+    generation: number,
+    change: MultiplayerLobbyChange,
+  ): void {
     this.state.storage.sql.exec(
       `INSERT INTO lobby_event_sequence (singleton, generation, server_sequence)
        VALUES (1, ?, 1)
@@ -2269,9 +2382,20 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       instanceId,
       generation,
       sequence,
+      change,
     });
     for (const socket of this.state.getWebSockets(lobbyGenerationTag(generation))) {
-      if (socket.readyState === 1) socket.send(message);
+      if (socket.readyState !== 1) continue;
+      try {
+        socket.send(message);
+      } catch {
+        try {
+          socket.close(RUNTIME_UNAVAILABLE_CLOSE_CODE, "lobby transport unavailable");
+        } catch {
+          // The D1 state and sequence reservation remain authoritative even if a stale socket can
+          // no longer accept either a final frame or close handshake.
+        }
+      }
     }
   }
 
@@ -2593,6 +2717,198 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     } catch {
       return null;
     }
+  }
+
+  private readLobbyAttachment(socket: WebSocket): LobbyConnectionAttachment | null {
+    try {
+      return parseLobbyAttachment(socket.deserializeAttachment());
+    } catch {
+      return null;
+    }
+  }
+
+  private readLobbyLifecycle(): LobbyLifecycleRecord | null {
+    const row = this.state.storage.sql
+      .exec<{
+        instance_id: string;
+        generation: number;
+        expires_at: number;
+        empty_deadline: number | null;
+      }>(
+        `SELECT instance_id, generation, expires_at, empty_deadline
+         FROM lobby_lifecycle WHERE singleton = 1`,
+      )
+      .toArray()[0];
+    if (
+      !row ||
+      !isOpaqueId(row.instance_id) ||
+      !isPositiveInteger(row.generation) ||
+      !isPositiveInteger(row.expires_at)
+    ) {
+      return null;
+    }
+    const emptyDeadline = row.empty_deadline === null ? null : integerValue(row.empty_deadline);
+    if (row.empty_deadline !== null && emptyDeadline === null) return null;
+    return {
+      instanceId: row.instance_id,
+      generation: row.generation,
+      expiresAt: row.expires_at,
+      emptyDeadline,
+    };
+  }
+
+  private hasOpenLobbySocket(generation: number): boolean {
+    return this.state
+      .getWebSockets(lobbyGenerationTag(generation))
+      .some((socket) => socket.readyState === 1);
+  }
+
+  private async beginLobbyEmptyGrace(
+    attachment: LobbyConnectionAttachment,
+    nowSeconds: number,
+  ): Promise<boolean> {
+    const lifecycle = this.readLobbyLifecycle();
+    if (
+      !lifecycle ||
+      lifecycle.generation !== attachment.generation ||
+      this.hasOpenLobbySocket(attachment.generation)
+    ) {
+      return false;
+    }
+    const deadline = nowSeconds + LOBBY_EMPTY_GRACE_SECONDS;
+    this.state.storage.sql.exec(
+      `UPDATE lobby_lifecycle
+       SET empty_deadline = CASE
+         WHEN empty_deadline IS NULL OR empty_deadline > ? THEN ?
+         ELSE empty_deadline
+       END
+       WHERE singleton = 1 AND generation = ?`,
+      deadline,
+      deadline,
+      attachment.generation,
+    );
+    await this.scheduleNextAlarm(deadline * 1_000 + 1);
+    return true;
+  }
+
+  private async resolveLobbyLifecycle(nowSeconds: number): Promise<void> {
+    const lifecycle = this.readLobbyLifecycle();
+    if (!lifecycle) return;
+
+    if (lifecycle.expiresAt <= nowSeconds) {
+      const instance = await this.container.multiplayerInstanceRepo.findById(lifecycle.instanceId);
+      if (!instance || instance.generation !== lifecycle.generation) {
+        this.state.storage.sql.exec("DELETE FROM lobby_lifecycle WHERE singleton = 1");
+        return;
+      }
+      if (!["CLOSED", "ABORTED", "EXPIRED"].includes(instance.status)) {
+        const nowIso = new Date(nowSeconds * 1_000).toISOString();
+        const expired = await this.container.multiplayerInstanceRepo.transition({
+          instanceId: instance.id,
+          expectedStatus: instance.status,
+          expectedGeneration: instance.generation,
+          nextStatus: "EXPIRED",
+          nextGeneration: instance.generation,
+          closedAt: nowIso,
+          abortCode: null,
+          nowIso,
+        });
+        if (!expired) {
+          const concurrent = await this.container.multiplayerInstanceRepo.findById(instance.id);
+          if (
+            !concurrent ||
+            concurrent.generation !== lifecycle.generation ||
+            concurrent.status !== "EXPIRED"
+          ) {
+            await this.scheduleNextAlarm(Date.now() + FINALIZATION_RETRY_BASE_MS);
+            return;
+          }
+        }
+        const runtime = this.readRuntimeMatch();
+        if (runtime && runtime.lifecycle !== "COMMITTED") {
+          this.persistRuntimeMatch({ ...runtime, lifecycle: "ABORTED" });
+          this.broadcastAbort("INFRA_FAILURE");
+        }
+      }
+      this.broadcastLobbyChanged(lifecycle.instanceId, lifecycle.generation, {
+        kind: "INVALIDATE",
+      });
+      this.state.storage.sql.exec("DELETE FROM lobby_lifecycle WHERE singleton = 1");
+      const expiringSockets = new Set(
+        this.state.getWebSockets(lobbyGenerationTag(lifecycle.generation)),
+      );
+      for (const socket of this.state.getWebSockets()) {
+        const gameplay = this.readAttachment(socket);
+        if (gameplay?.generation === lifecycle.generation) expiringSockets.add(socket);
+      }
+      for (const socket of expiringSockets) {
+        try {
+          socket.close(INSTANCE_EXPIRED_CLOSE_CODE, "instance expired");
+        } catch {
+          // Hibernation will discard an already-dead socket; lifecycle cleanup must still commit.
+        }
+      }
+      return;
+    }
+
+    if (lifecycle.emptyDeadline !== null && lifecycle.emptyDeadline <= nowSeconds) {
+      if (this.hasOpenLobbySocket(lifecycle.generation)) {
+        this.state.storage.sql.exec(
+          "UPDATE lobby_lifecycle SET empty_deadline = NULL WHERE singleton = 1",
+        );
+      } else {
+        const instance = await this.container.multiplayerInstanceRepo.findById(
+          lifecycle.instanceId,
+        );
+        if (
+          !instance ||
+          instance.generation !== lifecycle.generation ||
+          ["CLOSED", "ABORTED", "EXPIRED"].includes(instance.status)
+        ) {
+          this.state.storage.sql.exec("DELETE FROM lobby_lifecycle WHERE singleton = 1");
+          return;
+        }
+        if (instance.status === "CREATED" || instance.status === "LOBBY") {
+          const nowIso = new Date(nowSeconds * 1_000).toISOString();
+          const aborted = await this.container.multiplayerInstanceRepo.transition({
+            instanceId: instance.id,
+            expectedStatus: instance.status,
+            expectedGeneration: instance.generation,
+            nextStatus: "ABORTED",
+            nextGeneration: instance.generation,
+            closedAt: nowIso,
+            abortCode: "INSUFFICIENT_PLAYERS",
+            nowIso,
+          });
+          if (!aborted) {
+            const concurrent = await this.container.multiplayerInstanceRepo.findById(instance.id);
+            if (
+              !concurrent ||
+              concurrent.generation !== lifecycle.generation ||
+              concurrent.status !== "ABORTED"
+            ) {
+              await this.scheduleNextAlarm(Date.now() + FINALIZATION_RETRY_BASE_MS);
+              return;
+            }
+          }
+          this.state.storage.sql.exec("DELETE FROM lobby_lifecycle WHERE singleton = 1");
+          return;
+        }
+        // STARTING/ACTIVE/CLOSING use the gameplay reconnect policy. Stop the empty-lobby timer,
+        // but retain the exact instance expiry so an abandoned active authority cannot live forever.
+        this.state.storage.sql.exec(
+          "UPDATE lobby_lifecycle SET empty_deadline = NULL WHERE singleton = 1",
+        );
+      }
+    }
+
+    const current = this.readLobbyLifecycle();
+    if (!current) return;
+    const nextSeconds =
+      current.emptyDeadline === null
+        ? current.expiresAt
+        : Math.min(current.expiresAt, current.emptyDeadline);
+    await this.scheduleNextAlarm(nextSeconds * 1_000 + 1);
   }
 
   private touchConnection(attachment: ConnectionAttachment, nowSeconds: number): void {

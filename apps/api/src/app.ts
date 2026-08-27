@@ -226,10 +226,11 @@ export async function scheduledHandler(
   ctx: ExecutionContext,
 ): Promise<void> {
   const adapters = getStreamerProviderAdapters(env);
-  const { streamerUseCases, adminAuthUseCases } = createContainer(env.DB);
+  const { streamerUseCases, adminAuthUseCases, multiplayerInstanceRepo } = createContainer(env.DB);
+  const scheduledAt = new Date();
 
   const task = (async () => {
-    const now = new Date();
+    const now = scheduledAt;
     await streamerUseCases.ensureFeaturedRevalidationJobs({
       now,
       batchSize: FEATURED_POLICY.DEFAULT_BATCH_SIZE,
@@ -254,10 +255,22 @@ export async function scheduledHandler(
   // Bounded, opportunistic cleanup of expired admin step-up challenges/sessions/login-attempt
   // rows — reuses this existing 6-hour Cron instead of a new background service.
   const adminCleanupTask = adminAuthUseCases
-    .cleanupExpired(new Date())
+    .cleanupExpired(scheduledAt)
     .catch((err) => console.error("[admin-auth] cleanup crashed:", err));
 
-  ctx.waitUntil(Promise.all([task, adminCleanupTask]));
+  // Exact lobby expiry is maintained by one-shot Durable Object alarms. This bounded pass is a
+  // low-frequency safety net for rooms that were created but never established a lobby socket, or
+  // whose alarm could not be delivered during an infrastructure incident.
+  const multiplayerCleanupTask = multiplayerInstanceRepo
+    .expireDueInstances(scheduledAt.toISOString(), 100)
+    .then((expiredIds) => {
+      if (expiredIds.length > 0) {
+        console.log(`[multiplayer] expired stale instances: count=${expiredIds.length}`);
+      }
+    })
+    .catch((err) => console.error("[multiplayer] expiry cleanup crashed:", err));
+
+  ctx.waitUntil(Promise.all([task, adminCleanupTask, multiplayerCleanupTask]));
 }
 
 export { app };

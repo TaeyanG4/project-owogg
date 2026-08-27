@@ -3,6 +3,7 @@ import {
   MULTIPLAYER_HEARTBEAT_RESPONSE,
   MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
   MultiplayerLobbyChangedMessageSchema,
+  type MultiplayerLobbyChangedMessage,
 } from "@owogg/contracts";
 import { API_URL } from "../../../lib/api/config.js";
 
@@ -35,7 +36,7 @@ export interface MultiplayerLobbyRealtimeInput {
   readonly instanceId: string;
   readonly generation: number;
   readonly onConnected?: () => void;
-  readonly onChanged: () => void;
+  readonly onChanged: (message: MultiplayerLobbyChangedMessage, missedEvents: boolean) => void;
   readonly onDisconnected: () => void;
 }
 
@@ -78,8 +79,8 @@ function createBrowserSocket(url: string, protocol: string): MultiplayerLobbySoc
   return new WebSocket(url, protocol);
 }
 
-/** Opens the parent-only invalidation channel. It deliberately carries no roster records; a valid
- * signal asks the authenticated HTTP endpoint for one fresh roster snapshot. */
+/** Opens the parent-only lobby channel. Ready-state deltas can repaint immediately; identity and
+ * full-roster reconciliation remain behind the authenticated HTTP endpoint. */
 export function openMultiplayerLobbyRealtime(
   input: MultiplayerLobbyRealtimeInput,
   dependencies: MultiplayerLobbyRealtimeDependencies = {},
@@ -148,8 +149,10 @@ export function openMultiplayerLobbyRealtime(
     ) {
       return;
     }
+    const missedEvents =
+      lastSequence === 0 ? parsed.data.sequence !== 1 : parsed.data.sequence !== lastSequence + 1;
     lastSequence = parsed.data.sequence;
-    input.onChanged();
+    input.onChanged(parsed.data, missedEvents);
   };
   const onClose = () => signalDisconnected();
   const onError = () => signalDisconnected();

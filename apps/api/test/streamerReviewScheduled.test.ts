@@ -212,9 +212,11 @@ test("scheduled handler — processes a due Featured review end-to-end (mock pro
 });
 
 test("scheduled handler — no-op when no jobs are due", async () => {
+  const preparedSql: string[] = [];
   const env = {
     DB: {
-      prepare() {
+      prepare(sql: string) {
+        preparedSql.push(sql);
         return {
           bind() {
             return {
@@ -254,4 +256,11 @@ test("scheduled handler — no-op when no jobs are due", async () => {
   const summaryLog = logs.find((l) => l.includes("[streamer-review] scheduled run done"));
   assert.ok(summaryLog);
   assert.match(summaryLog, /acquisitionProcessed=0/);
+  assert.equal(
+    preparedSql.some(
+      (sql) => sql.includes("UPDATE multiplayer_instances") && sql.includes("lease.expires_at"),
+    ),
+    true,
+    "the shared Cron must run bounded stale multiplayer instance cleanup",
+  );
 });

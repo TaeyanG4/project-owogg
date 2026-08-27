@@ -74,11 +74,11 @@ test("lobby socket URL is credential-free and anchored to the configured API ori
   assert.throws(() => multiplayerLobbySocketUrl("https://api.owogg.com", "../bad"));
 });
 
-test("valid increasing lobby invalidations refresh once and heartbeat stays transport-only", () => {
+test("valid increasing lobby changes preserve deltas, report gaps, and keep heartbeat transport-only", () => {
   const harness = socketHarness();
   const constructorInputs: Array<{ url: string; protocol: string }> = [];
   let connected = 0;
-  let changed = 0;
+  const changes: Array<{ kind: string; missedEvents: boolean }> = [];
   let disconnected = 0;
   let heartbeat: (() => void) | undefined;
   let cleared = 0;
@@ -88,7 +88,8 @@ test("valid increasing lobby invalidations refresh once and heartbeat stays tran
       instanceId: INSTANCE_ID,
       generation: 3,
       onConnected: () => (connected += 1),
-      onChanged: () => (changed += 1),
+      onChanged: (message, missedEvents) =>
+        changes.push({ kind: message.change.kind, missedEvents }),
       onDisconnected: () => (disconnected += 1),
     },
     {
@@ -127,6 +128,11 @@ test("valid increasing lobby invalidations refresh once and heartbeat stays tran
       instanceId: INSTANCE_ID,
       generation: 3,
       sequence: 1,
+      change: {
+        kind: "PARTICIPANT_READY",
+        participantId: "participant_lobby_test_01",
+        status: "READY",
+      },
     }),
   );
   harness.message(
@@ -136,6 +142,7 @@ test("valid increasing lobby invalidations refresh once and heartbeat stays tran
       instanceId: INSTANCE_ID,
       generation: 3,
       sequence: 1,
+      change: { kind: "INVALIDATE" },
     }),
   );
   harness.message(
@@ -145,10 +152,24 @@ test("valid increasing lobby invalidations refresh once and heartbeat stays tran
       instanceId: INSTANCE_ID,
       generation: 4,
       sequence: 2,
+      change: { kind: "INVALIDATE" },
+    }),
+  );
+  harness.message(
+    JSON.stringify({
+      type: "LOBBY_CHANGED",
+      v: 1,
+      instanceId: INSTANCE_ID,
+      generation: 3,
+      sequence: 3,
+      change: { kind: "INVALIDATE" },
     }),
   );
   harness.message("not-json");
-  assert.equal(changed, 1);
+  assert.deepEqual(changes, [
+    { kind: "PARTICIPANT_READY", missedEvents: false },
+    { kind: "INVALIDATE", missedEvents: true },
+  ]);
 
   harness.disconnect("error");
   harness.disconnect("close");

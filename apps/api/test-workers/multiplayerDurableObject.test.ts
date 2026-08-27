@@ -229,14 +229,24 @@ function internalLobbyRequest(lobbyClaims: VerifiedMultiplayerLobbyClaims): Requ
   });
 }
 
-function internalLobbyNotificationRequest(instanceId: string, generation: number): Request {
+function internalLobbyNotificationRequest(
+  instanceId: string,
+  generation: number,
+  change:
+    | { readonly kind: "INVALIDATE" }
+    | {
+        readonly kind: "PARTICIPANT_READY";
+        readonly participantId: string;
+        readonly status: "JOINED" | "READY";
+      } = { kind: "INVALIDATE" },
+): Request {
   return new Request(`https://example.com${MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       [MULTIPLAYER_INTERNAL_PROTOCOL_HEADER]: MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
     },
-    body: JSON.stringify({ instanceId, generation }),
+    body: JSON.stringify({ instanceId, generation, change }),
   });
 }
 
@@ -421,6 +431,29 @@ async function connectLobby(lobbyClaims: VerifiedMultiplayerLobbyClaims): Promis
   if (!socket) throw new Error(`expected lobby WebSocket upgrade, received ${response.status}`);
   socket.accept();
   return { socket, response };
+}
+
+async function createLobbyRoom(key: string) {
+  const { rooms, instances } = roomHarness();
+  const created = await rooms.createRoom({
+    userId: HOST_USER_ID,
+    gameSlug: GAME_SLUG,
+    visibility: "PRIVATE",
+    joinPolicy: "OPEN",
+    idempotencyKey: `workers_lobby_${key}_00000001`,
+  });
+  if (!created.ok) throw new Error(`room create failed: ${created.code}`);
+  return {
+    instances,
+    room: created,
+    claims: {
+      instanceId: created.instance.id,
+      participantId: created.participant.id,
+      userId: HOST_USER_ID,
+      generation: created.instance.generation,
+      expiresAt: Math.ceil(Date.parse(created.instance.expiresAt) / 1_000),
+    } satisfies VerifiedMultiplayerLobbyClaims,
+  };
 }
 
 async function createConnectedRoom(key: string): Promise<{
@@ -653,6 +686,7 @@ test("lobby sockets receive ordered invalidations without gameplay state or cred
     participantId: "participant_lobby_workers_0001",
     userId: HOST_USER_ID,
     generation: 2,
+    expiresAt: Math.floor(Date.now() / 1_000) + 60 * 60,
   };
   const { socket, response } = await connectLobby(lobbyClaims);
   expect(response.status).toBe(101);
@@ -672,11 +706,16 @@ test("lobby sockets receive ordered invalidations without gameplay state or cred
     instanceId: lobbyClaims.instanceId,
     generation: lobbyClaims.generation,
     sequence: 1,
+    change: { kind: "INVALIDATE" },
   });
 
   const secondMessage = nextMessage(socket, "second lobby invalidation");
   const second = await stub.fetch(
-    internalLobbyNotificationRequest(lobbyClaims.instanceId, lobbyClaims.generation),
+    internalLobbyNotificationRequest(lobbyClaims.instanceId, lobbyClaims.generation, {
+      kind: "PARTICIPANT_READY",
+      participantId: lobbyClaims.participantId,
+      status: "READY",
+    }),
   );
   expect(second.status).toBe(204);
   await expect(secondMessage).resolves.toEqual({
@@ -685,12 +724,127 @@ test("lobby sockets receive ordered invalidations without gameplay state or cred
     instanceId: lobbyClaims.instanceId,
     generation: lobbyClaims.generation,
     sequence: 2,
+    change: {
+      kind: "PARTICIPANT_READY",
+      participantId: lobbyClaims.participantId,
+      status: "READY",
+    },
   });
 
   const heartbeat = nextRawMessage(socket, "lobby hibernation heartbeat response");
   socket.send(MULTIPLAYER_HEARTBEAT_REQUEST);
   await expect(heartbeat).resolves.toBe(MULTIPLAYER_HEARTBEAT_RESPONSE);
   socket.close(1000, "done");
+});
+
+test("a reconnect cancels empty-lobby cleanup while a fully abandoned lobby is aborted", async ({
+  expect,
+}) => {
+  const created = await createLobbyRoom("empty_cleanup");
+  const first = await connectLobby(created.claims);
+  const stub = env.MULTIPLAYER_INSTANCES.get(
+    env.MULTIPLAYER_INSTANCES.idFromName(created.room.instance.id),
+  );
+  first.socket.close(1000, "temporary disconnect");
+  await expect
+    .poll(() =>
+      runInDurableObject(
+        stub,
+        async (_instance, state) =>
+          state.storage.sql
+            .exec<{ empty_deadline: number | null }>(
+              "SELECT empty_deadline FROM lobby_lifecycle WHERE singleton = 1",
+            )
+            .toArray()[0]?.empty_deadline ?? null,
+      ),
+    )
+    .not.toBeNull();
+
+  const reconnected = await connectLobby(created.claims);
+  await expect(
+    runInDurableObject(
+      stub,
+      async (_instance, state) =>
+        state.storage.sql
+          .exec<{ empty_deadline: number | null }>(
+            "SELECT empty_deadline FROM lobby_lifecycle WHERE singleton = 1",
+          )
+          .one().empty_deadline,
+    ),
+  ).resolves.toBeNull();
+  expect(await created.instances.findById(created.room.instance.id)).toMatchObject({
+    status: "LOBBY",
+  });
+
+  reconnected.socket.close(1000, "room abandoned");
+  await expect
+    .poll(() =>
+      runInDurableObject(
+        stub,
+        async (_instance, state) =>
+          state.storage.sql
+            .exec<{ empty_deadline: number | null }>(
+              "SELECT empty_deadline FROM lobby_lifecycle WHERE singleton = 1",
+            )
+            .toArray()[0]?.empty_deadline ?? null,
+      ),
+    )
+    .not.toBeNull();
+  await runInDurableObject(stub, async (_instance, state) => {
+    state.storage.sql.exec(
+      "UPDATE lobby_lifecycle SET empty_deadline = ? WHERE singleton = 1",
+      Math.floor(Date.now() / 1_000) - 1,
+    );
+    await state.storage.setAlarm(Date.now() + 60_000);
+  });
+  expect(await runDurableObjectAlarm(stub)).toBe(true);
+  expect(await created.instances.findById(created.room.instance.id)).toMatchObject({
+    status: "ABORTED",
+    abortCode: "INSUFFICIENT_PLAYERS",
+  });
+});
+
+test("the exact lobby expiry alarm releases an otherwise connected stale room", async ({
+  expect,
+}) => {
+  const created = await createLobbyRoom("exact_expiry");
+  const connected = await connectLobby(created.claims);
+  const stub = env.MULTIPLAYER_INSTANCES.get(
+    env.MULTIPLAYER_INSTANCES.idFromName(created.room.instance.id),
+  );
+  expect(
+    await runInDurableObject(
+      stub,
+      async (_instance, state) =>
+        state.getWebSockets(`lobby:generation:${created.claims.generation}`).length,
+    ),
+  ).toBe(1);
+  await runInDurableObject(stub, async (_instance, state) => {
+    state.storage.sql.exec(
+      "UPDATE lobby_lifecycle SET expires_at = ? WHERE singleton = 1",
+      Math.floor(Date.now() / 1_000) - 1,
+    );
+    await state.storage.setAlarm(Date.now() + 60_000);
+  });
+  expect(await runDurableObjectAlarm(stub)).toBe(true);
+  expect(await created.instances.findById(created.room.instance.id)).toMatchObject({
+    status: "EXPIRED",
+    abortCode: null,
+  });
+  expect(
+    await runInDurableObject(
+      stub,
+      async (_instance, state) =>
+        state.storage.sql
+          .exec<{ count: number }>(
+            "SELECT COUNT(*) AS count FROM lobby_lifecycle WHERE singleton = 1",
+          )
+          .one().count,
+    ),
+  ).toBe(0);
+  // Miniflare retains a server-initiated hibernatable close until the client half closes. The
+  // production DO still issues its private close code after reserving the final invalidation.
+  if (connected.socket.readyState < 2) connected.socket.close(1000, "test cleanup");
 });
 
 test("new connection generation takes over and closes the old hibernatable socket", async ({

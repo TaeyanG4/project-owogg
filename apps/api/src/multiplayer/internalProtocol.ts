@@ -16,6 +16,8 @@ export interface VerifiedMultiplayerLobbyClaims {
   readonly participantId: string;
   readonly userId: number;
   readonly generation: number;
+  /** Exact D1-authoritative instance expiry, expressed as Unix seconds for a one-shot DO alarm. */
+  readonly expiresAt: number;
 }
 
 function isPositiveInteger(value: unknown): value is number {
@@ -33,12 +35,15 @@ function parseVerifiedMultiplayerLobbyClaims(
   const source = value as Record<string, unknown>;
   const keys = Object.keys(source);
   if (
-    keys.length !== 4 ||
-    !keys.every((key) => ["instanceId", "participantId", "userId", "generation"].includes(key)) ||
+    keys.length !== 5 ||
+    !keys.every((key) =>
+      ["instanceId", "participantId", "userId", "generation", "expiresAt"].includes(key),
+    ) ||
     !isOpaqueId(source.instanceId) ||
     !isOpaqueId(source.participantId) ||
     !isPositiveInteger(source.userId) ||
-    !isPositiveInteger(source.generation)
+    !isPositiveInteger(source.generation) ||
+    !isPositiveInteger(source.expiresAt)
   ) {
     return null;
   }
@@ -47,6 +52,7 @@ function parseVerifiedMultiplayerLobbyClaims(
     participantId: source.participantId,
     userId: source.userId,
     generation: source.generation,
+    expiresAt: source.expiresAt,
   };
 }
 

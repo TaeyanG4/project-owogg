@@ -5,8 +5,9 @@ import { z } from "zod";
  * game instance. */
 export const MULTIPLAYER_HEARTBEAT_REQUEST = "owogg.multiplayer.heartbeat.v1";
 export const MULTIPLAYER_HEARTBEAT_RESPONSE = "owogg.multiplayer.heartbeat-ack.v1";
-/** Parent-only lobby update channel. It carries invalidation signals only; roster identity remains
- * behind the authenticated HTTP roster endpoint and never enters a game iframe. */
+/** Parent-only lobby update channel. It carries either a credential-free invalidation or the
+ * minimal ready-state delta needed for an immediate lobby repaint. Nicknames, avatars, sessions,
+ * and the full roster remain behind the authenticated HTTP endpoint and never enter a game iframe. */
 export const MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL = "owogg.multiplayer.lobby.v1";
 
 const OpaqueIdSchema = z.string().regex(/^[A-Za-z0-9_-]{8,128}$/);
@@ -20,6 +21,18 @@ const IdempotencyKeySchema = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/);
 const PublicRoomCodeSchema = z.string().regex(/^[A-Za-z0-9_-]{12,64}$/);
 const InviteTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{32,128}$/);
 
+export const MultiplayerLobbyChangeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("INVALIDATE") }).strict(),
+  z
+    .object({
+      kind: z.literal("PARTICIPANT_READY"),
+      participantId: OpaqueIdSchema,
+      status: z.enum(["JOINED", "READY"]),
+    })
+    .strict(),
+]);
+export type MultiplayerLobbyChange = z.infer<typeof MultiplayerLobbyChangeSchema>;
+
 export const MultiplayerLobbyChangedMessageSchema = z
   .object({
     type: z.literal("LOBBY_CHANGED"),
@@ -27,6 +40,7 @@ export const MultiplayerLobbyChangedMessageSchema = z
     instanceId: OpaqueIdSchema,
     generation: z.number().int().positive(),
     sequence: z.number().int().positive(),
+    change: MultiplayerLobbyChangeSchema,
   })
   .strict();
 export type MultiplayerLobbyChangedMessage = z.infer<typeof MultiplayerLobbyChangedMessageSchema>;

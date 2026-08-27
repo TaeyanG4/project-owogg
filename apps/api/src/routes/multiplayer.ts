@@ -18,6 +18,7 @@ import {
   MultiplayerSetReadyRequestSchema,
   MultiplayerStartRoomRequestSchema,
   MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
+  type MultiplayerLobbyChange,
 } from "@owogg/contracts";
 import {
   MULTIPLAYER_ERROR_HTTP_STATUS,
@@ -220,28 +221,28 @@ function notifyRematchChange(c: Context<ApiEnv>, instanceId: string, generation:
   }
 }
 
-function notifyLobbyChange(c: Context<ApiEnv>, instanceId: string, generation: number): void {
+async function notifyLobbyChange(
+  c: Context<ApiEnv>,
+  instanceId: string,
+  generation: number,
+  change: MultiplayerLobbyChange = { kind: "INVALIDATE" },
+): Promise<void> {
   const namespace = c.env.MULTIPLAYER_INSTANCES;
   if (!namespace) return;
-  const notification = namespace
-    .get(namespace.idFromName(instanceId))
-    .fetch(
+  try {
+    await namespace.get(namespace.idFromName(instanceId)).fetch(
       new Request(`https://multiplayer.internal${MULTIPLAYER_INTERNAL_LOBBY_NOTIFY_PATH}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           [MULTIPLAYER_INTERNAL_PROTOCOL_HEADER]: MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
         },
-        body: JSON.stringify({ instanceId, generation }),
+        body: JSON.stringify({ instanceId, generation, change }),
       }),
-    )
-    .then(() => undefined)
-    .catch(() => undefined);
-  try {
-    c.executionCtx.waitUntil(notification);
+    );
   } catch {
-    // Hono's direct request helper has no ExecutionContext. The request is already in flight and
-    // production Workers always attach it to waitUntil.
+    // The D1 mutation is already authoritative. A disconnected lobby socket reconciles from the
+    // authenticated roster endpoint, so notification failure must not roll back the user action.
   }
 }
 
@@ -429,7 +430,7 @@ multiplayerRouter.post("/instances/join", async (c) => {
     inviteToken: parsed.data.inviteToken,
   });
   if (!result.ok) return failure(c, result.code);
-  notifyLobbyChange(c, result.instance.id, result.instance.generation);
+  await notifyLobbyChange(c, result.instance.id, result.instance.generation);
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomResponseSchema.parse({
@@ -527,7 +528,11 @@ multiplayerRouter.post("/instances/:instanceId/ready", async (c) => {
     ready: parsed.data.ready,
   });
   if (!result.ok) return failure(c, result.code);
-  notifyLobbyChange(c, result.instance.id, result.instance.generation);
+  await notifyLobbyChange(c, result.instance.id, result.instance.generation, {
+    kind: "PARTICIPANT_READY",
+    participantId: result.participant.id,
+    status: result.participant.status === "READY" ? "READY" : "JOINED",
+  });
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomResponseSchema.parse({
@@ -568,7 +573,7 @@ multiplayerRouter.post("/instances/:instanceId/start", async (c) => {
     expectedGeneration: parsed.data.expectedGeneration,
   });
   if (!result.ok) return failure(c, result.code);
-  notifyLobbyChange(c, result.instance.id, result.instance.generation);
+  await notifyLobbyChange(c, result.instance.id, result.instance.generation);
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomResponseSchema.parse({
@@ -678,7 +683,7 @@ multiplayerRouter.post("/instances/:instanceId/leave", async (c) => {
   ]);
   if (!instance) return failure(c, "INSTANCE_NOT_FOUND");
   if (!participant) return failure(c, "NOT_PARTICIPANT");
-  notifyLobbyChange(c, instance.id, instance.generation);
+  await notifyLobbyChange(c, instance.id, instance.generation);
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomResponseSchema.parse({
@@ -773,6 +778,10 @@ multiplayerRouter.get("/instances/:instanceId/lobby-socket", async (c) => {
   if (instance.status !== "LOBBY" && instance.status !== "STARTING") {
     return failure(c, "INSTANCE_NOT_JOINABLE");
   }
+  const expiresAt = Date.parse(instance.expiresAt);
+  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+    return failure(c, "INSTANCE_NOT_JOINABLE");
+  }
   if (!participant || (participant.status !== "JOINED" && participant.status !== "READY")) {
     return failure(c, "NOT_PARTICIPANT");
   }
@@ -791,6 +800,7 @@ multiplayerRouter.get("/instances/:instanceId/lobby-socket", async (c) => {
           participantId: participant.id,
           userId: authenticated.user.id,
           generation: instance.generation,
+          expiresAt: Math.ceil(expiresAt / 1_000),
         }),
       },
     },

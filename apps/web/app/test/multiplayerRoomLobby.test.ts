@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { MultiplayerRoomPlayer } from "@owogg/contracts";
+import type { MultiplayerLobbyChangedMessage, MultiplayerRoomPlayer } from "@owogg/contracts";
 import {
+  applyMultiplayerLobbyChange,
   multiplayerLobbyCanStart,
   multiplayerLobbyRosterSounds,
   multiplayerLobbySlotCount,
@@ -55,4 +56,28 @@ test("lobby sounds announce only other players entering and leaving after the in
     ["LEAVE"],
   );
   assert.deepEqual(multiplayerLobbyRosterSounds(new Set(), [self], self.participantId), []);
+});
+
+test("ready-state lobby deltas repaint immediately while gaps require roster reconciliation", () => {
+  const players = [player(0), player(1, "JOINED")];
+  const target = players[1];
+  assert.ok(target);
+  const message: MultiplayerLobbyChangedMessage = {
+    type: "LOBBY_CHANGED",
+    v: 1,
+    instanceId: "instance_lobby_test_01",
+    generation: 1,
+    sequence: 1,
+    change: {
+      kind: "PARTICIPANT_READY",
+      participantId: target.participantId,
+      status: "READY",
+    },
+  };
+  assert.equal(applyMultiplayerLobbyChange(players, message, false)?.[1]?.status, "READY");
+  assert.equal(applyMultiplayerLobbyChange(players, message, true), null);
+  assert.equal(
+    applyMultiplayerLobbyChange(players, { ...message, change: { kind: "INVALIDATE" } }, false),
+    null,
+  );
 });

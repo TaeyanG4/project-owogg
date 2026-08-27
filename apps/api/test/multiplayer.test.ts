@@ -17,6 +17,7 @@ import {
   MultiplayerJoinTicketResponseSchema,
   MultiplayerRoomResponseSchema,
   MultiplayerRoomRosterResponseSchema,
+  type MultiplayerLobbyChange,
 } from "@owogg/contracts";
 import { D1MultiplayerInstanceRepository } from "@owogg/db";
 import { createSqliteD1 } from "../../../packages/db/test/helpers/sqliteD1.js";
@@ -328,7 +329,11 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
   );
 
   const requestLimiter = limiter();
-  const lobbyNotifications: Array<{ instanceId: string; generation: number }> = [];
+  const lobbyNotifications: Array<{
+    instanceId: string;
+    generation: number;
+    change: MultiplayerLobbyChange;
+  }> = [];
   const lobbyConnections: Request[] = [];
   const env = runtimeEnv({
     DB: db,
@@ -350,6 +355,7 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
               const notification = (await internalRequest.json()) as {
                 instanceId: string;
                 generation: number;
+                change: MultiplayerLobbyChange;
               };
               lobbyNotifications.push(notification);
               return new Response(null, { status: 204 });
@@ -499,6 +505,7 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
     participantId: "participant_api_host_0001",
     userId: 7,
     generation: 1,
+    expiresAt: Math.ceil(Date.parse(expiresAt) / 1_000),
   });
   assert.equal(
     `${lobbyConnection.url}\n${[...lobbyConnection.headers].flat().join("\n")}`.includes(
@@ -723,5 +730,28 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
       (notification) => notification.instanceId === INSTANCE_ID && notification.generation === 1,
     ),
     true,
+  );
+  assert.deepEqual(
+    lobbyNotifications.filter((notification) => notification.change.kind === "PARTICIPANT_READY"),
+    [
+      {
+        instanceId: INSTANCE_ID,
+        generation: 1,
+        change: {
+          kind: "PARTICIPANT_READY",
+          participantId: joined.participant.id,
+          status: "JOINED",
+        },
+      },
+      {
+        instanceId: INSTANCE_ID,
+        generation: 1,
+        change: {
+          kind: "PARTICIPANT_READY",
+          participantId: joined.participant.id,
+          status: "READY",
+        },
+      },
+    ],
   );
 });
