@@ -13,6 +13,7 @@
   const statusTitle = document.getElementById("statusTitle");
   const statusDetail = document.getElementById("statusDetail");
   const revisionLabel = document.getElementById("revisionLabel");
+  const rulesLabel = document.getElementById("rulesLabel");
   const stoneBadge = document.getElementById("stoneBadge");
   const stoneLabel = document.getElementById("stoneLabel");
   const soundToggle = document.getElementById("soundToggle");
@@ -144,7 +145,7 @@
     if (
       value.stateSchemaVersion !== 1 ||
       value.rulesetKey !== "official:omok" ||
-      value.rulesetRevision !== 1 ||
+      (value.rulesetRevision !== 1 && value.rulesetRevision !== 2) ||
       value.boardSize !== BOARD_SIZE ||
       value.winLength !== 5 ||
       !Number.isInteger(value.revision) ||
@@ -281,6 +282,10 @@
       const y = Math.floor(index / BOARD_SIZE);
       const value = view ? view.board[index] : ".";
       cell.disabled = !canMove || value !== ".";
+      cell.classList.remove("preview-black", "preview-white");
+      if (canMove && value === "." && view) {
+        cell.classList.add(view.yourStone === "BLACK" ? "preview-black" : "preview-white");
+      }
       cell.replaceChildren();
       cell.setAttribute(
         "aria-label",
@@ -311,11 +316,19 @@
     renderStatus();
     renderBoard();
     revisionLabel.textContent = view ? `공식 상태 · ${view.revision}수` : "공식 상태 대기 중";
+    rulesLabel.textContent =
+      view && view.rulesetRevision === 2
+        ? "렌주 금수룰 · 흑 정확히 5목 / 백 5목 이상"
+        : "자유 오목 · 5개 이상 연결 시 승리";
   }
 
   function rejectionMessage(code) {
     if (code === "NOT_YOUR_TURN") return "아직 내 차례가 아닙니다.";
-    if (code === "ACTION_INVALID") return "그 자리에는 둘 수 없습니다.";
+    if (code === "ACTION_INVALID") {
+      return view && view.rulesetRevision === 2 && view.yourStone === "BLACK"
+        ? "그 자리는 이미 차 있거나 흑 금수(33·44·장목)입니다."
+        : "그 자리에는 둘 수 없습니다.";
+    }
     if (code === "ACTION_CONFLICT") return "동시에 상태가 바뀌어 판을 다시 맞췄습니다.";
     if (code === "RATE_LIMITED") return "착수가 너무 빠릅니다. 잠시 후 다시 시도하세요.";
     if (code === "MATCH_NOT_ACTIVE") return "현재 진행 중인 경기가 아닙니다.";

@@ -6,8 +6,8 @@
     "title": "온라인 오목",
     "genre": "board",
     "mode": "multi",
-    "shortDescription": "서버가 모든 착수와 승패를 판정하는 OWOGG 공식 2인 오목",
-    "description": "15×15 판에서 흑과 백이 번갈아 돌을 놓습니다. 가로, 세로 또는 대각선으로 돌 5개 이상을 먼저 이으면 승리합니다."
+    "shortDescription": "서버가 렌주 금수와 승패를 판정하는 OWOGG 공식 2인 오목",
+    "description": "15×15 판에서 흑과 백이 번갈아 돌을 놓습니다. 흑은 정확히 5목으로 승리하며 33·44·장목 금수가 적용되고, 백은 5목 이상을 이으면 승리합니다."
   },
   "input": ["mouse", "touch"],
   "presentation": { "orientation": "any", "aspectRatio": "1:1" },

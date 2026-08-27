@@ -357,18 +357,43 @@ h1 {
   pointer-events: none;
 }
 
-.intersection:not(:disabled):hover,
-.intersection:not(:disabled):focus-visible {
-  background: radial-gradient(
-    circle at center,
-    rgba(255, 255, 255, 0.24) 0 24%,
-    rgba(255, 255, 255, 0.72) 25% 28%,
-    transparent 30%
-  );
-}
-
 .intersection:not(:disabled) {
   cursor: pointer;
+}
+
+.intersection.preview-black:not(:disabled)::before,
+.intersection.preview-white:not(:disabled)::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 84%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  transition: opacity 90ms ease;
+  z-index: 2;
+}
+
+.intersection.preview-black:not(:disabled)::before {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: radial-gradient(circle at 34% 28%, #606674, #090b10 61%, #000 100%);
+  box-shadow: 0 4px 8px rgba(45, 24, 8, 0.38);
+}
+
+.intersection.preview-white:not(:disabled)::before {
+  border: 1px solid rgba(255, 255, 255, 0.88);
+  background: radial-gradient(circle at 34% 26%, #fff, #e7e9ed 62%, #aeb4bd 100%);
+  box-shadow: 0 4px 8px rgba(45, 24, 8, 0.3);
+}
+
+.intersection.preview-black:not(:disabled):hover::before,
+.intersection.preview-black:not(:disabled):focus-visible::before,
+.intersection.preview-white:not(:disabled):hover::before,
+.intersection.preview-white:not(:disabled):focus-visible::before {
+  opacity: 0.58;
 }
 
 .intersection:focus-visible {

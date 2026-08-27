@@ -76,6 +76,17 @@ if (
   throw new Error("FAIL: official Omok must keep black/white selection inside the game bundle");
 }
 if (
+  !htmlSource.includes('id="rulesLabel"') ||
+  !gameSource.includes("value.rulesetRevision !== 2") ||
+  !gameSource.includes('"preview-black"') ||
+  !gameSource.includes('"preview-white"') ||
+  !styleSource.includes("transform: translate(-50%, -50%)") ||
+  !styleSource.includes(".intersection.preview-black:not(:disabled)::before") ||
+  !styleSource.includes(".intersection.preview-white:not(:disabled)::before")
+) {
+  throw new Error("FAIL: official Omok must show centered stone-colored previews for Renju v2");
+}
+if (
   !htmlSource.includes('id="boardGrid"') ||
   !gameSource.includes("nearestDevicePixelCenter") ||
   !gameSource.includes("devicePixelRatio") ||
@@ -92,4 +103,4 @@ console.log(`  zip bytes: ${zipBytes.length}`);
 console.log(`  files: ${prepared.files.length}, entry: ${prepared.entry}`);
 console.log("  production bundle + manifest validation passed");
 console.log("  no direct storage/network/postMessage authority found in game.js");
-console.log("  in-game stone selection and device-pixel-aligned centered board UI found");
+console.log("  Renju v2, in-game stone selection, centered previews, and aligned board UI found");

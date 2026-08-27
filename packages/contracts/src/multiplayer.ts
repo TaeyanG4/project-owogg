@@ -97,7 +97,9 @@ const AdminOfficialMultiplayerProfileSchema = z
     profileRevision: z.number().int().positive(),
     enabled: z.boolean(),
     rulesetKey: z.literal("official:omok"),
-    rulesetRevision: z.literal(1),
+    // Revision 1 remains readable for immutable in-flight matches and audited upgrades; all new
+    // official Omok profiles are emitted as revision 2 by the server-owned preset.
+    rulesetRevision: z.union([z.literal(1), z.literal(2)]),
     resolvedClass: z.literal("M1"),
     simulationModel: z.literal("turn"),
     reconnectPolicy: z.literal("resume"),
@@ -221,6 +223,14 @@ export const MultiplayerStartRoomRequestSchema = z
   })
   .strict();
 export type MultiplayerStartRoomRequest = z.infer<typeof MultiplayerStartRoomRequestSchema>;
+
+export const MultiplayerSetReadyRequestSchema = z
+  .object({
+    expectedGeneration: z.number().int().positive(),
+    ready: z.boolean(),
+  })
+  .strict();
+export type MultiplayerSetReadyRequest = z.infer<typeof MultiplayerSetReadyRequestSchema>;
 
 export const MultiplayerCreateInviteRequestSchema = z
   .object({

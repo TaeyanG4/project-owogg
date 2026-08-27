@@ -100,6 +100,10 @@ export interface ReadyMultiplayerParticipantInput {
   readonly expectedGeneration: number;
 }
 
+export interface SetMultiplayerParticipantReadyInput extends ReadyMultiplayerParticipantInput {
+  readonly ready: boolean;
+}
+
 export type ReadyMultiplayerParticipantResult =
   | {
       readonly ok: true;
@@ -427,10 +431,19 @@ export class MultiplayerRoomUseCases {
   async readyParticipant(
     input: ReadyMultiplayerParticipantInput,
   ): Promise<ReadyMultiplayerParticipantResult> {
+    return this.setParticipantReady({ ...input, ready: true });
+  }
+
+  /** Shared lobby readiness control. Joining defaults to READY, while this explicit operation lets
+   * a player opt out before the host starts. It is intentionally game-agnostic. */
+  async setParticipantReady(
+    input: SetMultiplayerParticipantReadyInput,
+  ): Promise<ReadyMultiplayerParticipantResult> {
     if (
       !isPositiveInteger(input.userId) ||
       !INSTANCE_ID_PATTERN.test(input.instanceId) ||
-      !isPositiveInteger(input.expectedGeneration)
+      !isPositiveInteger(input.expectedGeneration) ||
+      typeof input.ready !== "boolean"
     ) {
       return { ok: false, code: "INVALID_REQUEST" };
     }
@@ -458,25 +471,27 @@ export class MultiplayerRoomUseCases {
           ? { ok: true, state: "ACTIVE", instance, participant, match }
           : { ok: false, code: "INTERNAL_RETRYABLE" };
       }
-      if (instance.status !== "LOBBY" && instance.status !== "STARTING") {
+      if (instance.status !== "LOBBY") {
         return { ok: false, code: "INSTANCE_NOT_JOINABLE" };
       }
 
       const nowIso = this.now().toISOString();
-      if (participant.status === "JOINED") {
-        const ready = await this.dependencies.instances.transitionParticipant({
+      const nextStatus = input.ready ? "READY" : "JOINED";
+      if (participant.status !== nextStatus) {
+        const transitioned = await this.dependencies.instances.transitionParticipant({
           instanceId: instance.id,
           expectedInstanceGeneration: instance.generation,
           userId: input.userId,
-          expectedStatus: "JOINED",
-          nextStatus: "READY",
-          readyAt: nowIso,
+          expectedStatus: participant.status,
+          nextStatus,
+          readyAt: input.ready ? nowIso : null,
           leftAt: null,
           nowIso,
         });
         participant =
-          ready ?? (await this.dependencies.instances.findParticipant(instance.id, input.userId));
-        if (!participant || participant.status !== "READY") {
+          transitioned ??
+          (await this.dependencies.instances.findParticipant(instance.id, input.userId));
+        if (!participant || participant.status !== nextStatus) {
           return { ok: false, code: "STALE_GENERATION" };
         }
       }

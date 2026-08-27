@@ -13,11 +13,11 @@ import {
   MULTIPLAYER_REMATCH_WINDOW_MS,
   OMOK_ACTION_LEDGER_SCHEMA_VERSION,
   OMOK_RULESET_KEY,
-  OMOK_RULESET_REVISION,
   applyOmokAction,
   createInitialOmokState,
   encodeOmokActionLedgerResponse,
   getOmokTerminalResult,
+  isSupportedOmokRulesetRevision,
   isSupportedMultiplayerRuntimeProfile,
   parseOmokAction,
   parseOmokActionLedgerResponse,
@@ -26,6 +26,7 @@ import {
   type MultiplayerJoinTicketClaims,
   type MultiplayerMatchRecord,
   type OmokActionLedgerResponseV1,
+  type OmokRulesetRevision,
   type OmokStateV1,
   type OmokTerminalResult,
 } from "@owogg/core";
@@ -443,7 +444,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       this.sendPresenceSnapshot(server, attachment);
       this.broadcastPlayerConnection(claims.participantId, "CONNECTED", null);
     } catch {
-      this.disconnectUnavailable(server, attachment);
+      await this.disconnectUnavailable(server, attachment);
     }
     this.ctx.waitUntil(this.scheduleNextAlarm(claims.exp * 1_000 + 1_000));
     return new Response(null, { status: 101, webSocket: client });
@@ -451,41 +452,23 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
 
   override webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): void {
     const task = this.messageQueue.then(() => this.handleWebSocketMessage(socket, message));
-    this.messageQueue = task.catch(() => {
+    this.messageQueue = task.catch(async () => {
       const attachment = this.readAttachment(socket);
-      if (attachment) this.disconnectUnavailable(socket, attachment);
+      if (attachment) await this.disconnectUnavailable(socket, attachment);
     });
     this.ctx.waitUntil(this.messageQueue);
   }
 
-  override webSocketClose(socket: WebSocket): void {
+  override async webSocketClose(socket: WebSocket): Promise<void> {
     const attachment = this.readAttachment(socket);
     if (!attachment) return;
-    const nowSeconds = Math.ceil(Date.now() / 1_000);
-    if (this.markDisconnected(attachment, nowSeconds)) {
-      const deadlineMs = (nowSeconds + RECONNECT_GRACE_SECONDS) * 1_000;
-      this.broadcastPlayerConnection(
-        attachment.participantId,
-        "RECONNECTING",
-        new Date(deadlineMs).toISOString(),
-      );
-      this.ctx.waitUntil(this.scheduleNextAlarm(deadlineMs + 1));
-    }
+    await this.beginReconnectGrace(attachment, Math.ceil(Date.now() / 1_000));
   }
 
-  override webSocketError(socket: WebSocket): void {
+  override async webSocketError(socket: WebSocket): Promise<void> {
     const attachment = this.readAttachment(socket);
     if (!attachment) return;
-    const nowSeconds = Math.ceil(Date.now() / 1_000);
-    if (this.markDisconnected(attachment, nowSeconds)) {
-      const deadlineMs = (nowSeconds + RECONNECT_GRACE_SECONDS) * 1_000;
-      this.broadcastPlayerConnection(
-        attachment.participantId,
-        "RECONNECTING",
-        new Date(deadlineMs).toISOString(),
-      );
-      this.ctx.waitUntil(this.scheduleNextAlarm(deadlineMs + 1));
-    }
+    await this.beginReconnectGrace(attachment, Math.ceil(Date.now() / 1_000));
   }
 
   override async alarm(): Promise<void> {
@@ -504,7 +487,19 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       "DELETE FROM participant_rate_windows WHERE window_started_at < ?",
       nowMs - 60_000,
     );
-    await this.resolveExpiredDisconnects(nowSeconds);
+    try {
+      await this.resolveExpiredDisconnects(nowSeconds);
+    } catch {
+      // A forfeit first becomes TERMINAL_PENDING before D1/B2 finalization. Re-arm explicitly so a
+      // transient repository outage cannot outlive Cloudflare's finite automatic alarm retries.
+      const pending = this.readRuntimeMatch();
+      if (pending?.lifecycle === "TERMINAL_PENDING") {
+        await this.scheduleFinalizationRetry(pending.finalizationAttempts + 1);
+      } else {
+        await this.scheduleNextAlarm(Date.now() + FINALIZATION_RETRY_BASE_MS);
+      }
+      return;
+    }
     const runtime = this.readRuntimeMatch();
     if (runtime?.lifecycle === "TERMINAL_PENDING") {
       try {
@@ -623,7 +618,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       if (result.code === "STALE_GENERATION") {
         socket.close(STALE_CONNECTION_CLOSE_CODE, "stale generation");
       } else {
-        this.disconnectUnavailable(socket, attachment);
+        await this.disconnectUnavailable(socket, attachment);
       }
       return;
     }
@@ -720,7 +715,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       clientSeq: message.clientSeq,
       serverSeq: nextServerSeq,
       clientActionId: message.clientActionId,
-      payloadHash: await this.hashActionPayload(payloadJson),
+      payloadHash: await this.hashActionPayload(payloadJson, runtime.state.rulesetRevision),
       expectedRevision: message.expectedRevision,
       resultRevision: transition.ok ? transition.state.revision : transition.currentRevision,
       resultCode: transition.ok ? "ACCEPTED" : transition.code,
@@ -876,7 +871,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       clientSeq: message.clientSeq,
       serverSeq,
       clientActionId: message.clientActionId,
-      payloadHash: await this.hashActionPayload(payloadJson),
+      payloadHash: await this.hashActionPayload(payloadJson, runtime.state.rulesetRevision),
       expectedRevision: message.expectedRevision,
       resultRevision: runtime.state.revision,
       resultCode: code,
@@ -912,7 +907,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
   ): Promise<void> {
     const result = await this.leaveParticipant(authority.userId, authority.generation);
     if (!result.ok) {
-      this.disconnectUnavailable(socket, attachment);
+      await this.disconnectUnavailable(socket, attachment);
     }
   }
 
@@ -956,10 +951,22 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       const runtime = this.readRuntimeMatch();
       if (runtime) this.persistRuntimeMatch({ ...runtime, lifecycle: "ABORTED" });
       this.broadcastAbort(abortCodeForClient(result.instance.abortCode));
+      this.state.storage.sql.exec(
+        "DELETE FROM participant_connections WHERE generation = ?",
+        generation,
+      );
       for (const connected of this.state.getWebSockets()) connected.close(1000, "match aborted");
       return result;
     }
     if (participant) {
+      // Remove explicit leavers before closing their sockets. Otherwise webSocketClose would
+      // misclassify a deliberate leave as a transient network loss and announce a grace window.
+      this.state.storage.sql.exec(
+        `DELETE FROM participant_connections
+         WHERE participant_id = ? AND generation = ?`,
+        participant.id,
+        generation,
+      );
       for (const connected of this.state.getWebSockets(participantTag(participant.id))) {
         connected.close(1000, "left");
       }
@@ -1021,7 +1028,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       !authority ||
       authority.profileId !== match.profileId ||
       authority.rulesetKey !== OMOK_RULESET_KEY ||
-      authority.rulesetRevision !== OMOK_RULESET_REVISION ||
+      !isSupportedOmokRulesetRevision(authority.rulesetRevision) ||
       match.generation !== this.generation()
     ) {
       throw new Error("unsupported runtime authority");
@@ -1036,7 +1043,11 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       throw new Error("unsupported multiplayer profile");
     }
 
-    let state = current?.state ?? createInitialOmokState();
+    const rulesetRevision: OmokRulesetRevision = authority.rulesetRevision;
+    let state = current?.state ?? createInitialOmokState(rulesetRevision);
+    if (state.rulesetRevision !== rulesetRevision) {
+      throw new Error("runtime state ruleset does not match pinned authority");
+    }
     if (state.revision > match.stateRevision) throw new Error("DO state is ahead of D1 ledger");
     if (state.revision < match.stateRevision) {
       const actions = await this.container.multiplayerMatchRepo.listActionsAfterRevision(
@@ -2018,14 +2029,14 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     return true;
   }
 
-  private async hashActionPayload(payloadJson: string): Promise<string> {
+  private async hashActionPayload(
+    payloadJson: string,
+    rulesetRevision: OmokRulesetRevision,
+  ): Promise<string> {
     return sha256Hex(
-      [
-        "owogg.multiplayer.action.v1",
-        OMOK_RULESET_KEY,
-        String(OMOK_RULESET_REVISION),
-        payloadJson,
-      ].join("\u0000"),
+      ["owogg.multiplayer.action.v1", OMOK_RULESET_KEY, String(rulesetRevision), payloadJson].join(
+        "\u0000",
+      ),
     );
   }
 
@@ -2086,7 +2097,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     });
     if (textEncoder.encode(message).byteLength > sequenced.maxStateBytes) {
       socket.close(RUNTIME_UNAVAILABLE_CLOSE_CODE, "state limit exceeded");
-      this.markDisconnected(attachment, Math.floor(Date.now() / 1_000));
+      await this.beginReconnectGrace(attachment, Math.ceil(Date.now() / 1_000));
     } else {
       socket.send(message);
     }
@@ -2509,7 +2520,25 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     return result.rowsWritten === 1;
   }
 
-  private disconnectUnavailable(socket: WebSocket, attachment: ConnectionAttachment): void {
+  private async beginReconnectGrace(
+    attachment: ConnectionAttachment,
+    nowSeconds: number,
+  ): Promise<boolean> {
+    if (!this.markDisconnected(attachment, nowSeconds)) return false;
+    const deadlineMs = (nowSeconds + RECONNECT_GRACE_SECONDS) * 1_000;
+    this.broadcastPlayerConnection(
+      attachment.participantId,
+      "RECONNECTING",
+      new Date(deadlineMs).toISOString(),
+    );
+    await this.scheduleNextAlarm(deadlineMs + 1);
+    return true;
+  }
+
+  private async disconnectUnavailable(
+    socket: WebSocket,
+    attachment: ConnectionAttachment,
+  ): Promise<void> {
     if (socket.readyState === 1) {
       socket.send(
         JSON.stringify({
@@ -2521,7 +2550,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       );
       socket.close(RUNTIME_UNAVAILABLE_CLOSE_CODE, "runtime unavailable");
     }
-    this.markDisconnected(attachment, Math.floor(Date.now() / 1_000));
+    await this.beginReconnectGrace(attachment, Math.ceil(Date.now() / 1_000));
   }
 
   private instanceId(): string {
@@ -2548,6 +2577,9 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
 
   private async scheduleNextAlarm(desiredMs: number): Promise<void> {
     const current = await this.state.storage.getAlarm();
+    // One DO has one alarm. Outside alarm(), preserve the earliest stored deadline. While alarm()
+    // is executing Cloudflare returns null (until a new alarm is set), so the next persisted event
+    // naturally schedules itself from the handler.
     if (current === null || desiredMs < current) await this.state.storage.setAlarm(desiredMs);
   }
 }

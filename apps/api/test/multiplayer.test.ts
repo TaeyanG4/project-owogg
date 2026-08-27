@@ -509,6 +509,43 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
   });
   assert.equal(hostReady?.status, "READY");
 
+  const playerReadyRequest = (ready: boolean) => ({
+    ...request,
+    headers: {
+      ...request.headers,
+      Cookie: `owogg_session=${playerSessionToken}`,
+    },
+    body: JSON.stringify({ expectedGeneration: 1, ready }),
+  });
+  const unreadyResponse = await app.request(
+    `http://localhost/api/multiplayer/instances/${INSTANCE_ID}/ready`,
+    playerReadyRequest(false),
+    env as any,
+  );
+  assert.equal(unreadyResponse.status, 200);
+  const unready = MultiplayerRoomResponseSchema.parse(await unreadyResponse.json());
+  assert.equal(unready.participant.status, "JOINED");
+
+  const blockedStartResponse = await app.request(
+    `http://localhost/api/multiplayer/instances/${INSTANCE_ID}/start`,
+    {
+      ...request,
+      body: JSON.stringify({ expectedGeneration: 1 }),
+    },
+    env as any,
+  );
+  assert.equal(blockedStartResponse.status, 409);
+  assert.equal((await blockedStartResponse.json()).error.code, "PLAYERS_NOT_READY");
+
+  const rereadyResponse = await app.request(
+    `http://localhost/api/multiplayer/instances/${INSTANCE_ID}/ready`,
+    playerReadyRequest(true),
+    env as any,
+  );
+  assert.equal(rereadyResponse.status, 200);
+  const reready = MultiplayerRoomResponseSchema.parse(await rereadyResponse.json());
+  assert.equal(reready.participant.status, "READY");
+
   const startResponse = await app.request(
     `http://localhost/api/multiplayer/instances/${INSTANCE_ID}/start`,
     {

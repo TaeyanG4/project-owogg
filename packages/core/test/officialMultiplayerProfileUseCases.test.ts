@@ -256,6 +256,43 @@ test("an enabled legacy invite profile upgrades to a new room-code revision", as
   assert.equal(records[1]?.profile.enabled, true);
 });
 
+test("an enabled revision 1 room-code profile upgrades to Renju revision 2", async () => {
+  const { records, useCases } = harness();
+  await useCases.setEnabled({
+    gameSlug: "official-omok",
+    enabled: true,
+    changedByAdminId: 3,
+    disabledReasonCode: null,
+  });
+  const current = records[0]!;
+  records[0] = {
+    ...current,
+    profile: {
+      ...current.profile,
+      rulesetRevision: 1,
+      resolvedConfigJson: '{"boardSize":15,"winLength":5}',
+    },
+  };
+
+  const upgraded = await useCases.setEnabled({
+    gameSlug: "official-omok",
+    enabled: true,
+    changedByAdminId: 3,
+    disabledReasonCode: null,
+  });
+
+  assert.equal(upgraded.ok, true);
+  assert.equal(records.length, 2);
+  assert.equal(records[0]?.profile.enabled, false);
+  assert.equal(records[0]?.disabledReasonCode, "RULESET_UPGRADE");
+  assert.equal(records[1]?.profile.rulesetRevision, 2);
+  assert.equal(
+    records[1]?.profile.resolvedConfigJson,
+    '{"boardSize":15,"winLength":5,"ruleVariant":"renju-forbidden-v1"}',
+  );
+  assert.equal(records[1]?.profile.enabled, true);
+});
+
 test("USER, single-player, and score/rank manifests cannot obtain official authority", async () => {
   for (const [candidate, code] of [
     [runtime({ publisher: "USER" }), "OFFICIAL_GAME_REQUIRED"],

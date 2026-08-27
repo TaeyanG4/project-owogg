@@ -15,6 +15,7 @@ import {
   MultiplayerRoomResponseSchema,
   MultiplayerRoomRosterResponseSchema,
   MultiplayerRuntimeStatusResponseSchema,
+  MultiplayerSetReadyRequestSchema,
   MultiplayerStartRoomRequestSchema,
 } from "@owogg/contracts";
 import {
@@ -102,7 +103,8 @@ async function takeRateLimit(
 
 function requestRateKey(
   c: Context<ApiEnv>,
-  operation: "create" | "join" | "start" | "leave" | "invite" | "roster" | "ticket" | "socket",
+  operation:
+    "create" | "join" | "ready" | "start" | "leave" | "invite" | "roster" | "ticket" | "socket",
 ): string {
   // Keep callers behind the same home/campus/mobile NAT independent while never exposing the
   // full bearer credential to Cloudflare rate-limit logs. This mirrors the platform-wide write
@@ -449,6 +451,47 @@ multiplayerRouter.get("/instances/:instanceId/roster", async (c) => {
             ]
           : [];
       }),
+    }),
+    200,
+  );
+});
+
+multiplayerRouter.post("/instances/:instanceId/ready", async (c) => {
+  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED) || !runtimeReady(c.env)) {
+    return failure(c, "MULTIPLAYER_UNAVAILABLE");
+  }
+  const rateLimit = await takeRateLimit(c.env, requestRateKey(c, "ready"));
+  if (rateLimit === "DENIED") return failure(c, "RATE_LIMITED");
+  if (rateLimit === "UNAVAILABLE") return failure(c, "MULTIPLAYER_UNAVAILABLE");
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return failure(c, "INVALID_REQUEST");
+  }
+  const parsed = MultiplayerSetReadyRequestSchema.safeParse(body);
+  if (!parsed.success) return failure(c, "INVALID_REQUEST");
+
+  const sessionId = getCookie(c, "owogg_session");
+  if (!sessionId) return failure(c, "UNAUTHENTICATED");
+  const container = createContainer(c.env.DB, readB2Config(c.env));
+  const authenticated = await container.sessionRepo.findSession(sessionId);
+  if (!authenticated) return failure(c, "UNAUTHENTICATED");
+
+  const result = await container.multiplayerRoomUseCases.setParticipantReady({
+    userId: authenticated.user.id,
+    instanceId: c.req.param("instanceId"),
+    expectedGeneration: parsed.data.expectedGeneration,
+    ready: parsed.data.ready,
+  });
+  if (!result.ok) return failure(c, result.code);
+  c.header("Cache-Control", "no-store");
+  return c.json(
+    MultiplayerRoomResponseSchema.parse({
+      replayed: false,
+      instance: publicRoom(result.instance),
+      participant: publicParticipant(result.participant),
     }),
     200,
   );

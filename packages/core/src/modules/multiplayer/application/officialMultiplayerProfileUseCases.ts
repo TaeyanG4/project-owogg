@@ -1,6 +1,8 @@
 import type { RuntimeGame } from "../../game/domain/runtimeGame.js";
 import type { RuntimeGameRegistry } from "../../game/ports/runtimeGameRegistry.js";
 import {
+  OMOK_LEGACY_RESOLVED_CONFIG_JSON,
+  OMOK_LEGACY_RULESET_REVISION,
   OMOK_RESOLVED_CONFIG_JSON,
   OMOK_RULESET_KEY,
   OMOK_RULESET_REVISION,
@@ -49,6 +51,8 @@ function isOfficialOmokProfileWithJoinPolicy(
   gameId: number,
   gameVersionId: number,
   joinPolicy: "OPEN" | "INVITE_ONLY",
+  rulesetRevision: typeof OMOK_RULESET_REVISION | typeof OMOK_LEGACY_RULESET_REVISION,
+  resolvedConfigJson: typeof OMOK_RESOLVED_CONFIG_JSON | typeof OMOK_LEGACY_RESOLVED_CONFIG_JSON,
 ): boolean {
   return (
     profile.profileVersion === 1 &&
@@ -60,8 +64,8 @@ function isOfficialOmokProfileWithJoinPolicy(
     profile.simulationModel === "turn" &&
     profile.runtimeBackend === "durable-object" &&
     profile.rulesetKey === OMOK_RULESET_KEY &&
-    profile.rulesetRevision === OMOK_RULESET_REVISION &&
-    profile.resolvedConfigJson === OMOK_RESOLVED_CONFIG_JSON &&
+    profile.rulesetRevision === rulesetRevision &&
+    profile.resolvedConfigJson === resolvedConfigJson &&
     profile.lifecycle === "match" &&
     profile.persistence === "match" &&
     profile.latencyProfile === "relaxed" &&
@@ -84,7 +88,14 @@ function isCurrentOfficialOmokProfile(
   gameId: number,
   gameVersionId: number,
 ): boolean {
-  return isOfficialOmokProfileWithJoinPolicy(profile, gameId, gameVersionId, "OPEN");
+  return isOfficialOmokProfileWithJoinPolicy(
+    profile,
+    gameId,
+    gameVersionId,
+    "OPEN",
+    OMOK_RULESET_REVISION,
+    OMOK_RESOLVED_CONFIG_JSON,
+  );
 }
 
 function isRecognizedOfficialOmokProfile(
@@ -92,10 +103,24 @@ function isRecognizedOfficialOmokProfile(
   gameId: number,
   gameVersionId: number,
 ): boolean {
-  return (
-    isCurrentOfficialOmokProfile(profile, gameId, gameVersionId) ||
-    isOfficialOmokProfileWithJoinPolicy(profile, gameId, gameVersionId, "INVITE_ONLY")
-  );
+  const recognizedPolicy = (joinPolicy: "OPEN" | "INVITE_ONLY") =>
+    isOfficialOmokProfileWithJoinPolicy(
+      profile,
+      gameId,
+      gameVersionId,
+      joinPolicy,
+      OMOK_RULESET_REVISION,
+      OMOK_RESOLVED_CONFIG_JSON,
+    ) ||
+    isOfficialOmokProfileWithJoinPolicy(
+      profile,
+      gameId,
+      gameVersionId,
+      joinPolicy,
+      OMOK_LEGACY_RULESET_REVISION,
+      OMOK_LEGACY_RESOLVED_CONFIG_JSON,
+    );
+  return recognizedPolicy("OPEN") || recognizedPolicy("INVITE_ONLY");
 }
 
 function buildOfficialOmokProfile(
@@ -258,13 +283,16 @@ export class OfficialMultiplayerProfileUseCases {
           return { ok: false, code: "PROFILE_CONFLICT" };
         }
 
-        // Preset semantics are immutable. Upgrade the historical one-use-invite revision by
-        // disabling it with an audited reason and creating a fresh room-code revision below.
+        // Preset semantics are immutable. Disable any recognized historical access-policy or
+        // ruleset revision and create the current room-code + Renju revision below.
         const disabled = await this.dependencies.profiles.setEnabled({
           profileId: enabled.id,
           enabled: false,
           changedByAdminId: input.changedByAdminId,
-          reasonCode: "ACCESS_POLICY_UPGRADE",
+          reasonCode:
+            enabled.profile.rulesetRevision === OMOK_RULESET_REVISION
+              ? "ACCESS_POLICY_UPGRADE"
+              : "RULESET_UPGRADE",
           nowIso,
         });
         if (disabled.status === "NOT_FOUND" || disabled.status === "CONFLICT") {

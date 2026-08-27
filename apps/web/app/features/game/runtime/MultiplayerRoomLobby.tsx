@@ -4,6 +4,7 @@ import type { MultiplayerRoomPlayer, MultiplayerRoomResponse } from "@owogg/cont
 import {
   fetchMultiplayerRoomRoster,
   leaveMultiplayerRoom,
+  setMultiplayerRoomReady,
   startMultiplayerRoom,
 } from "./multiplayerRoomApi";
 import { playMultiplayerLobbySound, type MultiplayerLobbySound } from "./multiplayerLobbySound";
@@ -149,7 +150,7 @@ export function MultiplayerRoomLobby({
   onExit,
 }: MultiplayerRoomLobbyProps) {
   const [players, setPlayers] = useState<readonly MultiplayerRoomPlayer[]>([]);
-  const [busy, setBusy] = useState<"START" | "LEAVE" | null>(null);
+  const [busy, setBusy] = useState<"START" | "LEAVE" | "READY" | null>(null);
   const [copied, setCopied] = useState<"CODE" | "LINK" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const previousParticipantIdsRef = useRef<ReadonlySet<string> | null>(null);
@@ -214,6 +215,8 @@ export function MultiplayerRoomLobby({
     return Array.from({ length: slotCount }, (_, slotIndex) => bySeat.get(slotIndex));
   }, [players, room.instance.maxPlayers]);
   const allReady = multiplayerLobbyCanStart(players, minPlayers);
+  const selfPlayer = players.find((player) => player.participantId === room.participant.id);
+  const selfReady = (selfPlayer?.status ?? room.participant.status) === "READY";
 
   const copyValue = useCallback(
     async (kind: "CODE" | "LINK") => {
@@ -245,6 +248,32 @@ export function MultiplayerRoomLobby({
     }
   }, [allReady, busy, isHost, onRoomChange, room.instance.generation, room.instance.id]);
 
+  const toggleReady = useCallback(async () => {
+    if (busy) return;
+    const nextReady = !selfReady;
+    setBusy("READY");
+    setError(null);
+    try {
+      const updated = await setMultiplayerRoomReady({
+        instanceId: room.instance.id,
+        expectedGeneration: room.instance.generation,
+        ready: nextReady,
+      });
+      setPlayers((current) =>
+        current.map((player) =>
+          player.participantId === updated.participant.id
+            ? { ...player, status: updated.participant.status === "READY" ? "READY" : "JOINED" }
+            : player,
+        ),
+      );
+      onRoomChange(updated);
+    } catch (reason) {
+      setError(messageFor(reason));
+    } finally {
+      setBusy(null);
+    }
+  }, [busy, onRoomChange, room.instance.generation, room.instance.id, selfReady]);
+
   const leave = useCallback(async () => {
     if (busy) return;
     setBusy("LEAVE");
@@ -274,7 +303,8 @@ export function MultiplayerRoomLobby({
             </p>
             <h3 className="mt-2 text-2xl font-black text-text-primary">{title}</h3>
             <p className="mt-2 text-sm text-text-secondary">
-              참가자는 입장과 동시에 준비 완료됩니다. 방장이 경기를 시작합니다.
+              입장하면 기본으로 준비 완료됩니다. 각 플레이어가 준비 상태를 확인한 뒤 방장이 경기를
+              시작합니다.
             </p>
           </div>
           <div className="flex max-w-full flex-wrap items-center gap-2">
@@ -351,21 +381,38 @@ export function MultiplayerRoomLobby({
         </div>
 
         <div className="mt-5 rounded-2xl border border-border bg-surface p-4">
-          {isHost ? (
+          <div className={`grid gap-3 ${isHost ? "sm:grid-cols-2" : ""}`}>
             <button
               type="button"
-              disabled={!allReady || busy !== null}
-              onClick={() => void start()}
-              className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-brand px-5 text-base font-black text-white transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-45"
+              disabled={busy !== null}
+              onClick={() => void toggleReady()}
+              aria-pressed={selfReady}
+              className={`inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border px-5 text-base font-black transition-colors disabled:cursor-wait disabled:opacity-55 ${
+                selfReady
+                  ? "border-emerald-300/35 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/20"
+                  : "border-brand bg-brand text-white hover:bg-brand-hover"
+              }`}
             >
-              <Play className="h-5 w-5 fill-current" />
-              {busy === "START" ? "경기 시작 중" : "경기 시작"}
+              <Check className="h-5 w-5" />
+              {busy === "READY" ? "변경 중" : selfReady ? "준비 취소" : "준비 완료"}
             </button>
-          ) : (
+            {isHost ? (
+              <button
+                type="button"
+                disabled={!allReady || busy !== null}
+                onClick={() => void start()}
+                className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-brand px-5 text-base font-black text-white transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <Play className="h-5 w-5 fill-current" />
+                {busy === "START" ? "경기 시작 중" : "경기 시작"}
+              </button>
+            ) : null}
+          </div>
+          {!isHost ? (
             <p className="py-2 text-center text-sm font-bold text-text-secondary">
               방장이 경기를 시작할 때까지 기다려 주세요.
             </p>
-          )}
+          ) : null}
           {error && (
             <p role="alert" className="mt-3 text-center text-sm font-semibold text-accent-red">
               {error}

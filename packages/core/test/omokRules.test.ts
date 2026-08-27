@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   OMOK_BOARD_SIZE,
+  OMOK_LEGACY_RULESET_REVISION,
+  OMOK_RULESET_REVISION,
   applyOmokAction,
   createInitialOmokState,
   getOmokTerminalResult,
@@ -22,8 +24,9 @@ function accept(state: OmokStateV1, seatIndex: number, action: OmokAction): Omok
 function playAlternating(
   blackMoves: readonly OmokAction[],
   whiteMoves: readonly OmokAction[],
+  rulesetRevision = OMOK_RULESET_REVISION,
 ): OmokStateV1 {
-  let state = createInitialOmokState();
+  let state = createInitialOmokState(rulesetRevision);
   for (let index = 0; index < blackMoves.length; index += 1) {
     const blackMove = blackMoves[index];
     assert.ok(blackMove);
@@ -40,6 +43,8 @@ const SAFE_WHITE_FILLERS = [
   { x: 4, y: 14 },
   { x: 6, y: 14 },
   { x: 8, y: 14 },
+  { x: 10, y: 14 },
+  { x: 12, y: 14 },
 ] as const;
 
 test("creates the fixed 15x15 server-owned initial state and player projections", () => {
@@ -49,7 +54,7 @@ test("creates the fixed 15x15 server-owned initial state and player projections"
   assert.deepEqual(state, {
     stateSchemaVersion: 1,
     rulesetKey: "official:omok",
-    rulesetRevision: 1,
+    rulesetRevision: 2,
     boardSize: 15,
     winLength: 5,
     revision: 0,
@@ -197,10 +202,11 @@ test("finds both diagonal directions deterministically", () => {
   ]);
 });
 
-test("revision 1 freestyle policy counts an overline as a win", () => {
+test("revision 1 legacy freestyle policy still counts an overline as a win", () => {
   const state = playAlternating(
     [0, 1, 2, 4, 5, 3].map((x) => ({ x, y: 0 })),
-    SAFE_WHITE_FILLERS,
+    SAFE_WHITE_FILLERS.slice(0, 5),
+    OMOK_LEGACY_RULESET_REVISION,
   );
   assert.equal(state.status, "WON");
   assert.equal(state.winnerSeatIndex, 0);
@@ -208,6 +214,78 @@ test("revision 1 freestyle policy counts an overline as a win", () => {
     state.winningLine,
     [0, 1, 2, 3, 4, 5].map((x) => ({ x, y: 0 })),
   );
+});
+
+test("revision 2 rejects a black overline without mutating the authoritative state", () => {
+  const before = playAlternating(
+    [0, 1, 2, 4, 5].map((x) => ({ x, y: 0 })),
+    SAFE_WHITE_FILLERS.slice(0, 5),
+  );
+  const transition = applyOmokAction(before, 0, { x: 3, y: 0 }, before.revision);
+  assert.deepEqual(transition, {
+    ok: false,
+    code: "ACTION_INVALID",
+    currentRevision: before.revision,
+  });
+  assert.equal(before.board[3], ".");
+  assert.equal(before.status, "ACTIVE");
+});
+
+test("revision 2 rejects black double-three and double-four moves", () => {
+  const doubleThree = playAlternating(
+    [
+      { x: 6, y: 7 },
+      { x: 7, y: 6 },
+      { x: 8, y: 7 },
+      { x: 7, y: 8 },
+    ],
+    SAFE_WHITE_FILLERS.slice(0, 4),
+  );
+  assert.deepEqual(applyOmokAction(doubleThree, 0, { x: 7, y: 7 }, doubleThree.revision), {
+    ok: false,
+    code: "ACTION_INVALID",
+    currentRevision: doubleThree.revision,
+  });
+
+  const doubleFour = playAlternating(
+    [
+      { x: 5, y: 7 },
+      { x: 7, y: 5 },
+      { x: 6, y: 7 },
+      { x: 7, y: 6 },
+      { x: 8, y: 7 },
+      { x: 7, y: 8 },
+    ],
+    SAFE_WHITE_FILLERS.slice(0, 6),
+  );
+  assert.deepEqual(applyOmokAction(doubleFour, 0, { x: 7, y: 7 }, doubleFour.revision), {
+    ok: false,
+    code: "ACTION_INVALID",
+    currentRevision: doubleFour.revision,
+  });
+});
+
+test("revision 2 allows white to complete an overline", () => {
+  const blackFillers = [
+    { x: 0, y: 14 },
+    { x: 2, y: 13 },
+    { x: 4, y: 14 },
+    { x: 6, y: 13 },
+    { x: 8, y: 14 },
+    { x: 10, y: 13 },
+  ] as const;
+  const whiteMoves = [0, 1, 2, 4, 5, 3].map((x) => ({ x, y: 0 }));
+  let state = createInitialOmokState();
+  for (let index = 0; index < whiteMoves.length; index += 1) {
+    const blackMove = blackFillers[index];
+    const whiteMove = whiteMoves[index];
+    assert.ok(blackMove && whiteMove);
+    state = accept(state, 0, blackMove);
+    state = accept(state, 1, whiteMove);
+  }
+  assert.equal(state.status, "WON");
+  assert.equal(state.winnerSeatIndex, 1);
+  assert.equal(state.winningLine?.length, 6);
 });
 
 test("commits a full-board draw without manufacturing a winner", () => {
@@ -224,7 +302,7 @@ test("commits a full-board draw without manufacturing a winner", () => {
   assert.equal(blackMoves.length, 113);
   assert.equal(whiteMoves.length, 112);
 
-  let state = createInitialOmokState();
+  let state = createInitialOmokState(OMOK_LEGACY_RULESET_REVISION);
   for (let index = 0; index < blackMoves.length; index += 1) {
     const blackMove = blackMoves[index];
     assert.ok(blackMove);
@@ -265,5 +343,9 @@ test("strictly rehydrates deterministic states and rejects corrupt or invented t
       board: `X${".".repeat(224)}`,
     }),
     null,
+  );
+  assert.deepEqual(
+    parseOmokStateV1(createInitialOmokState(OMOK_LEGACY_RULESET_REVISION)),
+    createInitialOmokState(OMOK_LEGACY_RULESET_REVISION),
   );
 });

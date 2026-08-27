@@ -130,11 +130,8 @@ function PeerConnectionNotice({ state }: { readonly state: MultiplayerPlayerConn
     return () => window.clearInterval(timer);
   }, [state.status]);
 
-  if (state.status === "CONNECTED") return null;
-  const seconds =
-    state.status === "RECONNECTING"
-      ? Math.max(0, Math.ceil((Date.parse(state.reconnectDeadlineAt) - now) / 1_000))
-      : 0;
+  const message = multiplayerPeerConnectionMessage(state, now);
+  if (!message) return null;
   return (
     <div
       role="status"
@@ -145,13 +142,25 @@ function PeerConnectionNotice({ state }: { readonly state: MultiplayerPlayerConn
           : "border-red-300/20 bg-red-400/10 text-red-200"
       }`}
     >
-      {state.status === "RECONNECTING"
-        ? `상대 네트워크 연결이 불안정합니다. ${seconds}초 동안 재접속을 기다립니다.`
-        : state.status === "LEFT"
-          ? "상대가 게임에서 나갔습니다."
-          : "상대가 30초 안에 재접속하지 않아 기권 처리되었습니다."}
+      {message}
     </div>
   );
+}
+
+export function multiplayerPeerConnectionMessage(
+  state: MultiplayerPlayerConnectionState,
+  nowMs = Date.now(),
+): string | null {
+  if (state.status === "CONNECTED") return null;
+  if (state.status !== "RECONNECTING") {
+    return state.status === "LEFT"
+      ? "상대가 게임에서 나갔습니다."
+      : "상대가 30초 안에 재접속하지 않아 기권 처리되었습니다.";
+  }
+  const seconds = Math.max(0, Math.ceil((Date.parse(state.reconnectDeadlineAt) - nowMs) / 1_000));
+  return seconds > 0
+    ? `상대 네트워크 연결이 불안정합니다. ${seconds}초 동안 재접속을 기다립니다.`
+    : "재접속 유예 시간이 끝났습니다. 공식 기권 결과를 확인하고 있습니다.";
 }
 
 export function multiplayerRoomClipboardValue(

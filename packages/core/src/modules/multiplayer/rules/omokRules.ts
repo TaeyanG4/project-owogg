@@ -3,16 +3,24 @@ import type { MultiplayerActionResultCode } from "../domain/multiplayerMatch.js"
 /**
  * OWOGG-owned M1 Simple Omok ruleset.
  *
- * Revision 1 is deliberately freestyle Omok: a 15 x 15 board, black moves first, five or more
- * contiguous stones win, and Renju forbidden-move rules are not applied. These semantics are
- * immutable for this ruleset revision; a policy change requires a new ruleset revision.
+ * Revision 1 remains the immutable legacy freestyle ruleset so already-pinned matches can finish.
+ * Revision 2 applies the Renju forbidden-move core: black wins with exactly five and cannot play
+ * an overline, double-four, or forbidden double-three; white wins with five or more. OWOGG keeps
+ * the existing free opening/host stone choice rather than claiming the tournament opening protocol.
  */
 export const OMOK_RULESET_KEY = "official:omok" as const;
-export const OMOK_RULESET_REVISION = 1 as const;
+export const OMOK_LEGACY_RULESET_REVISION = 1 as const;
+export const OMOK_RULESET_REVISION = 2 as const;
+export const OMOK_SUPPORTED_RULESET_REVISIONS = [
+  OMOK_LEGACY_RULESET_REVISION,
+  OMOK_RULESET_REVISION,
+] as const;
 export const OMOK_STATE_SCHEMA_VERSION = 1 as const;
 export const OMOK_BOARD_SIZE = 15 as const;
 export const OMOK_WIN_LENGTH = 5 as const;
-export const OMOK_RESOLVED_CONFIG_JSON = '{"boardSize":15,"winLength":5}' as const;
+export const OMOK_LEGACY_RESOLVED_CONFIG_JSON = '{"boardSize":15,"winLength":5}' as const;
+export const OMOK_RESOLVED_CONFIG_JSON =
+  '{"boardSize":15,"winLength":5,"ruleVariant":"renju-forbidden-v1"}' as const;
 
 const EMPTY_CELL = "." as const;
 const BLACK_CELL = "B" as const;
@@ -23,6 +31,7 @@ const BOARD_CELL_COUNT = OMOK_BOARD_SIZE * OMOK_BOARD_SIZE;
 export type OmokSeatIndex = 0 | 1;
 export type OmokStone = "BLACK" | "WHITE";
 export type OmokMatchStatus = "ACTIVE" | "WON" | "DRAW";
+export type OmokRulesetRevision = (typeof OMOK_SUPPORTED_RULESET_REVISIONS)[number];
 
 export interface OmokCoordinate {
   readonly x: number;
@@ -38,7 +47,7 @@ export type OmokAction = OmokCoordinate;
 export interface OmokStateV1 {
   readonly stateSchemaVersion: typeof OMOK_STATE_SCHEMA_VERSION;
   readonly rulesetKey: typeof OMOK_RULESET_KEY;
-  readonly rulesetRevision: typeof OMOK_RULESET_REVISION;
+  readonly rulesetRevision: OmokRulesetRevision;
   readonly boardSize: typeof OMOK_BOARD_SIZE;
   readonly winLength: typeof OMOK_WIN_LENGTH;
   readonly revision: number;
@@ -122,6 +131,10 @@ function isSeatIndex(value: unknown): value is OmokSeatIndex {
   return value === 0 || value === 1;
 }
 
+export function isSupportedOmokRulesetRevision(value: unknown): value is OmokRulesetRevision {
+  return (OMOK_SUPPORTED_RULESET_REVISIONS as readonly unknown[]).includes(value);
+}
+
 function stoneForSeat(seatIndex: OmokSeatIndex): OmokStone {
   return seatIndex === 0 ? "BLACK" : "WHITE";
 }
@@ -182,22 +195,243 @@ function findWinningLine(
   x: number,
   y: number,
   cell: EncodedCell,
+  rulesetRevision: OmokRulesetRevision,
 ): readonly OmokCoordinate[] | null {
   if (cell === EMPTY_CELL || boardCell(board, x, y) !== cell) return null;
   for (const [dx, dy] of WIN_DIRECTIONS) {
     const line = collectLine(board, x, y, cell, dx, dy);
-    if (line.length >= OMOK_WIN_LENGTH) return line;
+    const wins =
+      rulesetRevision === OMOK_LEGACY_RULESET_REVISION || cell === WHITE_CELL
+        ? line.length >= OMOK_WIN_LENGTH
+        : line.length === OMOK_WIN_LENGTH;
+    if (wins) return line;
   }
   return null;
 }
 
-function boardHasWinner(board: string, cell: EncodedCell): boolean {
+function boardHasWinner(
+  board: string,
+  cell: EncodedCell,
+  rulesetRevision: OmokRulesetRevision,
+): boolean {
   for (let y = 0; y < OMOK_BOARD_SIZE; y += 1) {
     for (let x = 0; x < OMOK_BOARD_SIZE; x += 1) {
-      if (boardCell(board, x, y) === cell && findWinningLine(board, x, y, cell)) return true;
+      if (boardCell(board, x, y) === cell && findWinningLine(board, x, y, cell, rulesetRevision)) {
+        return true;
+      }
     }
   }
   return false;
+}
+
+type RenjuForbiddenReason = "OVERLINE" | "DOUBLE_FOUR" | "DOUBLE_THREE" | "ANALYSIS_LIMIT";
+
+type RenjuBlackMoveAnalysis =
+  | { readonly kind: "LEGAL" }
+  | { readonly kind: "WIN"; readonly winningLine: readonly OmokCoordinate[] }
+  | { readonly kind: "FORBIDDEN"; readonly reason: RenjuForbiddenReason };
+
+interface RenjuAnalysisContext {
+  readonly memo: Map<string, RenjuBlackMoveAnalysis>;
+  nodes: number;
+}
+
+// A legal-action request must have bounded CPU even for a deliberately pathological board. Normal
+// positions visit only a handful of nodes; exhausting this defensive budget fails closed.
+const RENJU_ANALYSIS_NODE_LIMIT = 4_096;
+
+function coordinateIndex(coordinate: OmokCoordinate): number {
+  return boardIndex(coordinate.x, coordinate.y);
+}
+
+function coordinateSetKey(coordinates: readonly OmokCoordinate[]): string {
+  return coordinates
+    .map(coordinateIndex)
+    .sort((left, right) => left - right)
+    .join(",");
+}
+
+function lineContains(line: readonly OmokCoordinate[], coordinate: OmokCoordinate): boolean {
+  return line.some((candidate) => candidate.x === coordinate.x && candidate.y === coordinate.y);
+}
+
+function hasBlackOverlineThrough(board: string, x: number, y: number): boolean {
+  return WIN_DIRECTIONS.some(
+    ([dx, dy]) => collectLine(board, x, y, BLACK_CELL, dx, dy).length > OMOK_WIN_LENGTH,
+  );
+}
+
+/**
+ * Count distinct fours created through one black move. A straight four has two winning endpoints,
+ * so five-cell windows are deduplicated by their four occupied intersections. Broken fours and
+ * two independent fours in the same direction remain distinct.
+ */
+function collectBlackFourStructureKeys(board: string, anchor: OmokCoordinate): ReadonlySet<string> {
+  const structures = new Set<string>();
+  for (const [dx, dy] of WIN_DIRECTIONS) {
+    for (let startOffset = -(OMOK_WIN_LENGTH - 1); startOffset <= 0; startOffset += 1) {
+      const segment: OmokCoordinate[] = [];
+      for (let offset = 0; offset < OMOK_WIN_LENGTH; offset += 1) {
+        const x = anchor.x + (startOffset + offset) * dx;
+        const y = anchor.y + (startOffset + offset) * dy;
+        if (!isCoordinate(x) || !isCoordinate(y)) {
+          segment.length = 0;
+          break;
+        }
+        segment.push({ x, y });
+      }
+      if (segment.length !== OMOK_WIN_LENGTH) continue;
+
+      const black = segment.filter(
+        (coordinate) => boardCell(board, coordinate.x, coordinate.y) === BLACK_CELL,
+      );
+      const empty = segment.filter(
+        (coordinate) => boardCell(board, coordinate.x, coordinate.y) === EMPTY_CELL,
+      );
+      if (
+        black.length !== OMOK_WIN_LENGTH - 1 ||
+        empty.length !== 1 ||
+        !lineContains(black, anchor)
+      ) {
+        continue;
+      }
+
+      const completion = empty[0];
+      if (!completion) continue;
+      const completedBoard = replaceBoardCell(board, completion.x, completion.y, BLACK_CELL);
+      const completedLine = collectLine(
+        completedBoard,
+        completion.x,
+        completion.y,
+        BLACK_CELL,
+        dx,
+        dy,
+      );
+      if (completedLine.length === OMOK_WIN_LENGTH) {
+        structures.add(coordinateSetKey(black));
+      }
+    }
+  }
+  return structures;
+}
+
+function isStraightBlackFourThrough(
+  board: string,
+  anchor: OmokCoordinate,
+  extension: OmokCoordinate,
+  dx: number,
+  dy: number,
+): readonly OmokCoordinate[] | null {
+  const line = collectLine(board, anchor.x, anchor.y, BLACK_CELL, dx, dy);
+  if (
+    line.length !== OMOK_WIN_LENGTH - 1 ||
+    !lineContains(line, extension) ||
+    !lineContains(line, anchor)
+  ) {
+    return null;
+  }
+
+  const first = line[0];
+  const last = line[line.length - 1];
+  if (!first || !last) return null;
+  const before = { x: first.x - dx, y: first.y - dy };
+  const after = { x: last.x + dx, y: last.y + dy };
+  if (
+    !isCoordinate(before.x) ||
+    !isCoordinate(before.y) ||
+    !isCoordinate(after.x) ||
+    !isCoordinate(after.y) ||
+    boardCell(board, before.x, before.y) !== EMPTY_CELL ||
+    boardCell(board, after.x, after.y) !== EMPTY_CELL
+  ) {
+    return null;
+  }
+
+  for (const completion of [before, after]) {
+    const completedBoard = replaceBoardCell(board, completion.x, completion.y, BLACK_CELL);
+    if (
+      collectLine(completedBoard, completion.x, completion.y, BLACK_CELL, dx, dy).length !==
+      OMOK_WIN_LENGTH
+    ) {
+      return null;
+    }
+  }
+  return line;
+}
+
+function collectRealBlackThreeStructureKeys(
+  board: string,
+  anchor: OmokCoordinate,
+  context: RenjuAnalysisContext,
+): ReadonlySet<string> {
+  const structures = new Set<string>();
+  for (const [dx, dy] of WIN_DIRECTIONS) {
+    for (let offset = -(OMOK_WIN_LENGTH - 1); offset < OMOK_WIN_LENGTH; offset += 1) {
+      if (offset === 0) continue;
+      const extension = { x: anchor.x + offset * dx, y: anchor.y + offset * dy };
+      if (
+        !isCoordinate(extension.x) ||
+        !isCoordinate(extension.y) ||
+        boardCell(board, extension.x, extension.y) !== EMPTY_CELL
+      ) {
+        continue;
+      }
+
+      const extendedBoard = replaceBoardCell(board, extension.x, extension.y, BLACK_CELL);
+      const straightFour = isStraightBlackFourThrough(extendedBoard, anchor, extension, dx, dy);
+      if (!straightFour) continue;
+
+      // The hypothetical extension itself must be a legal, non-winning black move. This recursive
+      // legality check excludes fake threes whose only continuation is an overline, double-four,
+      // or another forbidden double-three, matching the RIF double-three exception.
+      const extensionAnalysis = analyzeRenjuBlackMove(board, extension, context);
+      if (extensionAnalysis.kind !== "LEGAL") continue;
+
+      const originalThree = straightFour.filter(
+        (coordinate) => coordinate.x !== extension.x || coordinate.y !== extension.y,
+      );
+      if (originalThree.length === 3 && lineContains(originalThree, anchor)) {
+        structures.add(coordinateSetKey(originalThree));
+      }
+    }
+  }
+  return structures;
+}
+
+function analyzeRenjuBlackMove(
+  board: string,
+  move: OmokCoordinate,
+  context: RenjuAnalysisContext,
+): RenjuBlackMoveAnalysis {
+  const cacheKey = `${board}:${move.x},${move.y}`;
+  const cached = context.memo.get(cacheKey);
+  if (cached) return cached;
+  if (context.nodes >= RENJU_ANALYSIS_NODE_LIMIT) {
+    return { kind: "FORBIDDEN", reason: "ANALYSIS_LIMIT" };
+  }
+  context.nodes += 1;
+
+  const nextBoard = replaceBoardCell(board, move.x, move.y, BLACK_CELL);
+  const exactFive = findWinningLine(nextBoard, move.x, move.y, BLACK_CELL, OMOK_RULESET_REVISION);
+  let result: RenjuBlackMoveAnalysis;
+  // RIF rule 9.2 gives an exact five priority over a simultaneously formed forbidden pattern.
+  if (exactFive) {
+    result = { kind: "WIN", winningLine: exactFive };
+  } else if (hasBlackOverlineThrough(nextBoard, move.x, move.y)) {
+    result = { kind: "FORBIDDEN", reason: "OVERLINE" };
+  } else if (collectBlackFourStructureKeys(nextBoard, move).size > 1) {
+    result = { kind: "FORBIDDEN", reason: "DOUBLE_FOUR" };
+  } else if (collectRealBlackThreeStructureKeys(nextBoard, move, context).size > 1) {
+    result = { kind: "FORBIDDEN", reason: "DOUBLE_THREE" };
+  } else {
+    result = { kind: "LEGAL" };
+  }
+  context.memo.set(cacheKey, result);
+  return result;
+}
+
+function analyzeCurrentRenjuBlackMove(board: string, move: OmokCoordinate): RenjuBlackMoveAnalysis {
+  return analyzeRenjuBlackMove(board, move, { memo: new Map(), nodes: 0 });
 }
 
 function sameCoordinates(
@@ -235,25 +469,38 @@ function parseWinningLine(value: unknown): readonly OmokCoordinate[] | null {
 }
 
 /** Validate the immutable server-owned config stored in an approved profile snapshot. */
-export function isOmokResolvedConfigJson(value: string): boolean {
+export function isOmokResolvedConfigJson(
+  value: string,
+  rulesetRevision: OmokRulesetRevision = OMOK_RULESET_REVISION,
+): boolean {
   try {
     const parsed: unknown = JSON.parse(value);
+    if (!isPlainRecord(parsed)) return false;
+    if (rulesetRevision === OMOK_LEGACY_RULESET_REVISION) {
+      return (
+        hasExactKeys(parsed, ["boardSize", "winLength"]) &&
+        parsed.boardSize === OMOK_BOARD_SIZE &&
+        parsed.winLength === OMOK_WIN_LENGTH
+      );
+    }
     return (
-      isPlainRecord(parsed) &&
-      hasExactKeys(parsed, ["boardSize", "winLength"]) &&
+      hasExactKeys(parsed, ["boardSize", "winLength", "ruleVariant"]) &&
       parsed.boardSize === OMOK_BOARD_SIZE &&
-      parsed.winLength === OMOK_WIN_LENGTH
+      parsed.winLength === OMOK_WIN_LENGTH &&
+      parsed.ruleVariant === "renju-forbidden-v1"
     );
   } catch {
     return false;
   }
 }
 
-export function createInitialOmokState(): OmokStateV1 {
+export function createInitialOmokState(
+  rulesetRevision: OmokRulesetRevision = OMOK_RULESET_REVISION,
+): OmokStateV1 {
   return {
     stateSchemaVersion: OMOK_STATE_SCHEMA_VERSION,
     rulesetKey: OMOK_RULESET_KEY,
-    rulesetRevision: OMOK_RULESET_REVISION,
+    rulesetRevision,
     boardSize: OMOK_BOARD_SIZE,
     winLength: OMOK_WIN_LENGTH,
     revision: 0,
@@ -286,7 +533,7 @@ export function parseOmokStateV1(value: unknown): OmokStateV1 | null {
     ]) ||
     value.stateSchemaVersion !== OMOK_STATE_SCHEMA_VERSION ||
     value.rulesetKey !== OMOK_RULESET_KEY ||
-    value.rulesetRevision !== OMOK_RULESET_REVISION ||
+    !isSupportedOmokRulesetRevision(value.rulesetRevision) ||
     value.boardSize !== OMOK_BOARD_SIZE ||
     value.winLength !== OMOK_WIN_LENGTH ||
     !Number.isSafeInteger(value.revision) ||
@@ -328,8 +575,9 @@ export function parseOmokStateV1(value: unknown): OmokStateV1 | null {
     }
   }
 
-  const blackWon = boardHasWinner(board, BLACK_CELL);
-  const whiteWon = boardHasWinner(board, WHITE_CELL);
+  const rulesetRevision = value.rulesetRevision;
+  const blackWon = boardHasWinner(board, BLACK_CELL, rulesetRevision);
+  const whiteWon = boardHasWinner(board, WHITE_CELL, rulesetRevision);
   if (blackWon && whiteWon) return null;
 
   if (value.status === "ACTIVE") {
@@ -370,6 +618,7 @@ export function parseOmokStateV1(value: unknown): OmokStateV1 | null {
       lastMove.x,
       lastMove.y,
       cellForSeat(lastMove.seatIndex),
+      rulesetRevision,
     );
     if (!parsedLine || !expectedLine || !sameCoordinates(parsedLine, expectedLine)) return null;
     if (lastMove.seatIndex === 0 ? !blackWon || whiteWon : !whiteWon || blackWon) return null;
@@ -378,7 +627,7 @@ export function parseOmokStateV1(value: unknown): OmokStateV1 | null {
   return {
     stateSchemaVersion: OMOK_STATE_SCHEMA_VERSION,
     rulesetKey: OMOK_RULESET_KEY,
-    rulesetRevision: OMOK_RULESET_REVISION,
+    rulesetRevision,
     boardSize: OMOK_BOARD_SIZE,
     winLength: OMOK_WIN_LENGTH,
     revision,
@@ -443,10 +692,20 @@ export function applyOmokAction(
   }
 
   const cell = cellForSeat(actorSeatIndex);
+  const renjuAnalysis =
+    state.rulesetRevision === OMOK_RULESET_REVISION && actorSeatIndex === 0
+      ? analyzeCurrentRenjuBlackMove(state.board, action)
+      : null;
+  if (renjuAnalysis?.kind === "FORBIDDEN") {
+    return { ok: false, code: "ACTION_INVALID", currentRevision: state.revision };
+  }
   const board = replaceBoardCell(state.board, action.x, action.y, cell);
   const revision = state.revision + 1;
   const lastMove: OmokMove = { ...action, seatIndex: actorSeatIndex };
-  const winningLine = findWinningLine(board, action.x, action.y, cell);
+  const winningLine =
+    renjuAnalysis?.kind === "WIN"
+      ? renjuAnalysis.winningLine
+      : findWinningLine(board, action.x, action.y, cell, state.rulesetRevision);
 
   let nextState: OmokStateV1;
   if (winningLine) {

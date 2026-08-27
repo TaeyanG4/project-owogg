@@ -347,10 +347,10 @@ append-only로 저장한다. 한 명만 요청하면 대기하고, 두 번째 �
 알리고, Web은 유실 복구용 15초 폴링만 사용한다.
 
 모든 profile은 게임 iframe 바깥의 공용 대기실을 사용한다. 참가자는 입장 성공과 같은 use-case에서
-기본 `READY`가 되고 iframe은 아직 mount하지 않는다. 최소 인원이 모두 `READY`인 경우에만 host의
-명시적 시작 요청이 `LOBBY → STARTING → ACTIVE`와 match 생성을 수행한다. 돌·팀·캐릭터처럼 게임마다
-다른 선택은 공용 방 생성/참가 화면에 넣지 않고 ACTIVE 뒤 해당 게임의 서버 검증 설정 단계에서
-처리한다.
+기본 `READY`가 되고 iframe은 아직 mount하지 않는다. 각 참가자는 공용 준비 버튼으로
+`READY ↔ JOINED`를 전환할 수 있으며, 최소 인원이 모두 `READY`인 경우에만 host의 명시적 시작 요청이
+`LOBBY → STARTING → ACTIVE`와 match 생성을 수행한다. 돌·팀·캐릭터처럼 게임마다 다른 선택은 공용
+방 생성/참가 화면에 넣지 않고 ACTIVE 뒤 해당 게임의 서버 검증 설정 단계에서 처리한다.
 
 ### 참가자 연결
 
@@ -842,6 +842,7 @@ slow client
 - [x] official `omokRules`
 - [x] create/join/ready/action/sync와 공식 `PRIVATE + OPEN` 코드 참가
 - [x] iframe 바깥 공용 대기실, 입장 즉시 READY, 최소 인원 검증과 host 수동 시작
+- [x] 모든 참가자의 READY 취소/재완료와 미준비 참가자가 있을 때 host 시작 차단
 - [x] server winner와 typed conflict resync
 - [x] reconnect resume
 - [x] 명시적 LEFT 즉시 기권승, 예기치 않은 연결 손실 30초 유예와 timeout 기권승
@@ -849,7 +850,9 @@ slow client
 - [x] parent-only 좌우 프로필, 방 제어 header, nested scrollbar 제거와 오목판/화점 UI
 - [x] Web Audio 착수·종료음과 사용자 소리 on/off
 - [x] 2분 양방향 재대결 동의, exact generation 재시작과 socket 알림/안전 폴링
-- [x] 검증 가능한 official 오목 ZIP source/build와 v1 무랭킹 manifest
+- [x] 검증 가능한 official 오목 ZIP source/build와 manifest schema v1 무랭킹 정책
+- [x] immutable 자유 오목 revision 1 호환과 렌주 금수 core revision 2(흑 33·44·장목,
+      흑 정확히 5목/백 5목 이상)
 - [x] 관리형 관리자 전용 exact-version `OMOK_V1` 활성화/비활성화 제어면
 - [x] exact version ZIP을 `/admin/games`로 Staging D1/B2에 게시
 - [~] 결과 ledger 로컬 검증 완료, reward는 별도 Staging Gate 전까지 비활성 유지
@@ -873,6 +876,13 @@ host가 최소 인원 확인 뒤 수동 시작하도록 변경했으며, 오목�
 내부에서 서버가 확정한다. 명시적 leave는 즉시 기권승, 예기치 않은 연결 손실은 최소 30초 재접속 유예
 뒤 기권승으로 공통 처리한다. 대상 DB/API/Web/Workers 테스트와 official ZIP 검증은 통과 중이며, 전체
 `pnpm verify`, 새 Staging 배포, 갱신 ZIP 게시와 두 사용자 acceptance가 남아 있다.
+
+2026-08-27 현재 fix revision은 자유 오목 ruleset revision 1을 immutable 호환 경로로 유지하면서 새
+방을 revision 2 렌주 금수 core로 전환한다. 흑의 33·44·장목은 서버가 거부하고, 흑은 정확히 5목,
+백은 5목 이상에서 승리한다. 게임 ZIP은 authoritative projection의 내 돌 색에 맞춰 교차점 정중앙에
+흑/백 착수 미리보기를 렌더링한다. 공용 대기실 READY 토글과 미준비 시작 차단을 추가했고, 모든 socket
+종료 경로가 30초 Durable Object alarm을 예약하며 일시적인 결과 저장 실패도 다음 alarm을 명시적으로
+재예약한다.
 
 완료 Gate: 동시/중복 action으로 corruption이 없고 iframe이 결과·업적·XP를 위조할 수 없다.
 

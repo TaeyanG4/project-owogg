@@ -76,6 +76,24 @@ export function startMultiplayerRoom(input: {
   );
 }
 
+export function setMultiplayerRoomReady(input: {
+  readonly instanceId: string;
+  readonly expectedGeneration: number;
+  readonly ready: boolean;
+}): Promise<MultiplayerRoomResponse> {
+  return apiFetch(
+    `/api/multiplayer/instances/${encodeURIComponent(input.instanceId)}/ready`,
+    MultiplayerRoomResponseSchema,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        expectedGeneration: input.expectedGeneration,
+        ready: input.ready,
+      }),
+    },
+  );
+}
+
 export function fetchMultiplayerRematchStatus(input: {
   readonly instanceId: string;
   readonly expectedGeneration: number;

@@ -6,7 +6,10 @@ import {
   readMultiplayerRoomShareValue,
   stripMultiplayerRoomCredentials,
 } from "../features/game/runtime/MultiplayerGameSurface";
-import { multiplayerRoomClipboardValue } from "../features/game/runtime/MultiplayerIframeRuntime";
+import {
+  multiplayerPeerConnectionMessage,
+  multiplayerRoomClipboardValue,
+} from "../features/game/runtime/MultiplayerIframeRuntime";
 
 test("multiplayer room share link keeps code and invite out of HTTP query data", () => {
   const result = buildMultiplayerRoomShareValue(
@@ -93,4 +96,28 @@ test("room-code and invite-link clipboard actions never substitute for each othe
   assert.equal(multiplayerRoomClipboardValue("CODE", "ROOMCODE1234", inviteLink), "ROOMCODE1234");
   assert.equal(multiplayerRoomClipboardValue("LINK", "ROOMCODE1234", inviteLink), inviteLink);
   assert.equal(multiplayerRoomClipboardValue("LINK", "ROOMCODE1234"), null);
+});
+
+test("disconnect notice counts down and then reports official forfeit finalization", () => {
+  const reconnecting = {
+    participantId: "participant-2",
+    status: "RECONNECTING",
+    reconnectDeadlineAt: "2026-08-27T00:00:30.000Z",
+  } as const;
+  assert.equal(
+    multiplayerPeerConnectionMessage(reconnecting, Date.parse("2026-08-27T00:00:01.000Z")),
+    "상대 네트워크 연결이 불안정합니다. 29초 동안 재접속을 기다립니다.",
+  );
+  assert.equal(
+    multiplayerPeerConnectionMessage(reconnecting, Date.parse("2026-08-27T00:00:30.000Z")),
+    "재접속 유예 시간이 끝났습니다. 공식 기권 결과를 확인하고 있습니다.",
+  );
+  assert.equal(
+    multiplayerPeerConnectionMessage({
+      participantId: "participant-2",
+      status: "TIMED_OUT",
+      reconnectDeadlineAt: null,
+    }),
+    "상대가 30초 안에 재접속하지 않아 기권 처리되었습니다.",
+  );
 });

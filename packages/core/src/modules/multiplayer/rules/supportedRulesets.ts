@@ -1,5 +1,9 @@
 import type { ApprovedMultiplayerProfileV1 } from "../domain/multiplayerProfile.js";
-import { OMOK_RULESET_KEY, OMOK_RULESET_REVISION, isOmokResolvedConfigJson } from "./omokRules.js";
+import {
+  OMOK_RULESET_KEY,
+  isOmokResolvedConfigJson,
+  isSupportedOmokRulesetRevision,
+} from "./omokRules.js";
 
 /**
  * Static server-build allowlist. An approved D1 profile is necessary but never sufficient to
@@ -10,7 +14,7 @@ export function isSupportedMultiplayerRuntimeProfile(
 ): boolean {
   if (
     profile.rulesetKey !== OMOK_RULESET_KEY ||
-    profile.rulesetRevision !== OMOK_RULESET_REVISION
+    !isSupportedOmokRulesetRevision(profile.rulesetRevision)
   ) {
     return false;
   }
@@ -22,6 +26,6 @@ export function isSupportedMultiplayerRuntimeProfile(
     profile.reconnectPolicy === "resume" &&
     profile.minPlayers === 2 &&
     profile.maxPlayers === 2 &&
-    isOmokResolvedConfigJson(profile.resolvedConfigJson)
+    isOmokResolvedConfigJson(profile.resolvedConfigJson, profile.rulesetRevision)
   );
 }

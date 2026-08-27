@@ -1,5 +1,10 @@
 import { env } from "cloudflare:workers";
-import { applyD1Migrations, evictDurableObject, runInDurableObject } from "cloudflare:test";
+import {
+  applyD1Migrations,
+  evictDurableObject,
+  runDurableObjectAlarm,
+  runInDurableObject,
+} from "cloudflare:test";
 import { beforeAll, test } from "vitest";
 import { MULTIPLAYER_HEARTBEAT_REQUEST, MULTIPLAYER_HEARTBEAT_RESPONSE } from "@owogg/contracts";
 import {
@@ -1387,7 +1392,18 @@ test("network loss announces a 30 second grace and then commits a forfeit win", 
     (message) => message.type === "MULTI_TERMINAL_COMMITTED",
   );
   const stub = env.MULTIPLAYER_INSTANCES.get(env.MULTIPLAYER_INSTANCES.idFromName(room.instanceId));
-  await runInDurableObject(stub, async (instance, state) => {
+  await expect
+    .poll(async () =>
+      runInDurableObject(stub, async (_instance, state) => {
+        const scheduled = await state.storage.getAlarm();
+        return (
+          typeof scheduled === "number" &&
+          scheduled <= Date.parse(String(reconnectDeadlineAt)) + 1_000
+        );
+      }),
+    )
+    .toBe(true);
+  await runInDurableObject(stub, async (_instance, state) => {
     state.storage.sql.exec(
       `UPDATE participant_connections
        SET disconnected_at = ?
@@ -1395,8 +1411,11 @@ test("network loss announces a 30 second grace and then commits a forfeit win", 
       Math.floor(Date.now() / 1_000) - 31,
       room.playerClaims.participantId,
     );
-    await instance.alarm();
+    // Keep it in the future so the test helper, rather than the runtime's immediate-alarm queue,
+    // deterministically invokes the real alarm handler.
+    await state.storage.setAlarm(Date.now() + 60_000);
   });
+  expect(await runDurableObjectAlarm(stub)).toBe(true);
   await expect(committed).resolves.toMatchObject({
     type: "MULTI_TERMINAL_COMMITTED",
     result: {
