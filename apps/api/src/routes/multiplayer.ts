@@ -456,7 +456,9 @@ multiplayerRouter.post("/instances/join", async (c) => {
     inviteToken: parsed.data.inviteToken,
   });
   if (!result.ok) return failure(c, result.code);
-  await notifyLobbyChange(c, result.instance.id, result.instance.generation);
+  if (!result.replayed) {
+    deferLobbyChange(c, result.instance.id, result.instance.generation);
+  }
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomResponseSchema.parse({
@@ -554,11 +556,13 @@ multiplayerRouter.post("/instances/:instanceId/ready", async (c) => {
     ready: parsed.data.ready,
   });
   if (!result.ok) return failure(c, result.code);
-  deferLobbyChange(c, result.instance.id, result.instance.generation, {
-    kind: "PARTICIPANT_READY",
-    participantId: result.participant.id,
-    status: result.participant.status === "READY" ? "READY" : "JOINED",
-  });
+  if (result.changed) {
+    deferLobbyChange(c, result.instance.id, result.instance.generation, {
+      kind: "PARTICIPANT_READY",
+      participantId: result.participant.id,
+      status: result.participant.status === "READY" ? "READY" : "JOINED",
+    });
+  }
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomResponseSchema.parse({
@@ -599,7 +603,7 @@ multiplayerRouter.post("/instances/:instanceId/start", async (c) => {
     expectedGeneration: parsed.data.expectedGeneration,
   });
   if (!result.ok) return failure(c, result.code);
-  await notifyLobbyChange(c, result.instance.id, result.instance.generation);
+  deferLobbyChange(c, result.instance.id, result.instance.generation);
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomResponseSchema.parse({
@@ -709,7 +713,6 @@ multiplayerRouter.post("/instances/:instanceId/leave", async (c) => {
   ]);
   if (!instance) return failure(c, "INSTANCE_NOT_FOUND");
   if (!participant) return failure(c, "NOT_PARTICIPANT");
-  await notifyLobbyChange(c, instance.id, instance.generation);
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomResponseSchema.parse({

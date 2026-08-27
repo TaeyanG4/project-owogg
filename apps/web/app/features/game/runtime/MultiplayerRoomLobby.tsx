@@ -42,8 +42,19 @@ export function multiplayerLobbySlotCount(maxPlayers: number, occupiedPlayers: n
   return Math.min(Math.max(maxPlayers, occupiedPlayers), MAX_RENDERED_LOBBY_SLOTS);
 }
 
-export function multiplayerLobbyShouldReconnect(realtimeEverConnected: boolean): boolean {
-  return realtimeEverConnected;
+export function multiplayerLobbyReconnectDelay(
+  realtimeEverConnected: boolean,
+  reconnectAttempt: number,
+): number | null {
+  if (
+    !realtimeEverConnected ||
+    !Number.isSafeInteger(reconnectAttempt) ||
+    reconnectAttempt < 0 ||
+    reconnectAttempt >= LOBBY_RECONNECT_DELAYS_MS.length
+  ) {
+    return null;
+  }
+  return LOBBY_RECONNECT_DELAYS_MS[reconnectAttempt] ?? null;
 }
 
 export function multiplayerLobbyRosterSounds(
@@ -383,12 +394,9 @@ export function MultiplayerRoomLobby({
             // only burns more edge/DO requests and can push the roster fallback into its limiter.
             // Keep the lobby functional through bounded polling; sockets that were previously
             // healthy still use the reconnect policy for ordinary network interruptions.
-            if (!multiplayerLobbyShouldReconnect(realtimeEverConnected)) return;
             if (!active || terminalRoom || reconnectTimer) return;
-            const delay =
-              LOBBY_RECONNECT_DELAYS_MS[
-                Math.min(reconnectAttempt, LOBBY_RECONNECT_DELAYS_MS.length - 1)
-              ];
+            const delay = multiplayerLobbyReconnectDelay(realtimeEverConnected, reconnectAttempt);
+            if (delay === null) return;
             reconnectAttempt += 1;
             reconnectTimer = setTimeout(() => {
               reconnectTimer = undefined;

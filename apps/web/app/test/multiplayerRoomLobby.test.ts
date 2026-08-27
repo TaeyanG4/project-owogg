@@ -4,8 +4,8 @@ import type { MultiplayerLobbyChangedMessage, MultiplayerRoomPlayer } from "@owo
 import {
   applyMultiplayerLobbyChange,
   multiplayerLobbyCanStart,
+  multiplayerLobbyReconnectDelay,
   multiplayerLobbyRosterSounds,
-  multiplayerLobbyShouldReconnect,
   multiplayerLobbySlotCount,
 } from "../features/game/runtime/MultiplayerRoomLobby";
 
@@ -36,9 +36,13 @@ test("the shared lobby renders profile-sized slots and is future-safe up to sixt
   assert.equal(multiplayerLobbySlotCount(20, 20), 16);
 });
 
-test("the lobby retries only a realtime channel that had previously connected", () => {
-  assert.equal(multiplayerLobbyShouldReconnect(false), false);
-  assert.equal(multiplayerLobbyShouldReconnect(true), true);
+test("the lobby gives only a previously healthy realtime channel a finite reconnect budget", () => {
+  assert.equal(multiplayerLobbyReconnectDelay(false, 0), null);
+  assert.deepEqual(
+    [0, 1, 2, 3, 4].map((attempt) => multiplayerLobbyReconnectDelay(true, attempt)),
+    [1_000, 3_000, 10_000, 30_000, null],
+  );
+  assert.equal(multiplayerLobbyReconnectDelay(true, -1), null);
 });
 
 test("lobby sounds announce only other players entering and leaving after the initial roster", () => {

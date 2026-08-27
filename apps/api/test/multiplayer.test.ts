@@ -624,6 +624,15 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
   const reready = MultiplayerRoomResponseSchema.parse(await rereadyResponse.json());
   assert.equal(reready.participant.status, "READY");
 
+  const idempotentReadyResponse = await app.request(
+    `http://localhost/api/multiplayer/instances/${INSTANCE_ID}/ready`,
+    playerReadyRequest(true),
+    env as any,
+  );
+  assert.equal(idempotentReadyResponse.status, 200);
+  const idempotentReady = MultiplayerRoomResponseSchema.parse(await idempotentReadyResponse.json());
+  assert.equal(idempotentReady.participant.status, "READY");
+
   const startResponse = await app.request(
     `http://localhost/api/multiplayer/instances/${INSTANCE_ID}/start`,
     {
@@ -734,7 +743,7 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
     "PARTICIPANT_LEFT",
   );
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.ok(lobbyNotifications.length >= 5);
+  assert.equal(lobbyNotifications.length, 4);
   assert.equal(
     lobbyNotifications.every(
       (notification) => notification.instanceId === INSTANCE_ID && notification.generation === 1,

@@ -95,7 +95,7 @@ export interface MultiplayerBridgeHostDependencies {
 const SOCKET_CONNECTING = 0;
 const SOCKET_OPEN = 1;
 const MAX_QUEUED_GAME_MESSAGES = 32;
-const HEARTBEAT_INTERVAL_MS = 15_000;
+const HEARTBEAT_INTERVAL_MS = 30_000;
 const textEncoder = new TextEncoder();
 
 function hasServerSequence(
@@ -217,8 +217,14 @@ export function createMultiplayerBridgeHost(
     }
   }
 
-  const heartbeatTimer = scheduleInterval(() => {
-    if (closed || socket.readyState !== SOCKET_OPEN) return;
+  let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  const stopHeartbeat = () => {
+    if (heartbeatTimer === undefined) return;
+    cancelInterval(heartbeatTimer);
+    heartbeatTimer = undefined;
+  };
+  heartbeatTimer = scheduleInterval(() => {
+    if (closed || terminalCommitted || aborted || left || socket.readyState !== SOCKET_OPEN) return;
     try {
       socket.send(MULTIPLAYER_HEARTBEAT_REQUEST);
     } catch {
@@ -250,6 +256,7 @@ export function createMultiplayerBridgeHost(
     } else if (message.type === "MULTI_LEAVE") {
       left = true;
       sendToSocket(message);
+      stopHeartbeat();
       callbacks.onLeave?.();
       return;
     }
@@ -325,10 +332,12 @@ export function createMultiplayerBridgeHost(
         return;
       }
       terminalCommitted = true;
+      stopHeartbeat();
       callbacks.onConnectionState?.({ status: "TERMINAL_COMMITTED", result: message.result });
       callbacks.onTerminalCommitted?.(message.result);
     } else if (message.type === "MULTI_ABORTED") {
       aborted = true;
+      stopHeartbeat();
       callbacks.onConnectionState?.({ status: "ABORTED", code: message.code });
     }
     if (
@@ -374,13 +383,14 @@ export function createMultiplayerBridgeHost(
         v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
         generation: bootstrap.generation,
       });
+      stopHeartbeat();
       callbacks.onLeave?.();
       return true;
     },
     close() {
       if (closed) return;
       closed = true;
-      cancelInterval(heartbeatTimer);
+      stopHeartbeat();
       queuedGameMessages.length = 0;
       channel.port1.onmessage = null;
       channel.port1.close();

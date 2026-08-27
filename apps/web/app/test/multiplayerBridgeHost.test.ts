@@ -201,12 +201,12 @@ test("queues bounded game messages while connecting and flushes in order on open
   gamePort.close();
 });
 
-test("idle heartbeat stays parent-only and is cancelled with the bridge", async () => {
+test("active-match heartbeat is sparse, parent-only, and stops at terminal state", async () => {
   const iframe = createIframeHarness();
   const socket = createSocketHarness();
   let heartbeat: (() => void) | undefined;
   let intervalMs = 0;
-  let cleared = false;
+  let cleared = 0;
   let drops = 0;
   const timer = setInterval(() => undefined, 60_000);
   const host = createMultiplayerBridgeHost(
@@ -223,7 +223,7 @@ test("idle heartbeat stays parent-only and is cancelled with the bridge", async 
       clearInterval(handle) {
         assert.equal(handle, timer);
         clearInterval(handle);
-        cleared = true;
+        cleared += 1;
       },
     },
   );
@@ -231,7 +231,7 @@ test("idle heartbeat stays parent-only and is cancelled with the bridge", async 
   const received: unknown[] = [];
   gamePort.onmessage = (event) => received.push(event.data);
 
-  assert.equal(intervalMs, 15_000);
+  assert.equal(intervalMs, 30_000);
   assert.ok(heartbeat);
   heartbeat();
   assert.deepEqual(socket.sent, [MULTIPLAYER_HEARTBEAT_REQUEST]);
@@ -240,8 +240,22 @@ test("idle heartbeat stays parent-only and is cancelled with the bridge", async 
   assert.deepEqual(received, []);
   assert.equal(drops, 0);
 
+  socket.message(
+    JSON.stringify({
+      type: "MULTI_TERMINAL_COMMITTED",
+      v: 1,
+      generation: 3,
+      serverSeq: 1,
+      result: { outcome: "win" },
+    }),
+  );
+  await waitUntil(() => received.length, 1);
+  assert.equal(cleared, 1);
+  heartbeat();
+  assert.deepEqual(socket.sent, [MULTIPLAYER_HEARTBEAT_REQUEST]);
+
   host.close();
-  assert.equal(cleared, true);
+  assert.equal(cleared, 1);
   gamePort.close();
 });
 

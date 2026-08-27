@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  MULTIPLAYER_HEARTBEAT_REQUEST,
-  MULTIPLAYER_HEARTBEAT_RESPONSE,
   MULTIPLAYER_LOBBY_SYNC_REQUEST,
   MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
 } from "@owogg/contracts";
@@ -75,15 +73,12 @@ test("lobby socket URL is credential-free and anchored to the configured API ori
   assert.throws(() => multiplayerLobbySocketUrl("https://api.owogg.com", "../bad"));
 });
 
-test("valid increasing lobby changes preserve deltas, report gaps, and keep heartbeat transport-only", () => {
+test("valid lobby changes preserve deltas and an idle connection sends no recurring traffic", () => {
   const harness = socketHarness();
   const constructorInputs: Array<{ url: string; protocol: string }> = [];
   let connected = 0;
   const changes: Array<{ kind: string; missedEvents: boolean }> = [];
   let disconnected = 0;
-  let heartbeat: (() => void) | undefined;
-  let cleared = 0;
-  const timerHandle = 7 as unknown as ReturnType<typeof setInterval>;
   const handle = openMultiplayerLobbyRealtime(
     {
       instanceId: INSTANCE_ID,
@@ -99,15 +94,6 @@ test("valid increasing lobby changes preserve deltas, report gaps, and keep hear
         constructorInputs.push({ url, protocol });
         return harness.socket;
       },
-      setInterval(callback, delay) {
-        assert.equal(delay, 15_000);
-        heartbeat = callback;
-        return timerHandle;
-      },
-      clearInterval(timer) {
-        assert.equal(timer, timerHandle);
-        cleared += 1;
-      },
     },
   );
 
@@ -120,9 +106,6 @@ test("valid increasing lobby changes preserve deltas, report gaps, and keep hear
   harness.open();
   assert.equal(connected, 1);
   assert.deepEqual(harness.sent, [MULTIPLAYER_LOBBY_SYNC_REQUEST]);
-  heartbeat?.();
-  assert.deepEqual(harness.sent, [MULTIPLAYER_LOBBY_SYNC_REQUEST, MULTIPLAYER_HEARTBEAT_REQUEST]);
-  harness.message(MULTIPLAYER_HEARTBEAT_RESPONSE);
   harness.message(
     JSON.stringify({
       type: "LOBBY_CONNECTED",
@@ -185,7 +168,7 @@ test("valid increasing lobby changes preserve deltas, report gaps, and keep hear
   harness.disconnect("error");
   harness.disconnect("close");
   assert.equal(disconnected, 1);
-  assert.equal(cleared, 1);
+  assert.deepEqual(harness.sent, [MULTIPLAYER_LOBBY_SYNC_REQUEST]);
   handle.close();
 });
 

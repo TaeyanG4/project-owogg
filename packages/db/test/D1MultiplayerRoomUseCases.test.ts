@@ -318,6 +318,15 @@ test("participants enter READY while only the host start request creates one ACT
   assert.equal(joined.ok, true);
   if (!joined.ok) return;
   assert.equal(joined.participant.status, "READY");
+  const alreadyReady = await rooms.setParticipantReady({
+    userId: 2,
+    instanceId: created.instance.id,
+    expectedGeneration: 1,
+    ready: true,
+  });
+  assert.equal(alreadyReady.ok, true);
+  if (!alreadyReady.ok) return;
+  assert.equal(alreadyReady.changed, false);
 
   const hostReady = await rooms.setParticipantReady({
     userId: 1,

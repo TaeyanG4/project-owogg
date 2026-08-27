@@ -1,6 +1,4 @@
 import {
-  MULTIPLAYER_HEARTBEAT_REQUEST,
-  MULTIPLAYER_HEARTBEAT_RESPONSE,
   MULTIPLAYER_LOBBY_SYNC_REQUEST,
   MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
   MultiplayerLobbyConnectedMessageSchema,
@@ -10,7 +8,6 @@ import {
 import { API_URL } from "../../../lib/api/config.js";
 
 const INSTANCE_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
-const HEARTBEAT_INTERVAL_MS = 15_000;
 
 export interface MultiplayerLobbySocketLike {
   readonly protocol: string;
@@ -30,8 +27,6 @@ export interface MultiplayerLobbySocketLike {
 export interface MultiplayerLobbyRealtimeDependencies {
   readonly apiUrl?: string;
   readonly createSocket?: (url: string, protocol: string) => MultiplayerLobbySocketLike;
-  readonly setInterval?: (callback: () => void, delay: number) => ReturnType<typeof setInterval>;
-  readonly clearInterval?: (handle: ReturnType<typeof setInterval>) => void;
 }
 
 export interface MultiplayerLobbyRealtimeInput {
@@ -95,22 +90,13 @@ export function openMultiplayerLobbyRealtime(
     url,
     MULTIPLAYER_LOBBY_WEBSOCKET_PROTOCOL,
   );
-  const startInterval = dependencies.setInterval ?? setInterval;
-  const stopInterval = dependencies.clearInterval ?? clearInterval;
-  let heartbeat: ReturnType<typeof setInterval> | undefined;
   let stopped = false;
   let disconnected = false;
   let lastSequence = 0;
 
-  const clearHeartbeat = () => {
-    if (heartbeat === undefined) return;
-    stopInterval(heartbeat);
-    heartbeat = undefined;
-  };
   const signalDisconnected = () => {
     if (stopped || disconnected) return;
     disconnected = true;
-    clearHeartbeat();
     input.onDisconnected();
   };
   const onOpen = () => {
@@ -130,18 +116,9 @@ export function openMultiplayerLobbyRealtime(
       return;
     }
     input.onConnected?.();
-    heartbeat = startInterval(() => {
-      if (socket.readyState !== 1) return;
-      try {
-        socket.send(MULTIPLAYER_HEARTBEAT_REQUEST);
-      } catch {
-        signalDisconnected();
-      }
-    }, HEARTBEAT_INTERVAL_MS);
   };
   const onMessage = (event: { readonly data?: unknown }) => {
     if (stopped || typeof event.data !== "string") return;
-    if (event.data === MULTIPLAYER_HEARTBEAT_RESPONSE) return;
     let decoded: unknown;
     try {
       decoded = JSON.parse(event.data);
@@ -183,7 +160,6 @@ export function openMultiplayerLobbyRealtime(
     close() {
       if (stopped) return;
       stopped = true;
-      clearHeartbeat();
       socket.removeEventListener("open", onOpen);
       socket.removeEventListener("message", onMessage);
       socket.removeEventListener("close", onClose);

@@ -623,7 +623,10 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     } catch {
       await this.disconnectUnavailable(server, attachment);
     }
-    this.ctx.waitUntil(this.scheduleNextAlarm(claims.exp * 1_000 + 1_000));
+    // Ticket nonces are checked synchronously and expired rows are deleted lazily on the next
+    // admission or lifecycle alarm. A dedicated 30-second alarm per gameplay connection would
+    // add billable invocations without improving replay protection because the signed ticket's
+    // expiry is already enforced before this object is reached.
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -819,8 +822,6 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       return;
     }
 
-    const nowSeconds = Math.floor(Date.now() / 1_000);
-    this.touchConnection(attachment, nowSeconds);
     switch (parsed.type) {
       case "MULTI_LEAVE":
         await this.handleLeave(authority, attachment, socket);
@@ -1180,6 +1181,22 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       expectedGeneration: generation,
     });
     if (!result.ok) return result;
+    const hasPeerLobbySocket = participant
+      ? this.state
+          .getWebSockets(lobbyGenerationTag(generation))
+          .some(
+            (socket) =>
+              socket.readyState === 1 &&
+              this.readLobbyAttachment(socket)?.participantId !== participant.id,
+          )
+      : false;
+    if (!result.replayed && hasPeerLobbySocket) {
+      // The authenticated leave already entered this Durable Object. Reuse that request to
+      // invalidate remaining lobby clients instead of making the outer Worker perform a second
+      // billable DO fetch. Avoid reserving an event when only the departing participant is still
+      // attached or gameplay has already replaced the lobby channel.
+      this.broadcastLobbyChanged(instanceId, generation, { kind: "INVALIDATE" });
+    }
     if (result.instance.status === "ABORTED") {
       const runtime = this.readRuntimeMatch();
       if (runtime) this.persistRuntimeMatch({ ...runtime, lifecycle: "ABORTED" });
@@ -2958,18 +2975,6 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
         ? current.expiresAt
         : Math.min(current.expiresAt, current.emptyDeadline);
     await this.scheduleNextAlarm(nextSeconds * 1_000 + 1);
-  }
-
-  private touchConnection(attachment: ConnectionAttachment, nowSeconds: number): void {
-    this.state.storage.sql.exec(
-      `UPDATE participant_connections SET last_seen_at = ?
-       WHERE participant_id = ? AND generation = ? AND connection_generation = ?
-         AND disconnected_at IS NULL`,
-      nowSeconds,
-      attachment.participantId,
-      attachment.generation,
-      attachment.connectionGeneration,
-    );
   }
 
   private markDisconnected(attachment: ConnectionAttachment, nowSeconds: number): boolean {

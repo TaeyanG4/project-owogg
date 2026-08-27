@@ -650,9 +650,21 @@ per-frame raw logging
 ### 권장
 
 - lobby/turn waiting은 Hibernation API 사용
-- 현재 D1 기반 공용 lobby 복구 조회는 foreground 6.5초, background 15초로 제한하고 ACTIVE/종료 즉시
-  중단한다. 이는 gameplay transport가 아니며 4인 fanout 단계에서는 DO event push로 교체·계측한다.
-- protocol ping/auto-response 사용
+- 정상 lobby는 WebSocket push와 연결 직후 sequence sync 1회만 사용하고 application heartbeat나 반복
+  roster 조회를 만들지 않는다. Ready/Join/Start처럼 실제 상태가 바뀔 때만 D1 확정 뒤 DO가 참가자에게
+  즉시 push한다.
+- lobby socket 장애 시에만 D1 roster 복구 조회를 foreground `2→2→3→5→10→15→30초`, background
+  30초로 backoff하고 ACTIVE/종료 즉시 중단한다. 정상 연결된 적 없는 socket은 재시도하지 않으며,
+  정상 연결 뒤 단절도 `1→3→10→30초` 네 번까지만 재연결한다.
+- active gameplay heartbeat는 30초 간격과 Hibernation auto-response를 사용하고 terminal/abort/leave 즉시
+  중단한다. lobby에는 heartbeat를 보내지 않는다.
+- replayed Join, 동일한 Ready 상태처럼 실제 변경이 없는 쓰기는 DO notify를 생략하고, Leave는 이미 DO에
+  들어온 control request 안에서 peer invalidation을 방송해 두 번째 DO fetch를 만들지 않는다.
+- gameplay message마다 `last_seen_at`을 갱신하지 않는다. Hibernation WebSocket의 close/error와
+  connection generation이 접속 권위이며, 연결 시각과 실제 disconnect 시각만 저장해 action당 DO SQL
+  write 1개를 제거한다. action rate window와 authoritative state checkpoint는 보안·복구를 위해 유지한다.
+- 30초 join-ticket nonce는 서명 만료를 edge에서 먼저 검증하고 DO 입장 시 원자 소비한다. nonce row
+  삭제만을 위한 개별 alarm은 만들지 않고 다음 admission/lifecycle alarm에서 lazy cleanup한다.
 - M2 input은 최신 방향 state로 coalesce
 - snapshot은 변화가 있을 때만 보내고 slow client는 resync
 - realtime DO storage는 phase/terminal과 최소 checkpoint만 기록
@@ -680,6 +692,69 @@ finalization retry/lag
 action/tick p50/p95/p99
 disconnect/ABORTED_INFRA
 ```
+
+### M1 공식 오목 비용 기준선 (2026-08-28)
+
+[Cloudflare Durable Objects 가격표](https://developers.cloudflare.com/durable-objects/platform/pricing/)의
+현재 기준은 Free `100,000 request/day`, `13,000 GB-s/day`, SQLite `5M read/day`, `100,000
+write/day`다. Paid는 월 최소 $5에 DO request 1M, duration 400,000 GB-s, SQLite read 25B,
+write 50M이 포함되며 초과 단가는 request `$0.15/M`, duration `$12.50/M GB-s`, write `$1/M`이다.
+WebSocket upgrade와 alarm은 각각 request 1개이고 client→DO message는 과금에서 20:1로 환산한다. DO
+dashboard의 message metric은 20:1 전 원시 개수이므로 quota 계산과 직접 비교하지 않는다.
+
+첫 2인 오목 한 판에서 정상 경로의 보수적 request 계산은 다음과 같다.
+
+```text
+fixed DO fetch/upgrade = 6
+  host/player lobby upgrade 2 + join notify 1 + start notify 1 + gameplay upgrade 2
+normal lifecycle alarm = 약 3
+  lobby→game empty-grace 정리 + rematch expiry + instance TTL
+client WebSocket messages = N + 5 + 2*floor(T/30)
+  N moves + lobby sync 2 + game ready 2 + stone selection 1 + 30초 heartbeat 2인
+
+billable DO requests ≈ 9 + (N + 5 + 2*floor(T/30)) / 20
+```
+
+| 경기 가정         | raw client message | billable DO request | request 한도만 본 Free 경기/일 |
+| ----------------- | -----------------: | ------------------: | -----------------------------: |
+| 5분·40수          |                 65 |               12.25 |                          8,163 |
+| 10분·60수 기준    |                105 |               14.25 |                          7,017 |
+| 20분·100수 장기전 |                185 |               18.25 |                          5,479 |
+
+요청보다 먼저 도달할 가능성이 큰 한도는 SQLite/D1 write다. 현재 정상 착수는 DO에서 durable rate window
+1행과 authoritative checkpoint 1행을 쓰고, D1에서는 match revision과 append-only action을 쓴다. 연결,
+권위 초기화, 마지막 수와 finalization overhead를 포함한 Staging 출발 추정은 DO write
+`2*N + 40~70`, D1 write도 비슷한 규모다. 따라서 Free write 한도는 평균 60수 기준 대략
+`500~625 matches/day`이며 운영 안전 상한은 계측 전 그 절반 이하로 둔다. 인덱스 유지와 replay/forfeit
+비율에 따라 달라지므로 Cloudflare의 실제 rows-written metric으로 보정해야 한다.
+
+Hibernation 중 idle WebSocket은 duration이 없고 outbound message도 request 과금이 없다. duration은
+handler와 D1 I/O가 실제로 활성화한 wall time에 좌우되므로 코드만으로 확정하지 않고 Staging의
+`DO active milliseconds`를 경기 ID 없이 집계해 다음 식으로 계산한다.
+
+```text
+GB-s/match = active_seconds * 0.125 GB
+paid duration overage/match = GB-s/match * $12.50 / 1,000,000
+```
+
+60수 기준, 모든 포함량을 이미 초과했다고 가정한 보수적 marginal budget은 DO/D1 write와 duration을
+합쳐 `$0.0003~$0.0006/match`(계획 환율 $1=₩1,400에서 약 `₩0.42~₩0.84`)다. 실제 초기 운영은 Paid
+기본 포함량 안이므로 월 비용은 대부분 최소 $5다. AdSense는 고정 단가가 없으며 Google의 공식 식
+`revenue = impressions * observed RPM / 1000`으로 실제 30일 RPM과 fill rate를 대입한다.
+
+| 실제 광고 RPM | Paid 기본 $5를 채우는 노출/월 | 양쪽 플레이어 각 1회 노출 시 경기/월 |
+| ------------: | ----------------------------: | -----------------------------------: |
+|         $0.50 |                        10,000 |                                5,000 |
+|         $1.00 |                         5,000 |                                2,500 |
+|         $3.00 |                         1,667 |                                  834 |
+|         $5.00 |                         1,000 |                                  500 |
+
+따라서 비용 목적으로는 플레이어 세션당 광고 슬롯 1개면 충분하고 여러 개를 둘 이유가 없다. 일반
+AdSense는 게임 조작 영역에서 최소 150px 이상 분리하고 자동 refresh하지 않는다. 경기 종료 같은 자연스러운
+전환점의 interstitial은 별도 승인이 필요한
+[AdSense H5 Games Ad Placement API](https://support.google.com/adsense/answer/9959170)만 사용한다. 실제
+손익 계산에서는 `slot views * fill rate`를 served impression으로 사용하며 광고 차단 사용자는 수익 0으로
+본다.
 
 동시 instance/player 안전 상한과 월 비용 Gate는 Staging load 결과를 보고 Production 전에 정한다.
 
@@ -896,6 +971,14 @@ READY 요청 자체를 503으로 바꾸지 않는다. socket이 정상인 동안
 폴링으로 전환한다. 한 번 정상 연결됐던 소켓의 네트워크 단절만 지수형 재연결 대상으로 삼으며,
 READY 이후 DO 알림은 `waitUntil`로 분리해 공급자 quota 장애가 쓰기 응답 지연이나 실패로 전파되지
 않게 한다. 이는 무료 tier 소진 시 `503 → 재연결 → roster 429` 연쇄를 차단하는 비용 안전장치다.
+
+2026-08-28 비용 보정은 idle lobby의 15초 application heartbeat를 제거했다. 따라서 2시간 동안 열린
+대기실 참가자 한 명당 약 480개의 반복 inbound message가 0개가 되며, 연결과 sequence sync 이후에는
+실제 상태 변경만 DO를 사용한다. gameplay heartbeat도 30초로 낮추고 terminal/abort/leave에서 즉시
+해제한다. 중복 Join/Ready notify와 Leave의 두 번째 DO fetch를 제거하고, provider 장애 뒤 WebSocket
+재접속은 유한 예산으로 제한한다. gameplay message별 진단용 `last_seen_at` write도 제거해 정상 착수당
+DO SQLite write를 3개 수준에서 rate-limit 1개와 authoritative checkpoint 1개 수준으로 낮춘다. 접속
+ticket별 30초 nonce-cleanup alarm도 제거해 정상 경기당 alarm invocation을 줄인다.
 
 완료 Gate: 동시/중복 action으로 corruption이 없고 iframe이 결과·업적·XP를 위조할 수 없다.
 

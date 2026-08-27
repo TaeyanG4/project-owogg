@@ -108,6 +108,8 @@ export type ReadyMultiplayerParticipantResult =
   | {
       readonly ok: true;
       readonly state: "WAITING" | "ACTIVE";
+      /** True only when this call actually changed the participant's persisted lobby status. */
+      readonly changed: boolean;
       readonly instance: MultiplayerInstanceRecord;
       readonly participant: MultiplayerParticipantRecord;
       readonly match: MultiplayerMatchRecord | null;
@@ -472,7 +474,7 @@ export class MultiplayerRoomUseCases {
           instance.generation,
         );
         return match
-          ? { ok: true, state: "ACTIVE", instance, participant, match }
+          ? { ok: true, state: "ACTIVE", changed: false, instance, participant, match }
           : { ok: false, code: "INTERNAL_RETRYABLE" };
       }
       if (instance.status !== "LOBBY") {
@@ -482,7 +484,8 @@ export class MultiplayerRoomUseCases {
 
       const nowIso = this.now().toISOString();
       const nextStatus = input.ready ? "READY" : "JOINED";
-      if (participant.status !== nextStatus) {
+      const changed = participant.status !== nextStatus;
+      if (changed) {
         const transitioned = await this.dependencies.instances.transitionParticipant({
           instanceId: instance.id,
           expectedInstanceGeneration: instance.generation,
@@ -502,7 +505,7 @@ export class MultiplayerRoomUseCases {
       }
 
       instance = (await this.dependencies.instances.findById(instance.id)) ?? instance;
-      return { ok: true, state: "WAITING", instance, participant, match: null };
+      return { ok: true, state: "WAITING", changed, instance, participant, match: null };
     } catch {
       return { ok: false, code: "INTERNAL_RETRYABLE" };
     }

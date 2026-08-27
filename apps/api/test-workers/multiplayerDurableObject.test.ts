@@ -747,6 +747,60 @@ test("lobby sockets receive ordered invalidations without gameplay state or cred
   socket.close(1000, "done");
 });
 
+test("HTTP leave reuses its existing Durable Object request to invalidate lobby peers", async ({
+  expect,
+}) => {
+  const { rooms, instances } = roomHarness();
+  const created = await rooms.createRoom({
+    userId: HOST_USER_ID,
+    gameSlug: GAME_SLUG,
+    visibility: "PRIVATE",
+    joinPolicy: "OPEN",
+    idempotencyKey: "workers_lobby_leave_push_0001",
+  });
+  if (!created.ok) throw new Error(`room create failed: ${created.code}`);
+  const joined = await rooms.joinRoom({
+    userId: PLAYER_USER_ID,
+    publicCode: created.instance.publicCode,
+    inviteToken: null,
+  });
+  if (!joined.ok) throw new Error(`room join failed: ${joined.code}`);
+
+  const { socket } = await connectLobby({
+    instanceId: created.instance.id,
+    participantId: created.participant.id,
+    userId: HOST_USER_ID,
+    generation: created.instance.generation,
+    expiresAt: Math.ceil(Date.parse(created.instance.expiresAt) / 1_000),
+  });
+  socket.send(MULTIPLAYER_LOBBY_SYNC_REQUEST);
+  await expect(nextMessage(socket, "leave lobby sequence baseline")).resolves.toMatchObject({
+    type: "LOBBY_CONNECTED",
+    sequence: 0,
+  });
+
+  const lobbyChange = nextMessage(socket, "leave lobby invalidation");
+  const stub = env.MULTIPLAYER_INSTANCES.get(
+    env.MULTIPLAYER_INSTANCES.idFromName(created.instance.id),
+  );
+  const response = await stub.fetch(
+    internalLeaveRequest(created.instance.id, PLAYER_USER_ID, created.instance.generation),
+  );
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({ ok: true, replayed: false });
+  await expect(lobbyChange).resolves.toMatchObject({
+    type: "LOBBY_CHANGED",
+    instanceId: created.instance.id,
+    generation: created.instance.generation,
+    sequence: 1,
+    change: { kind: "INVALIDATE" },
+  });
+  expect(await instances.findParticipant(created.instance.id, PLAYER_USER_ID)).toMatchObject({
+    status: "LEFT",
+  });
+  socket.close(1000, "done");
+});
+
 test("a reconnect cancels empty-lobby cleanup while a fully abandoned lobby is aborted", async ({
   expect,
 }) => {
