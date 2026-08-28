@@ -404,6 +404,79 @@ test("a PRIVATE OPEN room accepts its opaque room code without an invite token",
   );
 });
 
+test("a voluntary lobby leave can rejoin while a host-closed room is no longer discoverable", async () => {
+  const { rooms, instances } = harness();
+  const created = await createRoom(rooms);
+  const invite = await rooms.createInvite({
+    userId: 1,
+    instanceId: created.instance.id,
+    expectedGeneration: 1,
+    idempotencyKey: "invite_request_rejoin_0001",
+    keyring,
+  });
+  assert.equal(invite.ok, true);
+  if (!invite.ok) return;
+
+  const joined = await rooms.joinRoom({
+    userId: 2,
+    publicCode: created.instance.publicCode,
+    inviteToken: invite.inviteToken,
+  });
+  assert.equal(joined.ok, true);
+  if (!joined.ok) return;
+  const originalParticipantId = joined.participant.id;
+
+  const left = await rooms.leaveRoom({
+    userId: 2,
+    instanceId: created.instance.id,
+    expectedGeneration: 1,
+    expectedInstanceStatus: "LOBBY",
+  });
+  assert.equal(left.ok, true);
+  assert.equal((await instances.findById(created.instance.id))?.participantCount, 1);
+
+  // The authenticated former participant may reclaim the same audited seat without consuming a
+  // second one-use invite. It becomes READY through the ordinary join orchestration.
+  const rejoined = await rooms.joinRoom({
+    userId: 2,
+    publicCode: created.instance.publicCode,
+    inviteToken: null,
+  });
+  assert.equal(rejoined.ok, true);
+  if (!rejoined.ok) return;
+  assert.equal(rejoined.replayed, false);
+  assert.equal(rejoined.participant.id, originalParticipantId);
+  assert.equal(rejoined.participant.status, "READY");
+  assert.equal((await instances.findById(created.instance.id))?.participantCount, 2);
+
+  const hostLeft = await rooms.leaveRoom({
+    userId: 1,
+    instanceId: created.instance.id,
+    expectedGeneration: 1,
+    expectedInstanceStatus: "LOBBY",
+  });
+  assert.equal(hostLeft.ok, true);
+  if (!hostLeft.ok) return;
+  assert.equal(hostLeft.instance.status, "ABORTED");
+
+  assert.deepEqual(
+    await rooms.joinRoom({
+      userId: 1,
+      publicCode: created.instance.publicCode,
+      inviteToken: null,
+    }),
+    { ok: false, code: "INSTANCE_NOT_FOUND" },
+  );
+  assert.deepEqual(
+    await rooms.joinRoom({
+      userId: 2,
+      publicCode: created.instance.publicCode,
+      inviteToken: null,
+    }),
+    { ok: false, code: "INSTANCE_NOT_FOUND" },
+  );
+});
+
 test("one rematch request waits while two exact participants open one next generation", async () => {
   const { rooms, matches, instances } = harness();
   const created = await createRoom(rooms);

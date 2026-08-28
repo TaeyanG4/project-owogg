@@ -346,6 +346,19 @@ export class MultiplayerRoomUseCases {
     try {
       const instance = await this.dependencies.instances.findByPublicCode(input.publicCode);
       if (!instance) return { ok: false, code: "INSTANCE_NOT_FOUND" };
+      const nowIso = this.now().toISOString();
+      // Terminal and expired room codes are deliberately indistinguishable from unknown codes.
+      // This keeps a host-closed room out of the admission surface and prevents a retained
+      // participant audit row from leaking the former room's existence as ALREADY_JOINED.
+      if (
+        ["CLOSED", "ABORTED", "EXPIRED"].includes(instance.status) ||
+        instance.expiresAt <= nowIso
+      ) {
+        return { ok: false, code: "INSTANCE_NOT_FOUND" };
+      }
+      if (instance.status !== "CREATED" && instance.status !== "LOBBY") {
+        return { ok: false, code: "INSTANCE_NOT_JOINABLE" };
+      }
       const inviteTokenHash =
         input.inviteToken === null ? null : await sha256Hex(input.inviteToken);
       const joined = await this.dependencies.instances.join({
@@ -354,7 +367,7 @@ export class MultiplayerRoomUseCases {
         userId: input.userId,
         expectedGeneration: instance.generation,
         inviteTokenHash,
-        nowIso: this.now().toISOString(),
+        nowIso,
       });
       if (joined.status === "REJECTED") return { ok: false, code: joined.code };
       const current = await this.dependencies.instances.findById(instance.id);

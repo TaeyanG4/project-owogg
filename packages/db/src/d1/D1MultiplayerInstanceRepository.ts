@@ -400,9 +400,52 @@ export class D1MultiplayerInstanceRepository implements MultiplayerInstanceRepos
   async join(input: JoinMultiplayerInstanceInput): Promise<JoinMultiplayerInstanceResult> {
     const existing = await this.findParticipant(input.instanceId, input.userId);
     if (existing) {
-      return existing.status === "JOINED" || existing.status === "READY"
-        ? { status: "REPLAYED", participant: existing }
-        : { status: "REJECTED", code: "ALREADY_JOINED" };
+      if (existing.status === "JOINED" || existing.status === "READY") {
+        return { status: "REPLAYED", participant: existing };
+      }
+      if (existing.status === "KICKED") {
+        return { status: "REJECTED", code: "ALREADY_JOINED" };
+      }
+
+      // A voluntary lobby leave retains the immutable participant row for audit and reconnect
+      // identity. Reclaim that exact seat atomically instead of treating the retained LEFT row as
+      // a second participant. The original admission already consumed its invite, so a rejoin does
+      // not consume another invite use; the opaque room code and authenticated user must still
+      // match this exact instance participant.
+      const rejoined = await this.db
+        .prepare(
+          `UPDATE multiplayer_participants
+           SET status = 'JOINED', ready_at = NULL, left_at = NULL, updated_at = ?
+           WHERE instance_id = ? AND user_id = ? AND status = 'LEFT'
+             AND EXISTS (
+               SELECT 1
+               FROM multiplayer_instances instance
+               JOIN multiplayer_profiles profile ON profile.id = instance.profile_id
+               JOIN games game ON game.id = instance.game_id
+               JOIN game_versions version
+                 ON version.id = instance.game_version_id AND version.game_id = game.id
+               WHERE instance.id = multiplayer_participants.instance_id
+                 AND instance.generation = ?
+                 AND instance.status IN ('CREATED', 'LOBBY')
+                 AND instance.expires_at > ?
+                 AND instance.participant_count < instance.max_players
+                 AND profile.enabled = 1
+                 AND game.deleted_at IS NULL
+                 AND game.live_version_id = version.id
+                 AND version.publish_status = 'READY'
+                 AND (
+                   game.publisher_type = 'OWOGG'
+                   OR (game.publisher_type = 'USER' AND version.moderation_status = 'APPROVED')
+                 )
+             )`,
+        )
+        .bind(input.nowIso, input.instanceId, input.userId, input.expectedGeneration, input.nowIso)
+        .run();
+      if ((writtenRows(rejoined) ?? 0) === 1) {
+        const participant = await this.findParticipant(input.instanceId, input.userId);
+        if (participant?.status === "JOINED") return { status: "JOINED", participant };
+      }
+      return this.classifyJoinAfterWrite(input, 0);
     }
 
     let results: D1Result[];
@@ -1116,15 +1159,10 @@ export class D1MultiplayerInstanceRepository implements MultiplayerInstanceRepos
     input: JoinMultiplayerInstanceInput,
     rowsWritten: number | null,
   ): Promise<JoinMultiplayerInstanceResult> {
-    const participant = await this.findParticipant(input.instanceId, input.userId);
-    if (participant) {
-      if (participant.status === "JOINED" || participant.status === "READY") {
-        return { status: rowsWritten === 1 ? "JOINED" : "REPLAYED", participant };
-      }
-      return { status: "REJECTED", code: "ALREADY_JOINED" };
-    }
-
-    const instance = await this.findById(input.instanceId);
+    const [participant, instance] = await Promise.all([
+      this.findParticipant(input.instanceId, input.userId),
+      this.findById(input.instanceId),
+    ]);
     if (!instance) return { status: "REJECTED", code: "INSTANCE_NOT_FOUND" };
     if (instance.generation !== input.expectedGeneration) {
       return { status: "REJECTED", code: "STALE_GENERATION" };
@@ -1132,8 +1170,26 @@ export class D1MultiplayerInstanceRepository implements MultiplayerInstanceRepos
     if (!["CREATED", "LOBBY"].includes(instance.status) || instance.expiresAt <= input.nowIso) {
       return { status: "REJECTED", code: "INSTANCE_NOT_JOINABLE" };
     }
+    if (participant) {
+      if (participant.status === "JOINED" || participant.status === "READY") {
+        return { status: rowsWritten === 1 ? "JOINED" : "REPLAYED", participant };
+      }
+      if (participant.status === "KICKED") {
+        return { status: "REJECTED", code: "ALREADY_JOINED" };
+      }
+    }
     if (!(await this.isProfileAdmissionEnabled(instance))) {
       return { status: "REJECTED", code: "PROFILE_DISABLED" };
+    }
+
+    if (participant?.status === "LEFT") {
+      if (instance.participantCount >= instance.maxPlayers) {
+        return { status: "REJECTED", code: "INSTANCE_FULL" };
+      }
+      // A joinable LEFT row should normally have been reclaimed above. Reaching this branch means
+      // an admission precondition changed concurrently; surface it as retryable, not as a false
+      // claim that the user is still participating.
+      return { status: "REJECTED", code: "INTERNAL_RETRYABLE" };
     }
 
     if (instance.joinPolicy === "INVITE_ONLY") {
