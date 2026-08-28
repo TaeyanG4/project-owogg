@@ -33,18 +33,6 @@ export const MultiplayerLobbySignalChangeSchema = z.discriminatedUnion("kind", [
 ]);
 export type MultiplayerLobbySignalChange = z.infer<typeof MultiplayerLobbySignalChangeSchema>;
 
-export const MultiplayerLobbySignalConnectedMessageSchema = z
-  .object({
-    type: z.literal("LOBBY_SIGNAL_CONNECTED"),
-    v: z.literal(1),
-    instanceId: OpaqueIdSchema,
-    generation: z.number().int().positive(),
-  })
-  .strict();
-export type MultiplayerLobbySignalConnectedMessage = z.infer<
-  typeof MultiplayerLobbySignalConnectedMessageSchema
->;
-
 export const MultiplayerLobbySignalChangedMessageSchema = z
   .object({
     type: z.literal("LOBBY_SIGNAL_CHANGED"),

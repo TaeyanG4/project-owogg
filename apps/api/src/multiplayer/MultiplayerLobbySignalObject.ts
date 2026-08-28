@@ -118,6 +118,8 @@ export class MultiplayerLobbySignalObject extends DurableObject<MultiplayerLobby
       participantTag(claims.participantId),
     ]);
     server.serializeAttachment(attachment);
+    // Kept for one rolling-deploy compatibility window. Current clients trust the authenticated
+    // WebSocket `open` event and do not depend on this frame, but an already-open older bundle does.
     server.send(
       JSON.stringify({
         type: "LOBBY_SIGNAL_CONNECTED",

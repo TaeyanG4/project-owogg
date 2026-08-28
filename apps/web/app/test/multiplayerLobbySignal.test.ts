@@ -61,7 +61,7 @@ test("lobby signal URLs contain neither credentials nor gameplay tickets", () =>
   );
 });
 
-test("the lobby signal validates admission, applies only matching changes, and uses auto-response heartbeats", () => {
+test("the authenticated WebSocket handshake admits lobby signals and applies only matching changes", () => {
   const socket = new FakeSocket();
   const connected: string[] = [];
   const changes: unknown[] = [];
@@ -100,16 +100,6 @@ test("the lobby signal validates admission, applies only matching changes, and u
   assert.match(requestedUrl, /^wss:\/\/api-stg\.owogg\.com\//);
   assert.equal(requestedProtocol, MULTIPLAYER_LOBBY_SIGNAL_PROTOCOL);
   socket.emit("open");
-  assert.deepEqual(connected, []);
-  socket.emit(
-    "message",
-    JSON.stringify({
-      type: "LOBBY_SIGNAL_CONNECTED",
-      v: 1,
-      instanceId: "instance_signal_0001",
-      generation: 3,
-    }),
-  );
   assert.deepEqual(connected, ["connected"]);
   assert.equal(heartbeatDelay, 300_000);
 
@@ -177,4 +167,35 @@ test("a failed lobby signal reports disconnection only once", () => {
   socket.emit("error");
   socket.emit("close");
   assert.equal(disconnected, 1);
+});
+
+test("a WebSocket that did not negotiate the lobby subprotocol is never admitted", () => {
+  const socket = new FakeSocket();
+  socket.protocol = "";
+  let connected = 0;
+  let disconnected = 0;
+  openMultiplayerLobbySignal(
+    {
+      instanceId: "instance_signal_0003",
+      generation: 1,
+      onConnected() {
+        connected += 1;
+      },
+      onChanged() {},
+      onDisconnected() {
+        disconnected += 1;
+      },
+    },
+    {
+      apiUrl: "https://api-stg.owogg.com",
+      createSocket: () => socket,
+    },
+  );
+
+  socket.emit("open");
+  assert.equal(connected, 0);
+  assert.equal(disconnected, 1);
+  assert.deepEqual(socket.closes, [
+    { code: 1002, reason: "invalid multiplayer lobby signal protocol" },
+  ]);
 });

@@ -3,7 +3,6 @@ import {
   MULTIPLAYER_HEARTBEAT_RESPONSE,
   MULTIPLAYER_LOBBY_SIGNAL_PROTOCOL,
   MultiplayerLobbySignalChangedMessageSchema,
-  MultiplayerLobbySignalConnectedMessageSchema,
   type MultiplayerLobbySignalChange,
 } from "@owogg/contracts";
 import { API_URL } from "../../../lib/api/config.js";
@@ -121,9 +120,32 @@ export function openMultiplayerLobbySignal(
     input.onDisconnected();
   };
   const onOpen = () => {
-    if (stopped || socket.protocol === MULTIPLAYER_LOBBY_SIGNAL_PROTOCOL) return;
-    socket.close(1002, "invalid multiplayer lobby signal protocol");
-    signalDisconnected();
+    if (stopped || disconnected || connected) return;
+    // The browser emits `open` only after the authenticated API upgrade succeeded and the server
+    // echoed our exact subprotocol. Requiring another application frame here created a second,
+    // lossy admission gate in front of otherwise valid change frames.
+    if (socket.protocol !== MULTIPLAYER_LOBBY_SIGNAL_PROTOCOL) {
+      socket.close(1002, "invalid multiplayer lobby signal protocol");
+      signalDisconnected();
+      return;
+    }
+    connected = true;
+    if (admissionTimer !== undefined) {
+      clearTimeout(admissionTimer);
+      admissionTimer = undefined;
+    }
+    heartbeat = setHeartbeat(() => {
+      if (socket.readyState !== SOCKET_OPEN) {
+        signalDisconnected();
+        return;
+      }
+      try {
+        socket.send(MULTIPLAYER_HEARTBEAT_REQUEST);
+      } catch {
+        signalDisconnected();
+      }
+    }, HEARTBEAT_INTERVAL_MS);
+    input.onConnected();
   };
   const onMessage = (event: { readonly data?: unknown }) => {
     if (stopped || disconnected || typeof event.data !== "string") return;
@@ -132,32 +154,6 @@ export function openMultiplayerLobbySignal(
     try {
       decoded = JSON.parse(event.data);
     } catch {
-      return;
-    }
-    const admitted = MultiplayerLobbySignalConnectedMessageSchema.safeParse(decoded);
-    if (
-      admitted.success &&
-      admitted.data.instanceId === input.instanceId &&
-      admitted.data.generation === input.generation
-    ) {
-      if (connected) return;
-      connected = true;
-      if (admissionTimer !== undefined) {
-        clearTimeout(admissionTimer);
-        admissionTimer = undefined;
-      }
-      heartbeat = setHeartbeat(() => {
-        if (socket.readyState !== SOCKET_OPEN) {
-          signalDisconnected();
-          return;
-        }
-        try {
-          socket.send(MULTIPLAYER_HEARTBEAT_REQUEST);
-        } catch {
-          signalDisconnected();
-        }
-      }, HEARTBEAT_INTERVAL_MS);
-      input.onConnected();
       return;
     }
     const changed = MultiplayerLobbySignalChangedMessageSchema.safeParse(decoded);

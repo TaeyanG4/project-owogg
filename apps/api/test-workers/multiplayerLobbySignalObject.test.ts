@@ -1,4 +1,4 @@
-import { env, runInDurableObject } from "cloudflare:test";
+import { env, evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { test } from "vitest";
 import {
   MULTIPLAYER_HEARTBEAT_REQUEST,
@@ -91,9 +91,9 @@ async function connect(claims: VerifiedMultiplayerLobbySignalClaims) {
   const response = await stub.fetch(connectRequest(claims));
   const socket = response.webSocket;
   if (!socket) throw new Error(`expected lobby signal upgrade, received ${response.status}`);
-  const admission = nextRawMessage(socket, "signal admission");
+  const compatibilityAdmission = nextRawMessage(socket, "compatibility admission");
   socket.accept();
-  return { admission, response, socket, stub };
+  return { compatibilityAdmission, response, socket, stub };
 }
 
 test("lobby signals hibernate without persisted state and fan out minimal changes", async ({
@@ -104,9 +104,9 @@ test("lobby signals hibernate without persisted state and fan out minimal change
     participantId: "participant_signal_workers_0001",
     generation: 2,
   };
-  const { admission, response, socket, stub } = await connect(claims);
+  const { compatibilityAdmission, response, socket, stub } = await connect(claims);
   expect(response.status).toBe(101);
-  expect(JSON.parse(await admission)).toEqual({
+  expect(JSON.parse(await compatibilityAdmission)).toEqual({
     type: "LOBBY_SIGNAL_CONNECTED",
     v: 1,
     instanceId: claims.instanceId,
@@ -116,6 +116,8 @@ test("lobby signals hibernate without persisted state and fan out minimal change
   const heartbeat = nextRawMessage(socket, "auto-response heartbeat");
   socket.send(MULTIPLAYER_HEARTBEAT_REQUEST);
   await expect(heartbeat).resolves.toBe(MULTIPLAYER_HEARTBEAT_RESPONSE);
+
+  await evictDurableObject(stub);
 
   const changedAt = "2026-08-28T12:00:00.000Z";
   const changed = nextRawMessage(socket, "ready signal");
@@ -176,7 +178,7 @@ test("lobby signal admission rejects malformed claims and caps duplicate partici
   };
   const first = await connect(claims);
   const second = await connect(claims);
-  await Promise.all([first.admission, second.admission]);
+  await Promise.all([first.compatibilityAdmission, second.compatibilityAdmission]);
   const third = await stub.fetch(connectRequest(claims));
   expect(third.status).toBe(429);
   first.socket.close(1000, "done");
@@ -197,7 +199,7 @@ test("membership revocation closes only that participant and room closure drains
   };
   const first = await connect(firstClaims);
   const second = await connect(secondClaims);
-  await Promise.all([first.admission, second.admission]);
+  await Promise.all([first.compatibilityAdmission, second.compatibilityAdmission]);
 
   const firstChange = nextRawMessage(first.socket, "first invalidation");
   const secondChange = nextRawMessage(second.socket, "second invalidation");
