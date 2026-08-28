@@ -1100,6 +1100,23 @@ test("server-authoritative Omok win commits exact D1 results and opens the remat
     name: MULTIPLAYER_REMATCH_CHANGED_EVENT,
     payload: {},
   });
+  await runInDurableObject(stub, async (instance, state) => {
+    state.storage.sql.exec("UPDATE rematch_window SET expires_at = ?", Date.now() - 1);
+    await instance.alarm();
+    expect(
+      state.storage.sql
+        .exec<{ count: number }>(
+          `SELECT COUNT(*) AS count
+           FROM sqlite_master
+           WHERE type = 'table'
+             AND name IN ('runtime_meta', 'runtime_match', 'rematch_window')`,
+        )
+        .one().count,
+    ).toBe(0);
+    expect(await state.storage.getAlarm()).toBeNull();
+  });
+  expect(await room.instances.findById(room.instanceId)).toMatchObject({ status: "CLOSED" });
+  expect((await stub.fetch(internalRematchNotificationRequest(1))).status).toBe(410);
   room.hostSocket.close(1000, "done");
   room.playerSocket.close(1000, "done");
 });

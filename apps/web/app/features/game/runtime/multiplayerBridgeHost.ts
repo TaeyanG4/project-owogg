@@ -67,9 +67,6 @@ export interface MultiplayerBridgeHostCallbacks {
   onLeave?: () => void;
   onConnectionState?: (state: MultiplayerParentConnectionState) => void;
   onTerminalCommitted?: (result: unknown) => void;
-  /** Parent-only hint to refresh the authenticated roster. No profile data crosses the iframe
-   * MessagePort; the parent fetches the current safe projection from the API. */
-  onRosterChange?: () => void;
   /** Parent-only hint to refetch rematch consent. It is never forwarded into the game iframe. */
   onRematchChange?: () => void;
   /** Server-authoritative peer connectivity used only by the trusted parent room chrome. */
@@ -308,7 +305,6 @@ export function createMultiplayerBridgeHost(
         return;
       }
       callbacks.onPlayerConnectionChange?.(presence);
-      callbacks.onRosterChange?.();
       return;
     }
     if (message.type === "MULTI_CONNECTED") {
@@ -339,13 +335,6 @@ export function createMultiplayerBridgeHost(
       aborted = true;
       stopHeartbeat();
       callbacks.onConnectionState?.({ status: "ABORTED", code: message.code });
-    }
-    if (
-      message.type === "MULTI_PLAYER_JOINED" ||
-      message.type === "MULTI_PLAYER_LEFT" ||
-      message.type === "MULTI_SYNC"
-    ) {
-      callbacks.onRosterChange?.();
     }
     channel.port1.postMessage(message);
   };

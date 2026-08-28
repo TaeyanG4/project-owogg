@@ -9,6 +9,7 @@ import {
 import {
   multiplayerPeerConnectionMessage,
   multiplayerRoomClipboardValue,
+  multiplayerRuntimeInitialRoster,
 } from "../features/game/runtime/MultiplayerIframeRuntime";
 import { requestMultiplayerRematch } from "../features/game/runtime/multiplayerRoomApi";
 
@@ -97,6 +98,55 @@ test("room-code and invite-link clipboard actions never substitute for each othe
   assert.equal(multiplayerRoomClipboardValue("CODE", "ROOMCODE1234", inviteLink), "ROOMCODE1234");
   assert.equal(multiplayerRoomClipboardValue("LINK", "ROOMCODE1234", inviteLink), inviteLink);
   assert.equal(multiplayerRoomClipboardValue("LINK", "ROOMCODE1234"), null);
+});
+
+test("active runtime reuses a complete authenticated lobby roster without another read", () => {
+  const room = {
+    replayed: false,
+    instance: {
+      id: "instance_12345678",
+      publicCode: "ROOMCODE1234",
+      gameId: 1,
+      gameVersionId: 1,
+      profileRevision: 1,
+      visibility: "PRIVATE",
+      joinPolicy: "OPEN",
+      status: "ACTIVE",
+      generation: 1,
+      participantCount: 2,
+      maxPlayers: 2,
+      expiresAt: "2026-08-28T10:00:00.000Z",
+    },
+    participant: {
+      id: "participant_host_0001",
+      role: "HOST",
+      seatIndex: 0,
+      status: "READY",
+      connectionGeneration: 1,
+    },
+  } as const;
+  const players = [
+    {
+      participantId: "participant_host_0001",
+      role: "HOST",
+      seatIndex: 0,
+      status: "READY",
+      nickname: "Host",
+      avatarUrl: null,
+    },
+    {
+      participantId: "participant_player_0001",
+      role: "PLAYER",
+      seatIndex: 1,
+      status: "READY",
+      nickname: "Player",
+      avatarUrl: null,
+    },
+  ] as const;
+
+  assert.equal(multiplayerRuntimeInitialRoster(room, players), players);
+  assert.equal(multiplayerRuntimeInitialRoster(room, players.slice(0, 1)), null);
+  assert.equal(multiplayerRuntimeInitialRoster(room, [players[1], players[1]]), null);
 });
 
 test("disconnect notice counts down and then reports official forfeit finalization", () => {

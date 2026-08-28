@@ -405,10 +405,8 @@ test("participant reconnect grace is validated and consumed by the trusted paren
   const iframe = createIframeHarness();
   const socket = createSocketHarness();
   const changes: unknown[] = [];
-  let rosterChanges = 0;
   const host = createMultiplayerBridgeHost(iframe.windowLike, socket.socket, BOOTSTRAP, {
     onPlayerConnectionChange: (state) => changes.push(state),
-    onRosterChange: () => (rosterChanges += 1),
   });
   const gamePort = iframe.capture().port;
   const received: unknown[] = [];
@@ -437,7 +435,6 @@ test("participant reconnect grace is validated and consumed by the trusted paren
       reconnectDeadlineAt: deadline,
     },
   ]);
-  assert.equal(rosterChanges, 1);
   assert.deepEqual(received, []);
   host.close();
   gamePort.close();

@@ -195,8 +195,24 @@ export interface MultiplayerIframeRuntimeProps {
   readonly frameStyle?: CSSProperties;
   readonly iframeStyle?: CSSProperties;
   readonly shareValue?: string;
+  readonly initialPlayers?: readonly MultiplayerRoomPlayer[];
   readonly onRoomChange: (room: MultiplayerRoomResponse) => void;
   readonly onExit: () => void;
+}
+
+export function multiplayerRuntimeInitialRoster(
+  room: MultiplayerRoomResponse,
+  initialPlayers?: readonly MultiplayerRoomPlayer[],
+): readonly MultiplayerRoomPlayer[] | null {
+  if (
+    !initialPlayers ||
+    initialPlayers.length !== room.instance.participantCount ||
+    !initialPlayers.some((player) => player.participantId === room.participant.id) ||
+    new Set(initialPlayers.map((player) => player.participantId)).size !== initialPlayers.length
+  ) {
+    return null;
+  }
+  return initialPlayers;
 }
 
 /**
@@ -213,6 +229,7 @@ export function MultiplayerIframeRuntime({
   frameStyle,
   iframeStyle,
   shareValue,
+  initialPlayers,
   onRoomChange,
   onExit,
 }: MultiplayerIframeRuntimeProps) {
@@ -225,7 +242,9 @@ export function MultiplayerIframeRuntime({
   const [retryKey, setRetryKey] = useState(0);
   const [copied, setCopied] = useState<"CODE" | "LINK" | null>(null);
   const [leaving, setLeaving] = useState(false);
-  const [players, setPlayers] = useState<readonly MultiplayerRoomPlayer[]>([]);
+  const [players, setPlayers] = useState<readonly MultiplayerRoomPlayer[]>(
+    () => multiplayerRuntimeInitialRoster(room, initialPlayers) ?? [],
+  );
   const [playerConnections, setPlayerConnections] = useState<
     ReadonlyMap<string, MultiplayerPlayerConnectionState>
   >(new Map());
@@ -285,16 +304,20 @@ export function MultiplayerIframeRuntime({
     setConnectionState({ status: "CONNECTING" });
     reconnectAttemptRef.current = 0;
     setRetryKey(0);
-    setPlayers([]);
+    const rosterSeed = multiplayerRuntimeInitialRoster(room, initialPlayers);
+    setPlayers(rosterSeed ?? []);
     setPlayerConnections(new Map());
     setRematchState("CHECKING");
     setRematchBusy(false);
     setRematchError(null);
     rematchRequestRef.current += 1;
-    refreshRoster();
+    if (rosterSeed) rosterRequestRef.current += 1;
+    else refreshRoster();
   }, [
     closeCurrent,
     refreshRoster,
+    initialPlayers,
+    room,
     room.instance.id,
     room.instance.generation,
     room.participant.connectionGeneration,
@@ -340,10 +363,6 @@ export function MultiplayerIframeRuntime({
   useEffect(() => {
     if (connectionState.status !== "TERMINAL_COMMITTED") return;
     refreshRematch();
-    const timer = window.setInterval(refreshRematch, 15_000);
-    return () => {
-      window.clearInterval(timer);
-    };
   }, [connectionState.status, refreshRematch]);
 
   const handleConnectionState = useCallback(
@@ -351,7 +370,6 @@ export function MultiplayerIframeRuntime({
       if (nextState.status === "CONNECTED") {
         reconnectAttemptRef.current = 0;
         setConnectionState(nextState);
-        refreshRoster();
         return;
       }
       if (nextState.status === "DISCONNECTED") {
@@ -370,7 +388,7 @@ export function MultiplayerIframeRuntime({
       }
       setConnectionState(nextState);
     },
-    [closeCurrent, refreshRoster],
+    [closeCurrent],
   );
 
   const handleFrameLoad = useCallback(
@@ -399,7 +417,6 @@ export function MultiplayerIframeRuntime({
             transport.bootstrap,
             {
               onConnectionState: handleConnectionState,
-              onRosterChange: refreshRoster,
               onRematchChange: refreshRematch,
               onPlayerConnectionChange: (state) => {
                 setPlayerConnections((current) => {
@@ -422,14 +439,7 @@ export function MultiplayerIframeRuntime({
           });
         });
     },
-    [
-      closeCurrent,
-      connectionGeneration,
-      handleConnectionState,
-      refreshRematch,
-      refreshRoster,
-      room.instance.id,
-    ],
+    [closeCurrent, connectionGeneration, handleConnectionState, refreshRematch, room.instance.id],
   );
 
   const retry = useCallback(() => {

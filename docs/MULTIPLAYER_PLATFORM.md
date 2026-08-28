@@ -347,7 +347,8 @@ generation을 바꿀 수 없다.
 오목 재대결은 `COMMITTED` 뒤 2분 동안 두 active participant의 명시적 동의를 exact generation에
 append-only로 저장한다. 한 명만 요청하면 대기하고, 두 번째 동의와 동일한 D1 batch에서 generation을
 `+1` 한 뒤 참가자를 `JOINED`로 되돌린다. DO는 상대 요청을 기존 socket에 parent-only control event로
-알리고, Web은 유실 복구용 15초 폴링만 사용한다.
+알린다. Web은 terminal 진입 시 정본을 한 번 읽고 이후에는 요청 응답과 socket event로만 갱신하며,
+고정 주기 폴링은 사용하지 않는다.
 
 모든 profile은 게임 iframe 바깥의 공용 대기실을 사용한다. 참가자는 입장 성공과 같은 use-case에서
 기본 `READY`가 되고 iframe은 아직 mount하지 않는다. 각 참가자는 공용 준비 버튼으로
@@ -656,11 +657,12 @@ per-frame raw logging
 - 공용 대기실은 전용 `MultiplayerLobbySignalObject`의 Hibernation WebSocket을 사용한다. 이 객체는
   D1을 읽거나 쓰지 않고, DO storage·alarm·timer·게임 규칙을 갖지 않으며 변경 알림만 fan-out한다.
   D1이 roster와 준비 상태의 유일한 정본이다.
-- Join/Ready/Start/대기실 Leave는 먼저 D1에서 확정한다. READY는 `participantId/status/changedAt`만
-  전송해 즉시 repaint하고, 입장·퇴장·시작은 credential-free invalidation을 보내 수신자가 인증된
-  roster를 한 번 조회한다. 알림 실패는 D1 mutation을 되돌리지 않는다.
-- socket 정상 상태에서는 admission 직후, Join/Leave/Start invalidation, focus 복귀에만 roster를
-  조회한다. 연결 장애를 roster polling으로 숨기지 않으며 WebSocket만
+- Join/Ready/Start/대기실 Leave는 먼저 D1에서 확정한다. Join/Ready/Leave는 필요한 공개 projection과
+  `changedAt`만 delta로 전송해 즉시 repaint하고, Start만 credential-free invalidation 뒤 정본을
+  확인한다. 알림 실패는 D1 mutation을 되돌리지 않는다.
+- admission 응답의 roster로 즉시 렌더링하고 signal 연결 직후 response→WebSocket 사이의 유실 가능성을
+  닫는 정합성 조회를 한 번 수행한다. 이후 socket 정상 상태에서는 Start invalidation, focus 복귀,
+  재연결 성공 때만 roster를 조회한다. 연결 장애를 roster polling으로 숨기지 않으며 WebSocket만
   `5→15→30→60→300→900초`로 재연결한다. hidden 탭은 최소 15분 간격을 적용하고, 재연결이 성공하면
   full roster 한 번으로 유실된 알림을 복구한다. 한 요청이 진행 중이면 한 번의 trailing refresh로
   합친다.
@@ -678,6 +680,9 @@ per-frame raw logging
   증폭할 수 없게 한다.
 - 30초 join-ticket nonce는 서명 만료를 edge에서 먼저 검증하고 DO 입장 시 원자 소비한다. nonce row
   삭제만을 위한 개별 alarm은 만들지 않고 다음 admission/lifecycle alarm에서 lazy cleanup한다.
+- 완료된 gameplay DO는 2분 재대결 창 동안만 복구 state를 보존한다. 창이 닫혀 D1 instance가
+  `CLOSED`로 확정되면 socket을 닫고 DO SQLite를 `deleteAll()`로 제거하되, D1의 instance·participant·
+  match·action 이력은 보존한다.
 - M2 input은 최신 방향 state로 coalesce
 - snapshot은 변화가 있을 때만 보내고 slow client는 resync
 - realtime DO storage는 phase/terminal과 최소 checkpoint만 기록
@@ -715,9 +720,11 @@ write 50M이 포함되며 초과 단가는 request `$0.15/M`, duration `$12.50/M
 WebSocket upgrade와 alarm은 각각 request 1개이고 client→DO message는 과금에서 20:1로 환산한다. DO
 dashboard의 message metric은 20:1 전 원시 개수이므로 quota 계산과 직접 비교하지 않는다.
 
-휴면 중인 대기실 socket은 duration을 소비하지 않는다. 정상 연결에서는 참가자당 admission 직후
-roster 1회를 D1에서 읽으며 READY 변경은 추가 D1 조회 없이 작은 delta로 반영한다. Join/Leave/Start와
-focus 복귀 때만 정본을 다시 읽고, socket 장애 중에는 roster를 polling하지 않는다. 대기실 DO request는
+휴면 중인 대기실 socket은 duration을 소비하지 않는다. admission 응답 roster로 즉시 그린 뒤 signal
+연결 직후 race 복구 조회를 1회 수행하며 READY/Join/Leave는 추가 D1 조회 없이 작은 delta로 반영한다.
+Start, focus 복귀, 재연결 성공 때만 정본을 다시 읽고, socket 장애 중에는 roster를 polling하지 않는다.
+확정된 lobby roster는 active runtime까지 전달하므로 경기 진입 때 동일 roster를 다시 읽지 않는다.
+대기실 DO request는
 참가자별 upgrade, 실제 상태 변경 notification, client heartbeat의 20:1 환산분에 한정되고 DO SQLite
 read/write와 alarm은 0이다. 실제 D1 과금은 반환 행 수가 아니라 스캔한 `rows_read`를 사용하므로
 [D1 공식 가격/계측 기준](https://developers.cloudflare.com/d1/platform/pricing/)의 query meta와 dashboard로
@@ -948,7 +955,7 @@ slow client
 - [x] 오목 내부 host 흑돌/백돌 선택과 서버 고정 participant↔stone mapping
 - [x] parent-only 좌우 프로필, 방 제어 header, nested scrollbar 제거와 오목판/화점 UI
 - [x] Web Audio 착수·종료음과 사용자 소리 on/off
-- [x] 2분 양방향 재대결 동의, exact generation 재시작과 socket 알림/안전 폴링
+- [x] 2분 양방향 재대결 동의, exact generation 재시작과 socket 알림/정본 1회 복구
 - [x] 검증 가능한 official 오목 ZIP source/build와 manifest schema v1 무랭킹 정책
 - [x] immutable 자유 오목 revision 1 호환과 렌주 금수 core revision 2(흑 33·44·장목,
       흑 정확히 5목/백 5목 이상)
@@ -970,7 +977,7 @@ Staging 상태(2026-08-27): `official-omok` exact version을 D1/B2에 게시했�
 연결 상태와 나가기를 소유해 게임 제목을 가리지 않으며 iframe 문서와 frame 양쪽의 nested scroll을
 차단했다. 오목판 끝선·화점 5개와 합성 착수/승패음을 추가했고, `COMMITTED` 뒤 양쪽 동의로만 정확히
 한 generation을 여는 재대결을 D1/DO에 구현했다. 상대 요청은 socket control hint로 즉시 갱신하고
-15초 폴링은 유실 복구에만 사용한다. 이어서 공용 대기실을 추가해 참가자를 기본 READY로 만들고
+terminal 진입 시 정본을 한 번 읽은 뒤 고정 폴링은 하지 않는다. 이어서 공용 대기실을 추가해 참가자를 기본 READY로 만들고
 host가 최소 인원 확인 뒤 수동 시작하도록 변경했으며, 오목의 흑/백 선택은 공용 방 화면이 아닌 게임
 내부에서 서버가 확정한다. 명시적 leave는 즉시 기권승, 예기치 않은 연결 손실은 최소 30초 재접속 유예
 뒤 기권승으로 공통 처리한다. 대상 DB/API/Web/Workers 테스트와 official ZIP 검증은 통과 중이며, 전체
@@ -986,8 +993,9 @@ host가 최소 인원 확인 뒤 수동 시작하도록 변경했으며, 오목�
 2026-08-28 최종 대기실 전달 구조는 중간 단계였던 고정 roster polling과 상태 보유 lobby DO를 모두
 대체한다. 별도 `MultiplayerLobbySignalObject`는 인증된 참가자의 Hibernation WebSocket attachment만
 사용하며 storage, alarm, event sequence, lifecycle mirror, D1 repository를 갖지 않는다. READY 변경은
-D1에서 먼저 확정한 뒤 `waitUntil` notification으로 최소 delta를 보내고, Join/Leave/Start는 invalidation만
-보낸다. 공급자 장애가 mutation 응답을 실패시키지 않으며 재접속 후 full roster가 유실분을 복구한다.
+D1에서 먼저 확정한 뒤 `waitUntil` notification으로 최소 delta를 보내고, Join/Leave도 공개 roster
+delta를 보내며 Start만 invalidation한다. 공급자 장애가 mutation 응답을 실패시키지 않으며 재접속 후
+full roster가 유실분을 복구한다.
 
 socket 정상 상태의 D1 조회는 admission/재접속/focus와 실제 invalidation에만 수행한다. 장애 중 roster
 fallback polling은 없고 재연결은 최대 15분까지 증가하며 hidden 탭도 최소 15분을 사용해
@@ -995,6 +1003,11 @@ fallback polling은 없고 재연결은 최대 15분까지 증가하며 hidden �
 duration과 storage write를 만들지 않는다. gameplay 쪽은 기존처럼 30초 heartbeat를
 terminal/abort/leave에서 즉시 해제하고, message별 `last_seen_at`, nonce-cleanup 전용 alarm, 비권위
 action-rate SQLite write는 만들지 않는다.
+
+같은 정리에서 lobby가 확정한 roster를 active runtime으로 넘겨 경기 시작·socket 연결·presence event마다
+발생하던 중복 roster 조회를 제거했다. 재대결도 15초 polling을 삭제해 2분 창 기준 참가자당 최대 8회,
+2인 경기당 최대 16회의 불필요한 API/D1 read를 없앴다. 재대결 창이 실제로 종료된 room은 D1 이력을
+그대로 두고 gameplay DO SQLite만 `deleteAll()`하여 room별 영구 storage 누적을 막는다.
 
 2026-08-27 Staging 분석에서 gameplay DO invocation 238,887건 중 238,832건이 단 두 종료 경기의
 alarm이었다. 종료된 runtime의 과거 reconnect deadline을 alarm 끝에서 다시 예약해 즉시 재실행되는

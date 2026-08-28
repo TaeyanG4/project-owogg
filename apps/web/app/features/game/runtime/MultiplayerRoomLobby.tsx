@@ -95,6 +95,7 @@ export interface MultiplayerRoomLobbyProps {
     readonly nickname: string;
     readonly avatarUrl: string | null;
   } | null;
+  readonly onPlayersChange?: (players: readonly MultiplayerRoomPlayer[]) => void;
   readonly onRoomChange: (room: MultiplayerRoomResponse) => void;
   readonly onExit: () => void;
 }
@@ -213,6 +214,7 @@ export function MultiplayerRoomLobby({
   frameStyle,
   initialPlayers,
   viewer,
+  onPlayersChange,
   onRoomChange,
   onExit,
 }: MultiplayerRoomLobbyProps) {
@@ -225,9 +227,11 @@ export function MultiplayerRoomLobby({
   const previousParticipantIdsRef = useRef<ReadonlySet<string> | null>(null);
   const latestPlayersRef = useRef<readonly MultiplayerRoomPlayer[]>(players);
   const latestRoomRef = useRef(room);
+  const onPlayersChangeRef = useRef(onPlayersChange);
   const onRoomChangeRef = useRef(onRoomChange);
   const onExitRef = useRef(onExit);
   latestRoomRef.current = room;
+  onPlayersChangeRef.current = onPlayersChange;
   onRoomChangeRef.current = onRoomChange;
   onExitRef.current = onExit;
   const isHost = room.participant.role === "HOST";
@@ -296,6 +300,7 @@ export function MultiplayerRoomLobby({
       rosterSounds.forEach(playMultiplayerLobbySound);
       latestPlayersRef.current = nextPlayers;
       setPlayers(nextPlayers);
+      onPlayersChangeRef.current?.(nextPlayers);
     };
     const refresh = async () => {
       if (!active || terminalRoom) return;
@@ -508,15 +513,14 @@ export function MultiplayerRoomLobby({
       });
       const updatedStatus: MultiplayerRoomPlayer["status"] =
         updated.participant.status === "READY" ? "READY" : "JOINED";
-      setPlayers((current) => {
-        const nextPlayers = current.map((player) =>
-          player.participantId === updated.participant.id
-            ? { ...player, status: updatedStatus }
-            : player,
-        );
-        latestPlayersRef.current = nextPlayers;
-        return nextPlayers;
-      });
+      const nextPlayers = latestPlayersRef.current.map((player) =>
+        player.participantId === updated.participant.id
+          ? { ...player, status: updatedStatus }
+          : player,
+      );
+      latestPlayersRef.current = nextPlayers;
+      setPlayers(nextPlayers);
+      onPlayersChangeRef.current?.(nextPlayers);
       onRoomChange(updated);
     } catch (reason) {
       setError(messageFor(reason));

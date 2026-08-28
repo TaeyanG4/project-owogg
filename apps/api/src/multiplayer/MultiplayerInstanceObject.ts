@@ -229,6 +229,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     string,
     { windowStartedAt: number; actionCount: number }
   >();
+  private terminalStorageReleased = false;
 
   constructor(
     private readonly state: DurableObjectState,
@@ -330,6 +331,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
   }
 
   override async fetch(request: Request): Promise<Response> {
+    if (this.terminalStorageReleased) return new Response(null, { status: 410 });
     const url = new URL(request.url);
     if (
       request.method === "POST" &&
@@ -462,6 +464,10 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
   }
 
   override webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): void {
+    if (this.terminalStorageReleased) {
+      socket.close(1000, "match closed");
+      return;
+    }
     if (
       typeof message !== "string" ||
       message.length > MAX_CLIENT_MESSAGE_BYTES ||
@@ -496,6 +502,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
   }
 
   override async webSocketClose(socket: WebSocket): Promise<void> {
+    if (this.terminalStorageReleased) return;
     const attachment = this.readAttachment(socket);
     if (attachment) {
       this.releaseConnectionMemory(attachment);
@@ -504,6 +511,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
   }
 
   override async webSocketError(socket: WebSocket): Promise<void> {
+    if (this.terminalStorageReleased) return;
     const attachment = this.readAttachment(socket);
     if (attachment) {
       this.releaseConnectionMemory(attachment);
@@ -512,6 +520,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
   }
 
   override async alarm(): Promise<void> {
+    if (this.terminalStorageReleased) return;
     const nowMs = Date.now();
     const nowSeconds = Math.floor(nowMs / 1_000);
     this.state.storage.sql.exec(
@@ -555,7 +564,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       isNonNegativeInteger(rematchWindow.expires_at)
     ) {
       if (rematchWindow.expires_at <= nowMs) {
-        await this.closeExpiredRematchWindow(rematchWindow.generation);
+        if (await this.closeExpiredRematchWindow(rematchWindow.generation)) return;
       } else {
         await this.scheduleNextAlarm(rematchWindow.expires_at);
       }
@@ -1456,11 +1465,12 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     }
   }
 
-  private async closeExpiredRematchWindow(generation: number): Promise<void> {
+  private async closeExpiredRematchWindow(generation: number): Promise<boolean> {
     const instance = await this.container.multiplayerInstanceRepo.findById(this.instanceId());
+    let terminalClosed = instance?.status === "CLOSED" && instance.generation === generation;
     if (instance?.status === "CLOSING" && instance.generation === generation) {
       const nowIso = new Date().toISOString();
-      await this.container.multiplayerInstanceRepo.transition({
+      terminalClosed = await this.container.multiplayerInstanceRepo.transition({
         instanceId: instance.id,
         expectedStatus: "CLOSING",
         expectedGeneration: generation,
@@ -1470,6 +1480,10 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
         abortCode: null,
         nowIso,
       });
+      if (!terminalClosed) {
+        const latest = await this.container.multiplayerInstanceRepo.findById(this.instanceId());
+        terminalClosed = latest?.status === "CLOSED" && latest.generation === generation;
+      }
     }
     const runtime = this.readRuntimeMatch();
     if (runtime?.generation === generation && runtime.lifecycle === "COMMITTED") {
@@ -1479,6 +1493,27 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       "DELETE FROM rematch_window WHERE singleton = 1 AND generation = ?",
       generation,
     );
+    if (terminalClosed) await this.releaseTerminalStorage();
+    return terminalClosed;
+  }
+
+  private async releaseTerminalStorage(): Promise<void> {
+    if (this.terminalStorageReleased) return;
+    this.terminalStorageReleased = true;
+    try {
+      await this.messageQueue;
+      for (const socket of this.state.getWebSockets()) {
+        socket.close(1000, "match retention window closed");
+      }
+      this.readyConnections.clear();
+      this.ingressRateWindows.clear();
+      this.actionRateWindows.clear();
+      this.queuedMessageCount = 0;
+      await this.state.storage.deleteAll();
+    } catch (error) {
+      this.terminalStorageReleased = false;
+      throw error;
+    }
   }
 
   /** Initializes the same trusted runtime identity that a verified socket ticket would establish.

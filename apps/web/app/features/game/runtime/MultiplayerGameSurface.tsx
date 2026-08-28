@@ -345,6 +345,13 @@ export function MultiplayerGameSurface({
             : {})}
           {...(frameClassName ? { frameClassName } : {})}
           {...(frameStyle ? { frameStyle } : {})}
+          onPlayersChange={(players) => {
+            setInitialRoster({
+              instanceId: room.instance.id,
+              generation: room.instance.generation,
+              players,
+            });
+          }}
           onRoomChange={setRoom}
           onExit={() => {
             setRoom(null);
@@ -364,6 +371,10 @@ export function MultiplayerGameSurface({
         {...(frameStyle ? { frameStyle } : {})}
         {...(iframeStyle ? { iframeStyle } : {})}
         {...(shareValue ? { shareValue } : {})}
+        {...(initialRoster?.instanceId === room.instance.id &&
+        initialRoster.generation === room.instance.generation
+          ? { initialPlayers: initialRoster.players }
+          : {})}
         onRoomChange={setRoom}
         onExit={() => {
           setRoom(null);
