@@ -67,7 +67,7 @@ export function applyMultiplayerLobbySignalChange(
   players: readonly MultiplayerRoomPlayer[],
   change: MultiplayerLobbySignalChange,
 ): readonly MultiplayerRoomPlayer[] | null {
-  if (change.kind === "INVALIDATE") return null;
+  if (change.kind === "INVALIDATE" || change.kind === "ROOM_CLOSED") return null;
   if (change.kind === "PARTICIPANT_JOINED") {
     return [
       ...players.filter((player) => player.participantId !== change.player.participantId),
@@ -90,8 +90,29 @@ export interface MultiplayerRoomLobbyProps {
   readonly shareValue: string;
   readonly frameClassName?: string;
   readonly frameStyle?: CSSProperties;
+  readonly viewer: {
+    readonly nickname: string;
+    readonly avatarUrl: string | null;
+  } | null;
   readonly onRoomChange: (room: MultiplayerRoomResponse) => void;
   readonly onExit: () => void;
+}
+
+export function multiplayerLobbySelfPlayer(
+  room: MultiplayerRoomResponse,
+  viewer: MultiplayerRoomLobbyProps["viewer"],
+): MultiplayerRoomPlayer | null {
+  if (!viewer || (room.participant.status !== "JOINED" && room.participant.status !== "READY")) {
+    return null;
+  }
+  return {
+    participantId: room.participant.id,
+    role: room.participant.role,
+    seatIndex: room.participant.seatIndex,
+    status: room.participant.status,
+    nickname: viewer.nickname,
+    avatarUrl: viewer.avatarUrl,
+  };
 }
 
 function messageFor(error: unknown): string {
@@ -174,19 +195,25 @@ export function MultiplayerRoomLobby({
   shareValue,
   frameClassName,
   frameStyle,
+  viewer,
   onRoomChange,
   onExit,
 }: MultiplayerRoomLobbyProps) {
-  const [players, setPlayers] = useState<readonly MultiplayerRoomPlayer[]>([]);
+  const [players, setPlayers] = useState<readonly MultiplayerRoomPlayer[]>(() => {
+    const self = multiplayerLobbySelfPlayer(room, viewer);
+    return self ? [self] : [];
+  });
   const [busy, setBusy] = useState<"START" | "LEAVE" | "READY" | null>(null);
   const [copied, setCopied] = useState<"CODE" | "LINK" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const previousParticipantIdsRef = useRef<ReadonlySet<string> | null>(null);
-  const latestPlayersRef = useRef<readonly MultiplayerRoomPlayer[]>([]);
+  const latestPlayersRef = useRef<readonly MultiplayerRoomPlayer[]>(players);
   const latestRoomRef = useRef(room);
   const onRoomChangeRef = useRef(onRoomChange);
+  const onExitRef = useRef(onExit);
   latestRoomRef.current = room;
   onRoomChangeRef.current = onRoomChange;
+  onExitRef.current = onExit;
   const isHost = room.participant.role === "HOST";
 
   useEffect(() => {
@@ -201,7 +228,6 @@ export function MultiplayerRoomLobby({
     let reconnectAttempt = 0;
     const participantChangedAt = new Map<string, string>();
     previousParticipantIdsRef.current = null;
-    latestPlayersRef.current = [];
 
     const clearRefreshTimer = () => {
       if (!refreshTimer) return;
@@ -304,6 +330,18 @@ export function MultiplayerRoomLobby({
     };
 
     const applySignalChange = (change: MultiplayerLobbySignalChange) => {
+      if (change.kind === "ROOM_CLOSED") {
+        terminalRoom = true;
+        clearRefreshTimer();
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = undefined;
+        }
+        signalHandle?.close();
+        signalHandle = undefined;
+        onExitRef.current();
+        return;
+      }
       if (change.kind === "INVALIDATE") {
         scheduleRefresh(50);
         return;

@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { MultiplayerLobbySignalChange, MultiplayerRoomPlayer } from "@owogg/contracts";
+import type {
+  MultiplayerLobbySignalChange,
+  MultiplayerRoomPlayer,
+  MultiplayerRoomResponse,
+} from "@owogg/contracts";
 import {
   applyMultiplayerLobbySignalChange,
   multiplayerLobbyCanStart,
   multiplayerLobbyRosterSounds,
+  multiplayerLobbySelfPlayer,
   multiplayerLobbySlotCount,
 } from "../features/game/runtime/MultiplayerRoomLobby";
 import { multiplayerLobbySignalReconnectDelay } from "../features/game/runtime/multiplayerLobbySignal";
@@ -72,6 +77,52 @@ test("lobby join and leave deltas update the roster without a follow-up D1 read"
   assert.deepEqual(applyMultiplayerLobbySignalChange([host, opponent], left), [host]);
   assert.equal(applyMultiplayerLobbySignalChange([host], unready), null);
   assert.equal(applyMultiplayerLobbySignalChange([host], { kind: "INVALIDATE" }), null);
+  assert.equal(
+    applyMultiplayerLobbySignalChange([host], {
+      kind: "ROOM_CLOSED",
+      status: "ABORTED",
+      changedAt: "2026-08-28T12:00:03.000Z",
+    }),
+    null,
+  );
+});
+
+test("the authenticated participant is visible before the first roster recovery read", () => {
+  const room: MultiplayerRoomResponse = {
+    replayed: false,
+    instance: {
+      id: "instance_lobby_seed_0001",
+      publicCode: "ROOMSEED0001",
+      gameId: 1,
+      gameVersionId: 1,
+      profileRevision: 1,
+      visibility: "PRIVATE",
+      joinPolicy: "OPEN",
+      status: "LOBBY",
+      generation: 1,
+      participantCount: 1,
+      maxPlayers: 2,
+      expiresAt: "2026-08-28T13:00:00.000Z",
+    },
+    participant: {
+      id: "participant_lobby_seed_0001",
+      role: "HOST",
+      seatIndex: 0,
+      status: "JOINED",
+      connectionGeneration: 0,
+    },
+  };
+  assert.deepEqual(
+    multiplayerLobbySelfPlayer(room, { nickname: "Host", avatarUrl: "https://example.com/a.png" }),
+    {
+      participantId: "participant_lobby_seed_0001",
+      role: "HOST",
+      seatIndex: 0,
+      status: "JOINED",
+      nickname: "Host",
+      avatarUrl: "https://example.com/a.png",
+    },
+  );
 });
 
 test("lobby sounds announce only other players entering and leaving after the initial roster", () => {

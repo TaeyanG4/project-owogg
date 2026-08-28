@@ -536,6 +536,30 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
     "ABORTED",
   );
   assert.equal(durableObjectFetches, 0);
+  const waitingCloseRequest = [...lobbySignalRequests]
+    .reverse()
+    .find(
+      (internalRequest) =>
+        new URL(internalRequest.url).pathname === MULTIPLAYER_INTERNAL_LOBBY_SIGNAL_NOTIFY_PATH,
+    );
+  assert.ok(waitingCloseRequest);
+  const waitingCloseNotification = (await waitingCloseRequest.clone().json()) as {
+    change?: Record<string, unknown>;
+    closeRoom?: unknown;
+  };
+  assert.deepEqual(
+    {
+      ...waitingCloseNotification.change,
+      changedAt: typeof waitingCloseNotification.change?.changedAt,
+      closeRoom: waitingCloseNotification.closeRoom,
+    },
+    {
+      kind: "ROOM_CLOSED",
+      status: "ABORTED",
+      changedAt: "string",
+      closeRoom: true,
+    },
+  );
 
   const inviteRequest = {
     ...request,
@@ -605,6 +629,24 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
   const joined = MultiplayerRoomResponseSchema.parse(joinedJson);
   assert.equal(joined.instance.status, "LOBBY");
   assert.equal(joined.participant.status, "READY");
+
+  const replayedJoinResponse = await app.request(
+    "http://localhost/api/multiplayer/instances/join",
+    {
+      ...request,
+      headers: {
+        ...request.headers,
+        Cookie: `owogg_session=${playerSessionToken}`,
+      },
+      body: JSON.stringify({ publicCode: "APITICKET001", inviteToken: invite.inviteToken }),
+    },
+    env as any,
+  );
+  assert.equal(replayedJoinResponse.status, 200);
+  assert.equal(
+    MultiplayerRoomResponseSchema.parse(await replayedJoinResponse.json()).replayed,
+    true,
+  );
 
   const lobbySignalResponse = await app.request(
     `http://localhost/api/multiplayer/instances/${INSTANCE_ID}/lobby-signal`,
@@ -740,20 +782,18 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
       ...(notification.change as Record<string, unknown>),
       changedAt: typeof (notification.change as Record<string, unknown>).changedAt,
     })),
-    [
-      {
-        kind: "PARTICIPANT_JOINED",
-        player: {
-          participantId: joined.participant.id,
-          role: "PLAYER",
-          seatIndex: 1,
-          status: "READY",
-          nickname: "Player",
-          avatarUrl: null,
-        },
-        changedAt: "string",
+    Array.from({ length: 2 }, () => ({
+      kind: "PARTICIPANT_JOINED",
+      player: {
+        participantId: joined.participant.id,
+        role: "PLAYER",
+        seatIndex: 1,
+        status: "READY",
+        nickname: "Player",
+        avatarUrl: null,
       },
-    ],
+      changedAt: "string",
+    })),
   );
   assert.equal(readyNotifications.length, 2, "idempotent ready must not emit another signal");
   assert.deepEqual(

@@ -472,13 +472,15 @@ multiplayerRouter.post("/instances/join", async (c) => {
     inviteToken: parsed.data.inviteToken,
   });
   if (!result.ok) return failure(c, result.code);
-  if (!result.replayed) {
-    await notifyLobbySignal(c, result.instance.id, result.instance.generation, {
-      kind: "PARTICIPANT_JOINED",
-      player: publicRoomPlayer(result.participant, authenticated.user),
-      changedAt: result.participant.updatedAt,
-    });
-  }
+  // A successful replay can be a browser refresh or a recovered response whose original signal
+  // was emitted before another participant's socket finished admission. The direct delta is
+  // idempotent on participantId, so repeat it for every successful join instead of waiting for a
+  // later ready mutation to repair an apparently missing player.
+  await notifyLobbySignal(c, result.instance.id, result.instance.generation, {
+    kind: "PARTICIPANT_JOINED",
+    player: publicRoomPlayer(result.participant, authenticated.user),
+    changedAt: result.participant.updatedAt,
+  });
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomResponseSchema.parse({
@@ -720,6 +722,8 @@ multiplayerRouter.post("/instances/:instanceId/leave", async (c) => {
   const instanceId = c.req.param("instanceId");
   const currentInstance = await container.multiplayerInstanceRepo.findById(instanceId);
   if (!currentInstance) return failure(c, "INSTANCE_NOT_FOUND");
+  const leftWaitingRoom =
+    currentInstance.status === "CREATED" || currentInstance.status === "LOBBY";
   let result: InternalLeaveResult;
   if (currentInstance.status === "CREATED" || currentInstance.status === "LOBBY") {
     const direct = await container.multiplayerRoomUseCases.leaveRoom({
@@ -769,15 +773,27 @@ multiplayerRouter.post("/instances/:instanceId/leave", async (c) => {
   if (!instance) return failure(c, "INSTANCE_NOT_FOUND");
   if (!participant) return failure(c, "NOT_PARTICIPANT");
   if (!result.replayed) {
+    const closedByHost =
+      leftWaitingRoom &&
+      participant.role === "HOST" &&
+      (instance.status === "ABORTED" ||
+        instance.status === "CLOSED" ||
+        instance.status === "EXPIRED");
     await notifyLobbySignal(
       c,
       instanceId,
       instance.generation,
-      {
-        kind: "PARTICIPANT_LEFT",
-        participantId: participant.id,
-        changedAt: participant.updatedAt,
-      },
+      closedByHost
+        ? {
+            kind: "ROOM_CLOSED",
+            status: instance.status,
+            changedAt: instance.updatedAt,
+          }
+        : {
+            kind: "PARTICIPANT_LEFT",
+            participantId: participant.id,
+            changedAt: participant.updatedAt,
+          },
       {
         revokeParticipantId: participant.id,
         closeRoom: ["ABORTED", "CLOSED", "EXPIRED"].includes(instance.status),

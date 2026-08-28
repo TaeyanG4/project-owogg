@@ -1359,6 +1359,9 @@ export function GameHost({ slug }: GameHostProps) {
                         src={resolveGameRuntimeUrl(slug)}
                         title={localizedTitle ?? slug}
                         attemptKey={attemptKey}
+                        viewer={
+                          user ? { nickname: user.nickname, avatarUrl: user.avatar_url } : null
+                        }
                         onRuntimeResolved={handleMultiplayerRuntimeResolved}
                         frameClassName={renderedIframeFrameClassName}
                         {...(iframeFrameStyle ? { frameStyle: iframeFrameStyle } : {})}

@@ -37,6 +37,13 @@ export const MultiplayerLobbySignalChangeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("INVALIDATE") }).strict(),
   z
     .object({
+      kind: z.literal("ROOM_CLOSED"),
+      status: z.enum(["ABORTED", "CLOSED", "EXPIRED"]),
+      changedAt: z.string().datetime(),
+    })
+    .strict(),
+  z
+    .object({
       kind: z.literal("PARTICIPANT_JOINED"),
       player: MultiplayerRoomPlayerSchema,
       changedAt: z.string().datetime(),

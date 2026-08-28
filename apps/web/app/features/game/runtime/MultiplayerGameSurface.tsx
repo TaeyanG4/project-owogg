@@ -29,6 +29,10 @@ export interface MultiplayerGameSurfaceProps {
   readonly frameStyle?: CSSProperties;
   readonly iframeStyle?: CSSProperties;
   readonly fallback: ReactNode;
+  readonly viewer: {
+    readonly nickname: string;
+    readonly avatarUrl: string | null;
+  } | null;
   readonly onRuntimeResolved: (mode: MultiplayerRuntimeResolution) => void;
 }
 
@@ -148,6 +152,7 @@ export function MultiplayerGameSurface({
   frameStyle,
   iframeStyle,
   fallback,
+  viewer,
   onRuntimeResolved,
 }: MultiplayerGameSurfaceProps) {
   const [availability, setAvailability] = useState<
@@ -309,10 +314,12 @@ export function MultiplayerGameSurface({
           : 2;
       return (
         <MultiplayerRoomLobby
+          key={`${room.instance.id}:${room.instance.generation}`}
           title={title}
           room={room}
           minPlayers={minPlayers}
           shareValue={shareValue ?? roomShareValue(room.instance.publicCode)}
+          viewer={viewer}
           {...(frameClassName ? { frameClassName } : {})}
           {...(frameStyle ? { frameStyle } : {})}
           onRoomChange={setRoom}
