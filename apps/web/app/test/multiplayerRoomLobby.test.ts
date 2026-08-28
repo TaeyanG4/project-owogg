@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { MultiplayerRoomPlayer } from "@owogg/contracts";
+import type { MultiplayerLobbySignalChange, MultiplayerRoomPlayer } from "@owogg/contracts";
 import {
+  applyMultiplayerLobbySignalChange,
   multiplayerLobbyCanStart,
   multiplayerLobbyRosterSounds,
   multiplayerLobbySlotCount,
@@ -40,6 +41,37 @@ test("the event-driven signal channel backs off without a roster polling fallbac
     [0, 1, 2, 3, 4, 5, 99].map(multiplayerLobbySignalReconnectDelay),
     [5_000, 15_000, 30_000, 60_000, 300_000, 900_000, 900_000],
   );
+});
+
+test("lobby join and leave deltas update the roster without a follow-up D1 read", () => {
+  const host = player(0);
+  const opponent = player(1);
+  const joined: MultiplayerLobbySignalChange = {
+    kind: "PARTICIPANT_JOINED",
+    player: opponent,
+    changedAt: "2026-08-28T12:00:00.000Z",
+  };
+  assert.deepEqual(applyMultiplayerLobbySignalChange([host], joined), [host, opponent]);
+
+  const unready: MultiplayerLobbySignalChange = {
+    kind: "PARTICIPANT_READY",
+    participantId: opponent.participantId,
+    status: "JOINED",
+    changedAt: "2026-08-28T12:00:01.000Z",
+  };
+  assert.deepEqual(applyMultiplayerLobbySignalChange([host, opponent], unready), [
+    host,
+    { ...opponent, status: "JOINED" },
+  ]);
+
+  const left: MultiplayerLobbySignalChange = {
+    kind: "PARTICIPANT_LEFT",
+    participantId: opponent.participantId,
+    changedAt: "2026-08-28T12:00:02.000Z",
+  };
+  assert.deepEqual(applyMultiplayerLobbySignalChange([host, opponent], left), [host]);
+  assert.equal(applyMultiplayerLobbySignalChange([host], unready), null);
+  assert.equal(applyMultiplayerLobbySignalChange([host], { kind: "INVALIDATE" }), null);
 });
 
 test("lobby sounds announce only other players entering and leaving after the initial roster", () => {

@@ -13,6 +13,7 @@ import {
   MultiplayerLeaveRoomRequestSchema,
   MultiplayerRematchRequestSchema,
   MultiplayerRematchResponseSchema,
+  MultiplayerRoomPlayerSchema,
   MultiplayerRoomResponseSchema,
   MultiplayerRoomRosterResponseSchema,
   MultiplayerRuntimeStatusResponseSchema,
@@ -183,6 +184,25 @@ function publicParticipant(participant: {
     status: participant.status,
     connectionGeneration: participant.connectionGeneration,
   };
+}
+
+function publicRoomPlayer(
+  participant: {
+    readonly id: string;
+    readonly role: "HOST" | "PLAYER";
+    readonly seatIndex: number;
+    readonly status: "JOINED" | "READY" | "LEFT" | "KICKED";
+  },
+  user: { readonly nickname: string; readonly avatar_url: string | null },
+) {
+  return MultiplayerRoomPlayerSchema.parse({
+    participantId: participant.id,
+    role: participant.role,
+    seatIndex: participant.seatIndex,
+    status: participant.status,
+    nickname: user.nickname,
+    avatarUrl: user.avatar_url,
+  });
 }
 
 function publicRematch(result: Extract<MultiplayerRematchResult, { readonly ok: true }>) {
@@ -453,7 +473,11 @@ multiplayerRouter.post("/instances/join", async (c) => {
   });
   if (!result.ok) return failure(c, result.code);
   if (!result.replayed) {
-    await notifyLobbySignal(c, result.instance.id, result.instance.generation);
+    await notifyLobbySignal(c, result.instance.id, result.instance.generation, {
+      kind: "PARTICIPANT_JOINED",
+      player: publicRoomPlayer(result.participant, authenticated.user),
+      changedAt: result.participant.updatedAt,
+    });
   }
   c.header("Cache-Control", "no-store");
   return c.json(
@@ -504,18 +528,7 @@ multiplayerRouter.get("/instances/:instanceId/roster", async (c) => {
       instance: publicRoom(instance),
       players: participants.flatMap((participant, index) => {
         const user = users[index];
-        return user
-          ? [
-              {
-                participantId: participant.id,
-                role: participant.role,
-                seatIndex: participant.seatIndex,
-                status: participant.status,
-                nickname: user.nickname,
-                avatarUrl: user.avatar_url,
-              },
-            ]
-          : [];
+        return user ? [publicRoomPlayer(participant, user)] : [];
       }),
     }),
     200,
@@ -760,7 +773,11 @@ multiplayerRouter.post("/instances/:instanceId/leave", async (c) => {
       c,
       instanceId,
       instance.generation,
-      { kind: "INVALIDATE" },
+      {
+        kind: "PARTICIPANT_LEFT",
+        participantId: participant.id,
+        changedAt: participant.updatedAt,
+      },
       {
         revokeParticipantId: participant.id,
         closeRoom: ["ABORTED", "CLOSED", "EXPIRED"].includes(instance.status),

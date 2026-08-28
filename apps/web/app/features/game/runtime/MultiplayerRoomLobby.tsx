@@ -63,6 +63,26 @@ export function multiplayerLobbyRosterSounds(
   return sounds;
 }
 
+export function applyMultiplayerLobbySignalChange(
+  players: readonly MultiplayerRoomPlayer[],
+  change: MultiplayerLobbySignalChange,
+): readonly MultiplayerRoomPlayer[] | null {
+  if (change.kind === "INVALIDATE") return null;
+  if (change.kind === "PARTICIPANT_JOINED") {
+    return [
+      ...players.filter((player) => player.participantId !== change.player.participantId),
+      change.player,
+    ].sort((left, right) => left.seatIndex - right.seatIndex);
+  }
+  if (change.kind === "PARTICIPANT_LEFT") {
+    return players.filter((player) => player.participantId !== change.participantId);
+  }
+  if (!players.some((player) => player.participantId === change.participantId)) return null;
+  return players.map((player) =>
+    player.participantId === change.participantId ? { ...player, status: change.status } : player,
+  );
+}
+
 export interface MultiplayerRoomLobbyProps {
   readonly title: string;
   readonly room: MultiplayerRoomResponse;
@@ -179,7 +199,7 @@ export function MultiplayerRoomLobby({
     let refreshInFlight = false;
     let refreshPending = false;
     let reconnectAttempt = 0;
-    const readyChangedAt = new Map<string, string>();
+    const participantChangedAt = new Map<string, string>();
     previousParticipantIdsRef.current = null;
     latestPlayersRef.current = [];
 
@@ -222,6 +242,19 @@ export function MultiplayerRoomLobby({
         void refresh();
       }, delay);
     };
+    const commitPlayers = (nextPlayers: readonly MultiplayerRoomPlayer[]) => {
+      const rosterSounds = multiplayerLobbyRosterSounds(
+        previousParticipantIdsRef.current,
+        nextPlayers,
+        room.participant.id,
+      );
+      previousParticipantIdsRef.current = new Set(
+        nextPlayers.map((player) => player.participantId),
+      );
+      rosterSounds.forEach(playMultiplayerLobbySound);
+      latestPlayersRef.current = nextPlayers;
+      setPlayers(nextPlayers);
+    };
     const refresh = async () => {
       if (!active || terminalRoom) return;
       if (refreshInFlight) {
@@ -233,18 +266,11 @@ export function MultiplayerRoomLobby({
       try {
         const roster = await fetchMultiplayerRoomRoster(room.instance.id);
         if (!active || roster.generation !== room.instance.generation) return;
-        const rosterSounds = multiplayerLobbyRosterSounds(
-          previousParticipantIdsRef.current,
-          roster.players,
-          room.participant.id,
-        );
-        previousParticipantIdsRef.current = new Set(
-          roster.players.map((player) => player.participantId),
-        );
-        rosterSounds.forEach(playMultiplayerLobbySound);
-        latestPlayersRef.current = roster.players;
-        setPlayers(roster.players);
-        readyChangedAt.clear();
+        // A signal received while this D1 read was in flight is newer than the read's snapshot.
+        // Do not let that stale response erase an immediate join/leave/ready delta; the finally
+        // block schedules one reconciliation read after the signal instead.
+        if (refreshPending) return;
+        commitPlayers(roster.players);
         setError(null);
         const rosterExpiresAt = Date.parse(roster.instance.expiresAt);
         if (Number.isFinite(rosterExpiresAt) && rosterExpiresAt <= Date.now()) {
@@ -282,27 +308,20 @@ export function MultiplayerRoomLobby({
         scheduleRefresh(50);
         return;
       }
-      const previousChangedAt = readyChangedAt.get(change.participantId);
+      const participantId =
+        change.kind === "PARTICIPANT_JOINED" ? change.player.participantId : change.participantId;
+      const previousChangedAt = participantChangedAt.get(participantId);
       if (previousChangedAt && previousChangedAt >= change.changedAt) return;
-      readyChangedAt.set(change.participantId, change.changedAt);
-      const knownParticipant = latestPlayersRef.current.some(
-        (player) => player.participantId === change.participantId,
-      );
-      if (knownParticipant) {
-        const nextPlayers = latestPlayersRef.current.map((player) =>
-          player.participantId === change.participantId
-            ? { ...player, status: change.status }
-            : player,
-        );
-        latestPlayersRef.current = nextPlayers;
-        setPlayers(nextPlayers);
+      participantChangedAt.set(participantId, change.changedAt);
+      const nextPlayers = applyMultiplayerLobbySignalChange(latestPlayersRef.current, change);
+      if (nextPlayers) {
+        commitPlayers(nextPlayers);
+      } else {
+        scheduleRefresh(0);
       }
-      // A roster read that began before this committed mutation may still return its older view.
-      // One trailing read closes that race; steady-state ready changes otherwise need no D1 read.
-      if (!knownParticipant || refreshInFlight) {
-        refreshPending = refreshInFlight;
-        if (!refreshInFlight) scheduleRefresh(0);
-      }
+      // If an older roster read is already running, suppress its result and reconcile once after it
+      // finishes. Steady-state join/leave/ready changes otherwise require no D1 read at all.
+      refreshPending = refreshPending || refreshInFlight;
     };
 
     const scheduleReconnect = () => {

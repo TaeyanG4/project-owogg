@@ -729,6 +729,32 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
       notification.change !== null &&
       (notification.change as { kind?: unknown }).kind === "PARTICIPANT_READY",
   );
+  const joinedNotifications = lobbyNotifications.filter(
+    (notification) =>
+      typeof notification.change === "object" &&
+      notification.change !== null &&
+      (notification.change as { kind?: unknown }).kind === "PARTICIPANT_JOINED",
+  );
+  assert.deepEqual(
+    joinedNotifications.map((notification) => ({
+      ...(notification.change as Record<string, unknown>),
+      changedAt: typeof (notification.change as Record<string, unknown>).changedAt,
+    })),
+    [
+      {
+        kind: "PARTICIPANT_JOINED",
+        player: {
+          participantId: joined.participant.id,
+          role: "PLAYER",
+          seatIndex: 1,
+          status: "READY",
+          nickname: "Player",
+          avatarUrl: null,
+        },
+        changedAt: "string",
+      },
+    ],
+  );
   assert.equal(readyNotifications.length, 2, "idempotent ready must not emit another signal");
   assert.deepEqual(
     readyNotifications.map((notification) => ({
@@ -838,6 +864,27 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
     env as any,
   );
   assert.equal(leave.status, 200);
+  const leaveNotificationRequest = [...lobbySignalRequests]
+    .reverse()
+    .find(
+      (internalRequest) =>
+        new URL(internalRequest.url).pathname === MULTIPLAYER_INTERNAL_LOBBY_SIGNAL_NOTIFY_PATH,
+    );
+  assert.ok(leaveNotificationRequest);
+  const leaveNotification = (await leaveNotificationRequest.json()) as {
+    change?: Record<string, unknown>;
+  };
+  assert.deepEqual(
+    {
+      ...leaveNotification.change,
+      changedAt: typeof leaveNotification.change?.changedAt,
+    },
+    {
+      kind: "PARTICIPANT_LEFT",
+      participantId: "participant_api_host_0001",
+      changedAt: "string",
+    },
+  );
   const left = MultiplayerRoomResponseSchema.parse(await leave.json());
   assert.equal(left.instance.status, "ABORTED");
   assert.equal(left.participant.status, "LEFT");

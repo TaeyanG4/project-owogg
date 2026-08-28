@@ -6,7 +6,8 @@ import { z } from "zod";
 export const MULTIPLAYER_HEARTBEAT_REQUEST = "owogg.multiplayer.heartbeat.v1";
 export const MULTIPLAYER_HEARTBEAT_RESPONSE = "owogg.multiplayer.heartbeat-ack.v1";
 /** Parent-only waiting-room signal channel. Authentication remains in the OwOGG session cookie;
- * the channel carries no session, ticket, global user id, nickname, or avatar. */
+ * the channel carries no session, ticket, global user id, or provider identity. Join deltas may
+ * contain the same public nickname/avatar already exposed by the authenticated room roster. */
 export const MULTIPLAYER_LOBBY_SIGNAL_PROTOCOL = "owogg.multiplayer.lobby-signal.v1";
 
 const OpaqueIdSchema = z.string().regex(/^[A-Za-z0-9_-]{8,128}$/);
@@ -20,8 +21,34 @@ const IdempotencyKeySchema = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/);
 const PublicRoomCodeSchema = z.string().regex(/^[A-Za-z0-9_-]{12,64}$/);
 const InviteTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{32,128}$/);
 
+export const MultiplayerRoomPlayerSchema = z
+  .object({
+    participantId: OpaqueIdSchema,
+    role: z.enum(["HOST", "PLAYER"]),
+    seatIndex: z.number().int().min(0).max(7),
+    status: z.enum(["JOINED", "READY"]),
+    nickname: z.string().min(1).max(20),
+    avatarUrl: z.string().nullable(),
+  })
+  .strict();
+export type MultiplayerRoomPlayer = z.infer<typeof MultiplayerRoomPlayerSchema>;
+
 export const MultiplayerLobbySignalChangeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("INVALIDATE") }).strict(),
+  z
+    .object({
+      kind: z.literal("PARTICIPANT_JOINED"),
+      player: MultiplayerRoomPlayerSchema,
+      changedAt: z.string().datetime(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("PARTICIPANT_LEFT"),
+      participantId: OpaqueIdSchema,
+      changedAt: z.string().datetime(),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("PARTICIPANT_READY"),
@@ -438,18 +465,6 @@ export const MultiplayerRoomResponseSchema = z
   })
   .strict();
 export type MultiplayerRoomResponse = z.infer<typeof MultiplayerRoomResponseSchema>;
-
-export const MultiplayerRoomPlayerSchema = z
-  .object({
-    participantId: OpaqueIdSchema,
-    role: z.enum(["HOST", "PLAYER"]),
-    seatIndex: z.number().int().min(0).max(7),
-    status: z.enum(["JOINED", "READY"]),
-    nickname: z.string().min(1).max(20),
-    avatarUrl: z.string().nullable(),
-  })
-  .strict();
-export type MultiplayerRoomPlayer = z.infer<typeof MultiplayerRoomPlayerSchema>;
 
 /** Authenticated parent-only roster. Global user ids and provider identities never enter the
  * sandbox bridge; only the same public nickname/avatar already used by OwOGG profile surfaces is

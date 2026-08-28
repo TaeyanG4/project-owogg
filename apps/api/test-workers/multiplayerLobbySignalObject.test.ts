@@ -143,6 +143,31 @@ test("lobby signals hibernate without persisted state and fan out minimal change
     },
   });
 
+  const joinedChange = {
+    kind: "PARTICIPANT_JOINED",
+    player: {
+      participantId: "participant_signal_workers_0005",
+      role: "PLAYER",
+      seatIndex: 1,
+      status: "READY",
+      nickname: "Player",
+      avatarUrl: null,
+    },
+    changedAt: "2026-08-28T12:00:01.000Z",
+  } as const;
+  const joined = nextRawMessage(socket, "participant joined signal");
+  expect((await stub.fetch(notifyRequest(claims, joinedChange))).status).toBe(204);
+  expect(JSON.parse(await joined)).toMatchObject({ change: joinedChange });
+
+  const leftChange = {
+    kind: "PARTICIPANT_LEFT",
+    participantId: joinedChange.player.participantId,
+    changedAt: "2026-08-28T12:00:02.000Z",
+  } as const;
+  const left = nextRawMessage(socket, "participant left signal");
+  expect((await stub.fetch(notifyRequest(claims, leftChange))).status).toBe(204);
+  expect(JSON.parse(await left)).toMatchObject({ change: leftChange });
+
   await expect(
     runInDurableObject(stub, async (_object, state) => ({
       storedKeys: [...(await state.storage.list()).keys()],
