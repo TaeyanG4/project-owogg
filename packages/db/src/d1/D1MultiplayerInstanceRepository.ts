@@ -888,6 +888,28 @@ export class D1MultiplayerInstanceRepository implements MultiplayerInstanceRepos
             input.nowIso,
             MULTIPLAYER_REMATCH_WINDOW_MS / 1_000,
           ),
+        // The generation-advance trigger deliberately clears every READY flag first. Restore the
+        // next lobby's role-specific defaults in the same D1 batch so callers never observe a
+        // committed generation that still needs a separate best-effort readiness write. Keeping
+        // this atomic also removes two follow-up D1 operations from every accepted rematch.
+        this.db
+          .prepare(
+            `UPDATE multiplayer_participants
+             SET status = CASE WHEN role = 'HOST' THEN 'JOINED' ELSE 'READY' END,
+                 ready_at = CASE WHEN role = 'HOST' THEN NULL ELSE ? END,
+                 left_at = NULL,
+                 updated_at = ?
+             WHERE instance_id = ?
+               AND status = 'JOINED'
+               AND EXISTS (
+                 SELECT 1
+                 FROM multiplayer_instances instance
+                 WHERE instance.id = multiplayer_participants.instance_id
+                   AND instance.generation = ? + 1
+                   AND instance.status = 'LOBBY'
+               )`,
+          )
+          .bind(input.nowIso, input.nowIso, input.instanceId, input.expectedGeneration),
       ]);
     } catch {
       return this.classifyRematchAfterWrite(input, replayed);

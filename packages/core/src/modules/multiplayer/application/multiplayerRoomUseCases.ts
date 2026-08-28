@@ -849,27 +849,12 @@ export class MultiplayerRoomUseCases {
         participantId: status.participant.id,
         nowIso,
       });
-      if (requested.status === "REJECTED") return { ok: false, code: requested.code };
-      let participant = requested.participant;
-      if (requested.status === "STARTED") {
-        const participants = await this.dependencies.instances.listParticipants(
-          requested.instance.id,
-        );
-        for (const candidate of participants) {
-          if (candidate.status !== "JOINED" || candidate.role === "HOST") continue;
-          const ready = await this.dependencies.instances.transitionParticipant({
-            instanceId: requested.instance.id,
-            expectedInstanceGeneration: requested.instance.generation,
-            userId: candidate.userId,
-            expectedStatus: "JOINED",
-            nextStatus: "READY",
-            readyAt: nowIso,
-            leftAt: null,
-            nowIso,
-          });
-          if (!ready) return { ok: false, code: "INTERNAL_RETRYABLE" };
-          if (candidate.id === participant.id) participant = ready;
+      if (requested.status === "REJECTED") {
+        if (requested.code === "INTERNAL_RETRYABLE") {
+          const reconciled = await this.reconcileRematchMutation(input);
+          if (reconciled) return reconciled;
         }
+        return { ok: false, code: requested.code };
       }
       const requestedBySelf = requested.requesterParticipantIds.includes(requested.participant.id);
       const requestedByOpponent = requested.requesterParticipantIds.some(
@@ -884,12 +869,26 @@ export class MultiplayerRoomUseCases {
               ? "OPPONENT_REQUESTED"
               : "WAITING",
         instance: requested.instance,
-        participant,
+        participant: requested.participant,
         requestedBySelf,
         requestedByOpponent,
       };
     } catch {
+      // D1 may have committed the idempotent consent batch even if its response (or the immediate
+      // classification read) was interrupted. One error-only read distinguishes that case from a
+      // real failure without adding steady-state polling or duplicate writes.
+      const reconciled = await this.reconcileRematchMutation(input);
+      if (reconciled) return reconciled;
       return { ok: false, code: "INTERNAL_RETRYABLE" };
     }
+  }
+
+  private async reconcileRematchMutation(
+    input: MultiplayerRematchInput,
+  ): Promise<MultiplayerRematchResult | null> {
+    const reconciled = await this.getRematchStatus(input);
+    if (!reconciled.ok) return null;
+    if (reconciled.state === "STARTED" || reconciled.requestedBySelf) return reconciled;
+    return null;
   }
 }

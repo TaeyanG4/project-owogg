@@ -297,6 +297,7 @@ test("GET /games/:gameId/:versionId/index.html serves the published entry docume
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("Content-Type"), "text/html; charset=utf-8");
   assert.equal(res.headers.get("X-Owogg-Bundle-Source"), "published");
+  assert.equal(res.headers.get("Cache-Control"), "public, max-age=60, no-transform");
   const html = await res.text();
   assert.match(html, /<script src="\/games\/bridge\/v1\.js" data-owogg-bridge="v1"><\/script>/);
   assert.match(html, /<h1>hi<\/h1>/);

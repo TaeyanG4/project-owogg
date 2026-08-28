@@ -304,8 +304,8 @@ function assetResponseHeaders(
   const headers = new Headers({
     "Content-Type": content.contentType,
     "Cache-Control": policy.immutable
-      ? `public, max-age=${policy.maxAgeSeconds}, immutable`
-      : `public, max-age=${policy.maxAgeSeconds}`,
+      ? `public, max-age=${policy.maxAgeSeconds}, immutable${isHtmlPath(path) ? ", no-transform" : ""}`
+      : `public, max-age=${policy.maxAgeSeconds}${isHtmlPath(path) ? ", no-transform" : ""}`,
     // Public, unauthenticated bundle bytes — this router never reads a cookie or session, so CORS
     // was never a confidentiality boundary here, only ever an accidental obstacle. A sandboxed
     // iframe (no allow-same-origin) sends Origin: null on its own <script type="module"> fetches,
@@ -319,6 +319,9 @@ function assetResponseHeaders(
   });
   if (content.contentEncoding) headers.set("Content-Encoding", content.contentEncoding);
   if (isHtmlPath(path)) {
+    // Cloudflare Web Analytics' automatic setup rewrites proxied HTML by injecting its external
+    // beacon. A game document intentionally rejects every remote script, so prevent that edge
+    // transform instead of weakening the uploaded-game sandbox CSP to admit analytics code.
     headers.set("Content-Security-Policy", contentSecurityPolicy(frontendUrl));
   }
   // Generic serving always reads fully published bundle objects; keep the header as lightweight

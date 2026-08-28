@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   MultiplayerRoomUseCases,
   createMultiplayerTicketKeyring,
+  type MultiplayerInstanceRepository,
   type RuntimeGame,
   type RuntimeGameRegistry,
 } from "@owogg/core";
@@ -148,10 +149,14 @@ async function sha256(value: string): Promise<string> {
   return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function harness(joinPolicy: "OPEN" | "INVITE_ONLY" = "INVITE_ONLY") {
+function harness(
+  joinPolicy: "OPEN" | "INVITE_ONLY" = "INVITE_ONLY",
+  decorateInstances?: (instances: D1MultiplayerInstanceRepository) => MultiplayerInstanceRepository,
+) {
   const { db, raw } = createDatabase();
   seedAuthority(raw, joinPolicy);
-  const instances = new D1MultiplayerInstanceRepository(db);
+  const storedInstances = new D1MultiplayerInstanceRepository(db);
+  const instances = decorateInstances?.(storedInstances) ?? storedInstances;
   const matches = new D1MultiplayerMatchRepository(db);
   const profiles = new D1MultiplayerProfileRepository(db);
   let now = new Date(NOW);
@@ -173,7 +178,7 @@ function harness(joinPolicy: "OPEN" | "INVITE_ONLY" = "INVITE_ONLY") {
   });
   return {
     raw,
-    instances,
+    instances: storedInstances,
     matches,
     rooms,
     advance(milliseconds: number) {
@@ -477,8 +482,28 @@ test("a voluntary lobby leave can rejoin while a host-closed room is no longer d
   );
 });
 
-test("one rematch request waits while two exact participants open one next generation", async () => {
-  const { rooms, matches, instances } = harness();
+test("a committed rematch survives a lost repository response and opens one next generation", async () => {
+  let loseStartedResponse = true;
+  const { rooms, matches, instances } = harness(
+    "INVITE_ONLY",
+    (storedInstances) =>
+      new Proxy(storedInstances, {
+        get(target, property, receiver) {
+          if (property === "requestRematch") {
+            return async (...args: Parameters<MultiplayerInstanceRepository["requestRematch"]>) => {
+              const result = await target.requestRematch(...args);
+              if (result.status === "STARTED" && loseStartedResponse) {
+                loseStartedResponse = false;
+                throw new Error("simulated post-commit transport loss");
+              }
+              return result;
+            };
+          }
+          const value = Reflect.get(target, property, receiver) as unknown;
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }),
+  );
   const created = await createRoom(rooms);
   const invite = await rooms.createInvite({
     userId: 1,
