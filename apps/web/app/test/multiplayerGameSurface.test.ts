@@ -10,6 +10,7 @@ import {
   multiplayerPeerConnectionMessage,
   multiplayerRoomClipboardValue,
 } from "../features/game/runtime/MultiplayerIframeRuntime";
+import { requestMultiplayerRematch } from "../features/game/runtime/multiplayerRoomApi";
 
 test("multiplayer room share link keeps code and invite out of HTTP query data", () => {
   const result = buildMultiplayerRoomShareValue(
@@ -119,5 +120,63 @@ test("disconnect notice counts down and then reports official forfeit finalizati
       reconnectDeadlineAt: null,
     }),
     "상대가 30초 안에 재접속하지 않아 기권 처리되었습니다.",
+  );
+});
+
+test("rematch request reconciles an uncertain response from authoritative state", async () => {
+  const input = {
+    instanceId: "instance_12345678",
+    expectedGeneration: 1,
+  } as const;
+  const started = {
+    state: "STARTED",
+    requestedBySelf: true,
+    requestedByOpponent: true,
+    room: {
+      replayed: false,
+      instance: {
+        id: input.instanceId,
+        publicCode: "ROOMCODE1234",
+        gameId: 1,
+        gameVersionId: 1,
+        profileRevision: 1,
+        visibility: "PRIVATE",
+        joinPolicy: "OPEN",
+        status: "LOBBY",
+        generation: 2,
+        participantCount: 2,
+        maxPlayers: 2,
+        expiresAt: "2026-08-28T10:00:00.000Z",
+      },
+      participant: {
+        id: "participant_12345678",
+        role: "PLAYER",
+        seatIndex: 1,
+        status: "READY",
+        connectionGeneration: 1,
+      },
+    },
+  } as const;
+  const lostResponse = new Error("response lost after commit");
+
+  assert.deepEqual(
+    await requestMultiplayerRematch(input, {
+      request: async () => Promise.reject(lostResponse),
+      readStatus: async () => started,
+    }),
+    started,
+  );
+
+  await assert.rejects(
+    requestMultiplayerRematch(input, {
+      request: async () => Promise.reject(lostResponse),
+      readStatus: async () => ({
+        state: "OPPONENT_REQUESTED",
+        requestedBySelf: false,
+        requestedByOpponent: true,
+        room: null,
+      }),
+    }),
+    (error: unknown) => error === lostResponse,
   );
 });
