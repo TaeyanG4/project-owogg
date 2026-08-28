@@ -13,6 +13,17 @@ export function getApiUrl(): string {
 
 export const API_URL = getApiUrl();
 
+/** Protected Staging redirects unauthenticated subresource requests to the Cloudflare Access
+ * login origin. A Web App Manifest cannot complete that interactive redirect and only produces a
+ * noisy CORS failure, so PWA discovery stays enabled everywhere except that protected build. */
+export function shouldRequestWebManifest(apiUrl: string): boolean {
+  try {
+    return new URL(apiUrl).hostname !== "api-stg.owogg.com";
+  } catch {
+    return true;
+  }
+}
+
 /**
  * Origin that serves uploaded sandbox game bundles. Deliberately a *different* host from the main
  * site: everything inside a game iframe is third-party code, and a separate origin is what makes

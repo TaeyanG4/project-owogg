@@ -8,6 +8,7 @@ import {
 } from "react";
 import type {
   MultiplayerGameAvailabilityResponse,
+  MultiplayerRoomPlayer,
   MultiplayerRoomResponse,
 } from "@owogg/contracts";
 import { MultiplayerIframeRuntime } from "./MultiplayerIframeRuntime";
@@ -142,6 +143,12 @@ function roomShareValue(publicCode: string, inviteToken?: string): string {
   );
 }
 
+interface InitialLobbyRoster {
+  readonly instanceId: string;
+  readonly generation: number;
+  readonly players: readonly MultiplayerRoomPlayer[];
+}
+
 /** Discovery + room control UI shared by every approved multiplayer profile. */
 export function MultiplayerGameSurface({
   gameSlug,
@@ -159,6 +166,7 @@ export function MultiplayerGameSurface({
     MultiplayerGameAvailabilityResponse | "LOADING" | "ERROR"
   >("LOADING");
   const [room, setRoom] = useState<MultiplayerRoomResponse | null>(null);
+  const [initialRoster, setInitialRoster] = useState<InitialLobbyRoster | null>(null);
   const [shareValue, setShareValue] = useState<string | undefined>();
   const [publicCode, setPublicCode] = useState("");
   const [inviteToken, setInviteToken] = useState("");
@@ -201,6 +209,7 @@ export function MultiplayerGameSurface({
 
   useEffect(() => {
     setRoom(null);
+    setInitialRoster(null);
     setShareValue(undefined);
     return discover();
   }, [discover]);
@@ -245,6 +254,11 @@ export function MultiplayerGameSurface({
         idempotencyKey: createIdempotencyRef.current,
       });
       setShareValue(roomShareValue(created.instance.publicCode));
+      setInitialRoster({
+        instanceId: created.instance.id,
+        generation: created.instance.generation,
+        players: created.players,
+      });
       setRoom(created);
       createIdempotencyRef.current = newIdempotencyKey();
     } catch (reason) {
@@ -266,6 +280,11 @@ export function MultiplayerGameSurface({
         inviteToken: normalizedInviteToken || null,
       });
       setShareValue(roomShareValue(joined.instance.publicCode));
+      setInitialRoster({
+        instanceId: joined.instance.id,
+        generation: joined.instance.generation,
+        players: joined.players,
+      });
       setRoom(joined);
       if (typeof window !== "undefined") {
         window.history.replaceState(
@@ -320,11 +339,16 @@ export function MultiplayerGameSurface({
           minPlayers={minPlayers}
           shareValue={shareValue ?? roomShareValue(room.instance.publicCode)}
           viewer={viewer}
+          {...(initialRoster?.instanceId === room.instance.id &&
+          initialRoster.generation === room.instance.generation
+            ? { initialPlayers: initialRoster.players }
+            : {})}
           {...(frameClassName ? { frameClassName } : {})}
           {...(frameStyle ? { frameStyle } : {})}
           onRoomChange={setRoom}
           onExit={() => {
             setRoom(null);
+            setInitialRoster(null);
             setShareValue(undefined);
           }}
         />
@@ -343,6 +367,7 @@ export function MultiplayerGameSurface({
         onRoomChange={setRoom}
         onExit={() => {
           setRoom(null);
+          setInitialRoster(null);
           setShareValue(undefined);
         }}
       />

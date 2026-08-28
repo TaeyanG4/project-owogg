@@ -13,6 +13,7 @@ import {
   MultiplayerLeaveRoomRequestSchema,
   MultiplayerRematchRequestSchema,
   MultiplayerRematchResponseSchema,
+  MultiplayerRoomAdmissionResponseSchema,
   MultiplayerRoomPlayerSchema,
   MultiplayerRoomResponseSchema,
   MultiplayerRoomRosterResponseSchema,
@@ -202,6 +203,31 @@ function publicRoomPlayer(
     status: participant.status,
     nickname: user.nickname,
     avatarUrl: user.avatar_url,
+  });
+}
+
+async function readPublicRoomPlayers(
+  container: ReturnType<typeof createContainer>,
+  instanceId: string,
+  knownUser?: {
+    readonly id: number;
+    readonly nickname: string;
+    readonly avatar_url: string | null;
+  },
+) {
+  const participants = (
+    await container.multiplayerInstanceRepo.listParticipants(instanceId)
+  ).filter((participant) => participant.status === "JOINED" || participant.status === "READY");
+  const users = await Promise.all(
+    participants.map((participant) =>
+      participant.userId === knownUser?.id
+        ? knownUser
+        : container.userRepo.findById(participant.userId),
+    ),
+  );
+  return participants.flatMap((participant, index) => {
+    const user = users[index];
+    return user ? [publicRoomPlayer(participant, user)] : [];
   });
 }
 
@@ -432,12 +458,16 @@ multiplayerRouter.post("/instances", async (c) => {
     ...parsed.data,
   });
   if (!result.ok) return failure(c, result.code);
+  const players = result.replayed
+    ? await readPublicRoomPlayers(container, result.instance.id, authenticated.user)
+    : [publicRoomPlayer(result.participant, authenticated.user)];
   c.header("Cache-Control", "no-store");
   return c.json(
-    MultiplayerRoomResponseSchema.parse({
+    MultiplayerRoomAdmissionResponseSchema.parse({
       replayed: result.replayed,
       instance: publicRoom(result.instance),
       participant: publicParticipant(result.participant),
+      players,
     }),
     result.replayed ? 200 : 201,
   );
@@ -472,21 +502,27 @@ multiplayerRouter.post("/instances/join", async (c) => {
     inviteToken: parsed.data.inviteToken,
   });
   if (!result.ok) return failure(c, result.code);
+  const joinedPlayer = publicRoomPlayer(result.participant, authenticated.user);
   // A successful replay can be a browser refresh or a recovered response whose original signal
   // was emitted before another participant's socket finished admission. The direct delta is
   // idempotent on participantId, so repeat it for every successful join instead of waiting for a
-  // later ready mutation to repair an apparently missing player.
-  await notifyLobbySignal(c, result.instance.id, result.instance.generation, {
-    kind: "PARTICIPANT_JOINED",
-    player: publicRoomPlayer(result.participant, authenticated.user),
-    changedAt: result.participant.updatedAt,
-  });
+  // later ready mutation to repair an apparently missing player. Read the admission snapshot in
+  // parallel so DO delivery does not add another serial wait to the joining browser.
+  const [players] = await Promise.all([
+    readPublicRoomPlayers(container, result.instance.id, authenticated.user),
+    notifyLobbySignal(c, result.instance.id, result.instance.generation, {
+      kind: "PARTICIPANT_JOINED",
+      player: joinedPlayer,
+      changedAt: result.participant.updatedAt,
+    }),
+  ]);
   c.header("Cache-Control", "no-store");
   return c.json(
-    MultiplayerRoomResponseSchema.parse({
+    MultiplayerRoomAdmissionResponseSchema.parse({
       replayed: result.replayed,
       instance: publicRoom(result.instance),
       participant: publicParticipant(result.participant),
+      players,
     }),
     200,
   );
@@ -516,22 +552,14 @@ multiplayerRouter.get("/instances/:instanceId/roster", async (c) => {
     return failure(c, "NOT_PARTICIPANT");
   }
 
-  const participants = (
-    await container.multiplayerInstanceRepo.listParticipants(instanceId)
-  ).filter((participant) => participant.status === "JOINED" || participant.status === "READY");
-  const users = await Promise.all(
-    participants.map((participant) => container.userRepo.findById(participant.userId)),
-  );
+  const players = await readPublicRoomPlayers(container, instanceId, authenticated.user);
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomRosterResponseSchema.parse({
       instanceId,
       generation: instance.generation,
       instance: publicRoom(instance),
-      players: participants.flatMap((participant, index) => {
-        const user = users[index];
-        return user ? [publicRoomPlayer(participant, user)] : [];
-      }),
+      players,
     }),
     200,
   );

@@ -15,6 +15,7 @@ import {
   MultiplayerCreateInviteResponseSchema,
   MultiplayerGameAvailabilityResponseSchema,
   MultiplayerJoinTicketResponseSchema,
+  MultiplayerRoomAdmissionResponseSchema,
   MultiplayerRoomResponseSchema,
   MultiplayerRoomRosterResponseSchema,
 } from "@owogg/contracts";
@@ -626,9 +627,28 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
   const joinedResponse = await joinedResponsePromise;
   const joinedJson = await joinedResponse.json();
   assert.equal(joinedResponse.status, 200, JSON.stringify(joinedJson));
-  const joined = MultiplayerRoomResponseSchema.parse(joinedJson);
+  const joined = MultiplayerRoomAdmissionResponseSchema.parse(joinedJson);
   assert.equal(joined.instance.status, "LOBBY");
   assert.equal(joined.participant.status, "READY");
+  assert.deepEqual(joined.players, [
+    {
+      participantId: "participant_api_host_0001",
+      role: "HOST",
+      seatIndex: 0,
+      status: "JOINED",
+      nickname: "Host",
+      avatarUrl: null,
+    },
+    {
+      participantId: joined.participant.id,
+      role: "PLAYER",
+      seatIndex: 1,
+      status: "READY",
+      nickname: "Player",
+      avatarUrl: null,
+    },
+  ]);
+  assert.equal(JSON.stringify(joined).includes("userId"), false);
 
   const replayedJoinResponse = await app.request(
     "http://localhost/api/multiplayer/instances/join",
@@ -644,7 +664,7 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
   );
   assert.equal(replayedJoinResponse.status, 200);
   assert.equal(
-    MultiplayerRoomResponseSchema.parse(await replayedJoinResponse.json()).replayed,
+    MultiplayerRoomAdmissionResponseSchema.parse(await replayedJoinResponse.json()).replayed,
     true,
   );
 

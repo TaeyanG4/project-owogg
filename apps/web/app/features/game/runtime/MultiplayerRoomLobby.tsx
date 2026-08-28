@@ -90,6 +90,7 @@ export interface MultiplayerRoomLobbyProps {
   readonly shareValue: string;
   readonly frameClassName?: string;
   readonly frameStyle?: CSSProperties;
+  readonly initialPlayers?: readonly MultiplayerRoomPlayer[];
   readonly viewer: {
     readonly nickname: string;
     readonly avatarUrl: string | null;
@@ -113,6 +114,21 @@ export function multiplayerLobbySelfPlayer(
     nickname: viewer.nickname,
     avatarUrl: viewer.avatarUrl,
   };
+}
+
+export function multiplayerLobbyInitialPlayers(
+  room: MultiplayerRoomResponse,
+  viewer: MultiplayerRoomLobbyProps["viewer"],
+  initialPlayers: readonly MultiplayerRoomPlayer[] = [],
+): readonly MultiplayerRoomPlayer[] {
+  const playersById = new Map(
+    initialPlayers.map((player) => [player.participantId, player] as const),
+  );
+  const self = multiplayerLobbySelfPlayer(room, viewer);
+  if (self && !playersById.has(self.participantId)) {
+    playersById.set(self.participantId, self);
+  }
+  return [...playersById.values()].sort((left, right) => left.seatIndex - right.seatIndex);
 }
 
 function messageFor(error: unknown): string {
@@ -195,14 +211,14 @@ export function MultiplayerRoomLobby({
   shareValue,
   frameClassName,
   frameStyle,
+  initialPlayers,
   viewer,
   onRoomChange,
   onExit,
 }: MultiplayerRoomLobbyProps) {
-  const [players, setPlayers] = useState<readonly MultiplayerRoomPlayer[]>(() => {
-    const self = multiplayerLobbySelfPlayer(room, viewer);
-    return self ? [self] : [];
-  });
+  const [players, setPlayers] = useState<readonly MultiplayerRoomPlayer[]>(() =>
+    multiplayerLobbyInitialPlayers(room, viewer, initialPlayers),
+  );
   const [busy, setBusy] = useState<"START" | "LEAVE" | "READY" | null>(null);
   const [copied, setCopied] = useState<"CODE" | "LINK" | null>(null);
   const [error, setError] = useState<string | null>(null);

@@ -8,6 +8,7 @@ import type {
 import {
   applyMultiplayerLobbySignalChange,
   multiplayerLobbyCanStart,
+  multiplayerLobbyInitialPlayers,
   multiplayerLobbyRosterSounds,
   multiplayerLobbySelfPlayer,
   multiplayerLobbySlotCount,
@@ -122,6 +123,40 @@ test("the authenticated participant is visible before the first roster recovery 
       nickname: "Host",
       avatarUrl: "https://example.com/a.png",
     },
+  );
+});
+
+test("room admission renders the complete initial roster before the lobby socket connects", () => {
+  const host = player(0);
+  const self = player(1);
+  const room: MultiplayerRoomResponse = {
+    replayed: false,
+    instance: {
+      id: "instance_lobby_seed_0002",
+      publicCode: "ROOMSEED0002",
+      gameId: 1,
+      gameVersionId: 1,
+      profileRevision: 1,
+      visibility: "PRIVATE",
+      joinPolicy: "OPEN",
+      status: "LOBBY",
+      generation: 1,
+      participantCount: 2,
+      maxPlayers: 2,
+      expiresAt: "2026-08-28T13:00:00.000Z",
+    },
+    participant: {
+      id: self.participantId,
+      role: "PLAYER",
+      seatIndex: 1,
+      status: "READY",
+      connectionGeneration: 0,
+    },
+  };
+
+  assert.deepEqual(
+    multiplayerLobbyInitialPlayers(room, { nickname: "Player 2", avatarUrl: null }, [host, self]),
+    [host, self],
   );
 });
 

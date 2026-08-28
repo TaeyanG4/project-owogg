@@ -473,6 +473,16 @@ export const MultiplayerRoomResponseSchema = z
   .strict();
 export type MultiplayerRoomResponse = z.infer<typeof MultiplayerRoomResponseSchema>;
 
+/** Room create/join admission includes the current public roster so the parent UI can render the
+ * lobby immediately. Later membership and ready-state changes still travel over the hibernating
+ * lobby WebSocket; this snapshot only closes the gap before that socket is connected. */
+export const MultiplayerRoomAdmissionResponseSchema = MultiplayerRoomResponseSchema.extend({
+  players: z.array(MultiplayerRoomPlayerSchema).max(8),
+}).strict();
+export type MultiplayerRoomAdmissionResponse = z.infer<
+  typeof MultiplayerRoomAdmissionResponseSchema
+>;
+
 /** Authenticated parent-only roster. Global user ids and provider identities never enter the
  * sandbox bridge; only the same public nickname/avatar already used by OwOGG profile surfaces is
  * returned to a current participant. */

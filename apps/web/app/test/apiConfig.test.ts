@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolveApiUrl } from "../lib/api/config.js";
+import { resolveApiUrl, shouldRequestWebManifest } from "../lib/api/config.js";
 
 test("explicit VITE_API_URL always wins", () => {
   assert.equal(
@@ -17,4 +17,10 @@ test("local and Production API defaults remain isolated", () => {
   assert.equal(resolveApiUrl(undefined, "localhost"), "http://localhost:8787");
   assert.equal(resolveApiUrl(undefined, "127.0.0.1"), "http://localhost:8787");
   assert.equal(resolveApiUrl(undefined, "owogg.com"), "https://api.owogg.com");
+});
+
+test("the protected Staging build omits PWA manifest discovery", () => {
+  assert.equal(shouldRequestWebManifest("https://api-stg.owogg.com"), false);
+  assert.equal(shouldRequestWebManifest("https://api.owogg.com"), true);
+  assert.equal(shouldRequestWebManifest("http://localhost:8787"), true);
 });

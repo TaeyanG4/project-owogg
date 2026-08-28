@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { shouldRequestWebManifest } from "../apps/web/app/lib/api/config.js";
 
 /**
  * [React Router v7 SPA Mode Post-Build Provenance Script]
@@ -30,11 +31,14 @@ if (fs.existsSync(indexPath)) {
     '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />',
     '<link rel="icon" href="/favicon.ico" sizes="any" />',
     '<link rel="apple-touch-icon" href="/apple-touch-icon.png" />',
-    '<link rel="manifest" href="/site.webmanifest" />',
-  ].join("");
+  ];
+  const apiUrl = process.env.VITE_API_URL?.trim();
+  if (!apiUrl || shouldRequestWebManifest(apiUrl)) {
+    faviconLinks.push('<link rel="manifest" href="/site.webmanifest" />');
+  }
   let html = fs.readFileSync(indexPath, "utf-8");
-  if (!html.includes('rel="manifest"')) {
-    html = html.replace(/<head>/, `<head>${faviconLinks}`);
+  if (!html.includes('href="/favicon.svg"')) {
+    html = html.replace(/<head>/, `<head>${faviconLinks.join("")}`);
     fs.writeFileSync(indexPath, html, "utf-8");
     console.log("✅ OwOGG favicon links injected into SPA index.html.");
   }

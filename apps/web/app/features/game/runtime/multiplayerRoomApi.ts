@@ -1,11 +1,13 @@
 import {
   MultiplayerCreateInviteResponseSchema,
   MultiplayerGameAvailabilityResponseSchema,
+  MultiplayerRoomAdmissionResponseSchema,
   MultiplayerRoomResponseSchema,
   MultiplayerRoomRosterResponseSchema,
   MultiplayerRematchResponseSchema,
   type MultiplayerCreateInviteResponse,
   type MultiplayerGameAvailabilityResponse,
+  type MultiplayerRoomAdmissionResponse,
   type MultiplayerRoomResponse,
   type MultiplayerRoomRosterResponse,
   type MultiplayerRematchResponse,
@@ -36,8 +38,8 @@ export function fetchMultiplayerGameAvailability(
 
 export function createMultiplayerRoom(
   input: CreateMultiplayerRoomInput,
-): Promise<MultiplayerRoomResponse> {
-  return apiFetch("/api/multiplayer/instances", MultiplayerRoomResponseSchema, {
+): Promise<MultiplayerRoomAdmissionResponse> {
+  return apiFetch("/api/multiplayer/instances", MultiplayerRoomAdmissionResponseSchema, {
     method: "POST",
     body: JSON.stringify(input),
   });
@@ -45,8 +47,8 @@ export function createMultiplayerRoom(
 
 export function joinMultiplayerRoom(
   input: JoinMultiplayerRoomInput,
-): Promise<MultiplayerRoomResponse> {
-  return apiFetch("/api/multiplayer/instances/join", MultiplayerRoomResponseSchema, {
+): Promise<MultiplayerRoomAdmissionResponse> {
+  return apiFetch("/api/multiplayer/instances/join", MultiplayerRoomAdmissionResponseSchema, {
     method: "POST",
     body: JSON.stringify(input),
   });
