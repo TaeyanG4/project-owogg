@@ -340,6 +340,9 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
   const recoveryLimiter = limiter();
   let durableObjectFetches = 0;
   const lobbySignalRequests: Request[] = [];
+  let holdNextLobbyNotification = false;
+  let releaseLobbyNotification: (() => void) | undefined;
+  let lobbyNotificationStarted: (() => void) | undefined;
   const env = runtimeEnv({
     DB: db,
     ...B2_ENV,
@@ -406,6 +409,17 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
         return {
           async fetch(internalRequest: Request) {
             lobbySignalRequests.push(internalRequest.clone());
+            if (
+              holdNextLobbyNotification &&
+              new URL(internalRequest.url).pathname ===
+                MULTIPLAYER_INTERNAL_LOBBY_SIGNAL_NOTIFY_PATH
+            ) {
+              holdNextLobbyNotification = false;
+              lobbyNotificationStarted?.();
+              await new Promise<void>((resolve) => {
+                releaseLobbyNotification = resolve;
+              });
+            }
             return new Response(null, { status: 204 });
           },
         };
@@ -555,18 +569,37 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
   assert.equal(inviteReplay.replayed, true);
   assert.equal(inviteReplay.inviteToken, invite.inviteToken);
 
-  const joinedResponse = await app.request(
-    "http://localhost/api/multiplayer/instances/join",
-    {
-      ...request,
-      headers: {
-        ...request.headers,
-        Cookie: `owogg_session=${playerSessionToken}`,
+  holdNextLobbyNotification = true;
+  const notificationStarted = new Promise<void>((resolve) => {
+    lobbyNotificationStarted = resolve;
+  });
+  let joinResponseSettled = false;
+  const joinedResponsePromise = app
+    .request(
+      "http://localhost/api/multiplayer/instances/join",
+      {
+        ...request,
+        headers: {
+          ...request.headers,
+          Cookie: `owogg_session=${playerSessionToken}`,
+        },
+        body: JSON.stringify({ publicCode: "APITICKET001", inviteToken: invite.inviteToken }),
       },
-      body: JSON.stringify({ publicCode: "APITICKET001", inviteToken: invite.inviteToken }),
-    },
-    env as any,
+      env as any,
+    )
+    .then((response) => {
+      joinResponseSettled = true;
+      return response;
+    });
+  await notificationStarted;
+  await Promise.resolve();
+  assert.equal(
+    joinResponseSettled,
+    false,
+    "join response must not finish before its one lobby invalidation is delivered",
   );
+  releaseLobbyNotification?.();
+  const joinedResponse = await joinedResponsePromise;
   const joinedJson = await joinedResponse.json();
   assert.equal(joinedResponse.status, 200, JSON.stringify(joinedJson));
   const joined = MultiplayerRoomResponseSchema.parse(joinedJson);

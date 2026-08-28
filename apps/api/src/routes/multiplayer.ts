@@ -226,7 +226,7 @@ function notifyRematchChange(c: Context<ApiEnv>, instanceId: string, generation:
   }
 }
 
-function notifyLobbySignal(
+async function notifyLobbySignal(
   c: Context<ApiEnv>,
   instanceId: string,
   generation: number,
@@ -235,12 +235,11 @@ function notifyLobbySignal(
     readonly revokeParticipantId?: string;
     readonly closeRoom?: boolean;
   } = {},
-): void {
+): Promise<void> {
   const namespace = c.env.MULTIPLAYER_LOBBY_SIGNALS;
   if (!namespace) return;
-  const notification = namespace
-    .get(namespace.idFromName(instanceId))
-    .fetch(
+  try {
+    const response = await namespace.get(namespace.idFromName(instanceId)).fetch(
       new Request(`https://multiplayer.internal${MULTIPLAYER_INTERNAL_LOBBY_SIGNAL_NOTIFY_PATH}`, {
         method: "POST",
         headers: {
@@ -255,23 +254,17 @@ function notifyLobbySignal(
           closeRoom: delivery.closeRoom ?? false,
         }),
       }),
-    )
-    .then((response) => {
-      if (!response.ok) throw new Error(`lobby signal rejected (${response.status})`);
-    })
-    .catch((error: unknown) => {
-      // The D1 mutation already committed. Reconnect and the slow integrity refresh recover any
-      // missed signal, so a notification-provider failure must not roll the action back.
-      console.warn("[multiplayer:lobby-signal-failed]", {
-        instanceId,
-        generation,
-        reason: error instanceof Error ? error.message : "unknown",
-      });
+    );
+    if (!response.ok) throw new Error(`lobby signal rejected (${response.status})`);
+  } catch (error: unknown) {
+    // The authoritative D1 mutation already committed, so notification failure must not roll it
+    // back. Awaiting the single DO call here is intentional: a detached promise can be canceled
+    // as soon as the HTTP response completes, silently losing the only invalidation signal.
+    console.warn("[multiplayer:lobby-signal-failed]", {
+      instanceId,
+      generation,
+      reason: error instanceof Error ? error.message : "unknown",
     });
-  try {
-    c.executionCtx.waitUntil(notification);
-  } catch {
-    // Direct Hono unit tests do not expose an ExecutionContext. The promise is already guarded.
   }
 }
 
@@ -460,7 +453,7 @@ multiplayerRouter.post("/instances/join", async (c) => {
   });
   if (!result.ok) return failure(c, result.code);
   if (!result.replayed) {
-    notifyLobbySignal(c, result.instance.id, result.instance.generation);
+    await notifyLobbySignal(c, result.instance.id, result.instance.generation);
   }
   c.header("Cache-Control", "no-store");
   return c.json(
@@ -560,7 +553,7 @@ multiplayerRouter.post("/instances/:instanceId/ready", async (c) => {
   });
   if (!result.ok) return failure(c, result.code);
   if (result.state === "WAITING" && result.changed) {
-    notifyLobbySignal(c, result.instance.id, result.instance.generation, {
+    await notifyLobbySignal(c, result.instance.id, result.instance.generation, {
       kind: "PARTICIPANT_READY",
       participantId: result.participant.id,
       status: result.participant.status === "READY" ? "READY" : "JOINED",
@@ -607,7 +600,7 @@ multiplayerRouter.post("/instances/:instanceId/start", async (c) => {
     expectedGeneration: parsed.data.expectedGeneration,
   });
   if (!result.ok) return failure(c, result.code);
-  notifyLobbySignal(
+  await notifyLobbySignal(
     c,
     result.instance.id,
     result.instance.generation,
@@ -763,7 +756,7 @@ multiplayerRouter.post("/instances/:instanceId/leave", async (c) => {
   if (!instance) return failure(c, "INSTANCE_NOT_FOUND");
   if (!participant) return failure(c, "NOT_PARTICIPANT");
   if (!result.replayed) {
-    notifyLobbySignal(
+    await notifyLobbySignal(
       c,
       instanceId,
       instance.generation,
