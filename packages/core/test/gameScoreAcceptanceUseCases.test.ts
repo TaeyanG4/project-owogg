@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   GAME_SESSION_POLICY,
   GameScoreAcceptanceUseCases,
-  MultiplayerLegacyFlowGate,
+  SelectedTopologyAuthorityGate,
   signGameSession,
   type GameScoreAcceptanceRepository,
   type MultiplayerProfileRecord,
@@ -18,6 +18,26 @@ const SECRET = "c2-focused-test-secret";
 
 function runtimeGame(slug = "reaction-time"): RuntimeGame {
   return runtimeGameFixture(slug);
+}
+
+function withPlayConfig(runtime: RuntimeGame): RuntimeGame {
+  return {
+    ...runtime,
+    canonical: {
+      ...runtime.canonical,
+      playConfig: {
+        version: 1,
+        rulesetRevision: 1,
+        verifierId: "test-score-v1",
+        defaultVariantId: "standard",
+        variants: [{ id: "standard", label: "Standard" }],
+        allowedConfigs: [
+          { difficultyId: "normal", variantId: "standard", rewardFactor: 1 },
+          { difficultyId: "hard", variantId: "standard", rewardFactor: 1 },
+        ],
+      },
+    },
+  };
 }
 
 function createUseCases(
@@ -53,7 +73,7 @@ function createUseCases(
       return [];
     },
   };
-  const gate = new MultiplayerLegacyFlowGate({
+  const gate = new SelectedTopologyAuthorityGate({
     findEnabledForExactVersion: findProfile,
   } as unknown as MultiplayerProfileRepository);
   return {
@@ -162,5 +182,23 @@ test("profile authority failure fails closed instead of reopening the client sco
     score: 1,
   });
   assert.deepEqual(result, { ok: false, error: "MULTIPLAYER_AUTHORITY_UNAVAILABLE" });
+  assert.equal(writes(), 0);
+});
+
+test("PlayConfig blocks the gs1 client score path before token parsing", async () => {
+  const runtime = withPlayConfig(runtimeGame());
+  const { useCases, writes } = createUseCases(runtime);
+
+  const result = await useCases.accept({
+    slug: runtime.identity.slug,
+    userId: 7,
+    nickname: "player",
+    avatarUrl: null,
+    token: "deliberately-invalid",
+    secret: SECRET,
+    score: 999_999,
+  });
+
+  assert.deepEqual(result, { ok: false, error: "PLAY_CONFIG_AUTHORITY_UNAVAILABLE" });
   assert.equal(writes(), 0);
 });

@@ -21,7 +21,8 @@ export class GenericScoreReadUseCases {
     for (const item of aggregates) {
       const runtime = await this.runtimeGameRegistry.findBySlug(item.game_id);
       const scorePolicy = runtime?.canonical.policy.score;
-      if (!scorePolicy) continue;
+      const currentRevision = runtime?.canonical.playConfig?.rulesetRevision ?? 1;
+      if (!scorePolicy || item.ruleset_revision !== currentRevision) continue;
       bests[item.game_id] = scorePolicy.direction === "asc" ? item.min_score : item.max_score;
     }
 
@@ -37,7 +38,8 @@ export class GenericScoreReadUseCases {
     for (const item of aggregates) {
       const runtime = await this.runtimeGameRegistry.findBySlug(item.game_id);
       const scorePolicy = runtime?.canonical.policy.score;
-      if (!scorePolicy) continue;
+      const currentRevision = runtime?.canonical.playConfig?.rulesetRevision ?? 1;
+      if (!scorePolicy || item.ruleset_revision !== currentRevision) continue;
 
       const score = scorePolicy.direction === "asc" ? item.min_score : item.max_score;
       entries.push({

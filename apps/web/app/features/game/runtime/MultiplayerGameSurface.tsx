@@ -11,6 +11,7 @@ import type {
   MultiplayerRoomPlayer,
   MultiplayerRoomResponse,
 } from "@owogg/contracts";
+import { gameVersionPlayUrl } from "../../../lib/api/config";
 import { MultiplayerIframeRuntime } from "./MultiplayerIframeRuntime";
 import { MultiplayerRoomLobby } from "./MultiplayerRoomLobby";
 import { primeMultiplayerLobbySound } from "./multiplayerLobbySound";
@@ -23,7 +24,6 @@ import type { MultiplayerRuntimeResolution } from "./multiplayerRuntimeResolutio
 
 export interface MultiplayerGameSurfaceProps {
   readonly gameSlug: string;
-  readonly src: string;
   readonly title: string;
   readonly attemptKey: number;
   readonly frameClassName?: string;
@@ -35,6 +35,21 @@ export interface MultiplayerGameSurfaceProps {
     readonly avatarUrl: string | null;
   } | null;
   readonly onRuntimeResolved: (mode: MultiplayerRuntimeResolution) => void;
+  readonly initialAvailability?: Extract<
+    MultiplayerGameAvailabilityResponse,
+    { readonly status: "AVAILABLE" }
+  >;
+  readonly onExitToModeSelection?: () => void;
+}
+
+export function supportsPrivateOpenRoomLauncher(
+  availability: MultiplayerGameAvailabilityResponse,
+): availability is Extract<MultiplayerGameAvailabilityResponse, { readonly status: "AVAILABLE" }> {
+  return (
+    availability.status === "AVAILABLE" &&
+    availability.profile.allowedVisibility.includes("PRIVATE") &&
+    availability.profile.allowedJoinPolicies.includes("OPEN")
+  );
 }
 
 function newIdempotencyKey(): string {
@@ -88,9 +103,7 @@ export function readMultiplayerRoomShareValue(pageUrl: string): {
   }
 }
 
-/** Accepts a room-code link, a plain code, and historical two-part invite values. New official
- * Omok rooms need only the code; the hidden invite value is retained solely so an already-created
- * legacy Staging room can still be consumed during the rollout. */
+/** Accepts a room-code link, a plain code, and an optional two-part invite value. */
 export function parseMultiplayerRoomJoinValue(value: string): {
   readonly publicCode: string;
   readonly inviteToken: string;
@@ -152,7 +165,6 @@ interface InitialLobbyRoster {
 /** Discovery + room control UI shared by every approved multiplayer profile. */
 export function MultiplayerGameSurface({
   gameSlug,
-  src,
   title,
   attemptKey,
   frameClassName,
@@ -161,6 +173,8 @@ export function MultiplayerGameSurface({
   fallback,
   viewer,
   onRuntimeResolved,
+  initialAvailability,
+  onExitToModeSelection,
 }: MultiplayerGameSurfaceProps) {
   const [availability, setAvailability] = useState<
     MultiplayerGameAvailabilityResponse | "LOADING" | "ERROR"
@@ -184,17 +198,14 @@ export function MultiplayerGameSurface({
         if (!active) return;
         setAvailability(resolved);
         if (resolved.status === "AVAILABLE") {
-          if (
-            !resolved.profile.allowedVisibility.includes("PRIVATE") ||
-            !resolved.profile.allowedJoinPolicies.includes("OPEN")
-          ) {
+          if (!supportsPrivateOpenRoomLauncher(resolved)) {
             setAvailability("ERROR");
-            setError("관리자 센터에서 공식 오목을 코드 참가 방식으로 갱신해 주세요.");
+            setError("현재 승인된 멀티플레이 프로필은 코드 방 입장을 지원하지 않습니다.");
             return;
           }
           onRuntimeResolved("ONLINE");
         } else {
-          onRuntimeResolved("LEGACY");
+          onRuntimeResolved("GENERIC");
         }
       })
       .catch((reason: unknown) => {
@@ -211,8 +222,19 @@ export function MultiplayerGameSurface({
     setRoom(null);
     setInitialRoster(null);
     setShareValue(undefined);
+    if (initialAvailability) {
+      if (!supportsPrivateOpenRoomLauncher(initialAvailability)) {
+        setAvailability("ERROR");
+        setError("현재 승인된 멀티플레이 프로필은 코드 방 입장을 지원하지 않습니다.");
+        return;
+      }
+      setAvailability(initialAvailability);
+      setError(null);
+      onRuntimeResolved("ONLINE");
+      return;
+    }
     return discover();
-  }, [discover]);
+  }, [discover, initialAvailability, onRuntimeResolved]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -363,7 +385,7 @@ export function MultiplayerGameSurface({
     }
     return (
       <MultiplayerIframeRuntime
-        src={src}
+        src={gameVersionPlayUrl(room.instance.gameId, room.instance.gameVersionId)}
         title={title}
         room={room}
         attemptKey={attemptKey}
@@ -375,7 +397,6 @@ export function MultiplayerGameSurface({
         initialRoster.generation === room.instance.generation
           ? { initialPlayers: initialRoster.players }
           : {})}
-        onRoomChange={setRoom}
         onExit={() => {
           setRoom(null);
           setInitialRoster(null);
@@ -395,6 +416,15 @@ export function MultiplayerGameSurface({
           OWOGG Multiplayer
         </p>
         <h3 className="mt-2 text-2xl font-black text-text-primary">{title}</h3>
+        {onExitToModeSelection && (
+          <button
+            type="button"
+            onClick={onExitToModeSelection}
+            className="mt-3 cursor-pointer text-xs font-bold text-text-secondary underline-offset-4 hover:text-text-primary hover:underline"
+          >
+            게임 모드 선택으로 돌아가기
+          </button>
+        )}
         {availability === "LOADING" ? (
           <p className="mt-4 text-sm text-text-secondary">
             멀티플레이 사용 가능 여부를 확인 중입니다.

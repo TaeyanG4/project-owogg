@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Relay Protocol Probe</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <p class="eyebrow">OWOGG GENERIC MULTIPLAYER</p>
+        <h1>Relay Protocol Probe</h1>
+        <p id="status" role="status">Relay bootstrap을 기다리는 중…</p>
+      </header>
+
+      <section class="state" aria-labelledby="counter-title">
+        <div>
+          <p id="counter-title" class="label">Host-authoritative counter</p>
+          <strong id="counter">0</strong>
+        </div>
+        <p id="identity">참가자 정보를 기다리는 중입니다.</p>
+      </section>
+
+      <section aria-labelledby="roster-title">
+        <h2 id="roster-title">Roster</h2>
+        <ol id="roster" class="roster"></ol>
+      </section>
+
+      <section class="actions" aria-label="Relay actions">
+        <button id="increment" type="button">+1 intent broadcast</button>
+        <button id="direct" type="button">다른 참가자에게 direct ping</button>
+        <button id="snapshot" type="button">Host snapshot 저장</button>
+        <button id="leave" class="danger" type="button">방 나가기</button>
+      </section>
+
+      <section aria-labelledby="log-title">
+        <h2 id="log-title">Transport log</h2>
+        <ol id="log" class="log" aria-live="polite"></ol>
+      </section>
+    </main>
+    <script src="./game.js"></script>
+  </body>
+</html>

@@ -12,14 +12,16 @@ import {
   parseMultiplayerWebSocketProtocols,
   signMultiplayerJoinTicket,
   verifyMultiplayerJoinTicket,
-  type MultiplayerJoinTicketClaims,
+  type MultiplayerRelayJoinTicketClaims,
 } from "../src/index.js";
 
 const NOW = 1_800_000_000;
 const ACTIVE_SECRET = "active-multiplayer-ticket-secret-32-bytes-minimum";
 const PREVIOUS_SECRET = "previous-multiplayer-ticket-secret-32-bytes-minimum";
 
-function claims(overrides: Partial<MultiplayerJoinTicketClaims> = {}): MultiplayerJoinTicketClaims {
+function claims(
+  overrides: Partial<MultiplayerRelayJoinTicketClaims> = {},
+): MultiplayerRelayJoinTicketClaims {
   return {
     iss: MULTIPLAYER_TICKET_ISSUER,
     aud: MULTIPLAYER_TICKET_AUDIENCE,
@@ -33,12 +35,25 @@ function claims(overrides: Partial<MultiplayerJoinTicketClaims> = {}): Multiplay
     gameVersionId: 41,
     profileId: 19,
     profileRevision: 3,
-    rulesetKey: "official:omok",
-    rulesetRevision: 1,
     generation: 2,
     connectionGeneration: 4,
     seatIndex: 1,
     role: "PLAYER",
+    contentHash: "b".repeat(64),
+    runtime: {
+      kind: "relay",
+      protocolVersion: 1,
+      reconnect: "resume",
+      directMessages: true,
+      hostSnapshot: true,
+      maxMessageBytes: 4 * 1024,
+      maxSnapshotBytes: 16 * 1024,
+      messagesPerSecond: 20,
+      roomBytesPerSecond: 256 * 1024,
+      roomTtlSeconds: 2 * 60 * 60,
+      hostDeparturePolicy: "close",
+      resultTrust: "UNVERIFIED",
+    },
     ...overrides,
   };
 }
@@ -65,6 +80,43 @@ test("multiplayer join ticket signs and verifies exact route/admission context",
   );
   assert.equal(result.ok, true);
   if (result.ok) assert.deepEqual(result.claims, claims());
+});
+
+test("Relay ticket carries only generic server-owned runtime authority", async () => {
+  const expected = claims();
+  const token = await signMultiplayerJoinTicket(expected, keyring);
+  const result = await verifyMultiplayerJoinTicket(token, keyring, {}, NOW);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(result.claims, expected);
+  assert.equal("rulesetKey" in result.claims, false);
+  assert.equal("rulesetRevision" in result.claims, false);
+});
+
+test("Relay ticket rejects elevated, contradictory, and unknown runtime policy", () => {
+  const valid = claims();
+  assert.equal(parseMultiplayerJoinTicketClaims({ ...valid, contentHash: "latest" }), null);
+  assert.equal(
+    parseMultiplayerJoinTicketClaims({
+      ...valid,
+      runtime: { ...valid.runtime, roomBytesPerSecond: 256 * 1024 + 1 },
+    }),
+    null,
+  );
+  assert.equal(
+    parseMultiplayerJoinTicketClaims({
+      ...valid,
+      runtime: { ...valid.runtime, hostSnapshot: false },
+    }),
+    null,
+  );
+  assert.equal(
+    parseMultiplayerJoinTicketClaims({
+      ...valid,
+      runtime: { ...valid.runtime, gameRules: "creator-supplied" },
+    }),
+    null,
+  );
 });
 
 test("multiplayer join ticket supports an explicit previous verification key", async () => {
@@ -130,7 +182,7 @@ test("multiplayer join ticket claims are exact-shape and require post-issuance c
   assert.equal(parseMultiplayerJoinTicketClaims(claims({ connectionGeneration: 0 })), null);
   assert.equal(parseMultiplayerJoinTicketClaims(claims({ userId: 1.5 })), null);
   assert.equal(parseMultiplayerJoinTicketClaims(claims({ seatIndex: 8 })), null);
-  assert.equal(parseMultiplayerJoinTicketClaims(claims({ rulesetKey: "LATEST" })), null);
+  assert.equal(parseMultiplayerJoinTicketClaims({ ...claims(), rulesetKey: "LATEST" }), null);
   assert.equal(parseMultiplayerJoinTicketClaims(claims({ role: "SPECTATOR" as "PLAYER" })), null);
 });
 

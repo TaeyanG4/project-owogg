@@ -2,7 +2,7 @@
 
 상태: 가이드
 
-마지막 검증: 2026-08-25
+마지막 검증: 2026-08-29
 
 기준 소스:
 
@@ -48,6 +48,7 @@ owogg.logo.<png|jpg|jpeg|webp|svg>
     "title": "My Game",
     "genre": "arcade",
     "mode": "single",
+    "playModes": ["single"],
     "shortDescription": "한 줄 소개"
   },
   "progression": { "type": "none" },
@@ -59,6 +60,24 @@ owogg.logo.<png|jpg|jpeg|webp|svg>
 - 모든 CSS/JS/image/WASM 경로는 bundle 안에서 해석되는 상대 경로여야 합니다.
 - source map, 개발 서버 설정, 비밀값, 서버 전용 코드는 넣지 않습니다. `userId`, session/token,
   API URL도 manifest나 게임 코드에 넣지 않습니다.
+- `game.playModes`는 필수입니다. 값은 `single`, `local-multi`, `online-multi`이며, single 게임은
+  `["single"]`만 사용하고 multi 게임은 local 또는 online topology를 하나 이상 선언합니다.
+- `online-multi`는 기능 선언일 뿐 서버 실행 권한이 아닙니다. 온라인 활성화에는 별도 승인된 exact
+  version profile이 필요합니다.
+- `playConfig + multiplayer`는 `single` 또는 `local-multi`와 `online-multi`가 함께 선언된 hybrid
+  게임에서만 허용됩니다. top-level 경쟁 결과는 `single`/`local-multi` 경로에만 적용됩니다. online은
+  공용 Relay transport로 실행되고 결과는 항상 `UNVERIFIED`이므로 leaderboard, reward, XP, MMR에
+  반영되지 않습니다.
+- 현재 활성 runtime 요청은 `websocket + relay`, 2~8인입니다. `worker`/`container`, join-in-progress와
+  spectator 요청은 지원 runtime이 생기기 전까지 fail closed합니다. direct message와 host snapshot은
+  manifest 요청과 승인된 profile capability가 모두 허용할 때만 SDK에서 사용할 수 있습니다.
+- multiplayer 요청은 exact `(gameId, versionId, contentHash)`와 request hash에 저장됩니다. 관리자 심사는
+  disabled Relay profile만 만들고 별도 activation 뒤에만 새 방 생성이 허용됩니다. 새 ZIP/version은 이전
+  profile 권한을 상속하지 않으며 현재 room policy는 `PRIVATE + OPEN`입니다.
+- `playConfig.verifierId`는 ZIP이 서버 코드를 등록하는 필드가 아닙니다. 서버에 같은 ID의 trusted
+  verifier가 정적으로 설치되지 않은 version은 USER/OWOGG 모두 게시 전에 거부됩니다. 현재 첫 reviewed
+  ID는 `verified-aim-test-v1` 하나이며, 다른 ID와 reference verifier의 intended slug 불일치는 계속
+  fail closed입니다.
 - `$schema`는 공개 schema URL이며, 서버는 JSON Schema 외에 range, 난이도, 도전과제 참조 관계를
   추가로 엄격 검증합니다. 알 수 없는 필드는 거부됩니다.
 - 최대 compressed 20 MiB, extracted 50 MiB, 300 files, path depth 16, logo 2 MiB입니다.
@@ -156,6 +175,7 @@ bundle URL은 version-scoped immutable 경로입니다. `/official-games/*`, rel
 - `409`: slug, review slot, lifecycle invariant 등 충돌 확인
 - `413` 또는 bundle rejection: compressed/extracted/logo/file/path 제한 확인
 - `503 GAME_BUNDLES_NOT_CONFIGURED`: 해당 환경의 B2 binding 문제이며 bundle 내용 문제가 아님
+- `VERIFIER_NOT_REGISTERED`: manifest가 요청한 trusted verifier가 서버 registry에 설치되지 않음
 - `FAILED`: 관리자 republish 대상인지 publication error 확인
 
 운영자가 수행하는 approve/reject/revoke/republish/live/visibility 조작은 Game Creator가 직접 호출하는

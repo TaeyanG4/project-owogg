@@ -10,6 +10,14 @@ import {
 const NOW = Date.parse("2026-08-26T00:00:00.000Z");
 const INSTANCE_ID = "instance_transport_01";
 const TICKET_PROTOCOL = "owogg.ticket.SECRET_BEARER_VALUE";
+const EXPECTED_TRANSPORT_INPUT = {
+  instanceId: INSTANCE_ID,
+  expectedConnectionGeneration: 2,
+  expectedGameVersionId: 18,
+  expectedContentHash: "a".repeat(64),
+  expectedProfileRevision: 2,
+  expectedGeneration: 5,
+} as const;
 
 function admission(overrides: Record<string, unknown> = {}) {
   return {
@@ -20,12 +28,22 @@ function admission(overrides: Record<string, unknown> = {}) {
     bootstrap: {
       type: "MULTI_INIT",
       v: 1,
-      participantId: "participant_transport_01",
       gameVersionId: 18,
+      contentHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       profileRevision: 2,
-      rulesetKey: "official:omok",
-      rulesetRevision: 1,
       generation: 5,
+      runtime: { kind: "relay", protocolVersion: 1, resultTrust: "UNVERIFIED" },
+      self: { participantId: "participant_transport_01", seatIndex: 0, role: "HOST" },
+      roster: [
+        { participantId: "participant_transport_01", seatIndex: 0, role: "HOST" },
+        { participantId: "participant_transport_02", seatIndex: 1, role: "PLAYER" },
+      ],
+      capabilities: {
+        reconnect: "resume",
+        broadcast: true,
+        directMessages: false,
+        hostSnapshot: false,
+      },
     },
     ...overrides,
   };
@@ -81,21 +99,18 @@ test("parent exchanges the generation and puts the bearer only in WebSocket subp
   let requestInput: readonly [string, number] | null = null;
   const constructorInputs: Array<{ url: string; protocols: readonly [string, string] }> = [];
 
-  const transport = await openMultiplayerParentTransport(
-    { instanceId: INSTANCE_ID, expectedConnectionGeneration: 2 },
-    {
-      apiUrl: "https://api-stg.owogg.com",
-      now: () => NOW,
-      requestTicket: async (instanceId, expectedGeneration) => {
-        requestInput = [instanceId, expectedGeneration];
-        return admission();
-      },
-      createSocket: (url, protocols) => {
-        constructorInputs.push({ url, protocols });
-        return harness.socket;
-      },
+  const transport = await openMultiplayerParentTransport(EXPECTED_TRANSPORT_INPUT, {
+    apiUrl: "https://api-stg.owogg.com",
+    now: () => NOW,
+    requestTicket: async (instanceId, expectedGeneration) => {
+      requestInput = [instanceId, expectedGeneration];
+      return admission();
     },
-  );
+    createSocket: (url, protocols) => {
+      constructorInputs.push({ url, protocols });
+      return harness.socket;
+    },
+  });
 
   assert.deepEqual(requestInput, [INSTANCE_ID, 2]);
   const constructorInput = constructorInputs[0];
@@ -120,14 +135,11 @@ test("parent exchanges the generation and puts the bearer only in WebSocket subp
 
 test("a non-application selected protocol is closed before it can be treated as connected", async () => {
   const harness = socketHarness(TICKET_PROTOCOL);
-  const transport = await openMultiplayerParentTransport(
-    { instanceId: INSTANCE_ID, expectedConnectionGeneration: 2 },
-    {
-      now: () => NOW,
-      requestTicket: async () => admission(),
-      createSocket: () => harness.socket,
-    },
-  );
+  const transport = await openMultiplayerParentTransport(EXPECTED_TRANSPORT_INPUT, {
+    now: () => NOW,
+    requestTicket: async () => admission(),
+    createSocket: () => harness.socket,
+  });
 
   harness.open();
   assert.deepEqual(harness.closes, [{ code: 1002, reason: "invalid multiplayer protocol" }]);
@@ -146,38 +158,54 @@ test("expired or non-CAS admission responses never construct a socket", async ()
   };
 
   await assert.rejects(
-    openMultiplayerParentTransport(
-      { instanceId: INSTANCE_ID, expectedConnectionGeneration: 2 },
-      {
-        ...dependencies,
-        requestTicket: async () => admission({ connectionGeneration: 4 }),
-      },
-    ),
+    openMultiplayerParentTransport(EXPECTED_TRANSPORT_INPUT, {
+      ...dependencies,
+      requestTicket: async () => admission({ connectionGeneration: 4 }),
+    }),
     (error: unknown) =>
       error instanceof MultiplayerTransportError && error.code === "STALE_GENERATION",
   );
   await assert.rejects(
-    openMultiplayerParentTransport(
-      { instanceId: INSTANCE_ID, expectedConnectionGeneration: 2 },
-      {
-        ...dependencies,
-        requestTicket: async () => admission({ expiresAt: new Date(NOW).toISOString() }),
-      },
-    ),
+    openMultiplayerParentTransport(EXPECTED_TRANSPORT_INPUT, {
+      ...dependencies,
+      requestTicket: async () => admission({ expiresAt: new Date(NOW).toISOString() }),
+    }),
     (error: unknown) =>
       error instanceof MultiplayerTransportError && error.code === "TICKET_EXPIRED",
   );
   assert.equal(socketCalls, 0);
 });
 
+test("an admission for a different room-pinned bundle never constructs a socket", async () => {
+  let socketCalls = 0;
+  for (const bootstrap of [
+    { gameVersionId: 19 },
+    { contentHash: "b".repeat(64) },
+    { profileRevision: 3 },
+    { generation: 6 },
+  ]) {
+    await assert.rejects(
+      openMultiplayerParentTransport(EXPECTED_TRANSPORT_INPUT, {
+        now: () => NOW,
+        requestTicket: async () =>
+          admission({ bootstrap: { ...admission().bootstrap, ...bootstrap } }),
+        createSocket: () => {
+          socketCalls += 1;
+          return socketHarness().socket;
+        },
+      }),
+      (error: unknown) =>
+        error instanceof MultiplayerTransportError && error.code === "CONTRACT_MISMATCH",
+    );
+  }
+  assert.equal(socketCalls, 0);
+});
+
 test("malformed admission and constructor failures are redacted", async () => {
   await assert.rejects(
-    openMultiplayerParentTransport(
-      { instanceId: INSTANCE_ID, expectedConnectionGeneration: 2 },
-      {
-        requestTicket: async () => ({ ...admission(), secret: "SHOULD_NOT_APPEAR" }),
-      },
-    ),
+    openMultiplayerParentTransport(EXPECTED_TRANSPORT_INPUT, {
+      requestTicket: async () => ({ ...admission(), secret: "SHOULD_NOT_APPEAR" }),
+    }),
     (error: unknown) => {
       assert.ok(error instanceof MultiplayerTransportError);
       assert.equal(error.code, "CONTRACT_MISMATCH");
@@ -187,16 +215,13 @@ test("malformed admission and constructor failures are redacted", async () => {
   );
 
   await assert.rejects(
-    openMultiplayerParentTransport(
-      { instanceId: INSTANCE_ID, expectedConnectionGeneration: 2 },
-      {
-        now: () => NOW,
-        requestTicket: async () => admission(),
-        createSocket: () => {
-          throw new Error(TICKET_PROTOCOL);
-        },
+    openMultiplayerParentTransport(EXPECTED_TRANSPORT_INPUT, {
+      now: () => NOW,
+      requestTicket: async () => admission(),
+      createSocket: () => {
+        throw new Error(TICKET_PROTOCOL);
       },
-    ),
+    }),
     (error: unknown) => {
       assert.ok(error instanceof MultiplayerTransportError);
       assert.equal(error.code, "SOCKET_OPEN_FAILED");

@@ -9,7 +9,7 @@ import {
 } from "../domain/sandboxGameBundle.js";
 import {
   extractGameCreatorManifest,
-  getManagedMultiplayerProfileRequestV1,
+  getMultiplayerRuntimeProfileRequestV1,
   parseGameCreatorManifestBytes,
 } from "../domain/gameCreatorManifest.js";
 import { mapGameCreatorManifestToCanonical } from "../domain/gameCreatorManifestCanonical.js";
@@ -19,6 +19,7 @@ import type { GameIdentity } from "../modules/game/domain/gameIdentity.js";
 import type { GameVersion } from "../modules/game/domain/gameVersion.js";
 import type { GameCanonicalRepository } from "../modules/game/ports/gameCanonicalRepository.js";
 import type { MultiplayerProfileRequestRepository } from "../modules/multiplayer/ports/multiplayerProfileRequestRepository.js";
+import { resolveMultiplayerRuntimeProfileRequestV1 } from "../modules/multiplayer/domain/multiplayerProfileRequest.js";
 import type {
   GamePublicationFacts,
   GamePublicationTarget,
@@ -29,6 +30,7 @@ import type {
   GameBundleStorageRepository,
   SandboxGameBasicMetadataInput,
 } from "../ports/sandboxGames.js";
+import { EMPTY_GAME_VERIFIER_REGISTRY, type GameVerifierCatalog } from "../ports/gameVerifier.js";
 import { GamePublicationService } from "./gamePublicationService.js";
 import {
   patchGameCreatorManifestBasicMetadata,
@@ -42,6 +44,9 @@ export const OFFICIAL_GAME_UPLOAD_FAILURES = [
   "BUNDLE_INVALID",
   "MANIFEST_MISSING",
   "MANIFEST_INVALID",
+  "VERIFIER_NOT_REGISTERED",
+  "MULTIPLAYER_RUNTIME_NOT_AVAILABLE",
+  "MULTIPLAYER_CAPABILITY_NOT_AVAILABLE",
   "LOGO_REQUIRED",
   "LOGO_TOO_LARGE",
   "SLUG_CONFLICT",
@@ -164,21 +169,42 @@ export class OfficialGameUploadUseCases {
     private readonly publication: GamePublicationService,
     private readonly archiveWriter?: BundleArchiveWriter,
     private readonly multiplayerProfileRequests?: MultiplayerProfileRequestRepository,
+    private readonly gameVerifierCatalog: GameVerifierCatalog = EMPTY_GAME_VERIFIER_REGISTRY,
   ) {}
+
+  private assertSupportedManifestFeatures(
+    manifest: NonNullable<ReturnType<typeof extractGameCreatorManifest>>,
+  ): void {
+    const verifierId = manifest.playConfig?.verifierId;
+    if (verifierId !== undefined && !this.gameVerifierCatalog.has(verifierId)) {
+      throw new OfficialGameUploadFailure("VERIFIER_NOT_REGISTERED");
+    }
+    const request = getMultiplayerRuntimeProfileRequestV1(manifest);
+    if (!request) return;
+    const resolution = resolveMultiplayerRuntimeProfileRequestV1(request);
+    if (resolution.status === "RUNTIME_NOT_AVAILABLE") {
+      throw new OfficialGameUploadFailure("MULTIPLAYER_RUNTIME_NOT_AVAILABLE");
+    }
+    if (resolution.status === "CAPABILITY_NOT_AVAILABLE") {
+      throw new OfficialGameUploadFailure("MULTIPLAYER_CAPABILITY_NOT_AVAILABLE");
+    }
+  }
 
   private async submitDeclaredMultiplayerRequest(input: {
     manifest: NonNullable<ReturnType<typeof extractGameCreatorManifest>>;
     gameId: number;
     gameVersionId: number;
+    contentHash: string;
     nowIso: string;
   }): Promise<void> {
-    const request = getManagedMultiplayerProfileRequestV1(input.manifest);
+    const request = getMultiplayerRuntimeProfileRequestV1(input.manifest);
     if (!request) return;
     if (!this.multiplayerProfileRequests) throw new OfficialGameUploadFailure("PUBLISH_FAILED");
     try {
       const submitted = await this.multiplayerProfileRequests.submit({
         gameId: input.gameId,
         gameVersionId: input.gameVersionId,
+        contentHash: input.contentHash,
         requestedByUserId: null,
         request,
         nowIso: input.nowIso,
@@ -222,6 +248,7 @@ export class OfficialGameUploadUseCases {
       throw new OfficialGameUploadFailure("MANIFEST_INVALID");
     }
     if (!manifest) throw new OfficialGameUploadFailure("MANIFEST_MISSING");
+    this.assertSupportedManifestFeatures(manifest);
 
     const nowIso = new Date().toISOString();
     const canonical = mapGameCreatorManifestToCanonical({
@@ -290,6 +317,7 @@ export class OfficialGameUploadUseCases {
         manifest,
         gameId: identity.id,
         gameVersionId: version.id,
+        contentHash: version.contentHash,
         nowIso,
       });
       await this.canonicals.save(canonical);

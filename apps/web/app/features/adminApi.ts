@@ -16,8 +16,12 @@ import {
   AdminGameToggleResponseSchema,
   AdminOfficialGameDeleteResponseSchema,
   AdminOfficialGameUploadResponseSchema,
-  AdminOfficialMultiplayerProfileResponseSchema,
-  AdminOfficialMultiplayerProfileUpdateRequestSchema,
+  AdminManagedMultiplayerProfileRequestListResponseSchema,
+  AdminManagedMultiplayerProfileReviewRequestSchema,
+  AdminManagedMultiplayerProfileReviewResponseSchema,
+  AdminManagedMultiplayerProfileListResponseSchema,
+  AdminManagedMultiplayerProfileActivationRequestSchema,
+  AdminManagedMultiplayerProfileActivationResponseSchema,
   GameLogoUpdateResponseSchema,
   AdminUserSearchResponseSchema,
   AdminUserDetailResponseSchema,
@@ -249,26 +253,48 @@ export function postToggleAdminGame(gameId: string, enabled: boolean, reason: st
   );
 }
 
-export function fetchOfficialMultiplayerProfile(gameId: string) {
+export function fetchManagedMultiplayerProfileRequests(limit = 50) {
   return apiFetch(
-    `/api/admin/games/${encodeURIComponent(gameId)}/multiplayer-profile`,
-    AdminOfficialMultiplayerProfileResponseSchema,
+    `/api/admin/games/multiplayer-requests?limit=${limit}`,
+    AdminManagedMultiplayerProfileRequestListResponseSchema,
   );
 }
 
-export function postOfficialMultiplayerProfileEnabled(
-  gameId: string,
+export function postManagedMultiplayerProfileReview(
+  requestId: number,
+  decision: "APPROVED" | "REJECTED",
+  reasonCode: string | null = null,
+) {
+  const body = AdminManagedMultiplayerProfileReviewRequestSchema.parse({
+    decision,
+    ...(decision === "REJECTED" ? { reasonCode } : {}),
+  });
+  return apiFetch(
+    `/api/admin/games/multiplayer-requests/${requestId}/review`,
+    AdminManagedMultiplayerProfileReviewResponseSchema,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+export function fetchManagedMultiplayerProfiles(limit = 50) {
+  return apiFetch(
+    `/api/admin/games/multiplayer-profiles?limit=${limit}`,
+    AdminManagedMultiplayerProfileListResponseSchema,
+  );
+}
+
+export function postManagedMultiplayerProfileActivation(
+  profileId: number,
   enabled: boolean,
   reasonCode: string | null = null,
 ) {
-  const body = AdminOfficialMultiplayerProfileUpdateRequestSchema.parse({
-    preset: "OMOK_V1",
+  const body = AdminManagedMultiplayerProfileActivationRequestSchema.parse({
     enabled,
-    ...(reasonCode ? { reasonCode } : {}),
+    reasonCode,
   });
   return apiFetch(
-    `/api/admin/games/${encodeURIComponent(gameId)}/multiplayer-profile`,
-    AdminOfficialMultiplayerProfileResponseSchema,
+    `/api/admin/games/multiplayer-profiles/${profileId}/activation`,
+    AdminManagedMultiplayerProfileActivationResponseSchema,
     { method: "POST", body: JSON.stringify(body) },
   );
 }

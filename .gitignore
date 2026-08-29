@@ -64,3 +64,8 @@ apps/api/test/fixtures/game-deploy-smoke-test/official-omok.zip
 # ball-dodge.zip is the resulting upload artifact. dist/ is already covered above.
 examples/ball-dodge/vendor/
 examples/ball-dodge/ball-dodge.zip
+
+# Verified Aim Test reference upload artifact. Source, deterministic vectors and validation scripts
+# are reviewed; regenerate the ZIP at the upload boundary.
+examples/verified-aim-test/verified-aim-test.zip
+examples/relay-protocol-probe/relay-protocol-probe.zip

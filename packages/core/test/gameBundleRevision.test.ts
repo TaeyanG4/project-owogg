@@ -18,6 +18,7 @@ function manifest() {
       title: "Old title",
       genre: "puzzle",
       mode: "single",
+      playModes: ["single"],
       shortDescription: "old",
     },
     input: ["keyboard"],
@@ -30,7 +31,6 @@ test("basic metadata patch preserves non-editable manifest policy and cannot cha
   const updated = patchGameCreatorManifestBasicMetadata(manifest(), {
     title: "New title",
     genre: "arcade",
-    mode: "multi",
     shortDescription: null,
     description: "new description",
   });
@@ -38,11 +38,17 @@ test("basic metadata patch preserves non-editable manifest policy and cannot cha
   assert.equal(updated.game.slug, "revision-test");
   assert.equal(updated.game.title, "New title");
   assert.equal(updated.game.genre, "arcade");
-  assert.equal(updated.game.mode, "multi");
+  assert.equal(updated.game.mode, "single");
+  assert.deepEqual(updated.game.playModes, ["single"]);
   assert.equal(updated.game.shortDescription, undefined);
   assert.equal(updated.game.description, "new description");
   assert.deepEqual(updated.input, ["keyboard"]);
   assert.deepEqual(updated.result, { score: null });
+
+  assert.throws(
+    () => patchGameCreatorManifestBasicMetadata(manifest(), { mode: "multi" }),
+    /requires local-multi or online-multi/,
+  );
 });
 
 test("bundle rebuild replaces owogg.json and stale embedded logo with the current logo", () => {

@@ -52,6 +52,35 @@ test("descending leaderboard: one user's 150 raw rows never suppresses other use
   assert.equal(new Set(userIds).size, userIds.length, "no duplicate users in leaderboard");
 });
 
+test("leaderboard scopes personal bests to the canonical ruleset revision before ranking", async () => {
+  const { db, raw } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);
+  const userA = seedUser(raw, "A");
+  const userB = seedUser(raw, "B");
+  raw
+    .prepare(
+      `INSERT INTO scores
+         (user_id, nickname, game_id, score, difficulty, variant_id, ruleset_revision, created_at)
+       VALUES (?, 'A', 'revision-game', 9999, 'hard', 'legacy', 1, '2026-01-01'),
+              (?, 'A', 'revision-game', 80, 'hard', 'precision', 3, '2026-01-02'),
+              (?, 'B', 'revision-game', 90, 'hard', 'standard', 3, '2026-01-03')`,
+    )
+    .run(userA, userA, userB);
+  const repo = new D1ScoreRepository(db);
+
+  const rows = await repo.getLeaderboard("revision-game", 20, "desc", "hard", 3);
+  assert.deepEqual(
+    rows.map((row) => ({
+      score: row.score,
+      variant: row.variant_id,
+      revision: row.ruleset_revision,
+    })),
+    [
+      { score: 90, variant: "standard", revision: 3 },
+      { score: 80, variant: "precision", revision: 3 },
+    ],
+  );
+});
+
 test("ascending leaderboard (lower-is-better games): PB is the minimum, not just an early row", async () => {
   const { db, raw } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);
   const userA = seedUser(raw, "A");
@@ -171,7 +200,9 @@ test("a live-version generation change resets leaderboard and personal bests wit
     [10],
   );
   const bests = await repo.getUserPersonalBests(user);
-  assert.deepEqual(bests, [{ game_id: "versioned-game", min_score: 10, max_score: 10 }]);
+  assert.deepEqual(bests, [
+    { game_id: "versioned-game", ruleset_revision: 1, min_score: 10, max_score: 10 },
+  ]);
   assert.equal(
     raw.prepare("SELECT COUNT(*) AS count FROM scores WHERE game_id = 'versioned-game'").get()
       ?.count,

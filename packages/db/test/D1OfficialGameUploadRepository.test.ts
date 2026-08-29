@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { GameCanonicalDocument } from "@owogg/core";
+import { GAME_CANONICAL_SCHEMA_VERSION, type GameCanonicalDocument } from "@owogg/core";
 import { D1OfficialGameLifecycleRepository, D1OfficialGameUploadRepository } from "../src/index.js";
 import { createSqliteD1, SANDBOX_GAMES_TEST_SCHEMA } from "./helpers/sqliteD1.js";
 
 const canonical: GameCanonicalDocument = {
-  schemaVersion: 2,
+  schemaVersion: GAME_CANONICAL_SCHEMA_VERSION,
   slug: "admin-game",
   title: "관리자 게임",
   shortDescription: "설명",

@@ -19,6 +19,10 @@ export const LeaderRecordSchema = z
     userId: z.number().nullable().optional(),
     user_id: z.number().nullable().optional(),
     difficulty: z.string().optional(),
+    variantId: z.string().optional(),
+    variant_id: z.string().optional(),
+    rulesetRevision: z.number().int().positive().optional(),
+    ruleset_revision: z.number().int().positive().optional(),
   })
   .transform((data) => ({
     id: String(data.id),
@@ -32,6 +36,8 @@ export const LeaderRecordSchema = z
     avatarUrl: data.avatarUrl || data.avatar_url || null,
     userId: data.userId ?? data.user_id ?? null,
     difficulty: data.difficulty || "normal",
+    variantId: data.variantId || data.variant_id || "standard",
+    rulesetRevision: data.rulesetRevision ?? data.ruleset_revision ?? 1,
   }));
 
 export type LeaderRecord = z.infer<typeof LeaderRecordSchema>;

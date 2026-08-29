@@ -1,82 +1,90 @@
 import {
-  MULTIPLAYER_PROTOCOL_VERSION,
-  parseApprovedMultiplayerProfileV1,
-  type ApprovedMultiplayerProfileV1,
-  type MultiplayerRuntimeBackend,
-} from "./multiplayerProfile.js";
-import {
-  OWOGG_MULTIPLAYER_MANAGED_TEMPLATE_IDS,
+  OWOGG_MULTIPLAYER_PROTOCOL_VERSION,
+  OWOGG_MULTIPLAYER_RECONNECT_MODES,
   OWOGG_MULTIPLAYER_REQUEST_VERSION,
-  type OwoggManagedMultiplayerRequestV1,
-  type OwoggMultiplayerManagedTemplateId,
-  type OwoggMultiplayerSimulation,
+  OWOGG_MULTIPLAYER_RUNTIME_KINDS,
+  OWOGG_MULTIPLAYER_TRANSPORT_KINDS,
+  type OwoggMultiplayerReconnectMode,
+  type OwoggMultiplayerRuntimeKind,
+  type OwoggMultiplayerRuntimeRequestV1,
+  type OwoggMultiplayerTransportKind,
 } from "@owogg/game-sdk/contracts";
 import { sha256Hex } from "../../../domain/contentHash.js";
-import {
-  parseMultiplayerCapabilityRequestV1,
-  resolveMultiplayerRuntimeV1,
-  MultiplayerCapabilityValidationError,
-  type MultiplayerCapabilityRequestV1,
-  type MultiplayerRuntimeResolutionV1,
-} from "./multiplayerCapability.js";
 
 export const MULTIPLAYER_PROFILE_REQUEST_SCHEMA_VERSION = 1 as const;
-export const MULTIPLAYER_MANAGED_TEMPLATE_IDS = OWOGG_MULTIPLAYER_MANAGED_TEMPLATE_IDS;
+export const MULTIPLAYER_RELAY_MIN_PLAYERS = 2 as const;
+export const MULTIPLAYER_RELAY_MAX_PLAYERS = 8 as const;
 
-export type MultiplayerManagedTemplateId = OwoggMultiplayerManagedTemplateId;
-
-export interface ManagedMultiplayerProfileRequestV1 {
+export interface MultiplayerRuntimeProfileRequestV1 {
   readonly requestSchemaVersion: typeof MULTIPLAYER_PROFILE_REQUEST_SCHEMA_VERSION;
-  readonly kind: "managed-template";
-  readonly template: {
-    readonly id: MultiplayerManagedTemplateId;
-    readonly version: 1;
+  readonly transport: {
+    readonly kind: OwoggMultiplayerTransportKind;
+    readonly protocolVersion: typeof OWOGG_MULTIPLAYER_PROTOCOL_VERSION;
   };
-  readonly capability: MultiplayerCapabilityRequestV1;
-  readonly config: Readonly<Record<string, number>>;
-  readonly client: {
-    readonly protocolVersion: typeof MULTIPLAYER_PROTOCOL_VERSION;
+  readonly runtime: {
+    readonly kind: OwoggMultiplayerRuntimeKind;
+  };
+  readonly players: {
+    readonly min: number;
+    readonly max: number;
+  };
+  readonly features: {
+    readonly reconnect: OwoggMultiplayerReconnectMode;
+    readonly directMessages: boolean;
+    readonly hostSnapshot: boolean;
+    readonly joinInProgress: boolean;
+    readonly spectators: boolean;
   };
 }
 
-export type ManagedMultiplayerRequestResolutionV1 =
-  | {
-      readonly status: "SUPPORTED_V1";
-      readonly request: ManagedMultiplayerProfileRequestV1;
-      readonly resolvedClass: "M1" | "M2";
-      readonly runtimeBackend: MultiplayerRuntimeBackend;
-      readonly checkpointPolicy: "accepted-action" | "phase-boundary";
-      readonly activeRestartPolicy: "restore-checkpoint" | "abort-infra";
-    }
-  | Exclude<MultiplayerRuntimeResolutionV1, { readonly status: "SUPPORTED_V1" }>;
+export const MULTIPLAYER_RELAY_UNAVAILABLE_CAPABILITIES = ["joinInProgress", "spectators"] as const;
+export type MultiplayerRelayUnavailableCapability =
+  (typeof MULTIPLAYER_RELAY_UNAVAILABLE_CAPABILITIES)[number];
 
-export interface ManagedMultiplayerProfilePolicyV1 {
-  readonly resolvedClass: "M1" | "M2";
-  readonly simulationModel: Extract<
-    MultiplayerCapabilityRequestV1["simulation"],
-    "turn" | "event" | "realtime"
-  >;
-  readonly runtimeBackend: MultiplayerRuntimeBackend;
-  readonly rulesetKey:
-    "managed:turn-grid:v1" | "managed:reaction-arena:v1" | "managed:realtime-paddle:v1";
-  readonly rulesetRevision: 1;
-  readonly resolvedConfigJson: string;
-  readonly lifecycle: Extract<MultiplayerCapabilityRequestV1["lifecycle"], "match" | "continuous">;
-  readonly persistence: "match";
-  readonly latencyProfile: Extract<
-    MultiplayerCapabilityRequestV1["latency"],
-    "relaxed" | "interactive"
-  >;
-  readonly reconnectPolicy: MultiplayerCapabilityRequestV1["reconnect"];
+/** Server-owned initial Relay limits. They are intentionally absent from `owogg.json`. */
+export interface MultiplayerRelayProfilePolicyV1 {
+  readonly transportKind: "websocket";
+  readonly runtimeKind: "relay";
+  readonly protocolVersion: typeof OWOGG_MULTIPLAYER_PROTOCOL_VERSION;
+  readonly reconnectPolicy: OwoggMultiplayerReconnectMode;
+  readonly directMessages: boolean;
+  readonly hostSnapshot: boolean;
   readonly minPlayers: number;
   readonly maxPlayers: number;
   readonly allowedVisibility: readonly ["PRIVATE"];
   readonly allowedJoinPolicies: readonly ["OPEN"];
-  readonly maxActionBytes: number;
-  readonly maxStateBytes: number;
-  readonly actionRateLimit: number;
-  readonly rewardPolicyId: null;
+  readonly hostDeparturePolicy: "close";
+  readonly resultTrust: "UNVERIFIED";
+  readonly maxMessageBytes: 4096;
+  readonly maxSnapshotBytes: 0 | 16384;
+  readonly messagesPerSecond: 20;
+  readonly roomBytesPerSecond: 262144;
+  readonly roomTtlSeconds: 7200;
 }
+
+export type MultiplayerRuntimeRequestResolutionV1 =
+  | {
+      readonly status: "SUPPORTED_V1";
+      readonly request: MultiplayerRuntimeProfileRequestV1;
+      readonly transportKind: "websocket";
+      readonly runtimeKind: "relay";
+      readonly protocolVersion: typeof OWOGG_MULTIPLAYER_PROTOCOL_VERSION;
+      readonly resultTrust: "UNVERIFIED";
+      readonly policy: MultiplayerRelayProfilePolicyV1;
+    }
+  | {
+      readonly status: "RUNTIME_NOT_AVAILABLE";
+      readonly request: MultiplayerRuntimeProfileRequestV1;
+      readonly runtimeKind: "worker" | "container";
+      readonly reason: "MULTIPLAYER_RUNTIME_NOT_AVAILABLE";
+    }
+  | {
+      readonly status: "CAPABILITY_NOT_AVAILABLE";
+      readonly request: MultiplayerRuntimeProfileRequestV1;
+      readonly runtimeKind: "relay";
+      readonly unsupportedCapabilities: readonly MultiplayerRelayUnavailableCapability[];
+      readonly reason: "MULTIPLAYER_CAPABILITY_NOT_AVAILABLE";
+    };
 
 export class MultiplayerProfileRequestValidationError extends Error {
   constructor(public readonly detail: string) {
@@ -119,10 +127,15 @@ function integer(
   maximum: number,
 ): number {
   const value = source[key];
-  if (!Number.isInteger(value) || (value as number) < minimum || (value as number) > maximum) {
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < minimum ||
+    value > maximum
+  ) {
     invalid(`${path}.${key} must be an integer between ${minimum} and ${maximum}`);
   }
-  return value as number;
+  return value;
 }
 
 function enumValue<T extends string>(
@@ -138,394 +151,189 @@ function enumValue<T extends string>(
   return value as T;
 }
 
-function parseConfig(
-  templateId: MultiplayerManagedTemplateId,
+/** Strict parser for the unified manifest v1 `multiplayer` request block. */
+export function parseMultiplayerRuntimeProfileRequestV1(
   value: unknown,
-): Readonly<Record<string, number>> {
-  const source = record(value, "multiplayer.config");
-  if (templateId === "turn-grid") {
-    exactKeys(source, ["boardWidth", "boardHeight", "winLength"], "multiplayer.config");
-    const boardWidth = integer(source, "boardWidth", "multiplayer.config", 3, 25);
-    const boardHeight = integer(source, "boardHeight", "multiplayer.config", 3, 25);
-    const winLength = integer(source, "winLength", "multiplayer.config", 3, 25);
-    if (winLength > Math.max(boardWidth, boardHeight)) {
-      invalid("multiplayer.config.winLength cannot exceed both board dimensions");
-    }
-    return { boardWidth, boardHeight, winLength };
-  }
-  if (templateId === "reaction-arena") {
-    exactKeys(source, ["rounds", "responseWindowMs"], "multiplayer.config");
-    return {
-      rounds: integer(source, "rounds", "multiplayer.config", 1, 20),
-      responseWindowMs: integer(source, "responseWindowMs", "multiplayer.config", 100, 10_000),
-    };
-  }
-  exactKeys(source, ["fieldWidth", "fieldHeight", "targetScore"], "multiplayer.config");
-  return {
-    fieldWidth: integer(source, "fieldWidth", "multiplayer.config", 320, 4096),
-    fieldHeight: integer(source, "fieldHeight", "multiplayer.config", 180, 2160),
-    targetScore: integer(source, "targetScore", "multiplayer.config", 1, 21),
-  };
-}
-
-function assertTemplateCompatibility(
-  templateId: MultiplayerManagedTemplateId,
-  capability: MultiplayerCapabilityRequestV1,
-): void {
-  if (templateId === "turn-grid") {
-    if (
-      capability.players.min !== 2 ||
-      capability.players.max !== 2 ||
-      capability.simulation !== "turn" ||
-      capability.lifecycle !== "match" ||
-      capability.persistence !== "match" ||
-      capability.latency !== "relaxed" ||
-      capability.reconnect !== "resume" ||
-      capability.capabilities.hiddenInformation ||
-      capability.capabilities.simultaneousResponse ||
-      capability.capabilities.joinInProgress ||
-      capability.capabilities.spectators
-    ) {
-      invalid("turn-grid requirements do not match the managed template contract");
-    }
-    return;
-  }
-  if (templateId === "reaction-arena") {
-    if (
-      capability.players.min < 2 ||
-      capability.players.max > 8 ||
-      capability.simulation !== "event" ||
-      capability.lifecycle !== "match" ||
-      capability.persistence !== "match" ||
-      capability.latency !== "interactive" ||
-      capability.reconnect !== "none" ||
-      !capability.capabilities.simultaneousResponse ||
-      capability.capabilities.hiddenInformation ||
-      capability.capabilities.joinInProgress ||
-      capability.capabilities.spectators
-    ) {
-      invalid("reaction-arena requirements do not match the managed template contract");
-    }
-    return;
-  }
-  if (
-    capability.players.min !== 2 ||
-    capability.players.max !== 2 ||
-    capability.simulation !== "realtime" ||
-    capability.lifecycle !== "continuous" ||
-    capability.persistence !== "match" ||
-    capability.latency !== "interactive" ||
-    capability.reconnect !== "resume" ||
-    !capability.capabilities.simultaneousResponse ||
-    capability.capabilities.hiddenInformation ||
-    capability.capabilities.joinInProgress ||
-    capability.capabilities.spectators
-  ) {
-    invalid("realtime-paddle requirements do not match the managed template contract");
-  }
-}
-
-/** Strict parser for the planned owogg.json v2 `multiplayer` request block. */
-export function parseManagedMultiplayerProfileRequestV1(
-  value: unknown,
-): ManagedMultiplayerProfileRequestV1 {
+): MultiplayerRuntimeProfileRequestV1 {
   const source = record(value, "multiplayer");
+  exactKeys(source, ["version", "transport", "runtime", "players", "features"], "multiplayer");
+  if (source.version !== OWOGG_MULTIPLAYER_REQUEST_VERSION) {
+    invalid(`multiplayer.version must be ${OWOGG_MULTIPLAYER_REQUEST_VERSION}`);
+  }
+
+  const transportSource = record(source.transport, "multiplayer.transport");
+  exactKeys(transportSource, ["kind", "protocolVersion"], "multiplayer.transport");
+  const transportKind = enumValue(
+    transportSource,
+    "kind",
+    "multiplayer.transport",
+    OWOGG_MULTIPLAYER_TRANSPORT_KINDS,
+  );
+  if (transportSource.protocolVersion !== OWOGG_MULTIPLAYER_PROTOCOL_VERSION) {
+    invalid(`multiplayer.transport.protocolVersion must be ${OWOGG_MULTIPLAYER_PROTOCOL_VERSION}`);
+  }
+
+  const runtimeSource = record(source.runtime, "multiplayer.runtime");
+  exactKeys(runtimeSource, ["kind"], "multiplayer.runtime");
+  const runtimeKind = enumValue(
+    runtimeSource,
+    "kind",
+    "multiplayer.runtime",
+    OWOGG_MULTIPLAYER_RUNTIME_KINDS,
+  );
+
+  const playersSource = record(source.players, "multiplayer.players");
+  exactKeys(playersSource, ["min", "max"], "multiplayer.players");
+  const minPlayers = integer(
+    playersSource,
+    "min",
+    "multiplayer.players",
+    MULTIPLAYER_RELAY_MIN_PLAYERS,
+    MULTIPLAYER_RELAY_MAX_PLAYERS,
+  );
+  const maxPlayers = integer(
+    playersSource,
+    "max",
+    "multiplayer.players",
+    MULTIPLAYER_RELAY_MIN_PLAYERS,
+    MULTIPLAYER_RELAY_MAX_PLAYERS,
+  );
+  if (minPlayers > maxPlayers) invalid("multiplayer.players.min cannot exceed max");
+
+  const featuresSource = record(source.features, "multiplayer.features");
   exactKeys(
-    source,
-    ["requestVersion", "kind", "template", "players", "requirements", "config", "client"],
-    "multiplayer",
+    featuresSource,
+    ["reconnect", "directMessages", "hostSnapshot", "joinInProgress", "spectators"],
+    "multiplayer.features",
   );
-  if (source.requestVersion !== OWOGG_MULTIPLAYER_REQUEST_VERSION) {
-    invalid(`multiplayer.requestVersion must be ${OWOGG_MULTIPLAYER_REQUEST_VERSION}`);
-  }
-  if (source.kind !== "managed-template") invalid('multiplayer.kind must be "managed-template"');
-
-  const templateSource = record(source.template, "multiplayer.template");
-  exactKeys(templateSource, ["id", "version"], "multiplayer.template");
-  const templateId = enumValue(
-    templateSource,
-    "id",
-    "multiplayer.template",
-    MULTIPLAYER_MANAGED_TEMPLATE_IDS,
-  );
-  if (templateSource.version !== 1) invalid("multiplayer.template.version must be exactly 1");
-
-  const players = record(source.players, "multiplayer.players");
-  exactKeys(players, ["min", "max"], "multiplayer.players");
-  const requirements = record(source.requirements, "multiplayer.requirements");
-  exactKeys(
-    requirements,
-    [
-      "simulation",
-      "lifecycle",
-      "persistence",
-      "latency",
-      "reconnect",
-      "hiddenInformation",
-      "simultaneousResponse",
-      "joinInProgress",
-      "spectators",
-    ],
-    "multiplayer.requirements",
-  );
-  const requestedSimulation = enumValue(requirements, "simulation", "multiplayer.requirements", [
-    "turn",
-    "event",
-    "continuous",
-    "rollback",
-  ] as const satisfies readonly OwoggMultiplayerSimulation[]);
-  let capability: MultiplayerCapabilityRequestV1;
-  try {
-    capability = parseMultiplayerCapabilityRequestV1({
-      players: {
-        min: integer(players, "min", "multiplayer.players", 2, 64),
-        max: integer(players, "max", "multiplayer.players", 2, 64),
-      },
-      simulation: requestedSimulation === "continuous" ? "realtime" : requestedSimulation,
-      authority: "server",
-      lifecycle: requirements.lifecycle,
-      persistence: requirements.persistence,
-      latency: requirements.latency,
-      reconnect: requirements.reconnect,
-      capabilities: {
-        hiddenInformation: booleanValue(
-          requirements,
-          "hiddenInformation",
-          "multiplayer.requirements",
-        ),
-        simultaneousResponse: booleanValue(
-          requirements,
-          "simultaneousResponse",
-          "multiplayer.requirements",
-        ),
-        joinInProgress: booleanValue(requirements, "joinInProgress", "multiplayer.requirements"),
-        spectators: booleanValue(requirements, "spectators", "multiplayer.requirements"),
-      },
-    });
-  } catch (error) {
-    if (error instanceof MultiplayerCapabilityValidationError) invalid(error.detail);
-    throw error;
-  }
-  assertTemplateCompatibility(templateId, capability);
-
-  const clientSource = record(source.client, "multiplayer.client");
-  exactKeys(clientSource, ["protocolVersion"], "multiplayer.client");
-  if (clientSource.protocolVersion !== MULTIPLAYER_PROTOCOL_VERSION) {
-    invalid(`multiplayer.client.protocolVersion must be ${MULTIPLAYER_PROTOCOL_VERSION}`);
-  }
 
   return {
     requestSchemaVersion: MULTIPLAYER_PROFILE_REQUEST_SCHEMA_VERSION,
-    kind: "managed-template",
-    template: { id: templateId, version: 1 },
-    capability,
-    config: parseConfig(templateId, source.config),
-    client: { protocolVersion: MULTIPLAYER_PROTOCOL_VERSION },
-  };
-}
-
-export function resolveManagedMultiplayerProfileRequestV1(
-  request: ManagedMultiplayerProfileRequestV1,
-): ManagedMultiplayerRequestResolutionV1 {
-  const runtime = resolveMultiplayerRuntimeV1(request.capability);
-  return runtime.status === "SUPPORTED_V1" ? { ...runtime, request } : runtime;
-}
-
-function canonicalManagedConfig(request: ManagedMultiplayerProfileRequestV1) {
-  return request.template.id === "turn-grid"
-    ? {
-        boardWidth: request.config.boardWidth,
-        boardHeight: request.config.boardHeight,
-        winLength: request.config.winLength,
-      }
-    : request.template.id === "reaction-arena"
-      ? {
-          rounds: request.config.rounds,
-          responseWindowMs: request.config.responseWindowMs,
-        }
-      : {
-          fieldWidth: request.config.fieldWidth,
-          fieldHeight: request.config.fieldHeight,
-          targetScore: request.config.targetScore,
-        };
-}
-
-function publicSimulation(
-  simulation: MultiplayerCapabilityRequestV1["simulation"],
-): OwoggMultiplayerSimulation {
-  return simulation === "realtime" ? "continuous" : simulation;
-}
-
-/** Rebuild the normalized public `owogg.json` v2 multiplayer request object. */
-export function toOwoggManagedMultiplayerRequestV1(
-  request: ManagedMultiplayerProfileRequestV1,
-): OwoggManagedMultiplayerRequestV1 {
-  const normalized = {
-    requestVersion: OWOGG_MULTIPLAYER_REQUEST_VERSION,
-    kind: request.kind,
-    template: {
-      id: request.template.id,
-      version: request.template.version,
+    transport: {
+      kind: transportKind,
+      protocolVersion: OWOGG_MULTIPLAYER_PROTOCOL_VERSION,
     },
-    players: {
-      min: request.capability.players.min,
-      max: request.capability.players.max,
-    },
-    requirements: {
-      simulation: publicSimulation(request.capability.simulation),
-      lifecycle: request.capability.lifecycle,
-      persistence: request.capability.persistence,
-      latency: request.capability.latency,
-      reconnect: request.capability.reconnect,
-      hiddenInformation: request.capability.capabilities.hiddenInformation,
-      simultaneousResponse: request.capability.capabilities.simultaneousResponse,
-      joinInProgress: request.capability.capabilities.joinInProgress,
-      spectators: request.capability.capabilities.spectators,
-    },
-    config: canonicalManagedConfig(request),
-    client: {
-      protocolVersion: request.client.protocolVersion,
+    runtime: { kind: runtimeKind },
+    players: { min: minPlayers, max: maxPlayers },
+    features: {
+      reconnect: enumValue(
+        featuresSource,
+        "reconnect",
+        "multiplayer.features",
+        OWOGG_MULTIPLAYER_RECONNECT_MODES,
+      ),
+      directMessages: booleanValue(featuresSource, "directMessages", "multiplayer.features"),
+      hostSnapshot: booleanValue(featuresSource, "hostSnapshot", "multiplayer.features"),
+      joinInProgress: booleanValue(featuresSource, "joinInProgress", "multiplayer.features"),
+      spectators: booleanValue(featuresSource, "spectators", "multiplayer.features"),
     },
   };
-  return normalized as OwoggManagedMultiplayerRequestV1;
 }
 
-/** Resolve the server-owned ruleset identity and config for one approved managed request. */
-export function deriveManagedMultiplayerProfilePolicyV1(
-  request: ManagedMultiplayerProfileRequestV1,
-): ManagedMultiplayerProfilePolicyV1 {
-  const resolution = resolveManagedMultiplayerProfileRequestV1(request);
-  if (resolution.status !== "SUPPORTED_V1") {
-    invalid(`request cannot be approved by the V1 runtime: ${resolution.reason}`);
-  }
-  const resourcePolicy =
-    request.template.id === "turn-grid"
-      ? { maxActionBytes: 1024, maxStateBytes: 8192, actionRateLimit: 5 }
-      : request.template.id === "reaction-arena"
-        ? { maxActionBytes: 512, maxStateBytes: 4096, actionRateLimit: 12 }
-        : { maxActionBytes: 256, maxStateBytes: 8192, actionRateLimit: 30 };
+function relayPolicy(request: MultiplayerRuntimeProfileRequestV1): MultiplayerRelayProfilePolicyV1 {
   return {
-    resolvedClass: resolution.resolvedClass,
-    simulationModel: request.capability
-      .simulation as ManagedMultiplayerProfilePolicyV1["simulationModel"],
-    runtimeBackend: resolution.runtimeBackend,
-    rulesetKey: `managed:${request.template.id}:v1`,
-    rulesetRevision: 1,
-    resolvedConfigJson: JSON.stringify(canonicalManagedConfig(request)),
-    lifecycle: request.capability.lifecycle as ManagedMultiplayerProfilePolicyV1["lifecycle"],
-    persistence: "match",
-    latencyProfile: request.capability
-      .latency as ManagedMultiplayerProfilePolicyV1["latencyProfile"],
-    reconnectPolicy: request.capability.reconnect,
-    minPlayers: request.capability.players.min,
-    maxPlayers: request.capability.players.max,
+    transportKind: "websocket",
+    runtimeKind: "relay",
+    protocolVersion: OWOGG_MULTIPLAYER_PROTOCOL_VERSION,
+    reconnectPolicy: request.features.reconnect,
+    directMessages: request.features.directMessages,
+    hostSnapshot: request.features.hostSnapshot,
+    minPlayers: request.players.min,
+    maxPlayers: request.players.max,
     allowedVisibility: ["PRIVATE"],
     allowedJoinPolicies: ["OPEN"],
-    ...resourcePolicy,
-    rewardPolicyId: null,
+    hostDeparturePolicy: "close",
+    resultTrust: "UNVERIFIED",
+    maxMessageBytes: 4096,
+    maxSnapshotBytes: request.features.hostSnapshot ? 16384 : 0,
+    messagesPerSecond: 20,
+    roomBytesPerSecond: 262144,
+    roomTtlSeconds: 7200,
   };
 }
 
-/**
- * Builds the only trusted profile shape that may result from a managed request. The profile always
- * starts disabled; activation remains a separate audited control-plane decision after the exact
- * game version has passed moderation and Staging validation.
- */
-export function buildApprovedManagedMultiplayerProfileV1(input: {
-  readonly gameId: number;
-  readonly gameVersionId: number;
-  readonly requestHash: string;
-  readonly profileRevision: number;
-  readonly request: ManagedMultiplayerProfileRequestV1;
-}): ApprovedMultiplayerProfileV1 {
-  const policy = deriveManagedMultiplayerProfilePolicyV1(input.request);
-  return parseApprovedMultiplayerProfileV1({
-    profileVersion: 1,
-    gameId: input.gameId,
-    gameVersionId: input.gameVersionId,
-    sourceRequestHash: input.requestHash,
-    profileRevision: input.profileRevision,
-    protocolVersion: MULTIPLAYER_PROTOCOL_VERSION,
-    ...policy,
-    enabled: false,
-  });
-}
-
-/**
- * Defense-in-depth for the trusted profile write path. Creator input selects only a managed
- * template; it cannot be reviewed into a different ruleset, capability class, or player model.
- */
-export function assertManagedMultiplayerProfileMatchesRequestV1(
-  request: ManagedMultiplayerProfileRequestV1,
-  profile: ApprovedMultiplayerProfileV1,
-): void {
-  const policy = deriveManagedMultiplayerProfilePolicyV1(request);
-  if (
-    profile.resolvedClass !== policy.resolvedClass ||
-    profile.simulationModel !== policy.simulationModel ||
-    profile.runtimeBackend !== policy.runtimeBackend ||
-    profile.rulesetKey !== policy.rulesetKey ||
-    profile.rulesetRevision !== policy.rulesetRevision ||
-    profile.resolvedConfigJson !== policy.resolvedConfigJson ||
-    profile.lifecycle !== policy.lifecycle ||
-    profile.persistence !== policy.persistence ||
-    profile.latencyProfile !== policy.latencyProfile ||
-    profile.reconnectPolicy !== policy.reconnectPolicy ||
-    profile.minPlayers !== policy.minPlayers ||
-    profile.maxPlayers !== policy.maxPlayers ||
-    JSON.stringify(profile.allowedVisibility) !== JSON.stringify(policy.allowedVisibility) ||
-    JSON.stringify(profile.allowedJoinPolicies) !== JSON.stringify(policy.allowedJoinPolicies) ||
-    profile.maxActionBytes !== policy.maxActionBytes ||
-    profile.maxStateBytes !== policy.maxStateBytes ||
-    profile.actionRateLimit !== policy.actionRateLimit ||
-    profile.rewardPolicyId !== policy.rewardPolicyId
-  ) {
-    invalid("approved profile does not match the server-resolved managed template policy");
+/** Resolves availability only; it does not approve or activate a profile. */
+export function resolveMultiplayerRuntimeProfileRequestV1(
+  request: MultiplayerRuntimeProfileRequestV1,
+): MultiplayerRuntimeRequestResolutionV1 {
+  if (request.runtime.kind !== "relay") {
+    return {
+      status: "RUNTIME_NOT_AVAILABLE",
+      request,
+      runtimeKind: request.runtime.kind,
+      reason: "MULTIPLAYER_RUNTIME_NOT_AVAILABLE",
+    };
   }
+
+  const unsupportedCapabilities = MULTIPLAYER_RELAY_UNAVAILABLE_CAPABILITIES.filter(
+    (capability) => request.features[capability],
+  );
+  if (unsupportedCapabilities.length > 0) {
+    return {
+      status: "CAPABILITY_NOT_AVAILABLE",
+      request,
+      runtimeKind: "relay",
+      unsupportedCapabilities,
+      reason: "MULTIPLAYER_CAPABILITY_NOT_AVAILABLE",
+    };
+  }
+
+  const policy = relayPolicy(request);
+  return {
+    status: "SUPPORTED_V1",
+    request,
+    transportKind: "websocket",
+    runtimeKind: "relay",
+    protocolVersion: OWOGG_MULTIPLAYER_PROTOCOL_VERSION,
+    resultTrust: "UNVERIFIED",
+    policy,
+  };
 }
 
-/**
- * Rebuild the public owogg.json request shape in a fixed property order. Storage and review use
- * this representation rather than the uploader's original whitespace or property ordering, so
- * semantically identical requests have one stable hash.
- */
-export function serializeManagedMultiplayerProfileRequestV1(
-  request: ManagedMultiplayerProfileRequestV1,
+export function deriveMultiplayerRelayProfilePolicyV1(
+  request: MultiplayerRuntimeProfileRequestV1,
+): MultiplayerRelayProfilePolicyV1 {
+  const resolution = resolveMultiplayerRuntimeProfileRequestV1(request);
+  if (resolution.status !== "SUPPORTED_V1") {
+    invalid(`request cannot use the Relay V1 runtime: ${resolution.reason}`);
+  }
+  return resolution.policy;
+}
+
+/** Rebuilds the normalized public request in a fixed property order. */
+export function toOwoggMultiplayerRuntimeRequestV1(
+  request: MultiplayerRuntimeProfileRequestV1,
+): OwoggMultiplayerRuntimeRequestV1 {
+  return {
+    version: OWOGG_MULTIPLAYER_REQUEST_VERSION,
+    transport: {
+      kind: request.transport.kind,
+      protocolVersion: request.transport.protocolVersion,
+    },
+    runtime: { kind: request.runtime.kind },
+    players: { min: request.players.min, max: request.players.max },
+    features: {
+      reconnect: request.features.reconnect,
+      directMessages: request.features.directMessages,
+      hostSnapshot: request.features.hostSnapshot,
+      joinInProgress: request.features.joinInProgress,
+      spectators: request.features.spectators,
+    },
+  };
+}
+
+export function serializeMultiplayerRuntimeProfileRequestV1(
+  request: MultiplayerRuntimeProfileRequestV1,
 ): string {
-  const parsed = parseManagedMultiplayerProfileRequestV1({
-    requestVersion: OWOGG_MULTIPLAYER_REQUEST_VERSION,
-    kind: request.kind,
-    template: {
-      id: request.template.id,
-      version: request.template.version,
-    },
-    players: {
-      min: request.capability.players.min,
-      max: request.capability.players.max,
-    },
-    requirements: {
-      simulation: publicSimulation(request.capability.simulation),
-      lifecycle: request.capability.lifecycle,
-      persistence: request.capability.persistence,
-      latency: request.capability.latency,
-      reconnect: request.capability.reconnect,
-      hiddenInformation: request.capability.capabilities.hiddenInformation,
-      simultaneousResponse: request.capability.capabilities.simultaneousResponse,
-      joinInProgress: request.capability.capabilities.joinInProgress,
-      spectators: request.capability.capabilities.spectators,
-    },
-    config: request.config,
-    client: {
-      protocolVersion: request.client.protocolVersion,
-    },
-  });
-
-  return JSON.stringify(toOwoggManagedMultiplayerRequestV1(parsed));
+  const normalized = parseMultiplayerRuntimeProfileRequestV1(
+    toOwoggMultiplayerRuntimeRequestV1(request),
+  );
+  return JSON.stringify(toOwoggMultiplayerRuntimeRequestV1(normalized));
 }
 
-export async function hashManagedMultiplayerProfileRequestV1(
-  request: ManagedMultiplayerProfileRequestV1,
+export async function hashMultiplayerRuntimeProfileRequestV1(
+  request: MultiplayerRuntimeProfileRequestV1,
 ): Promise<string> {
-  const bytes = new TextEncoder().encode(serializeManagedMultiplayerProfileRequestV1(request));
+  const bytes = new TextEncoder().encode(serializeMultiplayerRuntimeProfileRequestV1(request));
   return sha256Hex(bytes.buffer);
 }

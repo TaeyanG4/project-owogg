@@ -1,7 +1,6 @@
 import {
-  MultiplayerProfileRequestValidationError,
-  assertManagedMultiplayerProfileMatchesRequestV1,
-  parseApprovedMultiplayerProfileV1,
+  isApprovedRelayMultiplayerProfileV1,
+  parseApprovedRelayMultiplayerProfileV1,
   type CreateApprovedMultiplayerProfileInput,
   type CreateApprovedMultiplayerProfileResult,
   type MultiplayerProfileRecord,
@@ -10,28 +9,28 @@ import {
   type SetMultiplayerProfileEnabledResult,
 } from "@owogg/core";
 import type { D1Database, D1Result } from "./D1UserRepository.js";
-import { D1MultiplayerProfileRequestRepository } from "./D1MultiplayerProfileRequestRepository.js";
 
 const PROFILE_SELECT_COLUMNS = `
   profile.id, profile.source_request_id, profile.source_request_hash, profile.profile_version,
-  profile.game_id, profile.game_version_id, profile.profile_revision, profile.protocol_version,
-  profile.resolved_class, profile.simulation_model, profile.runtime_backend, profile.ruleset_key,
-  profile.ruleset_revision, profile.resolved_config_json, profile.lifecycle, profile.persistence,
-  profile.latency_profile, profile.reconnect_policy, profile.min_players, profile.max_players,
-  profile.allowed_visibility_json, profile.allowed_join_policies_json, profile.max_action_bytes,
-  profile.max_state_bytes, profile.action_rate_limit, profile.reward_policy_id, profile.enabled,
-  profile.created_by_admin_id, profile.approved_at, profile.disabled_at,
-  profile.disabled_reason_code, profile.disabled_by_admin_id, profile.updated_at
+  profile.game_id, profile.game_version_id, profile.content_hash, profile.profile_revision,
+  profile.transport_kind, profile.runtime_kind, profile.protocol_version, profile.lifecycle,
+  profile.reconnect_policy, profile.direct_messages, profile.host_snapshot, profile.min_players,
+  profile.max_players, profile.allowed_visibility_json, profile.allowed_join_policies_json,
+  profile.host_departure_policy, profile.result_trust, profile.max_message_bytes,
+  profile.max_snapshot_bytes, profile.messages_per_second, profile.room_bytes_per_second,
+  profile.room_ttl_seconds, profile.enabled, profile.created_by_admin_id, profile.approved_at,
+  profile.disabled_at, profile.disabled_reason_code, profile.disabled_by_admin_id,
+  profile.updated_at
 `;
 
-function requiredPositiveInteger(value: unknown, field: string): number {
-  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+function positive(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
     throw new Error(`Invalid ${field} in multiplayer_profiles row: ${String(value)}`);
   }
   return value;
 }
 
-function requiredString(value: unknown, field: string): string {
+function string(value: unknown, field: string): string {
   if (typeof value !== "string" || value.length === 0) {
     throw new Error(`Invalid ${field} in multiplayer_profiles row: ${String(value)}`);
   }
@@ -39,44 +38,38 @@ function requiredString(value: unknown, field: string): string {
 }
 
 function nullableString(value: unknown, field: string): string | null {
-  if (value === null) return null;
-  return requiredString(value, field);
+  return value === null ? null : string(value, field);
 }
 
-function booleanInteger(value: unknown, field: string): boolean {
+function boolean(value: unknown, field: string): boolean {
   if (value !== 0 && value !== 1) {
     throw new Error(`Invalid ${field} in multiplayer_profiles row: ${String(value)}`);
   }
   return value === 1;
 }
 
-function parseJson(value: unknown, field: string): unknown {
-  const source = requiredString(value, field);
+function json(value: unknown, field: string): unknown {
   try {
-    return JSON.parse(source) as unknown;
+    return JSON.parse(string(value, field)) as unknown;
   } catch {
     throw new Error(`Invalid ${field} JSON in multiplayer_profiles row`);
   }
 }
 
-function writtenRows(result: D1Result | undefined): number | null {
-  // D1 rows_written is a billing-oriented count that includes index maintenance. CAS and
-  // idempotency decisions need the statement's affected table-row count instead.
+function changed(result: D1Result | undefined): number | null {
   const value = result?.meta?.changes ?? result?.meta?.rows_written;
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function assertPositiveId(value: number, field: string): void {
-  if (!Number.isInteger(value) || value <= 0) throw new RangeError(`${field} must be positive`);
+function assertId(value: number, field: string): void {
+  if (!Number.isSafeInteger(value) || value <= 0) throw new RangeError(`${field} must be positive`);
 }
 
-function assertNowIso(value: string): void {
-  if (value.length === 0 || Number.isNaN(Date.parse(value))) {
-    throw new RangeError("nowIso must be a non-empty ISO timestamp");
-  }
+function assertNow(value: string): void {
+  if (!value || Number.isNaN(Date.parse(value))) throw new RangeError("nowIso must be valid");
 }
 
-function sameProfileRecord(
+function sameProfile(
   record: MultiplayerProfileRecord,
   input: CreateApprovedMultiplayerProfileInput,
 ): boolean {
@@ -88,53 +81,49 @@ function sameProfileRecord(
 }
 
 export function mapMultiplayerProfileRow(row: Record<string, unknown>): MultiplayerProfileRecord {
-  const profile = parseApprovedMultiplayerProfileV1({
+  const profile = parseApprovedRelayMultiplayerProfileV1({
     profileVersion: row.profile_version,
     gameId: row.game_id,
     gameVersionId: row.game_version_id,
-    sourceRequestHash: nullableString(row.source_request_hash, "source_request_hash"),
+    contentHash: row.content_hash,
+    sourceRequestHash: row.source_request_hash,
     profileRevision: row.profile_revision,
+    transportKind: row.transport_kind,
+    runtimeKind: row.runtime_kind,
     protocolVersion: row.protocol_version,
-    resolvedClass: row.resolved_class,
-    simulationModel: row.simulation_model,
-    runtimeBackend: row.runtime_backend,
-    rulesetKey: row.ruleset_key,
-    rulesetRevision: row.ruleset_revision,
-    resolvedConfigJson: row.resolved_config_json,
     lifecycle: row.lifecycle,
-    persistence: row.persistence,
-    latencyProfile: row.latency_profile,
     reconnectPolicy: row.reconnect_policy,
+    directMessages: boolean(row.direct_messages, "direct_messages"),
+    hostSnapshot: boolean(row.host_snapshot, "host_snapshot"),
     minPlayers: row.min_players,
     maxPlayers: row.max_players,
-    allowedVisibility: parseJson(row.allowed_visibility_json, "allowed_visibility_json"),
-    allowedJoinPolicies: parseJson(row.allowed_join_policies_json, "allowed_join_policies_json"),
-    maxActionBytes: row.max_action_bytes,
-    maxStateBytes: row.max_state_bytes,
-    actionRateLimit: row.action_rate_limit,
-    rewardPolicyId: nullableString(row.reward_policy_id, "reward_policy_id"),
-    enabled: booleanInteger(row.enabled, "enabled"),
+    allowedVisibility: json(row.allowed_visibility_json, "allowed_visibility_json"),
+    allowedJoinPolicies: json(row.allowed_join_policies_json, "allowed_join_policies_json"),
+    hostDeparturePolicy: row.host_departure_policy,
+    resultTrust: row.result_trust,
+    maxMessageBytes: row.max_message_bytes,
+    maxSnapshotBytes: row.max_snapshot_bytes,
+    messagesPerSecond: row.messages_per_second,
+    roomBytesPerSecond: row.room_bytes_per_second,
+    roomTtlSeconds: row.room_ttl_seconds,
+    enabled: boolean(row.enabled, "enabled"),
   });
-
   return {
-    id: requiredPositiveInteger(row.id, "id"),
-    sourceRequestId:
-      row.source_request_id === null
-        ? null
-        : requiredPositiveInteger(row.source_request_id, "source_request_id"),
+    id: positive(row.id, "id"),
+    sourceRequestId: positive(row.source_request_id, "source_request_id"),
     profile,
     createdByAdminId:
       row.created_by_admin_id === null
         ? null
-        : requiredPositiveInteger(row.created_by_admin_id, "created_by_admin_id"),
-    approvedAt: requiredString(row.approved_at, "approved_at"),
+        : positive(row.created_by_admin_id, "created_by_admin_id"),
+    approvedAt: string(row.approved_at, "approved_at"),
     disabledAt: nullableString(row.disabled_at, "disabled_at"),
     disabledReasonCode: nullableString(row.disabled_reason_code, "disabled_reason_code"),
     disabledByAdminId:
       row.disabled_by_admin_id === null
         ? null
-        : requiredPositiveInteger(row.disabled_by_admin_id, "disabled_by_admin_id"),
-    updatedAt: requiredString(row.updated_at, "updated_at"),
+        : positive(row.disabled_by_admin_id, "disabled_by_admin_id"),
+    updatedAt: string(row.updated_at, "updated_at"),
   };
 }
 
@@ -144,84 +133,73 @@ export class D1MultiplayerProfileRepository implements MultiplayerProfileReposit
   async createApprovedRevision(
     input: CreateApprovedMultiplayerProfileInput,
   ): Promise<CreateApprovedMultiplayerProfileResult> {
-    assertPositiveId(input.createdByAdminId, "createdByAdminId");
-    if (input.sourceRequestId !== null) assertPositiveId(input.sourceRequestId, "sourceRequestId");
-    assertNowIso(input.nowIso);
-    const profile = parseApprovedMultiplayerProfileV1(input.profile);
-    if (profile.enabled) {
-      return { status: "REJECTED", code: "PROFILE_MUST_START_DISABLED" };
+    assertId(input.createdByAdminId, "createdByAdminId");
+    if (input.sourceRequestId === null)
+      return { status: "REJECTED", code: "SOURCE_REQUEST_INVALID" };
+    assertId(input.sourceRequestId, "sourceRequestId");
+    assertNow(input.nowIso);
+    if (!isApprovedRelayMultiplayerProfileV1(input.profile)) {
+      return { status: "REJECTED", code: "SOURCE_REQUEST_INVALID" };
     }
+    const profile = parseApprovedRelayMultiplayerProfileV1(input.profile);
+    if (profile.enabled) return { status: "REJECTED", code: "PROFILE_MUST_START_DISABLED" };
 
-    const existing = await this.findByExactRevision(
+    const existing = await this.findExactRevision(
       profile.gameId,
       profile.gameVersionId,
       profile.profileRevision,
     );
     if (existing) {
-      return sameProfileRecord(existing, { ...input, profile })
+      return sameProfile(existing, { ...input, profile })
         ? { status: "REPLAYED", record: existing }
         : { status: "REJECTED", code: "REVISION_CONFLICT" };
     }
 
     const version = await this.db
       .prepare(
-        `SELECT game.publisher_type, version.moderation_status
+        `SELECT game.publisher_type, version.moderation_status, version.content_hash
          FROM game_versions version
          JOIN games game ON game.id = version.game_id
-         WHERE version.id = ? AND version.game_id = ?
-           AND version.publish_status = 'READY' AND game.deleted_at IS NULL
-         LIMIT 1`,
+         WHERE version.id = ? AND version.game_id = ? AND version.publish_status = 'READY'
+           AND game.deleted_at IS NULL LIMIT 1`,
       )
       .bind(profile.gameVersionId, profile.gameId)
       .first<Record<string, unknown>>();
     if (!version) return { status: "REJECTED", code: "GAME_VERSION_NOT_FOUND" };
-
-    if (version.publisher_type !== "USER" && version.publisher_type !== "OWOGG") {
-      return { status: "REJECTED", code: "SOURCE_REQUEST_INVALID" };
+    if (version.content_hash !== profile.contentHash) {
+      return { status: "REJECTED", code: "MANAGED_PROFILE_MISMATCH" };
     }
-    if (version.publisher_type === "USER" && version.moderation_status !== "APPROVED") {
-      return { status: "REJECTED", code: "SOURCE_REQUEST_INVALID" };
-    }
-
-    if (input.sourceRequestId !== null) {
-      const request = await new D1MultiplayerProfileRequestRepository(this.db).findById(
-        input.sourceRequestId,
-      );
-      if (
-        !request ||
-        request.status !== "APPROVED" ||
-        request.gameId !== profile.gameId ||
-        request.gameVersionId !== profile.gameVersionId ||
-        request.requestHash !== profile.sourceRequestHash ||
-        (version.publisher_type === "USER" && request.requestedByUserId === null) ||
-        (version.publisher_type === "OWOGG" && request.requestedByUserId !== null)
-      ) {
-        return { status: "REJECTED", code: "SOURCE_REQUEST_INVALID" };
-      }
-      try {
-        assertManagedMultiplayerProfileMatchesRequestV1(request.request, profile);
-      } catch (error) {
-        if (error instanceof MultiplayerProfileRequestValidationError) {
-          return { status: "REJECTED", code: "MANAGED_PROFILE_MISMATCH" };
-        }
-        throw error;
-      }
-    } else if (
-      version.publisher_type !== "OWOGG" ||
-      profile.sourceRequestHash !== null ||
-      !profile.rulesetKey.startsWith("official:")
+    if (
+      (version.publisher_type !== "OWOGG" && version.publisher_type !== "USER") ||
+      (version.publisher_type === "USER" && version.moderation_status !== "APPROVED")
     ) {
       return { status: "REJECTED", code: "SOURCE_REQUEST_INVALID" };
     }
 
-    const revisionRow = await this.db
+    const request = await this.db
+      .prepare(
+        `SELECT id FROM multiplayer_profile_requests
+         WHERE id = ? AND game_id = ? AND game_version_id = ? AND content_hash = ?
+           AND request_hash = ? AND status = 'APPROVED' LIMIT 1`,
+      )
+      .bind(
+        input.sourceRequestId,
+        profile.gameId,
+        profile.gameVersionId,
+        profile.contentHash,
+        profile.sourceRequestHash,
+      )
+      .first<Record<string, unknown>>();
+    if (!request) return { status: "REJECTED", code: "MANAGED_PROFILE_MISMATCH" };
+
+    const revision = await this.db
       .prepare(
         `SELECT COALESCE(MAX(profile_revision), 0) + 1 AS next_revision
          FROM multiplayer_profiles WHERE game_id = ? AND game_version_id = ?`,
       )
       .bind(profile.gameId, profile.gameVersionId)
       .first<{ next_revision: number }>();
-    if (Number(revisionRow?.next_revision ?? 1) !== profile.profileRevision) {
+    if (Number(revision?.next_revision ?? 1) !== profile.profileRevision) {
       return { status: "REJECTED", code: "REVISION_CONFLICT" };
     }
 
@@ -230,63 +208,61 @@ export class D1MultiplayerProfileRepository implements MultiplayerProfileReposit
         .prepare(
           `INSERT INTO multiplayer_profiles (
              source_request_id, source_request_hash, profile_version, game_id, game_version_id,
-             profile_revision, protocol_version, resolved_class, simulation_model,
-             runtime_backend, ruleset_key, ruleset_revision, resolved_config_json, lifecycle,
-             persistence, latency_profile, reconnect_policy, min_players, max_players,
-             allowed_visibility_json, allowed_join_policies_json, max_action_bytes,
-             max_state_bytes, action_rate_limit, reward_policy_id, enabled,
-             created_by_admin_id, approved_at, disabled_at, disabled_reason_code,
-             disabled_by_admin_id, updated_at
+             profile_revision, protocol_version, resolved_class, simulation_model, runtime_backend,
+             ruleset_key, ruleset_revision, resolved_config_json, lifecycle, persistence,
+             latency_profile, reconnect_policy, min_players, max_players, allowed_visibility_json,
+             allowed_join_policies_json, max_action_bytes, max_state_bytes, action_rate_limit,
+             reward_policy_id, enabled, created_by_admin_id, approved_at, disabled_at,
+             disabled_reason_code, disabled_by_admin_id, updated_at, profile_kind, content_hash,
+             transport_kind, runtime_kind, direct_messages, host_snapshot, host_departure_policy,
+             result_trust, max_message_bytes, max_snapshot_bytes, messages_per_second,
+             room_bytes_per_second, room_ttl_seconds
            ) VALUES (
-             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0,
-             ?, ?, NULL, NULL, NULL, ?
+             ?, ?, 1, ?, ?, ?, 1, 'M1', 'event', 'durable-object', 'relay:transport-only', 1, '{}',
+             'match', 'match', 'relaxed', ?, ?, ?, ?, ?, ?, 1, ?, NULL, 0, ?, ?, NULL, NULL,
+             NULL, ?, 'RELAY', ?, 'websocket', 'relay', ?, ?, 'close', 'UNVERIFIED', ?, ?, ?, ?, ?
            )`,
         )
         .bind(
           input.sourceRequestId,
           profile.sourceRequestHash,
-          profile.profileVersion,
           profile.gameId,
           profile.gameVersionId,
           profile.profileRevision,
-          profile.protocolVersion,
-          profile.resolvedClass,
-          profile.simulationModel,
-          profile.runtimeBackend,
-          profile.rulesetKey,
-          profile.rulesetRevision,
-          profile.resolvedConfigJson,
-          profile.lifecycle,
-          profile.persistence,
-          profile.latencyProfile,
           profile.reconnectPolicy,
           profile.minPlayers,
           profile.maxPlayers,
           JSON.stringify(profile.allowedVisibility),
           JSON.stringify(profile.allowedJoinPolicies),
-          profile.maxActionBytes,
-          profile.maxStateBytes,
-          profile.actionRateLimit,
-          profile.rewardPolicyId,
+          profile.maxMessageBytes,
+          profile.messagesPerSecond,
           input.createdByAdminId,
           input.nowIso,
           input.nowIso,
+          profile.contentHash,
+          profile.directMessages ? 1 : 0,
+          profile.hostSnapshot ? 1 : 0,
+          profile.maxMessageBytes,
+          profile.maxSnapshotBytes,
+          profile.messagesPerSecond,
+          profile.roomBytesPerSecond,
+          profile.roomTtlSeconds,
         )
         .run();
     } catch (error) {
-      const concurrent = await this.findByExactRevision(
+      const concurrent = await this.findExactRevision(
         profile.gameId,
         profile.gameVersionId,
         profile.profileRevision,
       );
       if (concurrent) {
-        return sameProfileRecord(concurrent, { ...input, profile })
+        return sameProfile(concurrent, { ...input, profile })
           ? { status: "REPLAYED", record: concurrent }
           : { status: "REJECTED", code: "REVISION_CONFLICT" };
       }
       throw error;
     }
-    const created = await this.findByExactRevision(
+    const created = await this.findExactRevision(
       profile.gameId,
       profile.gameVersionId,
       profile.profileRevision,
@@ -298,16 +274,13 @@ export class D1MultiplayerProfileRepository implements MultiplayerProfileReposit
   async setEnabled(
     input: SetMultiplayerProfileEnabledInput,
   ): Promise<SetMultiplayerProfileEnabledResult> {
-    assertPositiveId(input.profileId, "profileId");
-    assertPositiveId(input.changedByAdminId, "changedByAdminId");
-    assertNowIso(input.nowIso);
+    assertId(input.profileId, "profileId");
+    assertId(input.changedByAdminId, "changedByAdminId");
+    assertNow(input.nowIso);
     if (input.enabled && input.reasonCode !== null) {
       throw new RangeError("enabled profile reasonCode must be null");
     }
-    if (
-      !input.enabled &&
-      (input.reasonCode === null || !/^[A-Z][A-Z0-9_]{0,63}$/.test(input.reasonCode))
-    ) {
+    if (!input.enabled && !/^[A-Z][A-Z0-9_]{0,63}$/.test(input.reasonCode ?? "")) {
       throw new RangeError("disabled profile reasonCode must be a stable uppercase code");
     }
     const current = await this.findById(input.profileId);
@@ -322,58 +295,73 @@ export class D1MultiplayerProfileRepository implements MultiplayerProfileReposit
             `UPDATE multiplayer_profiles AS profile
              SET enabled = 1, disabled_at = NULL, disabled_reason_code = NULL,
                  disabled_by_admin_id = NULL, updated_at = ?
-             WHERE profile.id = ? AND profile.enabled = 0
+             WHERE profile.id = ? AND profile.enabled = 0 AND profile.profile_kind = 'RELAY'
                AND NOT EXISTS (
                  SELECT 1 FROM multiplayer_profiles other
-                 WHERE other.game_version_id = profile.game_version_id
-                   AND other.enabled = 1
+                 WHERE other.game_version_id = profile.game_version_id AND other.enabled = 1
                )`,
           )
           .bind(input.nowIso, input.profileId)
           .run();
       } catch {
-        const conflicted = await this.findById(input.profileId);
-        return conflicted ? { status: "CONFLICT", record: conflicted } : { status: "NOT_FOUND" };
+        const conflict = await this.findById(input.profileId);
+        return conflict ? { status: "CONFLICT", record: conflict } : { status: "NOT_FOUND" };
       }
     } else {
       write = await this.db
         .prepare(
-          `UPDATE multiplayer_profiles
-           SET enabled = 0, disabled_at = ?, disabled_reason_code = ?,
-               disabled_by_admin_id = ?, updated_at = ?
-           WHERE id = ? AND enabled = 1`,
+          `UPDATE multiplayer_profiles SET enabled = 0, disabled_at = ?, disabled_reason_code = ?,
+             disabled_by_admin_id = ?, updated_at = ?
+           WHERE id = ? AND enabled = 1 AND profile_kind = 'RELAY'`,
         )
         .bind(input.nowIso, input.reasonCode, input.changedByAdminId, input.nowIso, input.profileId)
         .run();
     }
     const updated = await this.findById(input.profileId);
     if (!updated) return { status: "NOT_FOUND" };
-    return writtenRows(write) === 1 && updated.profile.enabled === input.enabled
+    return changed(write) === 1 && updated.profile.enabled === input.enabled
       ? { status: "UPDATED", record: updated }
       : { status: "CONFLICT", record: updated };
   }
 
   async findById(profileId: number): Promise<MultiplayerProfileRecord | null> {
+    assertId(profileId, "profileId");
     const row = await this.db
-      .prepare(`SELECT ${PROFILE_SELECT_COLUMNS} FROM multiplayer_profiles profile WHERE id = ?`)
+      .prepare(
+        `SELECT ${PROFILE_SELECT_COLUMNS} FROM multiplayer_profiles profile
+         WHERE profile.id = ? AND profile.profile_kind = 'RELAY'`,
+      )
       .bind(profileId)
       .first<Record<string, unknown>>();
     return row ? mapMultiplayerProfileRow(row) : null;
+  }
+
+  async listManaged(limit: number): Promise<readonly MultiplayerProfileRecord[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new RangeError("limit must be an integer between 1 and 100");
+    }
+    const rows = await this.db
+      .prepare(
+        `SELECT ${PROFILE_SELECT_COLUMNS} FROM multiplayer_profiles profile
+         WHERE profile.profile_kind = 'RELAY' AND profile.source_request_id IS NOT NULL
+         ORDER BY profile.updated_at DESC, profile.id DESC LIMIT ?`,
+      )
+      .bind(limit)
+      .all<Record<string, unknown>>();
+    return (rows.results ?? []).map(mapMultiplayerProfileRow);
   }
 
   async findLatestForExactVersion(
     gameId: number,
     gameVersionId: number,
   ): Promise<MultiplayerProfileRecord | null> {
-    assertPositiveId(gameId, "gameId");
-    assertPositiveId(gameVersionId, "gameVersionId");
+    assertId(gameId, "gameId");
+    assertId(gameVersionId, "gameVersionId");
     const row = await this.db
       .prepare(
-        `SELECT ${PROFILE_SELECT_COLUMNS}
-         FROM multiplayer_profiles profile
-         WHERE profile.game_id = ? AND profile.game_version_id = ?
-         ORDER BY profile.profile_revision DESC
-         LIMIT 1`,
+        `SELECT ${PROFILE_SELECT_COLUMNS} FROM multiplayer_profiles profile
+         WHERE profile.game_id = ? AND profile.game_version_id = ? AND profile.profile_kind = 'RELAY'
+         ORDER BY profile.profile_revision DESC LIMIT 1`,
       )
       .bind(gameId, gameVersionId)
       .first<Record<string, unknown>>();
@@ -384,20 +372,20 @@ export class D1MultiplayerProfileRepository implements MultiplayerProfileReposit
     gameId: number,
     gameVersionId: number,
   ): Promise<MultiplayerProfileRecord | null> {
+    assertId(gameId, "gameId");
+    assertId(gameVersionId, "gameVersionId");
     const row = await this.db
       .prepare(
         `SELECT ${PROFILE_SELECT_COLUMNS}
          FROM multiplayer_profiles profile
          JOIN games game ON game.id = profile.game_id
-         JOIN game_versions version
-           ON version.id = profile.game_version_id AND version.game_id = game.id
+         JOIN game_versions version ON version.id = profile.game_version_id AND version.game_id = game.id
          WHERE profile.game_id = ? AND profile.game_version_id = ? AND profile.enabled = 1
+           AND profile.profile_kind = 'RELAY' AND profile.content_hash = version.content_hash
            AND game.deleted_at IS NULL AND game.live_version_id = version.id
            AND version.publish_status = 'READY'
-           AND (
-             game.publisher_type = 'OWOGG'
-             OR (game.publisher_type = 'USER' AND version.moderation_status = 'APPROVED')
-           )
+           AND (game.publisher_type = 'OWOGG'
+             OR (game.publisher_type = 'USER' AND version.moderation_status = 'APPROVED'))
          LIMIT 1`,
       )
       .bind(gameId, gameVersionId)
@@ -405,17 +393,16 @@ export class D1MultiplayerProfileRepository implements MultiplayerProfileReposit
     return row ? mapMultiplayerProfileRow(row) : null;
   }
 
-  private async findByExactRevision(
+  private async findExactRevision(
     gameId: number,
     gameVersionId: number,
     profileRevision: number,
   ): Promise<MultiplayerProfileRecord | null> {
     const row = await this.db
       .prepare(
-        `SELECT ${PROFILE_SELECT_COLUMNS}
-         FROM multiplayer_profiles profile
-         WHERE game_id = ? AND game_version_id = ? AND profile_revision = ?
-         LIMIT 1`,
+        `SELECT ${PROFILE_SELECT_COLUMNS} FROM multiplayer_profiles profile
+         WHERE profile.game_id = ? AND profile.game_version_id = ? AND profile.profile_revision = ?
+           AND profile.profile_kind = 'RELAY' LIMIT 1`,
       )
       .bind(gameId, gameVersionId, profileRevision)
       .first<Record<string, unknown>>();

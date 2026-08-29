@@ -11,7 +11,8 @@ test("allows only explicit instance lifecycle transitions", () => {
   assert.equal(canTransitionMultiplayerInstance("ACTIVE", "CLOSING"), true);
   assert.equal(canTransitionMultiplayerInstance("STARTING", "EXPIRED"), true);
   assert.equal(canTransitionMultiplayerInstance("ACTIVE", "EXPIRED"), true);
-  assert.equal(canTransitionMultiplayerInstance("CLOSING", "LOBBY"), true);
+  assert.equal(canTransitionMultiplayerInstance("CLOSING", "LOBBY"), false);
+  assert.equal(canTransitionMultiplayerInstance("CLOSING", "CLOSED"), true);
   assert.equal(canTransitionMultiplayerInstance("CLOSED", "ACTIVE"), false);
   assert.equal(canTransitionMultiplayerInstance("EXPIRED", "LOBBY"), false);
 });

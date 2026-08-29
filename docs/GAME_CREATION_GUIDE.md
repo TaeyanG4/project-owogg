@@ -2,7 +2,7 @@
 
 상태: 가이드
 
-마지막 검증: 2026-08-25
+마지막 검증: 2026-08-29
 
 기준 소스:
 
@@ -113,16 +113,33 @@ owogg.logo.png | .jpg | .jpeg | .webp | .svg
     "slug": "my-game",
     "title": "My Game",
     "genre": "arcade",
-    "mode": "single"
+    "mode": "single",
+    "playModes": ["single"]
   },
   "progression": { "type": "none" },
   "result": { "score": null }
 }
 ```
 
-공개 schema는 `https://owogg.com/schemas/manifest/v1.json`입니다. `game`, `input`,
-`presentation`, `difficulties`, `progression`, `result`, `leaderboard`, `events`, `achievements`만
-허용하며 알 수 없는 필드는 거부합니다. range는 `min < max`, `outOfRange` 기본값은 `clamp`입니다.
+공개 schema는 `https://owogg.com/schemas/manifest/v1.json` 하나뿐입니다. `game`, `input`,
+`presentation`, `difficulties`, `progression`, `result`, `leaderboard`, `events`, `achievements`,
+`multiplayer`, `playConfig`만 허용하며 알 수 없는 필드는 거부합니다. `game.playModes`는 필수이고
+`single`, `local-multi`, `online-multi` 중 실제 지원 topology를 선언합니다. `mode: "single"`은
+`["single"]`만, `mode: "multi"`는 `local-multi` 또는 `online-multi`를 하나 이상 허용합니다.
+range는 `min < max`, `outOfRange` 기본값은 `clamp`입니다.
+
+`playConfig`는 `single` 또는 `local-multi` 경로와 scored leaderboard를 요구합니다. 같은 ZIP에서
+online도 제공하려면 `game.playModes`에 generic 경로와 `online-multi`를 함께 넣고 `multiplayer` 심사
+요청을 선언할 수 있습니다. top-level result/leaderboard/PlayConfig는 `single`/`local-multi` 경로에만
+적용됩니다. online은 승인된 exact-version Relay profile로 분리되고 결과는 항상 `UNVERIFIED`이므로
+leaderboard, reward, XP, MMR, score 기반 도전과제에 연결되지 않습니다.
+
+`multiplayer` 선언은 서버 실행 권한이 아닙니다. 업로드 시 요청은 exact
+`(gameId, gameVersionId, contentHash)`와 canonical request hash에 묶여 `PENDING_REVIEW`로 저장됩니다.
+관리자 승인은 먼저 disabled Relay profile만 생성하며, 별도 activation 뒤에만 새 방 생성과 ticket 발급이
+가능합니다. 새 version/content hash는 이전 승인을 재사용하지 않습니다. 현재 server runtime은
+`websocket + relay`, 2~8명, `PRIVATE + OPEN`만 활성화할 수 있고 worker/container,
+join-in-progress/spectator는 지원 구현 전까지 fail closed합니다.
 
 새 등록 endpoint는 `multipart/form-data`의 `bundle` file을 받는
 `POST /api/dev/games/upload`입니다. catalog-only 수동 등록 경로는 없으며 ZIP drag-and-drop만
@@ -237,10 +254,82 @@ GET /play/:slug
 Web의 `GameHost`는 publisher를 보고 다른 host를 고르지 않습니다. public game/session을 가져오고
 `IframeRuntime`을 구성하며 `window.OWOGG` fact를 result submission과 결과 UI에 연결합니다.
 
+### 5.1 online-multi Relay SDK
+
+승인된 Relay profile로 시작한 iframe에는 인증 token, WebSocket URL, user ID 또는 서버 ruleset 대신
+`window.OWOGG.multiplayer`가 제공됩니다. `bootstrap`은 exact
+`gameVersionId/contentHash/profileRevision/generation`과 함께 다음 공용 정보만 노출합니다.
+
+- `runtime`: 현재 `relay`, protocol version, `resultTrust: "UNVERIFIED"`
+- `self`: 서버가 정한 `participantId`, `seatIndex`, `HOST | PLAYER` 역할
+- `roster`: seat 순서의 2~8인 참가자 목록
+- `capabilities`: reconnect, broadcast, direct message, host snapshot 사용 가능 여부
+
+게임은 먼저 listener를 등록하고 `ready()`를 호출합니다. 초기 handshake 전에 호출한 `ready()`는 bounded
+queue에 보관되며, 이후 수신 메시지 안에서 최신 `bootstrap`을 읽을 수 있습니다.
+
+```js
+const relay = window.OWOGG.multiplayer;
+
+const unsubscribe = relay.subscribe((message) => {
+  const bootstrap = relay.bootstrap;
+  if (!bootstrap || bootstrap.runtime.kind !== "relay") return;
+
+  if (message.type === "MULTI_CONNECTED") {
+    initializePlayers(bootstrap.self, bootstrap.roster);
+  } else if (message.type === "RELAY_SYNC") {
+    restoreSnapshot(message.snapshot);
+  } else if (message.type === "RELAY_MESSAGE") {
+    applyPeerMessage(message.sender, message.payload);
+  } else if (message.type === "RELAY_REJECTED" || message.type === "RELAY_CLOSED") {
+    handleRelayStatus(message);
+  }
+});
+
+relay.ready();
+```
+
+연결 뒤에는 JSON-safe payload를 `broadcast(payload)`로 모든 참가자에게 보내거나, profile이 허용한 경우
+`direct(participantId, payload)`로 특정 참가자에게 보냅니다. `send({ delivery, ... })`는 두 방식을 하나의
+API로 호출하는 형태입니다. host이고 `capabilities.hostSnapshot`이 true일 때만
+`snapshot(payload)`로 bounded reconnect snapshot을 교체할 수 있습니다. 방을 자발적으로 나갈 때는
+`leave()`를 호출하고 더 이상 listener가 필요 없으면 `unsubscribe()`를 호출합니다.
+
+Relay는 sender/seat/role, generation/sequence, target, payload 크기와 전송률을 검증하지만 payload 내부의
+메시지 schema, 게임 규칙, 충돌 해결, 물리, hidden information, 승자를 검증하지 않습니다. 제작자는
+application-level message type/revision, host 권한, 상태 동기화와 충돌 정책을 게임 코드에 구현해야 합니다.
+`local-multi` 실행에는 Relay transport가 열리지 않으므로 같은 ZIP에서도 로컬 상태와 online 상태를
+명시적으로 분리해야 합니다.
+
 ## 6. 결과 승인
 
-게임 시작 전 API가 exact slug/live version/difficulty에 묶인 signed one-use session을 발급합니다.
-완료 후 server는 다음을 다시 검증합니다.
+PlayConfig가 없는 기존 generic 게임은 게임 시작 전 API가 exact slug/live version/difficulty에 묶인
+signed one-use `gs1` session을 발급합니다. PlayConfig 게임은 사용자가 게임 안에서 `single` 또는
+`local-multi`를 선택하고 허용된 difficulty/variant pair를 고르면 Host가 `gs2`를 요청합니다. 서버는
+선택 topology와 canonical pair, reward factor, ruleset revision, verifier ID를 서명하고 공개
+`startContext`만 iframe에 전달합니다. `gs2` token은 parent memory 밖으로 노출하지 않습니다.
+
+Phase 5-D/E에서 trusted verifier registry, 게시/session gate, first-evidence hash claim, 검증 coordinator와
+authoritative 결과 저장이 구현됐습니다. Phase 6에서는 첫 reviewed entry `verified-aim-test-v1`이
+설치됐습니다. 다른 verifier ID는 계속 fail closed이며 reference verifier도 canonical slug와 revision을
+다시 확인합니다. `/result`는 evidence를 검증하고 서버 facts를 반환합니다. 요청은 64 KiB, canonical
+evidence는 16 KiB·깊이 12·배열 1,024·객체 key 256·전체 node 4,096으로 제한되며 raw evidence는 저장하지
+않습니다. online 선택은 `gs1`/`gs2`를 발급하지 않고 approved exact-version Relay profile과 Durable
+Object transport를 사용하며, Relay 결과를 경쟁 결과로 승인하지 않습니다.
+
+gs2의 `rawScore`는 verifier 원값, `normalizedScore`는 manifest 범위·precision을 통과한 게임 점수,
+`competitiveScore`는 reward factor를 desc 점수에는 곱하고 asc 점수에는 나눈 뒤 같은 precision으로
+반올림한 경쟁 점수입니다. verifier가 범위 밖 값을 반환하면 clamp하지 않고 결과 전체를 거부합니다.
+attempt 소비, result, 선택적 score projection, claim terminal 전환은 한 D1 batch로 처리됩니다.
+도전과제·진행도는 normalized gameplay facts를, 리더보드는 competitive score를 사용합니다. 결과 응답의
+`difficultyId`/`variantId`도 서버 권위 값이며 GameHost는 이 값으로 결과 카드와 preview 범위를 갱신합니다.
+
+업로드 가능한 최소 구현은 `examples/verified-aim-test`에서 확인할 수 있습니다. 이 예제는
+`requestStart()`로 승인된 seed/config를 받고, 점수 대신 최대 10개의 순차 좌표·상대시간 evidence만
+`complete()`로 보냅니다. build/verify 스크립트와 서버 verifier가 같은 결정론 test vector를 검증하지만,
+이 참조 구현 자체가 사람과 자동화 클라이언트를 완전히 구별하는 anti-bot 보장은 아닙니다.
+
+non-PlayConfig gs1 완료 후 server는 다음을 다시 검증합니다.
 
 - 서명, 만료, one-use attempt
 - game와 version binding
@@ -255,9 +344,11 @@ Web의 `GameHost`는 publisher를 보고 다른 host를 고르지 않습니다. 
 `games.leaderboard_generation`은 현재 live version의 리더보드 세대입니다. OWOGG 재업로드 또는 USER
 승인/롤포워드/롤백으로 live version ID가 바뀌면 세대가 한 번 증가하고, 이후 승인 점수는 새 세대에
 기록됩니다. 공개 리더보드, 개인 최고 기록, Streamer/Discord 게임 랭킹은 현재 세대만 읽으므로 새
-버전의 리더보드는 빈 상태에서 시작합니다. 이전 점수 row는 감사·이력 용도로 남지만 현재 랭킹에는
-노출되지 않습니다. 같은 content/version을 다시 활성화해 live version ID가 바뀌지 않으면 초기화하지
-않습니다. 공개 리더보드의 edge cache는 최대 30초 동안 이전 응답을 보일 수 있습니다.
+버전의 리더보드는 빈 상태에서 시작합니다. PlayConfig 랭킹은 difficulty와 current ruleset revision도
+일치해야 하며 variant는 별도 랭킹을 만들지 않고 `Mode` 열에 표시합니다. 이전 점수 row는 감사·이력
+용도로 남지만 현재 랭킹에는 노출되지 않습니다. 같은 content/version을 다시 활성화해 live version
+ID가 바뀌지 않으면 초기화하지 않습니다. 공개 리더보드의 edge cache는 최대 30초 동안 이전 응답을
+보일 수 있습니다.
 
 ## 7. 제출 전 점검
 

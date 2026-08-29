@@ -41,12 +41,15 @@ function seedScore(
   userId: number,
   gameId: string,
   score: number,
+  rulesetRevision = 1,
 ): void {
   raw
     .prepare(
-      `INSERT INTO scores (user_id, nickname, game_id, score, created_at) VALUES (?, 'p', ?, ?, datetime('now'))`,
+      `INSERT INTO scores
+         (user_id, nickname, game_id, score, ruleset_revision, created_at)
+       VALUES (?, 'p', ?, ?, ?, datetime('now'))`,
     )
-    .run(userId, gameId, score);
+    .run(userId, gameId, score, rulesetRevision);
 }
 
 test("Streamer score ranking: one Streamer's hundreds of scores never suppress others, and total is exact", async () => {
@@ -145,4 +148,35 @@ test("Streamer score ranking: pagination (offset/limit) applies to the deduplica
   assert.equal(new Set(allUserIds).size, 4, "no overlap between pages");
   assert.equal(page1.entries[0]?.rank, 1);
   assert.equal(page2.entries[0]?.rank, 3);
+});
+
+test("Streamer score ranking: a selected game excludes scores from another ruleset revision", async () => {
+  const { db, raw } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);
+  const userA = seedUser(raw, "A");
+  const userB = seedUser(raw, "B");
+  seedVerifiedStreamer(raw, userA, "YOUTUBE", "yt-a");
+  seedVerifiedStreamer(raw, userB, "TWITCH", "tw-b");
+
+  seedScore(raw, userA, "reaction-time", 700, 1);
+  seedScore(raw, userA, "reaction-time", 9_999, 2);
+  seedScore(raw, userB, "reaction-time", 800, 1);
+
+  const repo = new D1StreamerRepository(db);
+  const result = await repo.getStreamerRankings({
+    mode: "score",
+    gameId: "reaction-time",
+    rulesetRevision: 1,
+    direction: "desc",
+    limit: 20,
+    offset: 0,
+  });
+
+  assert.equal(result.total, 2);
+  assert.deepEqual(
+    result.entries.map((entry) => [entry.userId, entry.score]),
+    [
+      [userB, 800],
+      [userA, 700],
+    ],
+  );
 });

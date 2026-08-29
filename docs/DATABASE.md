@@ -2,9 +2,9 @@
 
 상태: 기준 문서
 
-마지막 검증: 2026-08-27
+마지막 검증: 2026-08-30
 
-최신 마이그레이션: `0042_multiplayer_rematch.sql`
+최신 마이그레이션: `0045_generic_multiplayer_relay_profiles.sql`
 
 기준 소스:
 
@@ -16,32 +16,35 @@
 - [`ERD.md`](ERD.md) — 도메인별 관계도와 전체 물리 테이블·호환 뷰 사전
 
 Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 권한 원천입니다. 이 문서는
-현재 `0000_initial_schema.sql`부터 `0042_multiplayer_rematch.sql`까지의 역할을 설명합니다.
+현재 `0000_initial_schema.sql`부터 `0045_generic_multiplayer_relay_profiles.sql`까지의 역할을 설명합니다.
 
 ## 마이그레이션 범위
 
-| 범위          | 주제                                                                       |
-| ------------- | -------------------------------------------------------------------------- |
-| `0000`–`0005` | 사용자, 점수, identity/merge, progression                                  |
-| `0006`–`0009` | Discord link, guild, guild XP                                              |
-| `0010`–`0014` | 방송 채널 profile, metrics, review(당시 `creator_*` 역사 명칭)             |
-| `0015`–`0018` | admin 인증/계정, locale, 활동 연속 기록                                    |
-| `0019`–`0023` | 게임 설정, 난이도 점수, 프로필 공개 범위, 모니터링, moderation             |
-| `0024`–`0028` | USER sandbox game, staff/program, soft delete, mode/logo, 일회성 attempt   |
-| `0029`        | generic `games` identity와 USER backfill                                   |
-| `0030`        | USER identity write convergence                                            |
-| `0031`        | 공통 `game_versions`, slug/live-version 불변식, version 수렴               |
-| `0032`        | generic score acceptance에 필요한 relational binding                       |
-| `0033`        | generic `game_assets`, USER logo convergence                               |
-| `0034`        | USER control/review 필드의 generic authority 전환과 구 Worker 호환 미러    |
-| `0035`        | Game Creator Manifest v1 결과 원장, score projection, 게임별 도전과제 해금 |
-| `0036`        | live-version 리더보드 세대와 OWOGG 완전 삭제 감사 로그                     |
-| `0037`        | OAuth provider별 avatar 후보와 사용자 avatar 선택                          |
-| `0038`        | 관리자 역할별 기능 권한 정책과 통합 관리자 센터 접근                       |
-| `0039`        | 방송 채널 도메인의 `streamer_*` 명명 전환과 롤링 배포 호환 계층            |
-| `0040`        | 공개 게임별 고유 플레이·현재 북마크 집계를 위한 game-first covering index  |
-| `0041`        | exact-version 멀티 profile, instance/match 원장, reward outbox와 lease     |
-| `0042`        | committed match의 양방향 재대결 동의와 exact generation/lease 전환         |
+| 범위          | 주제                                                                        |
+| ------------- | --------------------------------------------------------------------------- |
+| `0000`–`0005` | 사용자, 점수, identity/merge, progression                                   |
+| `0006`–`0009` | Discord link, guild, guild XP                                               |
+| `0010`–`0014` | 방송 채널 profile, metrics, review(당시 `creator_*` 역사 명칭)              |
+| `0015`–`0018` | admin 인증/계정, locale, 활동 연속 기록                                     |
+| `0019`–`0023` | 게임 설정, 난이도 점수, 프로필 공개 범위, 모니터링, moderation              |
+| `0024`–`0028` | USER sandbox game, staff/program, soft delete, mode/logo, 일회성 attempt    |
+| `0029`        | generic `games` identity와 USER backfill                                    |
+| `0030`        | USER identity write convergence                                             |
+| `0031`        | 공통 `game_versions`, slug/live-version 불변식, version 수렴                |
+| `0032`        | generic score acceptance에 필요한 relational binding                        |
+| `0033`        | generic `game_assets`, USER logo convergence                                |
+| `0034`        | USER control/review 필드의 generic authority 전환과 구 Worker 호환 미러     |
+| `0035`        | Game Creator Manifest v1 결과 원장, score projection, 게임별 도전과제 해금  |
+| `0036`        | live-version 리더보드 세대와 OWOGG 완전 삭제 감사 로그                      |
+| `0037`        | OAuth provider별 avatar 후보와 사용자 avatar 선택                           |
+| `0038`        | 관리자 역할별 기능 권한 정책과 통합 관리자 센터 접근                        |
+| `0039`        | 방송 채널 도메인의 `streamer_*` 명명 전환과 롤링 배포 호환 계층             |
+| `0040`        | 공개 게임별 고유 플레이·현재 북마크 집계를 위한 game-first covering index   |
+| `0041`        | exact-version 멀티 profile, instance/match 원장, reward outbox와 lease      |
+| `0042`        | committed match의 양방향 재대결 동의와 exact generation/lease 전환          |
+| `0043`        | gs2 attempt의 first-evidence hash claim과 단일 terminal 전환                |
+| `0044`        | gs2 세 점수 의미, verifier provenance, mode/revision과 원자 랭킹 projection |
+| `0045`        | exact content hash에 묶인 generic Relay profile과 instance authority        |
 
 기존 migration은 변경, squash, 삭제하지 않습니다. 프로덕션 배포는 API보다 먼저
 `pnpm d1:migrate:prod`를 실행합니다.
@@ -79,8 +82,10 @@ publisher authority는 서버/배포 과정이 기록하는 relational fact이�
 
 `live_version_id`가 다른 version으로 바뀔 때만 `leaderboard_generation`이 증가합니다. `scores` row도
 승인 시점의 동일 generation을 저장하며 공개·개인·Streamer·Discord 게임 랭킹 쿼리는 현재 game
-generation과 일치하는 row만 읽습니다. 따라서 version rollout은 과거 score를 물리 삭제하지 않고도
-현재 leaderboard를 초기화합니다.
+generation과 canonical ruleset revision에 맞는 row만 읽습니다. 공개 게임 랭킹은 difficulty도 함께
+분리합니다. `variant_id`는 플레이한 Mode의 provenance와 표시를 보존하지만 독립 leaderboard partition은
+아닙니다. 따라서 version rollout 또는 ruleset revision 전환은 과거 score를 물리 삭제하지 않고도 현재
+leaderboard를 초기화합니다.
 
 ### `game_versions`
 
@@ -101,12 +106,33 @@ Publisher-neutral bundle identity와 publication 사실을 저장합니다.
 
 ### `game_results`와 `user_game_achievements`
 
-`0035`부터 `owogg.json` Game Creator Manifest v1 계약으로 보고된 완료 사실은 `game_results`에 먼저
-기록됩니다. 서버는 live canonical 계약을 기준으로 outcome, score, progression, metrics, events를
-검증하며, 범위 정책이 `clamp`인 값은 보정 사실과 사유를 함께 남기되 보상·랭킹 대상에서는
-제외합니다. 랭킹이 활성화된 유효 score만 기존 `scores` 테이블에 `result_id`로 연결된 projection을
-생성합니다. `user_game_achievements`는 이 결과 원장을 기반으로 게임별 manifest achievement를
+`0035`부터 `owogg.json` Game Creator Manifest v1 계약으로 승인된 완료 사실은 `game_results`에 먼저
+기록됩니다. non-PlayConfig `gs1`은 live canonical 계약으로 client facts의 outcome, score,
+progression, metrics, events를 검증하고, `clamp` 보정 결과는 보상·랭킹에서 제외합니다.
+
+`0044`의 verifier-backed `gs2` row는 `raw_score`, manifest precision을 적용한 `normalized_score`,
+reward factor가 적용된 `competitive_score`, `variant_id`, `ruleset_revision`, `verifier_id`,
+`evidence_hash`를 함께 기록합니다. 이 경로는 verifier 출력을 clamp하지 않고 선언 범위 밖이면 전체를
+거부합니다. `scores.score`에는 competitive score를 투영하며 normalized gameplay facts는 도전과제·
+진행도 판단에 사용합니다. `user_game_achievements`는 결과 원장을 기반으로 게임별 manifest achievement를
 멱등 해금합니다.
+
+### `game_result_verification_claims`
+
+`0043`은 verifier-backed `gs2` attempt마다 처음 제출된 canonical evidence의 SHA-256 hash를 원자적으로
+고정합니다. raw evidence는 저장하지 않습니다. claim identity는 `(attempt_id, user_id, game_id,
+version_id, evidence_hash)`이며 exact version이 해당 game 소속인지 insert trigger가 재검증합니다.
+
+상태는 `PROCESSING → VERIFIED | REJECTED` 한 번만 이동할 수 있습니다. `VERIFIED` 전환은 연결된
+`game_results`가 같은 attempt/user/game/version인지, 선택적 `scores`가 그 result와 user를 투영하는지
+trigger가 확인합니다. Phase 5-E부터 exact PROCESSING claim에 대해 attempt 소비, verifier-backed
+`game_results`, 선택적 `scores`, result/score ID가 연결된 VERIFIED 전환을 하나의 D1 batch로
+commit합니다. 어느 insert나 finalization이 실패해도 batch 전체가 rollback됩니다. 같은 evidence의
+terminal replay는 저장된 서버 facts 또는 rejection code를 반환하고, 다른 evidence나 context로 같은
+attempt를 바꾸려는 요청은 거부합니다. batch 시작 시 PUBLIC identity, exact current live version,
+READY publish 상태와 D1 kill-switch를 다시 확인하므로 verifier 실행 도중 권위 상태가 바뀐 결과는
+소비하거나 저장하지 않습니다. MVP에는 queue/cron/recovery worker가 없으므로 verifier 실행 뒤 Worker가
+비정상 종료한 희귀 claim은 자동 복구하지 않고 새 attempt를 발급합니다.
 
 ### `official_game_deletion_audit_log`
 
@@ -117,20 +143,20 @@ B2를 멱등 정리한 다음, exact `(game_id, slug, publisher_type)` 조건으
 
 ## Multiplayer foundation
 
-`0041`과 `0042`는 멀티플레이를 자동 활성화하지 않는 additive control-plane schema입니다. 게임별
-live 상태와 tick은 한 instance에 대응하는 Durable Object가 소유하고, D1은 다음의 장기 권한 사실만
-저장합니다.
+`0041`과 `0042`는 초기 additive control-plane schema이고, `0045`가 현재 generic Relay profile
+authority를 추가합니다. 게임별 live Relay 상태는 한 instance에 대응하는 Durable Object가 소유하고,
+D1은 다음의 장기 권한 사실만 저장합니다.
 
-- `multiplayer_profile_requests`: Creator가 exact USER-owned version에 제출한 canonical request JSON,
-  SHA-256과 단일 CAS 관리자 결정
-- `multiplayer_profiles`: 서버가 해석한 immutable M1/M2 profile revision; exact READY version당
-  enabled revision은 최대 하나
+- `multiplayer_profile_requests`: Creator/OWOGG upload가 exact version/content hash에 제출한 canonical
+  request JSON, SHA-256과 단일 CAS 관리자 결정
+- `multiplayer_profiles`: 서버가 해석한 immutable generic Relay profile revision; 승인 시 disabled로
+  생성되고 별도 activation을 거치며 exact READY version당 enabled revision은 최대 하나
 - `multiplayer_instances`, `multiplayer_participants`, `multiplayer_invites`: idempotent 생성, 정원,
   membership, generation과 hash-only invite 원장
-- `multiplayer_matches`, `multiplayer_match_players`, `multiplayer_match_actions`: server-authoritative
-  lifecycle, canonical 참가자 결과와 M1 action idempotency 원장
-- `multiplayer_rematch_requests`: committed exact generation에 묶인 active participant별 append-only
-  재대결 동의; 양쪽 동의가 모여야 generation과 exact-version lease를 한 번만 `+1` 전환
+- `multiplayer_matches`, `multiplayer_match_players`, `multiplayer_match_actions`: Phase 5 삭제 전 구
+  server-ruleset runtime의 historical lifecycle/action 원장. generic Relay message는 이 원장에 쓰지 않음
+- `multiplayer_rematch_requests`: 초기 server-ruleset 재대결 설계가 만든 historical table. Relay
+  application/runtime은 읽거나 쓰지 않으며, 적용된 migration 이력 보존 때문에 물리 schema에만 남음
 - `multiplayer_reward_outbox`: committed eligible player와 approved reward policy에 묶인 exactly-once
   전달 원장
 - `game_version_leases`: 실행 중 instance가 사용하는 exact bundle의 삭제를 막는 lease
@@ -138,21 +164,22 @@ live 상태와 tick은 한 instance에 대응하는 Durable Object가 소유하�
   감사 원장
 
 Profile semantic column은 update할 수 없고 변경 시 새 `profile_revision`을 만든다. Creator request는
-manifest 권한이 아니며 USER publisher identity, approved request hash, READY/APPROVED exact version을
-DB trigger가 다시 확인한다. Instance 생성도 현재 live READY version과 enabled profile snapshot이
-일치해야 한다. Profile을 disable하면 기존 참가자의 reconnect는 유지하지만 신규 join/rejoin/invite는
-거절한다. 만료 sweep은 lobby뿐 아니라 STARTING/ACTIVE/CLOSING instance도 `EXPIRED`로 바꾸고 match,
-invite와 lease를 같은 terminal trigger에서 정리한다.
+manifest 권한이 아니며 publisher identity, approved request hash, exact content hash와 READY/APPROVED
+version을 DB trigger가 다시 확인한다. Instance 생성도 현재 live READY version과 enabled Relay profile
+snapshot이 일치해야 한다. Profile을 disable하면 기존 참가자의 reconnect는 유지하지만 신규
+join/rejoin/invite는 거절한다. `0045`는 기존 ruleset profile을 disable하고 새 ruleset insert/enable을
+막으며 runtime repository는 `profile_kind = 'RELAY'`만 읽는다. 만료 sweep은 lobby뿐 아니라
+STARTING/ACTIVE/CLOSING instance도 `EXPIRED`로 바꾸고 match, invite와 lease를 같은 terminal trigger에서
+정리한다.
 
 Match는 `PENDING → ACTIVE → FINALIZING → COMMITTED` 순서를 건너뛸 수 없고 모든 player result가
 committed되기 전에는 최종 commit할 수 없다. Reward row는 finalizing/committed match의 committed
 eligible player에 대해서만 생성된다. iframe의 `GAME_COMPLETE`, score, XP 주장은 이 원장에 쓸 수
 없다.
 
-재대결 동의는 `COMMITTED` match와 같은 `CLOSING` generation, `READY` participant, 2분 consent
-window를 DB trigger가 다시 확인한다. 두 active participant의 동의가 모두 저장된 guarded batch만
-`CLOSING → LOBBY`와 generation `+1`을 수행하며 기존 참가자를 `JOINED`로 되돌리고 lease generation을
-함께 이동한다. 이전 generation invite는 즉시 revoke된다.
+Relay 재경기는 플랫폼 결과/재대결 API가 아니라 게임 ZIP의 application payload와 UI가 담당합니다.
+기존 `multiplayer_rematch_requests` trigger는 migration 이력에만 존재하고 현재 repository, API, DO,
+Web runtime에는 consumer가 없습니다.
 
 계정 병합은 같은 instance/match에 두 후보 계정이 함께 존재하는지와 두 Creator 계정의 review slot
 충돌을 먼저 검사한다. 충돌이 없을 때 Creator access, USER game publisher와 multiplayer request owner를

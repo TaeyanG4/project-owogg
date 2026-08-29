@@ -584,23 +584,29 @@ export class D1DiscordGuildRepository implements DiscordGuildRepository {
     gameId: string,
     direction: "asc" | "desc" = "desc",
     limit = 20,
+    rulesetRevision = 1,
   ): Promise<ServerGameLeaderboardEntry[]> {
     const orderClause = direction === "asc" ? "ASC" : "DESC";
 
     const query = `
-      SELECT s.id, s.user_id, u.nickname, u.avatar_url, s.game_id, s.score, s.created_at
+      SELECT s.id, s.user_id, u.nickname, u.avatar_url, s.game_id, s.score, s.created_at,
+             s.variant_id, s.ruleset_revision
       FROM scores s
       JOIN users u ON u.id = s.user_id
       JOIN games g ON g.slug = s.game_id
         AND g.deleted_at IS NULL
         AND g.leaderboard_generation = s.leaderboard_generation
-      WHERE s.user_id IS NOT NULL AND s.game_id = ? AND s.deleted_at IS NULL
+      WHERE s.user_id IS NOT NULL AND s.game_id = ? AND s.ruleset_revision = ?
+        AND s.deleted_at IS NULL
         AND s.user_id IN (SELECT DISTINCT user_id FROM discord_guild_xp_events WHERE guild_id = ?)
       ORDER BY s.score ${orderClause}, s.created_at ASC
       LIMIT 100
     `;
 
-    const res = await this.db.prepare(query).bind(gameId, guildId).all<Record<string, unknown>>();
+    const res = await this.db
+      .prepare(query)
+      .bind(gameId, rulesetRevision, guildId)
+      .all<Record<string, unknown>>();
 
     const seen = new Set<number>();
     const leaderboard: ServerGameLeaderboardEntry[] = [];
@@ -617,6 +623,8 @@ export class D1DiscordGuildRepository implements DiscordGuildRepository {
         avatarUrl: row.avatar_url ? String(row.avatar_url) : null,
         gameId: String(row.game_id),
         score: Number(row.score),
+        variantId: row.variant_id ? String(row.variant_id) : "standard",
+        rulesetRevision: Number(row.ruleset_revision ?? 1),
         formattedScore: String(row.score),
         createdAt: String(row.created_at),
       });

@@ -166,7 +166,14 @@ export class DiscordGuildXpUseCases {
     const game = (await this.games?.findBySlug(gameId)) ?? null;
     if (!game) throw new Error(`존재하지 않는 게임 ID입니다: ${gameId}`);
     const direction = game.canonical.policy.score?.direction ?? "desc";
-    return this.guildRepo.getGuildGameLeaderboard(guildId, gameId, direction, limit);
+    const rulesetRevision = game.canonical.playConfig?.rulesetRevision ?? 1;
+    return this.guildRepo.getGuildGameLeaderboard(
+      guildId,
+      gameId,
+      direction,
+      limit,
+      rulesetRevision,
+    );
   }
 
   async getUserGuildRankSummary(

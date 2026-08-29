@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "lib": ["ES2023", "DOM"],
+    "rootDir": ".",
+    "outDir": "dist",
+    "declaration": false,
+    "sourceMap": false,
+    "skipLibCheck": true
+  },
+  "include": ["main.ts", "rules.ts"]
+}

@@ -9,7 +9,8 @@ import type { GameSettingsRepository } from "../ports/repositories.js";
 import type { GameResultAcceptanceRepository } from "../ports/gameResultAcceptance.js";
 import type { RuntimeGameRegistry } from "../modules/game/ports/runtimeGameRegistry.js";
 import type { RuntimeGameAvailability } from "./runtimeGameAvailability.js";
-import type { MultiplayerLegacyFlowGate } from "./multiplayerLegacyFlowGate.js";
+import type { SelectedTopologyAuthorityGate } from "./selectedTopologyAuthorityGate.js";
+import { evaluateClientAuthoredResultFlow } from "./clientAuthoredResultFlowGate.js";
 import type { OwoggAchievementDefinition } from "@owogg/game-sdk/contracts";
 
 export type GameResultAcceptError =
@@ -17,6 +18,7 @@ export type GameResultAcceptError =
   | "GAME_DISABLED"
   | "MULTIPLAYER_MANAGED"
   | "MULTIPLAYER_AUTHORITY_UNAVAILABLE"
+  | "PLAY_CONFIG_AUTHORITY_UNAVAILABLE"
   | "INVALID_TOKEN"
   | "CONTEXT_MISMATCH"
   | "MANIFEST_NOT_CONFIGURED"
@@ -32,6 +34,7 @@ export type GameResultAcceptResult =
       readonly gameId: number;
       readonly slug: string;
       readonly normalized: NormalizedGameCreatorResult;
+      readonly difficultyId: string;
       readonly xpPerCompletion: number;
       readonly achievements: readonly OwoggAchievementDefinition[];
     }
@@ -41,7 +44,7 @@ export class GameResultAcceptanceUseCases {
   constructor(
     private readonly runtimeGames: RuntimeGameRegistry,
     private readonly availability: RuntimeGameAvailability,
-    private readonly multiplayerLegacyFlow: MultiplayerLegacyFlowGate,
+    private readonly selectedTopologyAuthority: SelectedTopologyAuthorityGate,
     private readonly settings: Pick<GameSettingsRepository, "getDisabledGameIds">,
     private readonly acceptanceRepo: GameResultAcceptanceRepository,
   ) {}
@@ -65,11 +68,16 @@ export class GameResultAcceptanceUseCases {
       return { ok: false, error: "GAME_NOT_AVAILABLE" };
     }
 
-    const legacyFlow = await this.multiplayerLegacyFlow.evaluate(
+    const authoritySelection = await this.selectedTopologyAuthority.evaluate(
       runtime.identity.id,
       runtime.liveVersion.id,
     );
-    if (!legacyFlow.allowed) return { ok: false, error: legacyFlow.error };
+    if (!authoritySelection.allowed) return { ok: false, error: authoritySelection.error };
+
+    const clientAuthoredFlow = evaluateClientAuthoredResultFlow(runtime.canonical);
+    if (!clientAuthoredFlow.allowed) {
+      return { ok: false, error: clientAuthoredFlow.error };
+    }
 
     const verified = await verifyGameSession(input.token, input.secret);
     if (!verified.ok) return { ok: false, error: "INVALID_TOKEN" };
@@ -132,6 +140,7 @@ export class GameResultAcceptanceUseCases {
       gameId: runtime.identity.id,
       slug: runtime.identity.slug,
       normalized: normalized.result,
+      difficultyId: tokenDifficulty.normalizedDifficultyId,
       xpPerCompletion: runtime.canonical.policy.xpPerCompletion,
       achievements: manifest.achievements ?? [],
     };

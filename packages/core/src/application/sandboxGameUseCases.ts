@@ -10,6 +10,7 @@ import type {
   BundleArchiveWriter,
 } from "../ports/sandboxGames.js";
 import type { GameCanonicalRepository } from "../modules/game/ports/gameCanonicalRepository.js";
+import { EMPTY_GAME_VERIFIER_REGISTRY, type GameVerifierCatalog } from "../ports/gameVerifier.js";
 import type { MultiplayerProfileRequestRepository } from "../modules/multiplayer/ports/multiplayerProfileRequestRepository.js";
 import type { GameCanonicalDocument } from "../modules/game/domain/gameCanonicalDocument.js";
 import type { SandboxGameVisibility, SandboxGameMode } from "../domain/sandboxGames.js";
@@ -35,9 +36,10 @@ import {
 import {
   GameCreatorManifestValidationError,
   extractGameCreatorManifest,
-  getManagedMultiplayerProfileRequestV1,
+  getMultiplayerRuntimeProfileRequestV1,
   parseGameCreatorManifestBytes,
 } from "../domain/gameCreatorManifest.js";
+import { resolveMultiplayerRuntimeProfileRequestV1 } from "../modules/multiplayer/domain/multiplayerProfileRequest.js";
 import { mapGameCreatorManifestToCanonical } from "../domain/gameCreatorManifestCanonical.js";
 import { sha256Hex } from "../domain/contentHash.js";
 import {
@@ -80,6 +82,13 @@ export type SandboxGameUseCaseError =
   | "MANIFEST_MISSING"
   /** owogg.json is malformed, violates v1, or a new version changes its immutable game slug. */
   | "MANIFEST_INVALID"
+  /** The manifest requests PlayConfig verification but the server has no reviewed implementation
+   * registered under that stable verifier ID. No storage or catalog mutation may happen. */
+  | "VERIFIER_NOT_REGISTERED"
+  /** The requested online runtime is recognized by manifest v1 but is not deployable yet. */
+  | "MULTIPLAYER_RUNTIME_NOT_AVAILABLE"
+  /** Relay was requested with a feature the current lifecycle contract cannot honor. */
+  | "MULTIPLAYER_CAPABILITY_NOT_AVAILABLE"
   /** Kept as route-level validation codes for metadata edit APIs. Game Creator ZIP validation reports
    * MANIFEST_INVALID so callers get one stable manifest error contract. */
   | "INVALID_GENRE"
@@ -183,15 +192,35 @@ export class SandboxGameUseCases {
     private gameCanonicalRepo: GameCanonicalRepository,
     private archiveWriter?: BundleArchiveWriter,
     private multiplayerProfileRequests?: MultiplayerProfileRequestRepository,
+    private gameVerifierCatalog: GameVerifierCatalog = EMPTY_GAME_VERIFIER_REGISTRY,
   ) {}
+
+  private assertSupportedManifestFeatures(
+    manifest: NonNullable<ReturnType<typeof extractGameCreatorManifest>>,
+  ): void {
+    const verifierId = manifest.playConfig?.verifierId;
+    if (verifierId !== undefined && !this.gameVerifierCatalog.has(verifierId)) {
+      throw new SandboxGameUseCaseFailure("VERIFIER_NOT_REGISTERED");
+    }
+    const request = getMultiplayerRuntimeProfileRequestV1(manifest);
+    if (!request) return;
+    const resolution = resolveMultiplayerRuntimeProfileRequestV1(request);
+    if (resolution.status === "RUNTIME_NOT_AVAILABLE") {
+      throw new SandboxGameUseCaseFailure("MULTIPLAYER_RUNTIME_NOT_AVAILABLE");
+    }
+    if (resolution.status === "CAPABILITY_NOT_AVAILABLE") {
+      throw new SandboxGameUseCaseFailure("MULTIPLAYER_CAPABILITY_NOT_AVAILABLE");
+    }
+  }
 
   private async submitDeclaredMultiplayerRequest(input: {
     manifest: NonNullable<ReturnType<typeof extractGameCreatorManifest>>;
     gameId: number;
     gameVersionId: number;
+    contentHash: string;
     requestedByUserId: number;
   }): Promise<void> {
-    const request = getManagedMultiplayerProfileRequestV1(input.manifest);
+    const request = getMultiplayerRuntimeProfileRequestV1(input.manifest);
     if (!request) return;
     if (!this.multiplayerProfileRequests) {
       throw new SandboxGameUseCaseFailure("PUBLISH_FAILED");
@@ -200,6 +229,7 @@ export class SandboxGameUseCases {
       const submitted = await this.multiplayerProfileRequests.submit({
         gameId: input.gameId,
         gameVersionId: input.gameVersionId,
+        contentHash: input.contentHash,
         requestedByUserId: input.requestedByUserId,
         request,
         nowIso: new Date().toISOString(),
@@ -347,6 +377,7 @@ export class SandboxGameUseCases {
     if (manifest.game.slug !== game.slug) {
       throw new SandboxGameUseCaseFailure("MANIFEST_INVALID");
     }
+    this.assertSupportedManifestFeatures(manifest);
 
     const logoFile = findGameLogoFile(prepared.files);
     if (logoFile && logoFile.bytes.byteLength > SANDBOX_GAME_POLICY.MAX_LOGO_BYTES) {
@@ -570,6 +601,7 @@ export class SandboxGameUseCases {
       }
     })();
     if (!manifest) throw new SandboxGameUseCaseFailure("MANIFEST_MISSING");
+    this.assertSupportedManifestFeatures(manifest);
 
     // Required on every registration (2026-08-18) — checked here, before createGame(), so a
     // missing/oversized logo never leaves a game row behind with nothing to show for it.
@@ -695,6 +727,7 @@ export class SandboxGameUseCases {
       manifest: input.manifest,
       gameId: input.gameId,
       gameVersionId: published.id,
+      contentHash: published.contentHash,
       requestedByUserId: input.requestedByUserId,
     });
     return published;
@@ -756,6 +789,7 @@ export class SandboxGameUseCases {
     })();
     if (!manifest) throw new SandboxGameUseCaseFailure("MANIFEST_MISSING");
     if (manifest.game.slug !== game.slug) throw new SandboxGameUseCaseFailure("MANIFEST_INVALID");
+    this.assertSupportedManifestFeatures(manifest);
     const logo = findGameLogoFile(preparedWithMetadata.files);
     const prepared = logo
       ? {
@@ -770,6 +804,7 @@ export class SandboxGameUseCases {
       manifest,
       gameId: game.id,
       gameVersionId: published.id,
+      contentHash: published.contentHash,
       requestedByUserId: game.developerUserId,
     });
     return published;
@@ -799,6 +834,7 @@ export class SandboxGameUseCases {
     }
     if (!manifest) throw new SandboxGameUseCaseFailure("MANIFEST_MISSING");
     if (manifest.game.slug !== game.slug) throw new SandboxGameUseCaseFailure("MANIFEST_INVALID");
+    this.assertSupportedManifestFeatures(manifest);
 
     try {
       const previous = await this.gameCanonicalRepo.findBySlug(game.slug);

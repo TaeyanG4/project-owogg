@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { app } from "../src/app.js";
-import type { GameCanonicalDocument } from "@owogg/core";
+import { GAME_CANONICAL_SCHEMA_VERSION, type GameCanonicalDocument } from "@owogg/core";
 import type { ApiEnv } from "../src/routes/auth.js";
 
 const B2_ENV = {
@@ -28,12 +28,21 @@ interface FakeGame {
 
 interface PublicGameJson {
   slug: string;
+  playModes: Array<"single" | "local-multi" | "online-multi">;
   publisherType: string;
   publisherName: string;
   catalog: { type: string };
   mediaUrl: string | null;
   publishedAt: string;
   stats: { playerCount: number; bookmarkCount: number; popularityScore: number };
+  playConfig?: {
+    version: number;
+    rulesetRevision: number;
+    defaultVariantId: string;
+    variants: Array<{ id: string; label: string }>;
+    allowedConfigs: Array<{ difficultyId: string; variantId: string; rewardFactor: number }>;
+    [key: string]: unknown;
+  };
   [key: string]: unknown;
 }
 
@@ -189,7 +198,7 @@ const OFFICIAL: FakeGame = {
   playerCount: 10,
   bookmarkCount: 4,
   canonical: {
-    schemaVersion: 2,
+    schemaVersion: GAME_CANONICAL_SCHEMA_VERSION,
     slug: "reaction-time",
     title: "반응속도 테스트",
     shortDescription: "반응속도를 측정합니다.",
@@ -201,6 +210,24 @@ const OFFICIAL: FakeGame = {
       xpPerCompletion: 10,
       requiresAuth: false,
     },
+    difficulty: {
+      levels: [
+        { id: "normal", label: "Normal" },
+        { id: "hard", label: "Hard" },
+      ],
+      defaultLevelId: "normal",
+    },
+    playConfig: {
+      version: 1,
+      rulesetRevision: 7,
+      verifierId: "reaction-time/score-v1",
+      defaultVariantId: "standard",
+      variants: [{ id: "standard", label: "Standard" }],
+      allowedConfigs: [
+        { difficultyId: "normal", variantId: "standard", rewardFactor: 1 },
+        { difficultyId: "hard", variantId: "standard", rewardFactor: 1.25 },
+      ],
+    },
     supportsReplay: false,
     catalog: {
       type: "TAXONOMY",
@@ -211,6 +238,40 @@ const OFFICIAL: FakeGame = {
       minPlayers: 1,
       maxPlayers: 1,
       thumbnail: "/reaction-time.svg",
+    },
+    creatorManifest: {
+      $schema: "https://owogg.com/schemas/manifest/v1.json",
+      schemaVersion: 1,
+      game: {
+        slug: "reaction-time",
+        title: "반응속도 테스트",
+        genre: "skill",
+        mode: "single",
+        playModes: ["single"],
+      },
+      difficulties: [
+        { id: "normal", title: "Normal", default: true },
+        { id: "hard", title: "Hard" },
+      ],
+      playConfig: {
+        version: 1,
+        rulesetRevision: 7,
+        verifierId: "reaction-time/score-v1",
+        variants: [{ id: "standard", title: "Standard", default: true }],
+        allowedConfigs: [
+          { difficultyId: "normal", variantId: "standard", rewardFactor: 1 },
+          { difficultyId: "hard", variantId: "standard", rewardFactor: 1.25 },
+        ],
+      },
+      progression: { type: "none" },
+      result: {
+        score: {
+          unit: "ms",
+          direction: "asc",
+          range: { min: 0, max: 60_000, outOfRange: "reject" },
+        },
+      },
+      leaderboard: { enabled: true },
     },
     updatedAt: "2026-08-01T00:00:00.000Z",
   },
@@ -227,11 +288,12 @@ const USER: FakeGame = {
   playerCount: 7,
   bookmarkCount: 2,
   canonical: {
-    schemaVersion: 1,
+    schemaVersion: GAME_CANONICAL_SCHEMA_VERSION,
     slug: "ball-dodge",
     title: "공 피하기",
     shortDescription: "공을 피하세요",
     description: "공을 피하세요.",
+    publisher: { official: false },
     policy: {
       score: { unit: "seconds", direction: "desc", min: 0, max: 3600 },
       leaderboard: true,
@@ -270,6 +332,19 @@ test("GET /api/games lists generic OWOGG and USER projections and preserves cata
   assert.equal(user?.publisherName, "Taeyang");
   assert.equal(official?.catalog.type, "TAXONOMY");
   assert.equal(user?.catalog.type, "GENRE_MODE");
+  assert.deepEqual(official?.playModes, ["single"]);
+  assert.deepEqual(user?.playModes, ["single"]);
+  assert.deepEqual(official?.playConfig, {
+    version: 1,
+    rulesetRevision: 7,
+    defaultVariantId: "standard",
+    variants: [{ id: "standard", label: "Standard" }],
+    allowedConfigs: [
+      { difficultyId: "normal", variantId: "standard", rewardFactor: 1 },
+      { difficultyId: "hard", variantId: "standard", rewardFactor: 1.25 },
+    ],
+  });
+  assert.equal("verifierId" in (official?.playConfig ?? {}), false);
   assert.deepEqual(official?.stats, {
     playerCount: 10,
     bookmarkCount: 4,

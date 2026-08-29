@@ -1,27 +1,63 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { MultiplayerGameAvailabilityResponse } from "@owogg/contracts";
 import {
   buildMultiplayerRoomShareValue,
   parseMultiplayerRoomJoinValue,
   readMultiplayerRoomShareValue,
+  supportsPrivateOpenRoomLauncher,
   stripMultiplayerRoomCredentials,
 } from "../features/game/runtime/MultiplayerGameSurface";
 import {
-  multiplayerPeerConnectionMessage,
   multiplayerRoomClipboardValue,
   multiplayerRuntimeInitialRoster,
 } from "../features/game/runtime/MultiplayerIframeRuntime";
-import { requestMultiplayerRematch } from "../features/game/runtime/multiplayerRoomApi";
+
+test("the shared room launcher accepts only an exact available PRIVATE + OPEN profile", () => {
+  const available: Extract<MultiplayerGameAvailabilityResponse, { readonly status: "AVAILABLE" }> =
+    {
+      status: "AVAILABLE",
+      protocolVersion: 1,
+      gameSlug: "creator-relay-demo",
+      profile: {
+        gameVersionId: 1,
+        contentHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        profileRevision: 1,
+        transportKind: "websocket",
+        runtimeKind: "relay",
+        reconnectPolicy: "resume",
+        directMessages: true,
+        hostSnapshot: true,
+        minPlayers: 2,
+        maxPlayers: 2,
+        allowedVisibility: ["PRIVATE"],
+        allowedJoinPolicies: ["OPEN"],
+        resultTrust: "UNVERIFIED",
+      },
+    };
+  assert.equal(supportsPrivateOpenRoomLauncher(available), true);
+  assert.equal(
+    supportsPrivateOpenRoomLauncher({
+      ...available,
+      profile: { ...available.profile, allowedJoinPolicies: ["INVITE_ONLY"] },
+    }),
+    false,
+  );
+  assert.equal(
+    supportsPrivateOpenRoomLauncher({ status: "UNAVAILABLE", protocolVersion: 1 }),
+    false,
+  );
+});
 
 test("multiplayer room share link keeps code and invite out of HTTP query data", () => {
   const result = buildMultiplayerRoomShareValue(
-    "https://stg.owogg.com/games/official-omok?old=value#result",
+    "https://stg.owogg.com/games/creator-relay-demo?old=value#result",
     "ROOMCODE1234",
     "invite_token_123456789",
   );
   const url = new URL(result);
   assert.equal(url.origin, "https://stg.owogg.com");
-  assert.equal(url.pathname, "/games/official-omok");
+  assert.equal(url.pathname, "/games/creator-relay-demo");
   assert.equal(url.searchParams.get("old"), "value");
   assert.equal(url.searchParams.has("room"), false);
   assert.equal(url.searchParams.has("invite"), false);
@@ -32,10 +68,10 @@ test("multiplayer room share link keeps code and invite out of HTTP query data",
   assert.equal(result.includes("socket"), false);
 });
 
-test("share parsing prefers fragments, supports legacy query links, and strips consumed credentials", () => {
+test("share parsing prefers fragments and strips consumed credentials", () => {
   const open = new URL(
     buildMultiplayerRoomShareValue(
-      "https://owogg.com/games/official-omok?invite=stale",
+      "https://owogg.com/games/creator-relay-demo?invite=stale",
       "OPENROOM1234",
     ),
   );
@@ -47,15 +83,15 @@ test("share parsing prefers fragments, supports legacy query links, and strips c
   });
   assert.deepEqual(
     readMultiplayerRoomShareValue(
-      "https://stg.owogg.com/games/official-omok?room=LEGACY&invite=legacy-token",
+      "https://stg.owogg.com/games/creator-relay-demo?room=OLDROOM12345&invite=invite-token",
     ),
-    { publicCode: "LEGACY", inviteToken: "legacy-token" },
+    { publicCode: "OLDROOM12345", inviteToken: "invite-token" },
   );
   assert.equal(
     stripMultiplayerRoomCredentials(
-      "https://stg.owogg.com/games/official-omok?room=OLD&keep=1#room=NEW&invite=secret&tab=game",
+      "https://stg.owogg.com/games/creator-relay-demo?room=OLD&keep=1#room=NEW&invite=secret&tab=game",
     ),
-    "https://stg.owogg.com/games/official-omok?keep=1#tab=game",
+    "https://stg.owogg.com/games/creator-relay-demo?keep=1#tab=game",
   );
   assert.equal(
     buildMultiplayerRoomShareValue("", "ROOMCODE1234", "invite-token"),
@@ -63,9 +99,9 @@ test("share parsing prefers fragments, supports legacy query links, and strips c
   );
 });
 
-test("room-code links, plain codes, and historical invite links all normalize safely", () => {
+test("room-code links, plain codes, and optional invite values all normalize safely", () => {
   const inviteLink = buildMultiplayerRoomShareValue(
-    "https://stg.owogg.com/games/official-omok",
+    "https://stg.owogg.com/games/creator-relay-demo",
     "ROOMCODE1234",
     "invite_token_12345678901234567890",
   );
@@ -86,7 +122,10 @@ test("room-code links, plain codes, and historical invite links all normalize sa
   });
   assert.deepEqual(
     parseMultiplayerRoomJoinValue(
-      buildMultiplayerRoomShareValue("https://stg.owogg.com/games/official-omok", "ROOMCODE1234"),
+      buildMultiplayerRoomShareValue(
+        "https://stg.owogg.com/games/creator-relay-demo",
+        "ROOMCODE1234",
+      ),
     ),
     { publicCode: "ROOMCODE1234", inviteToken: "" },
   );
@@ -94,7 +133,7 @@ test("room-code links, plain codes, and historical invite links all normalize sa
 
 test("room-code and invite-link clipboard actions never substitute for each other", () => {
   const inviteLink =
-    "https://stg.owogg.com/games/official-omok#room=ROOMCODE1234&invite=invite_token_12345678901234567890";
+    "https://stg.owogg.com/games/creator-relay-demo#room=ROOMCODE1234&invite=invite_token_12345678901234567890";
   assert.equal(multiplayerRoomClipboardValue("CODE", "ROOMCODE1234", inviteLink), "ROOMCODE1234");
   assert.equal(multiplayerRoomClipboardValue("LINK", "ROOMCODE1234", inviteLink), inviteLink);
   assert.equal(multiplayerRoomClipboardValue("LINK", "ROOMCODE1234"), null);
@@ -108,6 +147,7 @@ test("active runtime reuses a complete authenticated lobby roster without anothe
       publicCode: "ROOMCODE1234",
       gameId: 1,
       gameVersionId: 1,
+      contentHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       profileRevision: 1,
       visibility: "PRIVATE",
       joinPolicy: "OPEN",
@@ -147,86 +187,32 @@ test("active runtime reuses a complete authenticated lobby roster without anothe
   assert.equal(multiplayerRuntimeInitialRoster(room, players), players);
   assert.equal(multiplayerRuntimeInitialRoster(room, players.slice(0, 1)), null);
   assert.equal(multiplayerRuntimeInitialRoster(room, [players[1], players[1]]), null);
-});
 
-test("disconnect notice counts down and then reports official forfeit finalization", () => {
-  const reconnecting = {
-    participantId: "participant-2",
-    status: "RECONNECTING",
-    reconnectDeadlineAt: "2026-08-27T00:00:30.000Z",
+  const fourPlayerRoom = {
+    ...room,
+    instance: { ...room.instance, participantCount: 4, maxPlayers: 4 },
   } as const;
-  assert.equal(
-    multiplayerPeerConnectionMessage(reconnecting, Date.parse("2026-08-27T00:00:01.000Z")),
-    "상대 네트워크 연결이 불안정합니다. 29초 동안 재접속을 기다립니다.",
-  );
-  assert.equal(
-    multiplayerPeerConnectionMessage(reconnecting, Date.parse("2026-08-27T00:00:30.000Z")),
-    "재접속 유예 시간이 끝났습니다. 공식 기권 결과를 확인하고 있습니다.",
-  );
-  assert.equal(
-    multiplayerPeerConnectionMessage({
-      participantId: "participant-2",
-      status: "TIMED_OUT",
-      reconnectDeadlineAt: null,
-    }),
-    "상대가 30초 안에 재접속하지 않아 기권 처리되었습니다.",
-  );
-});
-
-test("rematch request reconciles an uncertain response from authoritative state", async () => {
-  const input = {
-    instanceId: "instance_12345678",
-    expectedGeneration: 1,
-  } as const;
-  const started = {
-    state: "STARTED",
-    requestedBySelf: true,
-    requestedByOpponent: true,
-    room: {
-      replayed: false,
-      instance: {
-        id: input.instanceId,
-        publicCode: "ROOMCODE1234",
-        gameId: 1,
-        gameVersionId: 1,
-        profileRevision: 1,
-        visibility: "PRIVATE",
-        joinPolicy: "OPEN",
-        status: "LOBBY",
-        generation: 2,
-        participantCount: 2,
-        maxPlayers: 2,
-        expiresAt: "2026-08-28T10:00:00.000Z",
-      },
-      participant: {
-        id: "participant_12345678",
-        role: "PLAYER",
-        seatIndex: 1,
-        status: "READY",
-        connectionGeneration: 1,
-      },
+  const fourPlayers = [
+    ...players,
+    {
+      ...players[1],
+      participantId: "participant_player_0002",
+      seatIndex: 2,
+      nickname: "Player 2",
     },
-  } as const;
-  const lostResponse = new Error("response lost after commit");
-
-  assert.deepEqual(
-    await requestMultiplayerRematch(input, {
-      request: async () => Promise.reject(lostResponse),
-      readStatus: async () => started,
-    }),
-    started,
-  );
-
-  await assert.rejects(
-    requestMultiplayerRematch(input, {
-      request: async () => Promise.reject(lostResponse),
-      readStatus: async () => ({
-        state: "OPPONENT_REQUESTED",
-        requestedBySelf: false,
-        requestedByOpponent: true,
-        room: null,
-      }),
-    }),
-    (error: unknown) => error === lostResponse,
+    {
+      ...players[1],
+      participantId: "participant_player_0003",
+      seatIndex: 3,
+      nickname: "Player 3",
+    },
+  ] as const;
+  assert.equal(multiplayerRuntimeInitialRoster(fourPlayerRoom, fourPlayers), fourPlayers);
+  assert.equal(
+    multiplayerRuntimeInitialRoster(fourPlayerRoom, [
+      ...fourPlayers.slice(0, 3),
+      { ...fourPlayers[3], seatIndex: 2 },
+    ]),
+    null,
   );
 });

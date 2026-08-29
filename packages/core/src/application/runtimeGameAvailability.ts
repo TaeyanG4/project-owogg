@@ -4,6 +4,12 @@ import type { GameVersionRepository } from "../modules/game/ports/gameVersionRep
 import type { GameIdentity } from "../modules/game/domain/gameIdentity.js";
 import type { RuntimeGame } from "../modules/game/domain/runtimeGame.js";
 
+/** Minimal cross-module port used only to keep a room's immutable version servable after a later
+ * live-version switch. An absent implementation fails closed for non-live versions. */
+export interface RuntimeGameVersionLeaseAvailability {
+  hasActiveVersionLease(gameVersionId: number, nowIso: string): Promise<boolean>;
+}
+
 /**
  * D1-only emergency availability boundary for an exact generic asset version. It intentionally
  * has no canonical/B2 dependency, so a broken metadata object can never prevent an operator's
@@ -14,6 +20,7 @@ export class RuntimeGameAvailability {
     private readonly identities: GameIdentityRepository,
     private readonly versions: GameVersionRepository,
     private readonly settings: Pick<GameSettingsRepository, "getDisabledGameIds">,
+    private readonly versionLeases?: RuntimeGameVersionLeaseAvailability,
   ) {}
 
   async isVersionServable(gameId: number, versionId: number): Promise<boolean> {
@@ -27,8 +34,25 @@ export class RuntimeGameAvailability {
     }
 
     const identity = await this.identities.findById(gameId);
-    if (identity === null || identity.liveVersionId !== versionId) return false;
-    return this.isIdentityServable(identity);
+    if (
+      identity === null ||
+      identity.deletedAt !== null ||
+      identity.visibility !== "PUBLIC" ||
+      identity.liveVersionId === null
+    ) {
+      return false;
+    }
+    const version = await this.versions.findById(versionId);
+    if (version === null || version.gameId !== identity.id || version.publishStatus !== "READY") {
+      return false;
+    }
+    const disabledSlugs = await this.settings.getDisabledGameIds();
+    if (disabledSlugs.includes(identity.slug)) return false;
+    if (identity.liveVersionId === versionId) return true;
+    return (
+      (await this.versionLeases?.hasActiveVersionLease(versionId, new Date().toISOString())) ??
+      false
+    );
   }
 
   /** Checks a D1 identity that the caller already resolved, avoiding a duplicate identity query.

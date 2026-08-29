@@ -8,12 +8,22 @@ import {
 const BOOTSTRAP = {
   type: "MULTI_INIT",
   v: 1,
-  participantId: "participant_client_001",
   gameVersionId: 12,
+  contentHash: "a".repeat(64),
   profileRevision: 2,
-  rulesetKey: "official:omok",
-  rulesetRevision: 1,
   generation: 3,
+  runtime: { kind: "relay", protocolVersion: 1, resultTrust: "UNVERIFIED" },
+  self: { participantId: "participant_client_001", seatIndex: 0, role: "HOST" },
+  roster: [
+    { participantId: "participant_client_001", seatIndex: 0, role: "HOST" },
+    { participantId: "participant_client_002", seatIndex: 1, role: "PLAYER" },
+  ],
+  capabilities: {
+    reconnect: "resume",
+    broadcast: true,
+    directMessages: true,
+    hostSnapshot: true,
+  },
 } as const;
 
 function createWindowHarness() {
@@ -48,13 +58,12 @@ async function waitUntil(actual: () => number, expected: number, timeoutMs = 2_0
   }
 }
 
-test("only the real parent can transfer an exact credential-free MULTI_INIT", async () => {
+test("only the real parent can transfer an exact credential-free Relay bootstrap", async () => {
   const harness = createWindowHarness();
   const channel = new MessageChannel();
   const connected = connectMultiplayerBridge(harness.windowLike);
 
   harness.dispatch(harness.attacker, BOOTSTRAP, [channel.port2]);
-  assert.equal(harness.listenerCount(), 1);
   harness.dispatch(harness.parent, { ...BOOTSTRAP, ticket: "must-not-enter-iframe" }, [
     channel.port2,
   ]);
@@ -68,53 +77,7 @@ test("only the real parent can transfer an exact credential-free MULTI_INIT", as
   channel.port1.close();
 });
 
-test("ready/action/input/leave use one monotonic client sequence and retry-stable action ids", async () => {
-  const harness = createWindowHarness();
-  const channel = new MessageChannel();
-  const messages: unknown[] = [];
-  channel.port1.onmessage = (event) => messages.push(event.data);
-  const connected = connectMultiplayerBridge(harness.windowLike, {
-    createActionId: () => "action_client_generated_0001",
-  });
-  harness.dispatch(harness.parent, BOOTSTRAP, [channel.port2]);
-  const client = await connected;
-
-  assert.equal(client.ready(), true);
-  assert.equal(client.ready(), false);
-  assert.equal(
-    client.action({ expectedRevision: 0, payload: { type: "PLACE", row: 1, column: 2 } }),
-    "action_client_generated_0001",
-  );
-  assert.equal(client.input({ cursor: [1, 2] }), true);
-  client.leave();
-  assert.equal(client.input({ after: "leave" }), false);
-  await waitUntil(() => messages.length, 4);
-
-  assert.deepEqual(messages, [
-    { type: "MULTI_READY", v: 1, generation: 3 },
-    {
-      type: "MULTI_ACTION",
-      v: 1,
-      generation: 3,
-      clientSeq: 1,
-      clientActionId: "action_client_generated_0001",
-      expectedRevision: 0,
-      payload: { type: "PLACE", row: 1, column: 2 },
-    },
-    {
-      type: "MULTI_INPUT",
-      v: 1,
-      generation: 3,
-      clientSeq: 2,
-      payload: { cursor: [1, 2] },
-    },
-    { type: "MULTI_LEAVE", v: 1, generation: 3 },
-  ]);
-  client.disconnect();
-  channel.port1.close();
-});
-
-test("invalid outbound payloads do not consume sequence numbers", async () => {
+test("ready, send helpers, snapshot, and leave share one strict Relay channel", async () => {
   const harness = createWindowHarness();
   const channel = new MessageChannel();
   const messages: unknown[] = [];
@@ -123,23 +86,115 @@ test("invalid outbound payloads do not consume sequence numbers", async () => {
   harness.dispatch(harness.parent, BOOTSTRAP, [channel.port2]);
   const client = await connected;
 
-  assert.equal(
-    client.action({
-      clientActionId: "bad",
-      expectedRevision: 0,
-      payload: {},
-    }),
-    null,
+  assert.equal(client.ready(), true);
+  assert.equal(client.ready(), false);
+  assert.equal(client.send({ delivery: "broadcast", payload: { tick: 1 } }), true);
+  assert.equal(client.broadcast({ tick: 2 }), true);
+  assert.equal(client.direct("participant_client_002", { privateMove: 3 }), true);
+  assert.equal(client.snapshot({ world: { tick: 2 } }), true);
+  client.leave();
+  assert.equal(client.broadcast({ after: "leave" }), false);
+  await waitUntil(() => messages.length, 6);
+
+  assert.deepEqual(messages, [
+    { type: "MULTI_READY", v: 1, generation: 3 },
+    {
+      type: "RELAY_SEND",
+      v: 1,
+      generation: 3,
+      clientSeq: 1,
+      delivery: "broadcast",
+      payload: { tick: 1 },
+    },
+    {
+      type: "RELAY_SEND",
+      v: 1,
+      generation: 3,
+      clientSeq: 2,
+      delivery: "broadcast",
+      payload: { tick: 2 },
+    },
+    {
+      type: "RELAY_SEND",
+      v: 1,
+      generation: 3,
+      clientSeq: 3,
+      delivery: "direct",
+      targetParticipantId: "participant_client_002",
+      payload: { privateMove: 3 },
+    },
+    {
+      type: "RELAY_SNAPSHOT_SET",
+      v: 1,
+      generation: 3,
+      clientSeq: 4,
+      payload: { world: { tick: 2 } },
+    },
+    { type: "MULTI_LEAVE", v: 1, generation: 3 },
+  ]);
+  client.disconnect();
+  channel.port1.close();
+});
+
+test("invalid requests and disabled capabilities do not consume sequence numbers", async () => {
+  const harness = createWindowHarness();
+  const channel = new MessageChannel();
+  const messages: unknown[] = [];
+  channel.port1.onmessage = (event) => messages.push(event.data);
+  const connected = connectMultiplayerBridge(harness.windowLike);
+  harness.dispatch(
+    harness.parent,
+    {
+      ...BOOTSTRAP,
+      self: BOOTSTRAP.roster[1],
+      capabilities: { ...BOOTSTRAP.capabilities, directMessages: false, hostSnapshot: false },
+    },
+    [channel.port2],
   );
-  assert.equal(client.input({ valid: true }), true);
+  const client = await connected;
+
+  assert.equal(client.send({ delivery: "broadcast", payload: {}, extra: true } as never), false);
+  assert.equal(client.direct("participant_client_001", {}), false);
+  assert.equal(client.snapshot({}), false);
+  assert.equal(client.broadcast({ first: true }), true);
   await waitUntil(() => messages.length, 1);
   assert.deepEqual(messages[0], {
-    type: "MULTI_INPUT",
+    type: "RELAY_SEND",
     v: 1,
     generation: 3,
     clientSeq: 1,
-    payload: { valid: true },
+    delivery: "broadcast",
+    payload: { first: true },
   });
+  client.disconnect();
+  channel.port1.close();
+});
+
+test("stale generations, duplicate server sequences, and port-level bootstrap are dropped", async () => {
+  const harness = createWindowHarness();
+  const channel = new MessageChannel();
+  const connected = connectMultiplayerBridge(harness.windowLike);
+  harness.dispatch(harness.parent, BOOTSTRAP, [channel.port2]);
+  const client = await connected;
+  const received: unknown[] = [];
+  client.subscribe((message) => received.push(message));
+
+  channel.port1.postMessage({ ...BOOTSTRAP, generation: 4 });
+  const message = {
+    type: "RELAY_MESSAGE",
+    v: 1,
+    generation: 3,
+    serverSeq: 2,
+    sender: { participantId: "participant_client_002", seatIndex: 1, role: "PLAYER" },
+    delivery: "broadcast",
+    payload: { value: 1 },
+  } as const;
+  channel.port1.postMessage({ ...message, generation: 2, serverSeq: 1 });
+  channel.port1.postMessage(message);
+  channel.port1.postMessage(message);
+  channel.port1.postMessage({ ...message, serverSeq: 3, payload: { value: 2 } });
+  await waitUntil(() => received.length, 2);
+  assert.deepEqual(received, [message, { ...message, serverSeq: 3, payload: { value: 2 } }]);
   client.disconnect();
   channel.port1.close();
 });
@@ -159,69 +214,8 @@ test("closed ports and malformed JavaScript calls fail without escaping the SDK"
   const client = await connected;
 
   assert.equal(client.ready(), false);
-  assert.equal(client.input({ valid: true }), false);
-  assert.equal(client.action(null as never), null);
-  assert.equal(
-    client.action({ expectedRevision: 0, payload: {}, clientActionId: "action_valid_123456789" }),
-    null,
-  );
+  assert.equal(client.broadcast({ valid: true }), false);
+  assert.equal((client.send as (request: unknown) => boolean)(null), false);
   assert.doesNotThrow(() => (client.subscribe as (listener: unknown) => () => void)(null)());
   client.disconnect();
-});
-
-test("drops stale generation, duplicate server sequence, and port-level MULTI_INIT", async () => {
-  const harness = createWindowHarness();
-  const channel = new MessageChannel();
-  const connected = connectMultiplayerBridge(harness.windowLike);
-  harness.dispatch(harness.parent, BOOTSTRAP, [channel.port2]);
-  const client = await connected;
-  const received: unknown[] = [];
-  client.subscribe((message) => received.push(message));
-
-  channel.port1.postMessage({ ...BOOTSTRAP, generation: 4 });
-  channel.port1.postMessage({
-    type: "MULTI_STATE",
-    v: 1,
-    generation: 2,
-    serverSeq: 1,
-    revision: 1,
-    payload: {},
-  });
-  channel.port1.postMessage({
-    type: "MULTI_STATE",
-    v: 1,
-    generation: 3,
-    serverSeq: 2,
-    revision: 2,
-    payload: { board: [] },
-  });
-  channel.port1.postMessage({
-    type: "MULTI_EVENT",
-    v: 1,
-    generation: 3,
-    serverSeq: 2,
-    name: "DUPLICATE",
-  });
-  channel.port1.postMessage({
-    type: "MULTI_EVENT",
-    v: 1,
-    generation: 3,
-    serverSeq: 3,
-    name: "NEXT",
-  });
-  await waitUntil(() => received.length, 2);
-
-  assert.deepEqual(received, [
-    {
-      type: "MULTI_STATE",
-      v: 1,
-      generation: 3,
-      serverSeq: 2,
-      revision: 2,
-      payload: { board: [] },
-    },
-    { type: "MULTI_EVENT", v: 1, generation: 3, serverSeq: 3, name: "NEXT" },
-  ]);
-  client.disconnect();
-  channel.port1.close();
 });

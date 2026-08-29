@@ -5,7 +5,7 @@ import {
   GAME_IFRAME_REFERRER_POLICY,
   GAME_IFRAME_SANDBOX,
 } from "../features/game/GameFrame";
-import { getGameOrigin, gamePlayUrl, API_URL } from "../lib/api/config";
+import { getGameOrigin, gamePlayUrl, gameVersionPlayUrl, API_URL } from "../lib/api/config";
 
 // The iframe sandbox policy is the boundary protecting the main app from uploaded third-party game
 // code, so it is asserted rather than left to review — a well-meaning "just add allow-same-origin
@@ -46,6 +46,12 @@ test("the game origin is resolved from configuration, not hardcoded to one hostn
 test("the provider-neutral runtime URL is shared by OWOGG and USER games", () => {
   assert.equal(gamePlayUrl("reaction-time"), `${API_URL}/play/reaction-time`);
   assert.equal(gamePlayUrl("creator game"), `${API_URL}/play/creator%20game`);
+});
+
+test("multiplayer uses the immutable numeric version URL pinned by its room", () => {
+  assert.equal(gameVersionPlayUrl(42, 17), `${API_URL}/games/42/17/index.html`);
+  assert.throws(() => gameVersionPlayUrl(0, 17), RangeError);
+  assert.throws(() => gameVersionPlayUrl(42, Number.NaN), RangeError);
 });
 
 test("the game iframe sends no referrer", () => {

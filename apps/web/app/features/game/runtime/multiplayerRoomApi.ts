@@ -4,13 +4,11 @@ import {
   MultiplayerRoomAdmissionResponseSchema,
   MultiplayerRoomResponseSchema,
   MultiplayerRoomRosterResponseSchema,
-  MultiplayerRematchResponseSchema,
   type MultiplayerCreateInviteResponse,
   type MultiplayerGameAvailabilityResponse,
   type MultiplayerRoomAdmissionResponse,
   type MultiplayerRoomResponse,
   type MultiplayerRoomRosterResponse,
-  type MultiplayerRematchResponse,
 } from "@owogg/contracts";
 import { apiFetch } from "../../../lib/api/client";
 
@@ -94,69 +92,6 @@ export function setMultiplayerRoomReady(input: {
       }),
     },
   );
-}
-
-export function fetchMultiplayerRematchStatus(input: {
-  readonly instanceId: string;
-  readonly expectedGeneration: number;
-}): Promise<MultiplayerRematchResponse> {
-  return apiFetch(
-    `/api/multiplayer/instances/${encodeURIComponent(input.instanceId)}/rematch?generation=${encodeURIComponent(String(input.expectedGeneration))}`,
-    MultiplayerRematchResponseSchema,
-    { method: "GET" },
-  );
-}
-
-export interface MultiplayerRematchRequestInput {
-  readonly instanceId: string;
-  readonly expectedGeneration: number;
-}
-
-interface MultiplayerRematchRecoveryDependencies {
-  readonly request?: (input: MultiplayerRematchRequestInput) => Promise<MultiplayerRematchResponse>;
-  readonly readStatus?: (
-    input: MultiplayerRematchRequestInput,
-  ) => Promise<MultiplayerRematchResponse>;
-}
-
-function postMultiplayerRematch(
-  input: MultiplayerRematchRequestInput,
-): Promise<MultiplayerRematchResponse> {
-  return apiFetch(
-    `/api/multiplayer/instances/${encodeURIComponent(input.instanceId)}/rematch`,
-    MultiplayerRematchResponseSchema,
-    {
-      method: "POST",
-      body: JSON.stringify({ expectedGeneration: input.expectedGeneration }),
-    },
-  );
-}
-
-/**
- * Rematch consent is an idempotent, server-authoritative mutation. A D1 commit can succeed even
- * when the browser loses the response or a following read fails transiently. Reconcile that
- * uncertain outcome once before surfacing an error so a successfully started rematch is never
- * presented as failed. This is an error-only read, not polling.
- */
-export async function requestMultiplayerRematch(
-  input: MultiplayerRematchRequestInput,
-  dependencies: MultiplayerRematchRecoveryDependencies = {},
-): Promise<MultiplayerRematchResponse> {
-  const request = dependencies.request ?? postMultiplayerRematch;
-  const readStatus = dependencies.readStatus ?? fetchMultiplayerRematchStatus;
-  try {
-    return await request(input);
-  } catch (requestError) {
-    try {
-      const authoritative = await readStatus(input);
-      if (authoritative.state === "STARTED" || authoritative.requestedBySelf) {
-        return authoritative;
-      }
-    } catch {
-      // Preserve the mutation error below. The status read is only an uncertainty reconciliation.
-    }
-    throw requestError;
-  }
 }
 
 export function createMultiplayerInvite(input: {

@@ -2,7 +2,7 @@
 
 상태: 기준 문서
 
-마지막 검증: 2026-08-24
+마지막 검증: 2026-08-29
 
 기준 소스:
 
@@ -19,10 +19,12 @@
 - `packages/db/migrations/0033_generic_game_assets.sql`
 - `packages/db/migrations/0034_unified_game_control_plane.sql`
 - `packages/db/migrations/0035_creator_manifest_results.sql`
+- `packages/db/migrations/0043_game_result_verification_claims.sql`
+- `packages/db/migrations/0044_verified_result_score_semantics.sql`
 
-이 문서는 현재 production의 게임 identity, publication, runtime, score 경계를 설명합니다. USER와
+이 문서는 현재 저장소 tree의 게임 identity, publication, runtime, score 경계를 설명합니다. USER와
 OWOGG는 같은 runtime/storage 모델을 사용하지만 authorization과 publication control plane은 서로
-다릅니다.
+다릅니다. Phase 5-E 변경은 로컬 구현이며 별도 승인 전에는 Staging/Production 상태를 뜻하지 않습니다.
 
 ```text
 OwOGG Game Platform
@@ -50,16 +52,28 @@ OwOGG Game Platform
   target은 불변 tuple `(gameId, versionId, contentHash)`입니다.
 - `game_assets`는 provider-neutral 게임 단위 asset metadata를 소유합니다. Bundle bytes는 B2에서
   불변이며 version 범위로 유지됩니다.
-- `GameCanonicalDocument` v3는 root `owogg.json` Game Creator Manifest v1의 실행 계약과 title,
-  description, policy, presentation, difficulty, catalog, public `publisher.official` 표시 메타데이터를
-  소유합니다. 소유권/인가, live-version 상태, 환경 URL, secret은 소유하지 않습니다. USER 경로는
-  항상 `official: false`, 인증·인가된 관리자 업로드만 `official: true`를 기록합니다.
+- `GameCanonicalDocument` v1은 root `owogg.json` Game Creator Manifest v1의 실행 계약과 title,
+  description, policy, presentation, difficulty, catalog, 공개 `publisher.official` 표시 메타데이터,
+  심사를 거쳐 정규화된 PlayConfig를 소유합니다. PlayConfig의 `verifierId`는 서버 내부 값이며 공개
+  projection에는 포함하지 않습니다. 소유권/인가, live-version 상태, 환경 URL, secret은 소유하지
+  않습니다. USER 경로는 항상 `official: false`, 인증·인가된 관리자 업로드만 `official: true`를
+  기록합니다. 출시 전 실험 규격은 호환하지 않고 현재 v1만 읽습니다.
 - `GamePublicationService`는 유일한 file/manifest publication loop입니다. manifest를 마지막에 쓰고,
   검증한 동일 publication target에만 READY를 표시합니다.
 - `RuntimeGameRegistry`, `GameHost`, `IframeRuntime`, `window.OWOGG` Bridge, signed Game Session,
-  generic result acceptance는 publisher-neutral production 경로입니다. 결과 원장은 score가 없는
+  generic result acceptance는 publisher-neutral 경로입니다. 결과 원장은 score가 없는
   outcome/progression/metrics 완료도 저장하고, leaderboard가 선언된 유효 score만 `scores` projection을
-  생성합니다.
+  생성합니다. gs2는 verifier raw score, manifest-normalized score와 factor-adjusted competitive score를
+  분리하고 랭킹에는 competitive score만 투영합니다.
+- non-PlayConfig generic 실행은 기존 `gs1`을 유지합니다. PlayConfig의 `single`/`local-multi` 실행은
+  선택 topology와 canonical difficulty/variant pair를 서명한 `gs2`와 공개 `startContext`를 사용하고,
+  token은 GameHost parent memory에만 둡니다. `online-multi`는 exact-version approved Relay profile과
+  Durable Object transport로 분리됩니다. iframe bootstrap은 ruleset 대신 runtime/self/2~8인
+  roster/capabilities를 전달하며, Relay는 sender와 transport 한계만 검증합니다. 따라서 online 결과는
+  `UNVERIFIED`이고 leaderboard/reward/XP/MMR에 투영하지 않습니다. trusted verifier registry,
+  first-evidence claim, `/result`의 authoritative 검증과 원자 결과 저장이 구현됐고, Phase 6의 첫 reviewed verifier
+  `verified-aim-test-v1`만 정적으로 설치돼 있습니다. 미등록 ID와 reference verifier의 intended slug
+  불일치는 계속 fail closed입니다.
 
 ## USER 제어 영역
 

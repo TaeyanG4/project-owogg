@@ -1,14 +1,12 @@
 import {
   MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
   MULTIPLAYER_HOST_MAX_PAYLOAD_BYTES,
-  MULTIPLAYER_PLAYER_CONNECTION_CHANGED_EVENT,
-  MULTIPLAYER_REMATCH_CHANGED_EVENT,
-  parseGameToHostMultiplayerMessage,
+  parseGameToHostRelayMessage,
   parseHostToGameMultiplayerMessage,
   type HostToGameMultiplayerMessage,
   type MultiInitMessage,
-  type MultiplayerAbortCode,
   type MultiplayerDisconnectCode,
+  type MultiplayerRelayCloseCode,
 } from "@owogg/game-sdk/bridge";
 import { MULTIPLAYER_HEARTBEAT_REQUEST, MULTIPLAYER_HEARTBEAT_RESPONSE } from "@owogg/contracts";
 
@@ -41,9 +39,7 @@ export type MultiplayerParentConnectionState =
   | { readonly status: "CONNECTING" }
   | { readonly status: "CONNECTED"; readonly connectionGeneration: number }
   | { readonly status: "DISCONNECTED"; readonly code: MultiplayerDisconnectCode }
-  | { readonly status: "TERMINAL_PENDING" }
-  | { readonly status: "TERMINAL_COMMITTED"; readonly result: unknown }
-  | { readonly status: "ABORTED"; readonly code: MultiplayerAbortCode };
+  | { readonly status: "CLOSED"; readonly code: MultiplayerRelayCloseCode };
 
 export type MultiplayerPlayerConnectionState =
   | {
@@ -66,11 +62,6 @@ export interface MultiplayerBridgeHostCallbacks {
   onReady?: () => void;
   onLeave?: () => void;
   onConnectionState?: (state: MultiplayerParentConnectionState) => void;
-  onTerminalCommitted?: (result: unknown) => void;
-  /** Parent-only hint to refetch rematch consent. It is never forwarded into the game iframe. */
-  onRematchChange?: () => void;
-  /** Server-authoritative peer connectivity used only by the trusted parent room chrome. */
-  onPlayerConnectionChange?: (state: MultiplayerPlayerConnectionState) => void;
   onProtocolDrop?: (direction: "GAME_TO_HOST" | "SERVER_TO_HOST") => void;
 }
 
@@ -101,41 +92,6 @@ function hasServerSequence(
   return "serverSeq" in message;
 }
 
-function parsePlayerConnectionState(payload: unknown): MultiplayerPlayerConnectionState | null {
-  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return null;
-  const source = payload as Record<string, unknown>;
-  const keys = Object.keys(source);
-  if (
-    keys.length !== 3 ||
-    !keys.every((key) => ["participantId", "status", "reconnectDeadlineAt"].includes(key)) ||
-    typeof source.participantId !== "string" ||
-    !/^[A-Za-z0-9_-]{8,128}$/.test(source.participantId)
-  ) {
-    return null;
-  }
-  if (source.status === "RECONNECTING") {
-    return typeof source.reconnectDeadlineAt === "string" &&
-      Number.isFinite(Date.parse(source.reconnectDeadlineAt))
-      ? {
-          participantId: source.participantId,
-          status: "RECONNECTING",
-          reconnectDeadlineAt: source.reconnectDeadlineAt,
-        }
-      : null;
-  }
-  if (
-    (source.status === "CONNECTED" || source.status === "LEFT" || source.status === "TIMED_OUT") &&
-    source.reconnectDeadlineAt === null
-  ) {
-    return {
-      participantId: source.participantId,
-      status: source.status,
-      reconnectDeadlineAt: null,
-    };
-  }
-  return null;
-}
-
 function closeCodeToDisconnectCode(code: number): MultiplayerDisconnectCode {
   if (code === 4001) return "REPLACED_BY_NEW_CONNECTION";
   if (code === 4003) return "AUTH_EXPIRED";
@@ -145,10 +101,8 @@ function closeCodeToDisconnectCode(code: number): MultiplayerDisconnectCode {
 }
 
 /**
- * Parent-only multiplayer transport boundary. The browser parent owns the authenticated ticket
- * request and WebSocket; the sandboxed game receives only a sanitized MULTI_INIT, canonical
- * server projections, and a private MessagePort. No URL, cookie, global user id, or ticket enters
- * the iframe.
+ * Parent-only Relay transport boundary. The parent owns the ticket and WebSocket; the sandboxed
+ * game receives only sanitized bootstrap/delivery messages through a private MessagePort.
  */
 export function createMultiplayerBridgeHost(
   iframeWindow: MultiplayerBridgeIframeWindowLike,
@@ -168,8 +122,7 @@ export function createMultiplayerBridgeHost(
   let ready = false;
   let left = false;
   let disconnectNotified = false;
-  let terminalCommitted = false;
-  let aborted = false;
+  let runtimeClosed = false;
   let lastClientSeq = 0;
   let lastServerSeq = -1;
   let lastConnectionGeneration = 0;
@@ -186,8 +139,6 @@ export function createMultiplayerBridgeHost(
       try {
         socket.send(encoded);
       } catch {
-        // readyState can change between the check and send(). A reconnect uses a new connection
-        // generation, so retaining this old-generation intent for retry would be unsafe.
         notifyDrop("GAME_TO_HOST");
       }
       return;
@@ -221,7 +172,7 @@ export function createMultiplayerBridgeHost(
     heartbeatTimer = undefined;
   };
   heartbeatTimer = scheduleInterval(() => {
-    if (closed || terminalCommitted || aborted || left || socket.readyState !== SOCKET_OPEN) return;
+    if (closed || runtimeClosed || left || socket.readyState !== SOCKET_OPEN) return;
     try {
       socket.send(MULTIPLAYER_HEARTBEAT_REQUEST);
     } catch {
@@ -231,13 +182,13 @@ export function createMultiplayerBridgeHost(
 
   channel.port1.onmessage = (event: MessageEvent) => {
     if (closed) return;
-    const message = parseGameToHostMultiplayerMessage(event.data);
+    const message = parseGameToHostRelayMessage(event.data);
     if (!message || message.generation !== bootstrap.generation || left) {
       notifyDrop("GAME_TO_HOST");
       return;
     }
 
-    if (message.type === "MULTI_ACTION" || message.type === "MULTI_INPUT") {
+    if (message.type === "RELAY_SEND" || message.type === "RELAY_SNAPSHOT_SET") {
       if (message.clientSeq !== lastClientSeq + 1) {
         notifyDrop("GAME_TO_HOST");
         return;
@@ -250,7 +201,7 @@ export function createMultiplayerBridgeHost(
       }
       ready = true;
       callbacks.onReady?.();
-    } else if (message.type === "MULTI_LEAVE") {
+    } else {
       left = true;
       sendToSocket(message);
       stopHeartbeat();
@@ -291,22 +242,6 @@ export function createMultiplayerBridgeHost(
       }
       lastServerSeq = message.serverSeq;
     }
-    if (message.type === "MULTI_EVENT" && message.name === MULTIPLAYER_REMATCH_CHANGED_EVENT) {
-      callbacks.onRematchChange?.();
-      return;
-    }
-    if (
-      message.type === "MULTI_EVENT" &&
-      message.name === MULTIPLAYER_PLAYER_CONNECTION_CHANGED_EVENT
-    ) {
-      const presence = parsePlayerConnectionState(message.payload);
-      if (!presence) {
-        notifyDrop("SERVER_TO_HOST");
-        return;
-      }
-      callbacks.onPlayerConnectionChange?.(presence);
-      return;
-    }
     if (message.type === "MULTI_CONNECTED") {
       if (message.connectionGeneration <= lastConnectionGeneration) {
         notifyDrop("SERVER_TO_HOST");
@@ -320,35 +255,23 @@ export function createMultiplayerBridgeHost(
     } else if (message.type === "MULTI_DISCONNECTED") {
       disconnectNotified = true;
       callbacks.onConnectionState?.({ status: "DISCONNECTED", code: message.code });
-    } else if (message.type === "MULTI_TERMINAL_PENDING") {
-      callbacks.onConnectionState?.({ status: "TERMINAL_PENDING" });
-    } else if (message.type === "MULTI_TERMINAL_COMMITTED") {
-      if (terminalCommitted) {
-        notifyDrop("SERVER_TO_HOST");
-        return;
-      }
-      terminalCommitted = true;
+    } else if (message.type === "RELAY_CLOSED") {
+      runtimeClosed = true;
       stopHeartbeat();
-      callbacks.onConnectionState?.({ status: "TERMINAL_COMMITTED", result: message.result });
-      callbacks.onTerminalCommitted?.(message.result);
-    } else if (message.type === "MULTI_ABORTED") {
-      aborted = true;
-      stopHeartbeat();
-      callbacks.onConnectionState?.({ status: "ABORTED", code: message.code });
+      callbacks.onConnectionState?.({ status: "CLOSED", code: message.code });
     }
     channel.port1.postMessage(message);
   };
   const onClose = (event: SocketCloseEventLike) => {
-    if (closed || disconnectNotified || terminalCommitted || aborted) return;
+    if (closed || disconnectNotified || runtimeClosed) return;
     disconnectNotified = true;
     const code = closeCodeToDisconnectCode(event.code);
-    const message = {
+    channel.port1.postMessage({
       type: "MULTI_DISCONNECTED",
       v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
       generation: bootstrap.generation,
       code,
-    } as const;
-    channel.port1.postMessage(message);
+    });
     callbacks.onConnectionState?.({ status: "DISCONNECTED", code });
   };
   const onError = () => {
@@ -360,7 +283,6 @@ export function createMultiplayerBridgeHost(
   socket.addEventListener("close", onClose);
   socket.addEventListener("error", onError);
   callbacks.onConnectionState?.({ status: "CONNECTING" });
-
   iframeWindow.postMessage(bootstrap, "*", [channel.port2]);
 
   return {
@@ -391,7 +313,7 @@ export function createMultiplayerBridgeHost(
         try {
           socket.close(1000, "bridge closed");
         } catch {
-          // A browser can reject close() while CONNECTING. Listener cleanup is already complete.
+          // Listener cleanup is already complete if a browser rejects close while CONNECTING.
         }
       }
     },

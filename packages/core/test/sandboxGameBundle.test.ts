@@ -342,7 +342,13 @@ test("extractGameCreatorManifest parses and normalizes a valid v1 manifest", () 
     preparedFile("index.html", "<html></html>"),
     preparedFile(OWOGG_GAME_CREATOR_MANIFEST_FILENAME, {
       schemaVersion: 1,
-      game: { slug: "ball-dodge", title: "Ball Dodge", genre: "arcade", mode: "single" },
+      game: {
+        slug: "ball-dodge",
+        title: "Ball Dodge",
+        genre: "arcade",
+        mode: "single",
+        playModes: ["single"],
+      },
       progression: { type: "none" },
       result: { score: null },
     }),

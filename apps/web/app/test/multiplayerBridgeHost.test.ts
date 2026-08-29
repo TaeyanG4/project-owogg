@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  MULTIPLAYER_PLAYER_CONNECTION_CHANGED_EVENT,
-  MULTIPLAYER_REMATCH_CHANGED_EVENT,
-  type MultiInitMessage,
-} from "@owogg/game-sdk/bridge";
+import type { MultiInitMessage } from "@owogg/game-sdk/bridge";
 import { MULTIPLAYER_HEARTBEAT_REQUEST, MULTIPLAYER_HEARTBEAT_RESPONSE } from "@owogg/contracts";
 import {
   createMultiplayerBridgeHost,
@@ -16,12 +12,22 @@ import {
 const BOOTSTRAP: MultiInitMessage = {
   type: "MULTI_INIT",
   v: 1,
-  participantId: "participant_host_0001",
   gameVersionId: 12,
+  contentHash: "a".repeat(64),
   profileRevision: 2,
-  rulesetKey: "official:omok",
-  rulesetRevision: 1,
   generation: 3,
+  runtime: { kind: "relay", protocolVersion: 1, resultTrust: "UNVERIFIED" },
+  self: { participantId: "participant_host_0001", seatIndex: 0, role: "HOST" },
+  roster: [
+    { participantId: "participant_host_0001", seatIndex: 0, role: "HOST" },
+    { participantId: "participant_player_0001", seatIndex: 1, role: "PLAYER" },
+  ],
+  capabilities: {
+    reconnect: "resume",
+    broadcast: true,
+    directMessages: true,
+    hostSnapshot: true,
+  },
 };
 
 function createIframeHarness() {
@@ -110,7 +116,7 @@ async function waitUntil(actual: () => number, expected: number, timeoutMs = 2_0
   }
 }
 
-test("bootstrap carries only MULTI_INIT and the port; validated game intents reach only the socket", async () => {
+test("Relay bootstrap is credential-free and only strict Relay intents reach the socket", async () => {
   const iframe = createIframeHarness();
   const socket = createSocketHarness();
   let readyCalls = 0;
@@ -125,26 +131,32 @@ test("bootstrap carries only MULTI_INIT and the port; validated game intents rea
   const capture = iframe.capture();
   assert.deepEqual(capture.message, BOOTSTRAP);
   assert.equal(capture.targetOrigin, "*");
-  assert.equal(JSON.stringify(capture.message).includes("ticket"), false);
+  assert.doesNotMatch(JSON.stringify(capture.message), /ticket|socket|userId/i);
 
   capture.port.postMessage({ type: "MULTI_READY", v: 1, generation: 3 });
+  capture.port.postMessage({
+    type: "RELAY_SEND",
+    v: 1,
+    generation: 3,
+    clientSeq: 1,
+    delivery: "broadcast",
+    payload: { move: [1, 2] },
+  });
+  capture.port.postMessage({
+    type: "RELAY_SEND",
+    v: 1,
+    generation: 3,
+    clientSeq: 3,
+    delivery: "broadcast",
+    payload: { skipped: true },
+  });
   capture.port.postMessage({
     type: "MULTI_ACTION",
     v: 1,
     generation: 3,
-    clientSeq: 1,
-    clientActionId: "action_host_1234567890",
-    expectedRevision: 0,
-    payload: { type: "PLACE", row: 1, column: 2 },
-  });
-  capture.port.postMessage({
-    type: "MULTI_INPUT",
-    v: 1,
-    generation: 3,
-    clientSeq: 3,
+    clientSeq: 2,
     payload: {},
   });
-  capture.port.postMessage({ type: "GAME_COMPLETE", score: 999_999 });
   await waitUntil(() => socket.sent.length + drops, 4);
 
   assert.equal(readyCalls, 1);
@@ -154,13 +166,12 @@ test("bootstrap carries only MULTI_INIT and the port; validated game intents rea
     [
       { type: "MULTI_READY", v: 1, generation: 3 },
       {
-        type: "MULTI_ACTION",
+        type: "RELAY_SEND",
         v: 1,
         generation: 3,
         clientSeq: 1,
-        clientActionId: "action_host_1234567890",
-        expectedRevision: 0,
-        payload: { type: "PLACE", row: 1, column: 2 },
+        delivery: "broadcast",
+        payload: { move: [1, 2] },
       },
     ],
   );
@@ -168,18 +179,18 @@ test("bootstrap carries only MULTI_INIT and the port; validated game intents rea
   capture.port.close();
 });
 
-test("queues bounded game messages while connecting and flushes in order on open", async () => {
+test("connecting sockets queue valid intents and flush them in order", async () => {
   const iframe = createIframeHarness();
   const socket = createSocketHarness(0);
   const host = createMultiplayerBridgeHost(iframe.windowLike, socket.socket, BOOTSTRAP);
-  const gamePort = iframe.capture().port;
-  gamePort.postMessage({ type: "MULTI_READY", v: 1, generation: 3 });
-  gamePort.postMessage({
-    type: "MULTI_INPUT",
+  const port = iframe.capture().port;
+  port.postMessage({ type: "MULTI_READY", v: 1, generation: 3 });
+  port.postMessage({
+    type: "RELAY_SNAPSHOT_SET",
     v: 1,
     generation: 3,
     clientSeq: 1,
-    payload: { cursor: 2 },
+    payload: { frame: 7 },
   });
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(socket.sent.length, 0);
@@ -189,432 +200,138 @@ test("queues bounded game messages while connecting and flushes in order on open
     [
       { type: "MULTI_READY", v: 1, generation: 3 },
       {
-        type: "MULTI_INPUT",
+        type: "RELAY_SNAPSHOT_SET",
         v: 1,
         generation: 3,
         clientSeq: 1,
-        payload: { cursor: 2 },
+        payload: { frame: 7 },
       },
     ],
   );
   host.close();
-  gamePort.close();
+  port.close();
 });
 
-test("active-match heartbeat is sparse, parent-only, and stops at terminal state", async () => {
+test("server deliveries require current generation and increasing server sequence", async () => {
   const iframe = createIframeHarness();
   const socket = createSocketHarness();
-  let heartbeat: (() => void) | undefined;
-  let intervalMs = 0;
-  let cleared = 0;
   let drops = 0;
-  const timer = setInterval(() => undefined, 60_000);
+  const host = createMultiplayerBridgeHost(iframe.windowLike, socket.socket, BOOTSTRAP, {
+    onProtocolDrop: (direction) => {
+      assert.equal(direction, "SERVER_TO_HOST");
+      drops += 1;
+    },
+  });
+  const port = iframe.capture().port;
+  const received: unknown[] = [];
+  port.onmessage = (event) => received.push(event.data);
+  port.start();
+  const delivery = {
+    type: "RELAY_MESSAGE",
+    v: 1,
+    generation: 3,
+    serverSeq: 1,
+    sender: { participantId: "participant_player_0001", seatIndex: 1, role: "PLAYER" },
+    delivery: "broadcast",
+    payload: { event: "jump" },
+  } as const;
+  socket.message(JSON.stringify(delivery));
+  socket.message(JSON.stringify(delivery));
+  socket.message(JSON.stringify({ ...delivery, generation: 4, serverSeq: 2 }));
+  socket.message(MULTIPLAYER_HEARTBEAT_RESPONSE);
+  await waitUntil(() => received.length + drops, 3);
+
+  assert.deepEqual(received, [delivery]);
+  assert.equal(drops, 2);
+  host.close();
+  port.close();
+});
+
+test("Relay close and socket loss remain trusted parent connection states", async () => {
+  const iframe = createIframeHarness();
+  const socket = createSocketHarness();
+  const states: MultiplayerParentConnectionState[] = [];
+  const host = createMultiplayerBridgeHost(iframe.windowLike, socket.socket, BOOTSTRAP, {
+    onConnectionState: (state) => states.push(state),
+  });
+  const port = iframe.capture().port;
+  socket.message(
+    JSON.stringify({ type: "MULTI_CONNECTED", v: 1, generation: 3, connectionGeneration: 4 }),
+  );
+  socket.message(
+    JSON.stringify({ type: "RELAY_CLOSED", v: 1, generation: 3, code: "ROOM_EXPIRED" }),
+  );
+  socket.closeFromServer(1006);
+  await waitUntil(() => states.length, 3);
+  assert.deepEqual(states, [
+    { status: "CONNECTING" },
+    { status: "CONNECTED", connectionGeneration: 4 },
+    { status: "CLOSED", code: "ROOM_EXPIRED" },
+  ]);
+  host.close();
+  port.close();
+
+  const iframe2 = createIframeHarness();
+  const socket2 = createSocketHarness();
+  const states2: MultiplayerParentConnectionState[] = [];
+  const host2 = createMultiplayerBridgeHost(iframe2.windowLike, socket2.socket, BOOTSTRAP, {
+    onConnectionState: (state) => states2.push(state),
+  });
+  const port2 = iframe2.capture().port;
+  socket2.closeFromServer(4001);
+  socket2.closeFromServer(4001);
+  await waitUntil(() => states2.length, 2);
+  assert.deepEqual(states2, [
+    { status: "CONNECTING" },
+    { status: "DISCONNECTED", code: "REPLACED_BY_NEW_CONNECTION" },
+  ]);
+  host2.close();
+  port2.close();
+});
+
+test("heartbeat is parent-only and stops after an explicit leave", () => {
+  const iframe = createIframeHarness();
+  const socket = createSocketHarness();
+  let tick: (() => void) | undefined;
+  let cleared = 0;
   const host = createMultiplayerBridgeHost(
     iframe.windowLike,
     socket.socket,
     BOOTSTRAP,
-    { onProtocolDrop: () => (drops += 1) },
+    {},
     {
-      setInterval(callback, delay) {
-        heartbeat = callback;
-        intervalMs = delay;
-        return timer;
+      setInterval(callback) {
+        tick = callback;
+        return 1 as unknown as ReturnType<typeof setInterval>;
       },
-      clearInterval(handle) {
-        assert.equal(handle, timer);
-        clearInterval(handle);
+      clearInterval() {
         cleared += 1;
       },
     },
   );
-  const gamePort = iframe.capture().port;
-  const received: unknown[] = [];
-  gamePort.onmessage = (event) => received.push(event.data);
-
-  assert.equal(intervalMs, 30_000);
-  assert.ok(heartbeat);
-  heartbeat();
+  const port = iframe.capture().port;
+  tick?.();
   assert.deepEqual(socket.sent, [MULTIPLAYER_HEARTBEAT_REQUEST]);
-  socket.message(MULTIPLAYER_HEARTBEAT_RESPONSE);
-  await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.deepEqual(received, []);
-  assert.equal(drops, 0);
-
-  socket.message(
-    JSON.stringify({
-      type: "MULTI_TERMINAL_COMMITTED",
-      v: 1,
-      generation: 3,
-      serverSeq: 1,
-      result: { outcome: "win" },
-    }),
-  );
-  await waitUntil(() => received.length, 1);
-  assert.equal(cleared, 1);
-  heartbeat();
-  assert.deepEqual(socket.sent, [MULTIPLAYER_HEARTBEAT_REQUEST]);
-
-  host.close();
-  assert.equal(cleared, 1);
-  gamePort.close();
-});
-
-test("a socket state race drops the intent without escaping the parent bridge", async () => {
-  const iframe = createIframeHarness();
-  const socket = createSocketHarness(1, true);
-  let drops = 0;
-  const host = createMultiplayerBridgeHost(iframe.windowLike, socket.socket, BOOTSTRAP, {
-    onProtocolDrop: (direction) => {
-      assert.equal(direction, "GAME_TO_HOST");
-      drops += 1;
-    },
-  });
-  const gamePort = iframe.capture().port;
-  gamePort.postMessage({ type: "MULTI_READY", v: 1, generation: 3 });
-  await waitUntil(() => drops, 1);
-  assert.equal(drops, 1);
-  assert.deepEqual(socket.sent, []);
-  host.close();
-  gamePort.close();
-});
-
-test("server projections require current generation and strictly increasing server sequence", async () => {
-  const iframe = createIframeHarness();
-  const socket = createSocketHarness();
-  const states: MultiplayerParentConnectionState[] = [];
-  let drops = 0;
-  const host = createMultiplayerBridgeHost(iframe.windowLike, socket.socket, BOOTSTRAP, {
-    onConnectionState: (state) => states.push(state),
-    onProtocolDrop: (direction) => {
-      assert.equal(direction, "SERVER_TO_HOST");
-      drops += 1;
-    },
-  });
-  const gamePort = iframe.capture().port;
-  const received: unknown[] = [];
-  gamePort.onmessage = (event) => received.push(event.data);
-
-  socket.message(
-    JSON.stringify({
-      type: "MULTI_CONNECTED",
-      v: 1,
-      generation: 3,
-      connectionGeneration: 2,
-    }),
-  );
-  socket.message(
-    JSON.stringify({
-      type: "MULTI_STATE",
-      v: 1,
-      generation: 3,
-      serverSeq: 5,
-      revision: 2,
-      payload: { board: [] },
-    }),
-  );
-  socket.message(
-    JSON.stringify({
-      type: "MULTI_EVENT",
-      v: 1,
-      generation: 3,
-      serverSeq: 5,
-      name: "DUPLICATE",
-    }),
-  );
-  socket.message(
-    JSON.stringify({
-      type: "MULTI_EVENT",
-      v: 1,
-      generation: 4,
-      serverSeq: 6,
-      name: "STALE_GENERATION",
-    }),
-  );
-  socket.message(JSON.stringify({ ...BOOTSTRAP, ticket: "must-not-enter-iframe" }));
-  await waitUntil(() => received.length + drops, 5);
-
-  assert.deepEqual(received, [
-    { type: "MULTI_CONNECTED", v: 1, generation: 3, connectionGeneration: 2 },
-    {
-      type: "MULTI_STATE",
-      v: 1,
-      generation: 3,
-      serverSeq: 5,
-      revision: 2,
-      payload: { board: [] },
-    },
-  ]);
-  assert.equal(drops, 3);
-  assert.deepEqual(states, [
-    { status: "CONNECTING" },
-    { status: "CONNECTED", connectionGeneration: 2 },
-  ]);
-  host.close();
-  gamePort.close();
-});
-
-test("rematch change is consumed by the parent and never enters the game iframe", async () => {
-  const iframe = createIframeHarness();
-  const socket = createSocketHarness();
-  let rematchChanges = 0;
-  const host = createMultiplayerBridgeHost(iframe.windowLike, socket.socket, BOOTSTRAP, {
-    onRematchChange: () => (rematchChanges += 1),
-  });
-  const gamePort = iframe.capture().port;
-  const received: unknown[] = [];
-  gamePort.onmessage = (event) => received.push(event.data);
-
-  socket.message(
-    JSON.stringify({
-      type: "MULTI_EVENT",
-      v: 1,
-      generation: 3,
-      serverSeq: 1,
-      name: MULTIPLAYER_REMATCH_CHANGED_EVENT,
-      payload: {},
-    }),
-  );
-  socket.message(
-    JSON.stringify({
-      type: "MULTI_EVENT",
-      v: 1,
-      generation: 3,
-      serverSeq: 2,
-      name: "GAME_EVENT",
-      payload: { safe: true },
-    }),
-  );
-  await waitUntil(() => rematchChanges + received.length, 2);
-
-  assert.equal(rematchChanges, 1);
-  assert.deepEqual(received, [
-    {
-      type: "MULTI_EVENT",
-      v: 1,
-      generation: 3,
-      serverSeq: 2,
-      name: "GAME_EVENT",
-      payload: { safe: true },
-    },
-  ]);
-  host.close();
-  gamePort.close();
-});
-
-test("participant reconnect grace is validated and consumed by the trusted parent", async () => {
-  const iframe = createIframeHarness();
-  const socket = createSocketHarness();
-  const changes: unknown[] = [];
-  const host = createMultiplayerBridgeHost(iframe.windowLike, socket.socket, BOOTSTRAP, {
-    onPlayerConnectionChange: (state) => changes.push(state),
-  });
-  const gamePort = iframe.capture().port;
-  const received: unknown[] = [];
-  gamePort.onmessage = (event) => received.push(event.data);
-  const deadline = new Date(Date.now() + 30_000).toISOString();
-
-  socket.message(
-    JSON.stringify({
-      type: "MULTI_EVENT",
-      v: 1,
-      generation: 3,
-      serverSeq: 1,
-      name: MULTIPLAYER_PLAYER_CONNECTION_CHANGED_EVENT,
-      payload: {
-        participantId: "participant_player_0001",
-        status: "RECONNECTING",
-        reconnectDeadlineAt: deadline,
-      },
-    }),
-  );
-  await waitUntil(() => changes.length, 1);
-  assert.deepEqual(changes, [
-    {
-      participantId: "participant_player_0001",
-      status: "RECONNECTING",
-      reconnectDeadlineAt: deadline,
-    },
-  ]);
-  assert.deepEqual(received, []);
-  host.close();
-  gamePort.close();
-});
-
-test("terminal state stays parent-owned and remains sticky after the transport closes", async () => {
-  const iframe = createIframeHarness();
-  const socket = createSocketHarness();
-  const states: MultiplayerParentConnectionState[] = [];
-  const terminal: unknown[] = [];
-  const host = createMultiplayerBridgeHost(iframe.windowLike, socket.socket, BOOTSTRAP, {
-    onConnectionState: (state) => states.push(state),
-    onTerminalCommitted: (result) => terminal.push(result),
-  });
-  const gamePort = iframe.capture().port;
-  const received: unknown[] = [];
-  gamePort.onmessage = (event) => received.push(event.data);
-
-  socket.message(
-    JSON.stringify({
-      type: "MULTI_TERMINAL_PENDING",
-      v: 1,
-      generation: 3,
-      serverSeq: 7,
-    }),
-  );
-  socket.message(
-    JSON.stringify({
-      type: "MULTI_TERMINAL_COMMITTED",
-      v: 1,
-      generation: 3,
-      serverSeq: 8,
-      result: { outcome: "win" },
-    }),
-  );
-  socket.closeFromServer(4001);
-  await waitUntil(() => received.length, 2);
-
-  assert.deepEqual(terminal, [{ outcome: "win" }]);
-  assert.deepEqual(states, [
-    { status: "CONNECTING" },
-    { status: "TERMINAL_PENDING" },
-    { status: "TERMINAL_COMMITTED", result: { outcome: "win" } },
-  ]);
-  assert.equal(received.length, 2);
-  host.close();
-  gamePort.close();
-});
-
-test("a non-terminal socket close becomes one sanitized disconnected projection", async () => {
-  const iframe = createIframeHarness();
-  const socket = createSocketHarness();
-  const states: MultiplayerParentConnectionState[] = [];
-  const host = createMultiplayerBridgeHost(iframe.windowLike, socket.socket, BOOTSTRAP, {
-    onConnectionState: (state) => states.push(state),
-  });
-  const gamePort = iframe.capture().port;
-  const received: unknown[] = [];
-  gamePort.onmessage = (event) => received.push(event.data);
-
-  socket.closeFromServer(4008, "implementation detail must not cross the bridge");
-  socket.closeFromServer(4008);
-  await waitUntil(() => received.length, 1);
-
-  assert.deepEqual(states, [
-    { status: "CONNECTING" },
-    { status: "DISCONNECTED", code: "SLOW_CONSUMER" },
-  ]);
-  assert.deepEqual(received, [
-    {
-      type: "MULTI_DISCONNECTED",
-      v: 1,
-      generation: 3,
-      code: "SLOW_CONSUMER",
-    },
-  ]);
-  host.close();
-  gamePort.close();
-});
-
-test("aborted state remains sticky when the server closes the transport", async () => {
-  const iframe = createIframeHarness();
-  const socket = createSocketHarness();
-  const states: MultiplayerParentConnectionState[] = [];
-  const host = createMultiplayerBridgeHost(iframe.windowLike, socket.socket, BOOTSTRAP, {
-    onConnectionState: (state) => states.push(state),
-  });
-  const gamePort = iframe.capture().port;
-  const received: unknown[] = [];
-  gamePort.onmessage = (event) => received.push(event.data);
-
-  socket.message(
-    JSON.stringify({
-      type: "MULTI_ABORTED",
-      v: 1,
-      generation: 3,
-      code: "PARTICIPANT_LEFT",
-    }),
-  );
-  socket.closeFromServer(1011);
-  await waitUntil(() => received.length, 1);
-
-  assert.deepEqual(states, [
-    { status: "CONNECTING" },
-    { status: "ABORTED", code: "PARTICIPANT_LEFT" },
-  ]);
-  assert.deepEqual(received, [
-    {
-      type: "MULTI_ABORTED",
-      v: 1,
-      generation: 3,
-      code: "PARTICIPANT_LEFT",
-    },
-  ]);
-  host.close();
-  gamePort.close();
-});
-
-test("oversized server projections are dropped before entering the sandbox", async () => {
-  const iframe = createIframeHarness();
-  const socket = createSocketHarness();
-  let drops = 0;
-  const host = createMultiplayerBridgeHost(iframe.windowLike, socket.socket, BOOTSTRAP, {
-    onProtocolDrop: (direction) => {
-      assert.equal(direction, "SERVER_TO_HOST");
-      drops += 1;
-    },
-  });
-  const gamePort = iframe.capture().port;
-  const received: unknown[] = [];
-  gamePort.onmessage = (event) => received.push(event.data);
-
-  socket.message(
-    JSON.stringify({
-      type: "MULTI_STATE",
-      v: 1,
-      generation: 3,
-      serverSeq: 1,
-      revision: 1,
-      payload: { padding: "x".repeat(20 * 1024) },
-    }),
-  );
-  await waitUntil(() => drops, 1);
-
-  assert.equal(drops, 1);
-  assert.deepEqual(received, []);
-  host.close();
-  gamePort.close();
-});
-
-test("the parent can send one explicit leave intent without exposing the socket to UI", () => {
-  const iframe = createIframeHarness();
-  const socket = createSocketHarness();
-  let leaveCalls = 0;
-  const host = createMultiplayerBridgeHost(iframe.windowLike, socket.socket, BOOTSTRAP, {
-    onLeave: () => {
-      leaveCalls += 1;
-    },
-  });
-  const gamePort = iframe.capture().port;
   assert.equal(host.leave(), true);
-  assert.equal(host.leave(), false);
-  assert.deepEqual(
-    socket.sent.map((value) => JSON.parse(value)),
-    [{ type: "MULTI_LEAVE", v: 1, generation: 3 }],
-  );
-  assert.equal(leaveCalls, 1);
+  tick?.();
+  assert.equal(socket.sent.length, 2);
+  assert.equal(JSON.parse(socket.sent[1] ?? "null").type, "MULTI_LEAVE");
+  assert.equal(cleared, 1);
   host.close();
-  gamePort.close();
+  port.close();
 });
 
-test("invalid bootstrap is rejected before a port or socket listener is exposed", () => {
+test("invalid bootstrap is rejected before a port is exposed", () => {
   const iframe = createIframeHarness();
   const socket = createSocketHarness();
   assert.throws(
     () =>
       createMultiplayerBridgeHost(iframe.windowLike, socket.socket, {
         ...BOOTSTRAP,
-        apiUrl: "https://api.example.invalid",
-      } as MultiInitMessage),
+        runtime: { kind: "relay", protocolVersion: 1, resultTrust: "UNVERIFIED", extra: true },
+      } as unknown as MultiInitMessage),
     /invalid multiplayer iframe bootstrap/,
   );
+  assert.equal(socket.sent.length, 0);
+  assert.equal(socket.closes.length, 0);
 });

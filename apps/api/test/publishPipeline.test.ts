@@ -25,7 +25,13 @@ const NEW_VERSION_ID = 17;
 const CREATOR_MANIFEST = strToU8(
   JSON.stringify({
     schemaVersion: 1,
-    game: { slug: "my-game", title: "My Game", genre: "puzzle", mode: "single" },
+    game: {
+      slug: "my-game",
+      title: "My Game",
+      genre: "puzzle",
+      mode: "single",
+      playModes: ["single"],
+    },
     progression: { type: "none" },
     result: { score: null },
   }),

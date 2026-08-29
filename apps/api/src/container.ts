@@ -19,6 +19,8 @@ import {
   D1SandboxGameRepository,
   D1GameScoreAcceptanceRepository,
   D1GameResultAcceptanceRepository,
+  D1GameResultVerificationClaimRepository,
+  D1GameVerifiedResultPersistenceRepository,
   D1GameAchievementRepository,
   D1GameIdentityRepository,
   D1GameVersionRepository,
@@ -60,6 +62,8 @@ import {
   OfficialGameLifecycleUseCases,
   GameScoreAcceptanceUseCases,
   GameResultAcceptanceUseCases,
+  GameResultVerificationUseCases,
+  GameVerifiedResultAcceptanceUseCases,
   GameAchievementUseCases,
   GamePublicationService,
   SandboxGameVersionPublicationRepository,
@@ -68,10 +72,9 @@ import {
   PublicGameMetricsUseCases,
   RuntimeGameAvailability,
   MultiplayerAdmissionUseCases,
-  OfficialMultiplayerProfileUseCases,
   ManagedMultiplayerProfileReviewUseCases,
   MultiplayerRoomUseCases,
-  MultiplayerLegacyFlowGate,
+  SelectedTopologyAuthorityGate,
   type UserRepository,
   type SessionRepository,
   type ScoreRepository,
@@ -94,11 +97,14 @@ import {
   type GameBundleStorageRepository,
   type GameScoreAcceptanceRepository,
   type GameResultAcceptanceRepository,
+  type GameResultVerificationClaimRepository,
+  type GameVerifiedResultPersistenceRepository,
   type GameAchievementRepository,
   type GameCanonicalRepository,
   type GameIdentityRepository,
   type GameVersionRepository,
   type GameAssetRepository,
+  type GameVerifierRegistry,
   type RuntimeGameRegistry,
   type PublicGameCatalog,
   type MultiplayerProfileRepository,
@@ -108,6 +114,7 @@ import {
 } from "@owogg/core";
 import type { D1Database } from "@cloudflare/workers-types";
 import { FflateBundleArchiveReader } from "./infrastructure/games/FflateBundleArchiveReader.js";
+import { createTrustedGameVerifierRegistry } from "./infrastructure/games/StaticGameVerifierRegistry.js";
 
 export interface AppContainer {
   userRepo: UserRepository;
@@ -133,6 +140,8 @@ export interface AppContainer {
   /** Provider-neutral atomic attempt consume + score insert (migration 0032). */
   gameScoreAcceptanceRepo: GameScoreAcceptanceRepository;
   gameResultAcceptanceRepo: GameResultAcceptanceRepository;
+  gameResultVerificationClaimRepo: GameResultVerificationClaimRepository;
+  gameVerifiedResultPersistenceRepo: GameVerifiedResultPersistenceRepository;
   gameAchievementRepo: GameAchievementRepository;
   gameBundleStorageRepo: GameBundleStorageRepository;
   /** True only when a complete Backblaze B2 config was passed to createContainer — routes should
@@ -146,6 +155,8 @@ export interface AppContainer {
   gameAssetRepo: GameAssetRepository;
   runtimeGameRegistry: RuntimeGameRegistry;
   runtimeGameAvailability: RuntimeGameAvailability;
+  /** Statically compiled trusted verifier authority used by publication, sessions and results. */
+  gameVerifierRegistry: GameVerifierRegistry;
   publicGameCatalog: PublicGameCatalog;
   /** Multiplayer control-plane authority. Routes remain closed until Phase 2 admission and
    * ticket use cases are wired; exposing these repositories here does not itself expose APIs. */
@@ -154,10 +165,9 @@ export interface AppContainer {
   multiplayerInstanceRepo: MultiplayerInstanceRepository;
   multiplayerMatchRepo: MultiplayerMatchRepository;
   multiplayerAdmissionUseCases: MultiplayerAdmissionUseCases;
-  officialMultiplayerProfileUseCases: OfficialMultiplayerProfileUseCases;
   managedMultiplayerProfileReviewUseCases: ManagedMultiplayerProfileReviewUseCases;
   multiplayerRoomUseCases: MultiplayerRoomUseCases;
-  multiplayerLegacyFlowGate: MultiplayerLegacyFlowGate;
+  selectedTopologyAuthorityGate: SelectedTopologyAuthorityGate;
   publicGameMetricsUseCases: PublicGameMetricsUseCases;
   scoreReadUseCases: GenericScoreReadUseCases;
   personalizationUseCases: PersonalizationUseCases;
@@ -182,6 +192,8 @@ export interface AppContainer {
   officialGameLifecycleUseCases: OfficialGameLifecycleUseCases;
   gameScoreAcceptanceUseCases: GameScoreAcceptanceUseCases;
   gameResultAcceptanceUseCases: GameResultAcceptanceUseCases;
+  gameResultVerificationUseCases: GameResultVerificationUseCases;
+  gameVerifiedResultAcceptanceUseCases: GameVerifiedResultAcceptanceUseCases;
   gameAchievementUseCases: GameAchievementUseCases;
   gamePublicationService: GamePublicationService;
 }
@@ -219,20 +231,24 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
   const multiplayerProfileRequestRepo = new D1MultiplayerProfileRequestRepository(db);
   const multiplayerInstanceRepo = new D1MultiplayerInstanceRepository(db);
   const multiplayerMatchRepo = new D1MultiplayerMatchRepository(db);
+  const gameVersionRepo = new D1GameVersionRepository(db);
+  const gameVerifierRegistry = createTrustedGameVerifierRegistry();
   const multiplayerAdmissionUseCases = new MultiplayerAdmissionUseCases({
     instances: multiplayerInstanceRepo,
     profiles: multiplayerProfileRepo,
+    gameVersions: gameVersionRepo,
   });
-  const multiplayerLegacyFlowGate = new MultiplayerLegacyFlowGate(multiplayerProfileRepo);
+  const selectedTopologyAuthorityGate = new SelectedTopologyAuthorityGate(multiplayerProfileRepo);
   const adminMonitoringRepo = new D1AdminMonitoringRepository(db);
   const userModerationRepo = new D1UserModerationRepository(db);
   const gameCreatorRepo = new D1GameCreatorRepository(db);
   const sandboxGameRepo = new D1SandboxGameRepository(db);
   const gameScoreAcceptanceRepo = new D1GameScoreAcceptanceRepository(db);
   const gameResultAcceptanceRepo = new D1GameResultAcceptanceRepository(db);
+  const gameResultVerificationClaimRepo = new D1GameResultVerificationClaimRepository(db);
+  const gameVerifiedResultPersistenceRepo = new D1GameVerifiedResultPersistenceRepository(db);
   const gameAchievementRepo = new D1GameAchievementRepository(db);
   const gameIdentityRepo = new D1GameIdentityRepository(db);
-  const gameVersionRepo = new D1GameVersionRepository(db);
   const gameAssetRepo = new D1GameAssetRepository(db);
   const officialGameUploadRepo = new D1OfficialGameUploadRepository(db);
   const officialGameLifecycleRepo = new D1OfficialGameLifecycleRepository(db);
@@ -254,10 +270,6 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     instances: multiplayerInstanceRepo,
     matches: multiplayerMatchRepo,
   });
-  const officialMultiplayerProfileUseCases = new OfficialMultiplayerProfileUseCases({
-    runtimeGames: runtimeGameRegistry,
-    profiles: multiplayerProfileRepo,
-  });
   const managedMultiplayerProfileReviewUseCases = new ManagedMultiplayerProfileReviewUseCases({
     requests: multiplayerProfileRequestRepo,
     profiles: multiplayerProfileRepo,
@@ -266,6 +278,7 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     gameIdentityRepo,
     gameVersionRepo,
     gameSettingsRepo,
+    multiplayerInstanceRepo,
   );
   const publicGameCatalog = new AvailableRuntimeGameCatalog(
     runtimeGameRegistry,
@@ -328,6 +341,7 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     gameCanonicalRepo,
     gameBundleArchiveCodec,
     multiplayerProfileRequestRepo,
+    gameVerifierRegistry,
   );
   const officialGamePublicationService = new GamePublicationService(
     officialGameUploadRepo,
@@ -341,6 +355,7 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     officialGamePublicationService,
     gameBundleArchiveCodec,
     multiplayerProfileRequestRepo,
+    gameVerifierRegistry,
   );
   const officialGameLifecycleUseCases = new OfficialGameLifecycleUseCases(
     officialGameLifecycleRepo,
@@ -351,16 +366,27 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
   const gameScoreAcceptanceUseCases = new GameScoreAcceptanceUseCases(
     runtimeGameRegistry,
     runtimeGameAvailability,
-    multiplayerLegacyFlowGate,
+    selectedTopologyAuthorityGate,
     gameSettingsRepo,
     gameScoreAcceptanceRepo,
   );
   const gameResultAcceptanceUseCases = new GameResultAcceptanceUseCases(
     runtimeGameRegistry,
     runtimeGameAvailability,
-    multiplayerLegacyFlowGate,
+    selectedTopologyAuthorityGate,
     gameSettingsRepo,
     gameResultAcceptanceRepo,
+  );
+  const gameResultVerificationUseCases = new GameResultVerificationUseCases(
+    runtimeGameRegistry,
+    runtimeGameAvailability,
+    gameSettingsRepo,
+    gameVerifierRegistry,
+    gameResultVerificationClaimRepo,
+  );
+  const gameVerifiedResultAcceptanceUseCases = new GameVerifiedResultAcceptanceUseCases(
+    gameResultVerificationUseCases,
+    gameVerifiedResultPersistenceRepo,
   );
   const gameAchievementUseCases = new GameAchievementUseCases(gameAchievementRepo);
   return {
@@ -384,6 +410,8 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     sandboxGameRepo,
     gameScoreAcceptanceRepo,
     gameResultAcceptanceRepo,
+    gameResultVerificationClaimRepo,
+    gameVerifiedResultPersistenceRepo,
     gameAchievementRepo,
     gameIdentityRepo,
     gameVersionRepo,
@@ -393,16 +421,16 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     gameCanonicalRepo,
     runtimeGameRegistry,
     runtimeGameAvailability,
+    gameVerifierRegistry,
     publicGameCatalog,
     multiplayerProfileRepo,
     multiplayerProfileRequestRepo,
     multiplayerInstanceRepo,
     multiplayerMatchRepo,
     multiplayerAdmissionUseCases,
-    officialMultiplayerProfileUseCases,
     managedMultiplayerProfileReviewUseCases,
     multiplayerRoomUseCases,
-    multiplayerLegacyFlowGate,
+    selectedTopologyAuthorityGate,
     publicGameMetricsUseCases,
     scoreReadUseCases,
     personalizationUseCases,
@@ -427,6 +455,8 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     officialGameLifecycleUseCases,
     gameScoreAcceptanceUseCases,
     gameResultAcceptanceUseCases,
+    gameResultVerificationUseCases,
+    gameVerifiedResultAcceptanceUseCases,
     gameAchievementUseCases,
     gamePublicationService,
   };

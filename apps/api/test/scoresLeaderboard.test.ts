@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { app } from "../src/app.js";
-import type { GameCanonicalDocument } from "@owogg/core";
+import { GAME_CANONICAL_SCHEMA_VERSION, type GameCanonicalDocument } from "@owogg/core";
 
 /**
  * GET /api/scores/:gameId — both identity/version and title/policy now resolve through the generic
@@ -20,6 +20,8 @@ interface FakeScoreRow {
   game_id: string;
   score: number;
   difficulty: string;
+  variant_id?: string;
+  ruleset_revision?: number;
   created_at: string;
 }
 
@@ -52,7 +54,7 @@ function createDb(rows: FakeScoreRow[], queryLog: string[] = [], multiplayerMana
             resolved_class: "M1",
             simulation_model: "turn",
             runtime_backend: "durable-object",
-            ruleset_key: "official:omok",
+            ruleset_key: "retired:profile",
             ruleset_revision: 1,
             resolved_config_json: '{"boardSize":15,"winLength":5}',
             lifecycle: "match",
@@ -151,7 +153,7 @@ async function requestLeaderboard(db: unknown, path: string) {
     );
     const definition: GameCanonicalDocument | null = slug
       ? {
-          schemaVersion: 2,
+          schemaVersion: GAME_CANONICAL_SCHEMA_VERSION,
           slug,
           title: slug === "reaction-time" ? "반응속도 테스트" : "순서 기억력 테스트",
           shortDescription: "fixture",
@@ -210,6 +212,8 @@ test("GET /api/scores/:gameId includes the registry's title on every row, not th
       game_id: "reaction-time",
       score: 200,
       difficulty: "normal",
+      variant_id: "precision",
+      ruleset_revision: 1,
       created_at: new Date().toISOString(),
     },
   ]);
@@ -220,6 +224,8 @@ test("GET /api/scores/:gameId includes the registry's title on every row, not th
   const body = (await res.json()) as { leaderboard: Array<Record<string, unknown>> };
   assert.equal(body.leaderboard.length, 1);
   assert.equal(body.leaderboard[0]?.gameTitle, "반응속도 테스트");
+  assert.equal(body.leaderboard[0]?.variantId, "precision");
+  assert.equal(body.leaderboard[0]?.rulesetRevision, 1);
 });
 
 test("GET /api/scores/:gameId still 400s an unknown gameId even with a DB bound", async () => {
@@ -341,4 +347,5 @@ test("generic leaderboard keeps runtime validation on primary and reads score ro
     false,
   );
   assert.ok(replicaQueries.some((query) => query.includes("FROM scores")));
+  assert.ok(replicaQueries.some((query) => query.includes("s.ruleset_revision = ?")));
 });

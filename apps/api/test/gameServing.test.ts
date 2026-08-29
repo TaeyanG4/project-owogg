@@ -32,7 +32,12 @@ interface FakeVersion {
   publish_status?: "UPLOADED" | "PUBLISHING" | "READY" | "FAILED";
 }
 
-function createDb(options: { game?: FakeGame; version?: FakeVersion; disabledSlugs?: string[] }) {
+function createDb(options: {
+  game?: FakeGame;
+  version?: FakeVersion;
+  disabledSlugs?: string[];
+  activeLeaseVersionIds?: number[];
+}) {
   const { game, version } = options;
   function statement(query: string) {
     let values: unknown[] = [];
@@ -76,6 +81,11 @@ function createDb(options: { game?: FakeGame; version?: FakeVersion; disabledSlu
             file_count: 2,
             uploaded_at: "2026-08-21T00:00:00.000Z",
           } as T;
+        }
+        if (query.includes("FROM game_version_leases")) {
+          return (options.activeLeaseVersionIds ?? []).includes(values[0] as number)
+            ? ({ present: 1 } as T)
+            : null;
         }
         return null;
       },
@@ -166,6 +176,7 @@ function canonicalDocument(slug: string): Uint8Array {
       title: "Test Game",
       shortDescription: "Test game short",
       description: "Test game description",
+      publisher: { official: false },
       policy: { score: null, leaderboard: false, xpPerCompletion: 0, requiresAuth: false },
       supportsReplay: false,
       catalog: { type: "GENRE_MODE", genre: "puzzle", mode: "single" },
@@ -549,6 +560,20 @@ test("non-live, wrong-owner, and kill-switch-disabled exact versions are denied"
     );
     assert.equal(res.status, 404);
   }
+});
+
+test("an active room lease keeps its exact READY bundle servable after the live version changes", async () => {
+  const switchedGame = { ...LIVE_GAME, live_version_id: 18 };
+  const { db } = createDb({
+    game: switchedGame,
+    version: LIVE_VERSION,
+    activeLeaseVersionIds: [LIVE_VERSION.id],
+  });
+  const res = await withStorage({ stored: publishedObjects(switchedGame, LIVE_VERSION) }, () =>
+    app.request("/games/1/17/index.html", {}, { DB: db, ...B2_ENV } as any),
+  );
+  assert.equal(res.status, 200);
+  assert.match(await res.text(), /data-owogg-bridge="v1"/);
 });
 
 test("GET a published asset of a generic version that is not READY returns 404", async () => {

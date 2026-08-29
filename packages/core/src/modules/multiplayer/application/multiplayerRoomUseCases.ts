@@ -6,12 +6,14 @@ import type {
 } from "../domain/multiplayerInstance.js";
 import type { MultiplayerMatchRecord } from "../domain/multiplayerMatch.js";
 import type { MultiplayerTicketKeyring } from "../domain/multiplayerJoinTicket.js";
-import type { MultiplayerJoinPolicy, MultiplayerVisibility } from "../domain/multiplayerProfile.js";
+import {
+  isApprovedRelayMultiplayerProfileV1,
+  type MultiplayerJoinPolicy,
+  type MultiplayerVisibility,
+} from "../domain/multiplayerProfile.js";
 import type { MultiplayerInstanceRepository } from "../ports/multiplayerInstanceRepository.js";
 import type { MultiplayerMatchRepository } from "../ports/multiplayerMatchRepository.js";
 import type { MultiplayerProfileRepository } from "../ports/multiplayerProfileRepository.js";
-import { isSupportedMultiplayerRuntimeProfile } from "../rules/supportedRulesets.js";
-import { MULTIPLAYER_REMATCH_WINDOW_MS } from "../domain/multiplayerLifecycle.js";
 
 const INSTANCE_TTL_MS = 2 * 60 * 60 * 1_000;
 const VERSION_LEASE_GRACE_MS = 5 * 60 * 1_000;
@@ -151,25 +153,6 @@ export type LeaveMultiplayerRoomResult =
     }
   | { readonly ok: false; readonly code: RoomErrorCode };
 
-export type MultiplayerRematchState = "AVAILABLE" | "WAITING" | "OPPONENT_REQUESTED" | "STARTED";
-
-export interface MultiplayerRematchInput {
-  readonly userId: number;
-  readonly instanceId: string;
-  readonly expectedGeneration: number;
-}
-
-export type MultiplayerRematchResult =
-  | {
-      readonly ok: true;
-      readonly state: MultiplayerRematchState;
-      readonly instance: MultiplayerInstanceRecord;
-      readonly participant: MultiplayerParticipantRecord;
-      readonly requestedBySelf: boolean;
-      readonly requestedByOpponent: boolean;
-    }
-  | { readonly ok: false; readonly code: RoomErrorCode };
-
 export interface MultiplayerRoomUseCaseDependencies {
   readonly runtimeGames: RuntimeGameRegistry;
   readonly profiles: MultiplayerProfileRepository;
@@ -258,22 +241,27 @@ export class MultiplayerRoomUseCases {
         runtime.identity.id,
         runtime.liveVersion.id,
       );
-      if (!profileRecord || !isSupportedMultiplayerRuntimeProfile(profileRecord.profile)) {
+      if (
+        !profileRecord ||
+        !isApprovedRelayMultiplayerProfileV1(profileRecord.profile) ||
+        profileRecord.profile.contentHash !== runtime.liveVersion.contentHash
+      ) {
         return { ok: false, code: "PROFILE_DISABLED" };
       }
       const profile = profileRecord.profile;
       if (
-        !profile.allowedVisibility.includes(input.visibility) ||
-        !profile.allowedJoinPolicies.includes(input.joinPolicy)
+        profile.allowedVisibility[0] !== input.visibility ||
+        profile.allowedJoinPolicies[0] !== input.joinPolicy
       ) {
         return { ok: false, code: "FORBIDDEN" };
       }
 
       const now = this.now();
       const nowIso = now.toISOString();
-      const instanceExpiresAt = new Date(now.getTime() + INSTANCE_TTL_MS).toISOString();
+      const instanceTtlMs = Math.min(INSTANCE_TTL_MS, profile.roomTtlSeconds * 1_000);
+      const instanceExpiresAt = new Date(now.getTime() + instanceTtlMs).toISOString();
       const leaseExpiresAt = new Date(
-        now.getTime() + INSTANCE_TTL_MS + VERSION_LEASE_GRACE_MS,
+        now.getTime() + instanceTtlMs + VERSION_LEASE_GRACE_MS,
       ).toISOString();
       const createIdempotencyHash = await sha256Hex(roomCreateHashInput(input));
 
@@ -285,6 +273,7 @@ export class MultiplayerRoomUseCases {
           createIdempotencyHash,
           gameId: runtime.identity.id,
           gameVersionId: runtime.liveVersion.id,
+          contentHash: runtime.liveVersion.contentHash,
           profileId: profileRecord.id,
           profileRevision: profile.profileRevision,
           visibility: input.visibility,
@@ -415,6 +404,7 @@ export class MultiplayerRoomUseCases {
       if (instance.generation !== input.expectedGeneration) {
         return { ok: false, code: "STALE_GENERATION" };
       }
+      if (instance.joinPolicy !== "INVITE_ONLY") return { ok: false, code: "FORBIDDEN" };
       const participant = await this.dependencies.instances.findParticipant(
         instance.id,
         input.userId,
@@ -570,7 +560,13 @@ export class MultiplayerRoomUseCases {
         this.dependencies.instances.listParticipants(instance.id),
         this.dependencies.profiles.findById(instance.profileId),
       ]);
-      if (!profileRecord || !isSupportedMultiplayerRuntimeProfile(profileRecord.profile)) {
+      if (
+        !profileRecord ||
+        !isApprovedRelayMultiplayerProfileV1(profileRecord.profile) ||
+        profileRecord.profile.gameVersionId !== instance.gameVersionId ||
+        profileRecord.profile.profileRevision !== instance.profileRevision ||
+        profileRecord.profile.contentHash !== instance.contentHash
+      ) {
         return { ok: false, code: "PROFILE_DISABLED" };
       }
       const activeParticipants = participants.filter(
@@ -726,169 +722,11 @@ export class MultiplayerRoomUseCases {
               : "INSUFFICIENT_PLAYERS",
           nowIso,
         });
-      } else if (instance.status === "CLOSING") {
-        // A participant declining the rematch ends the short consent window immediately and
-        // releases the exact-version lease instead of keeping an abandoned room alive.
-        await this.dependencies.instances.transition({
-          instanceId: instance.id,
-          expectedStatus: "CLOSING",
-          expectedGeneration: instance.generation,
-          nextStatus: "CLOSED",
-          nextGeneration: instance.generation,
-          closedAt: nowIso,
-          abortCode: null,
-          nowIso,
-        });
       }
       instance = (await this.dependencies.instances.findById(instance.id)) ?? instance;
       return { ok: true, replayed: false, instance, participant };
     } catch {
       return { ok: false, code: "INTERNAL_RETRYABLE" };
     }
-  }
-
-  async getRematchStatus(input: MultiplayerRematchInput): Promise<MultiplayerRematchResult> {
-    if (
-      !isPositiveInteger(input.userId) ||
-      !INSTANCE_ID_PATTERN.test(input.instanceId) ||
-      !isPositiveInteger(input.expectedGeneration)
-    ) {
-      return { ok: false, code: "INVALID_REQUEST" };
-    }
-    try {
-      const instance = await this.dependencies.instances.findById(input.instanceId);
-      if (!instance) return { ok: false, code: "INSTANCE_NOT_FOUND" };
-      const participant = await this.dependencies.instances.findParticipant(
-        instance.id,
-        input.userId,
-      );
-      if (!participant || (participant.status !== "JOINED" && participant.status !== "READY")) {
-        return { ok: false, code: "NOT_PARTICIPANT" };
-      }
-
-      const requesterParticipantIds =
-        await this.dependencies.instances.listRematchRequesterParticipantIds(
-          instance.id,
-          input.expectedGeneration,
-        );
-      const requestedBySelf = requesterParticipantIds.includes(participant.id);
-      const requestedByOpponent = requesterParticipantIds.some(
-        (participantId) => participantId !== participant.id,
-      );
-      if (
-        instance.generation === input.expectedGeneration + 1 &&
-        (instance.status === "LOBBY" ||
-          instance.status === "STARTING" ||
-          instance.status === "ACTIVE")
-      ) {
-        return {
-          ok: true,
-          state: "STARTED",
-          instance,
-          participant,
-          requestedBySelf,
-          requestedByOpponent,
-        };
-      }
-      if (instance.generation !== input.expectedGeneration) {
-        return { ok: false, code: "STALE_GENERATION" };
-      }
-      if (instance.status !== "CLOSING") {
-        return { ok: false, code: "INSTANCE_NOT_JOINABLE" };
-      }
-      const match = await this.dependencies.matches.findMatchByInstanceGeneration(
-        instance.id,
-        instance.generation,
-      );
-      const committedAtMs = match?.committedAt ? Date.parse(match.committedAt) : Number.NaN;
-      const now = this.now();
-      if (
-        !match ||
-        match.status !== "COMMITTED" ||
-        !Number.isFinite(committedAtMs) ||
-        now.getTime() >= committedAtMs + MULTIPLAYER_REMATCH_WINDOW_MS
-      ) {
-        await this.dependencies.instances.transition({
-          instanceId: instance.id,
-          expectedStatus: "CLOSING",
-          expectedGeneration: instance.generation,
-          nextStatus: "CLOSED",
-          nextGeneration: instance.generation,
-          closedAt: now.toISOString(),
-          abortCode: null,
-          nowIso: now.toISOString(),
-        });
-        return { ok: false, code: "INSTANCE_NOT_JOINABLE" };
-      }
-      return {
-        ok: true,
-        state: requestedBySelf
-          ? "WAITING"
-          : requestedByOpponent
-            ? "OPPONENT_REQUESTED"
-            : "AVAILABLE",
-        instance,
-        participant,
-        requestedBySelf,
-        requestedByOpponent,
-      };
-    } catch {
-      return { ok: false, code: "INTERNAL_RETRYABLE" };
-    }
-  }
-
-  async requestRematch(input: MultiplayerRematchInput): Promise<MultiplayerRematchResult> {
-    const status = await this.getRematchStatus(input);
-    if (!status.ok || status.state === "STARTED") return status;
-    const nowIso = this.now().toISOString();
-    try {
-      const requested = await this.dependencies.instances.requestRematch({
-        instanceId: status.instance.id,
-        expectedGeneration: input.expectedGeneration,
-        userId: input.userId,
-        participantId: status.participant.id,
-        nowIso,
-      });
-      if (requested.status === "REJECTED") {
-        if (requested.code === "INTERNAL_RETRYABLE") {
-          const reconciled = await this.reconcileRematchMutation(input);
-          if (reconciled) return reconciled;
-        }
-        return { ok: false, code: requested.code };
-      }
-      const requestedBySelf = requested.requesterParticipantIds.includes(requested.participant.id);
-      const requestedByOpponent = requested.requesterParticipantIds.some(
-        (participantId) => participantId !== requested.participant.id,
-      );
-      return {
-        ok: true,
-        state:
-          requested.status === "STARTED"
-            ? "STARTED"
-            : requestedByOpponent
-              ? "OPPONENT_REQUESTED"
-              : "WAITING",
-        instance: requested.instance,
-        participant: requested.participant,
-        requestedBySelf,
-        requestedByOpponent,
-      };
-    } catch {
-      // D1 may have committed the idempotent consent batch even if its response (or the immediate
-      // classification read) was interrupted. One error-only read distinguishes that case from a
-      // real failure without adding steady-state polling or duplicate writes.
-      const reconciled = await this.reconcileRematchMutation(input);
-      if (reconciled) return reconciled;
-      return { ok: false, code: "INTERNAL_RETRYABLE" };
-    }
-  }
-
-  private async reconcileRematchMutation(
-    input: MultiplayerRematchInput,
-  ): Promise<MultiplayerRematchResult | null> {
-    const reconciled = await this.getRematchStatus(input);
-    if (!reconciled.ok) return null;
-    if (reconciled.state === "STARTED" || reconciled.requestedBySelf) return reconciled;
-    return null;
   }
 }

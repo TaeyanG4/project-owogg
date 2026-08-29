@@ -17,6 +17,8 @@ function mapScoreRow(row: Record<string, unknown>): Score {
     game_id: String(row.game_id),
     score: Number(row.score),
     difficulty: row.difficulty ? String(row.difficulty) : "normal",
+    variant_id: row.variant_id ? String(row.variant_id) : "standard",
+    ruleset_revision: Number(row.ruleset_revision ?? 1),
     created_at: String(row.created_at),
   };
 }
@@ -74,6 +76,8 @@ export class D1ScoreRepository implements ScoreRepository {
       game_id: data.gameId,
       score: data.score,
       difficulty: data.difficulty,
+      variant_id: "standard",
+      ruleset_revision: 1,
       created_at: createdAt,
     };
   }
@@ -83,6 +87,7 @@ export class D1ScoreRepository implements ScoreRepository {
     limit = 20,
     direction: "asc" | "desc" = "desc",
     difficulty = "normal",
+    rulesetRevision = 1,
   ): Promise<Score[]> {
     // `direction` must only ever originate from the trusted game manifest (never from raw
     // user/query input) — it is interpolated directly into SQL below.
@@ -128,6 +133,7 @@ export class D1ScoreRepository implements ScoreRepository {
           AND g.deleted_at IS NULL
           AND g.leaderboard_generation = s.leaderboard_generation
         WHERE s.user_id IS NOT NULL AND s.game_id = ? AND s.difficulty = ?
+          AND s.ruleset_revision = ?
           AND s.deleted_at IS NULL
       )
       SELECT * FROM ranked
@@ -138,7 +144,7 @@ export class D1ScoreRepository implements ScoreRepository {
 
     const res = await this.db
       .prepare(query)
-      .bind(gameId, difficulty, limit)
+      .bind(gameId, difficulty, rulesetRevision, limit)
       .all<Record<string, unknown>>();
 
     return res.results.map(mapScoreRow);
@@ -147,19 +153,26 @@ export class D1ScoreRepository implements ScoreRepository {
   async getUserPersonalBests(userId: number): Promise<UserPersonalBestAggregate[]> {
     const res = await this.db
       .prepare(
-        `SELECT s.game_id, MIN(s.score) as min_score, MAX(s.score) as max_score
+        `SELECT s.game_id, s.ruleset_revision, MIN(s.score) as min_score,
+                MAX(s.score) as max_score
          FROM scores s
          JOIN games g ON g.slug = s.game_id
            AND g.deleted_at IS NULL
            AND g.leaderboard_generation = s.leaderboard_generation
          WHERE s.user_id = ? AND s.deleted_at IS NULL
-         GROUP BY s.game_id`,
+         GROUP BY s.game_id, s.ruleset_revision`,
       )
       .bind(userId)
-      .all<{ game_id: string; min_score: number; max_score: number }>();
+      .all<{
+        game_id: string;
+        ruleset_revision: number;
+        min_score: number;
+        max_score: number;
+      }>();
 
     return res.results.map((row) => ({
       game_id: String(row.game_id),
+      ruleset_revision: Number(row.ruleset_revision ?? 1),
       min_score: Number(row.min_score),
       max_score: Number(row.max_score),
     }));

@@ -60,6 +60,73 @@ function taxonomyDoc(overrides: Partial<GameCanonicalDocument> = {}): GameCanoni
   };
 }
 
+function verifiedDoc(): GameCanonicalDocument {
+  return genreModeDoc({
+    difficulty: {
+      levels: [
+        { id: "normal", label: "Normal" },
+        { id: "hard", label: "Hard" },
+      ],
+      defaultLevelId: "normal",
+    },
+    playConfig: {
+      version: 1,
+      rulesetRevision: 7,
+      verifierId: "my-game/score-v1",
+      defaultVariantId: "standard",
+      variants: [
+        { id: "standard", label: "Standard" },
+        { id: "precision", label: "Precision" },
+      ],
+      allowedConfigs: [
+        { difficultyId: "normal", variantId: "standard", rewardFactor: 1 },
+        { difficultyId: "normal", variantId: "precision", rewardFactor: 1.1 },
+        { difficultyId: "hard", variantId: "standard", rewardFactor: 1.2 },
+        { difficultyId: "hard", variantId: "precision", rewardFactor: 1.3 },
+      ],
+    },
+    creatorManifest: {
+      $schema: "https://owogg.com/schemas/manifest/v1.json",
+      schemaVersion: 1,
+      game: {
+        slug: "my-game",
+        title: "My Game",
+        genre: "puzzle",
+        mode: "single",
+        playModes: ["single"],
+      },
+      difficulties: [
+        { id: "normal", title: "Normal", default: true },
+        { id: "hard", title: "Hard" },
+      ],
+      playConfig: {
+        version: 1,
+        rulesetRevision: 7,
+        verifierId: "my-game/score-v1",
+        variants: [
+          { id: "standard", title: "Standard", default: true },
+          { id: "precision", title: "Precision" },
+        ],
+        allowedConfigs: [
+          { difficultyId: "normal", variantId: "standard", rewardFactor: 1 },
+          { difficultyId: "normal", variantId: "precision", rewardFactor: 1.1 },
+          { difficultyId: "hard", variantId: "standard", rewardFactor: 1.2 },
+          { difficultyId: "hard", variantId: "precision", rewardFactor: 1.3 },
+        ],
+      },
+      progression: { type: "none" },
+      result: {
+        score: {
+          unit: "pts",
+          direction: "desc",
+          range: { min: 0, max: 100, outOfRange: "reject" },
+        },
+      },
+      leaderboard: { enabled: true },
+    },
+  });
+}
+
 function roundTrip(doc: GameCanonicalDocument): GameCanonicalDocument {
   return parseGameCanonicalDocument(serializeGameCanonicalDocument(doc), doc.slug);
 }
@@ -262,16 +329,7 @@ test("publisher.official round-trips as public presentation metadata", () => {
   assert.equal(roundTrip(taxonomyDoc()).publisher.official, true);
 });
 
-test("legacy schema v1 normalizes fail-safe to non-official", () => {
-  const raw = JSON.parse(serializeGameCanonicalDocument(genreModeDoc()));
-  raw.schemaVersion = 1;
-  delete raw.publisher;
-  const parsed = parseGameCanonicalDocument(JSON.stringify(raw), "my-game");
-  assert.equal(parsed.schemaVersion, GAME_CANONICAL_SCHEMA_VERSION);
-  assert.deepEqual(parsed.publisher, { official: false });
-});
-
-test("current schema requires a strict publisher metadata object", () => {
+test("the only canonical v1 shape requires a strict publisher metadata object", () => {
   const missing = JSON.parse(serializeGameCanonicalDocument(genreModeDoc()));
   delete missing.publisher;
   assert.throws(
@@ -287,19 +345,104 @@ test("current schema requires a strict publisher metadata object", () => {
   );
 });
 
-test("legacy canonical schemas cannot claim a Game Creator Manifest v1 contract", () => {
-  const raw = JSON.parse(serializeGameCanonicalDocument(genreModeDoc()));
-  raw.schemaVersion = 2;
-  raw.creatorManifest = {
-    schemaVersion: 1,
-    game: { slug: "my-game", title: "My Game", genre: "puzzle", mode: "single" },
-    progression: { type: "none" },
-    result: { score: null },
+test("canonical accepts only the current v1 schema number", () => {
+  for (const unsupportedVersion of [0, 99]) {
+    const raw = JSON.parse(serializeGameCanonicalDocument(genreModeDoc()));
+    raw.schemaVersion = unsupportedVersion;
+    assert.throws(
+      () => parseGameCanonicalDocument(JSON.stringify(raw), "my-game"),
+      (err: unknown) =>
+        err instanceof GameCanonicalDocumentError && err.code === "UNSUPPORTED_SCHEMA_VERSION",
+    );
+  }
+});
+
+test("canonical v1 round-trips normalized PlayConfig with its creator declaration", () => {
+  const parsed = roundTrip(verifiedDoc());
+  assert.equal(parsed.schemaVersion, 1);
+  assert.equal(parsed.creatorManifest?.playConfig?.variants[0]?.default, true);
+  assert.deepEqual(parsed.playConfig, verifiedDoc().playConfig);
+});
+
+test("canonical v1 round-trips a hybrid local and Relay-online creator declaration", () => {
+  const raw = JSON.parse(serializeGameCanonicalDocument(verifiedDoc()));
+  raw.catalog = { type: "GENRE_MODE", genre: "board", mode: "multi" };
+  raw.creatorManifest.game = {
+    ...raw.creatorManifest.game,
+    genre: "board",
+    mode: "multi",
+    playModes: ["local-multi", "online-multi"],
   };
+  raw.creatorManifest.multiplayer = {
+    version: 1,
+    transport: { kind: "websocket", protocolVersion: 1 },
+    runtime: { kind: "relay" },
+    players: { min: 2, max: 8 },
+    features: {
+      reconnect: "resume",
+      directMessages: true,
+      hostSnapshot: true,
+      joinInProgress: false,
+      spectators: false,
+    },
+  };
+
+  const parsed = parseGameCanonicalDocument(JSON.stringify(raw), "my-game");
+  assert.deepEqual(parsed.creatorManifest?.game.playModes, ["local-multi", "online-multi"]);
+  assert.equal(parsed.creatorManifest?.playConfig?.verifierId, "my-game/score-v1");
+  assert.equal(parsed.creatorManifest?.multiplayer?.runtime.kind, "relay");
+  assert.deepEqual(roundTrip(parsed), parsed);
+});
+
+test("canonical PlayConfig must exactly match its creator manifest declaration", () => {
+  const raw = JSON.parse(serializeGameCanonicalDocument(verifiedDoc()));
+  raw.creatorManifest.playConfig.verifierId = "my-game/other-verifier";
   assert.throws(
     () => parseGameCanonicalDocument(JSON.stringify(raw), "my-game"),
     (err: unknown) => err instanceof GameCanonicalDocumentError && err.code === "INVALID_DOCUMENT",
   );
+});
+
+test("canonical PlayConfig cannot exist without the reviewed creator manifest", () => {
+  const raw = JSON.parse(serializeGameCanonicalDocument(verifiedDoc()));
+  delete raw.creatorManifest;
+  assert.throws(
+    () => parseGameCanonicalDocument(JSON.stringify(raw), "my-game"),
+    (err: unknown) => err instanceof GameCanonicalDocumentError && err.code === "INVALID_DOCUMENT",
+  );
+});
+
+test("canonical PlayConfig rejects invalid runtime authority", () => {
+  const mutations: Array<(raw: ReturnType<typeof JSON.parse>) => void> = [
+    (raw) => {
+      raw.playConfig.extra = true;
+    },
+    (raw) => {
+      raw.playConfig.rulesetRevision = 0;
+    },
+    (raw) => {
+      raw.playConfig.defaultVariantId = "missing";
+    },
+    (raw) => {
+      raw.playConfig.allowedConfigs[0].rewardFactor = 0;
+    },
+    (raw) => {
+      raw.playConfig.allowedConfigs[1] = { ...raw.playConfig.allowedConfigs[0] };
+    },
+    (raw) => {
+      raw.policy.leaderboard = false;
+    },
+  ];
+
+  for (const mutate of mutations) {
+    const raw = JSON.parse(serializeGameCanonicalDocument(verifiedDoc()));
+    mutate(raw);
+    assert.throws(
+      () => parseGameCanonicalDocument(JSON.stringify(raw), "my-game"),
+      (err: unknown) =>
+        err instanceof GameCanonicalDocumentError && err.code === "INVALID_DOCUMENT",
+    );
+  }
 });
 
 // ── fail-closed ───────────────────────────────────────────────────────────────

@@ -345,6 +345,7 @@ export class D1StreamerRepository implements StreamerRepository {
     mode: "score" | "xp";
     gameId?: string;
     direction?: "asc" | "desc";
+    rulesetRevision?: number;
     platform?: StreamerPlatformType;
     limit?: number;
     offset?: number;
@@ -374,7 +375,7 @@ export class D1StreamerRepository implements StreamerRepository {
     if (options.mode === "score") {
       const selectedGameId = options.gameId && options.gameId !== "all" ? options.gameId : null;
       const orderClause = options.direction === "asc" ? "ASC" : "DESC";
-      const gameFilterClause = selectedGameId ? `AND s.game_id = ?` : "";
+      const gameFilterClause = selectedGameId ? `AND s.game_id = ? AND s.ruleset_revision = ?` : "";
 
       // One canonical PB row per eligible Streamer user is selected in SQL (ROW_NUMBER, before
       // LIMIT/OFFSET) so a single Streamer with hundreds of raw score rows can never crowd other
@@ -401,7 +402,9 @@ export class D1StreamerRepository implements StreamerRepository {
       `;
 
       const bindArgs: (string | number)[] = [];
-      if (selectedGameId) bindArgs.push(selectedGameId);
+      if (selectedGameId) {
+        bindArgs.push(selectedGameId, options.rulesetRevision ?? 1);
+      }
       if (options.platform) bindArgs.push(options.platform);
 
       const countQuery = `SELECT COUNT(*) as total FROM (${rankedCte})`;

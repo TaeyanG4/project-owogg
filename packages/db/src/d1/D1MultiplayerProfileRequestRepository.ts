@@ -1,8 +1,9 @@
 import {
   MULTIPLAYER_PROFILE_REQUEST_STATUSES,
-  hashManagedMultiplayerProfileRequestV1,
-  parseManagedMultiplayerProfileRequestV1,
-  serializeManagedMultiplayerProfileRequestV1,
+  hashMultiplayerRuntimeProfileRequestV1,
+  isSha256ContentHash,
+  parseMultiplayerRuntimeProfileRequestV1,
+  serializeMultiplayerRuntimeProfileRequestV1,
   type MultiplayerProfileRequestRecord,
   type MultiplayerProfileRequestRepository,
   type ReviewMultiplayerProfileRequestInput,
@@ -14,7 +15,7 @@ import {
 import type { D1Database, D1Result } from "./D1UserRepository.js";
 
 const REQUEST_SELECT_COLUMNS = `
-  id, game_id, game_version_id, request_schema_version, request_hash, request_json,
+  id, game_id, game_version_id, content_hash, request_schema_version, request_hash, request_json,
   requested_by_user_id, status, reviewed_by_admin_id, reviewed_at,
   decision_reason_code, created_at, updated_at
 `;
@@ -91,13 +92,13 @@ export async function mapMultiplayerProfileRequestRow(
   } catch {
     throw new Error("Invalid request_json JSON in multiplayer_profile_requests row");
   }
-  const request = parseManagedMultiplayerProfileRequestV1(source);
-  const canonicalJson = serializeManagedMultiplayerProfileRequestV1(request);
+  const request = parseMultiplayerRuntimeProfileRequestV1(source);
+  const canonicalJson = serializeMultiplayerRuntimeProfileRequestV1(request);
   if (canonicalJson !== json) {
     throw new Error("Non-canonical request_json in multiplayer_profile_requests row");
   }
   const storedHash = requestHash(row.request_hash);
-  const calculatedHash = await hashManagedMultiplayerProfileRequestV1(request);
+  const calculatedHash = await hashMultiplayerRuntimeProfileRequestV1(request);
   if (calculatedHash !== storedHash) {
     throw new Error("request_hash does not match request_json in multiplayer_profile_requests row");
   }
@@ -138,6 +139,7 @@ export async function mapMultiplayerProfileRequestRow(
     id: requiredPositiveInteger(row.id, "id"),
     gameId: requiredPositiveInteger(row.game_id, "game_id"),
     gameVersionId: requiredPositiveInteger(row.game_version_id, "game_version_id"),
+    contentHash: requestHash(row.content_hash),
     requestSchemaVersion: 1,
     requestHash: storedHash,
     requestJson: canonicalJson,
@@ -155,6 +157,7 @@ export async function mapMultiplayerProfileRequestRow(
 interface ExactVersionOwner {
   readonly publisherType: "OWOGG" | "USER";
   readonly publisherUserId: number | null;
+  readonly contentHash: string;
 }
 
 export class D1MultiplayerProfileRequestRepository implements MultiplayerProfileRequestRepository {
@@ -166,7 +169,7 @@ export class D1MultiplayerProfileRequestRepository implements MultiplayerProfile
   ): Promise<ExactVersionOwner | null> {
     const row = await this.db
       .prepare(
-        `SELECT game.publisher_type, game.publisher_user_id
+        `SELECT game.publisher_type, game.publisher_user_id, version.content_hash
          FROM game_versions version
          JOIN games game ON game.id = version.game_id
          WHERE version.id = ? AND version.game_id = ? AND game.deleted_at IS NULL
@@ -183,6 +186,7 @@ export class D1MultiplayerProfileRequestRepository implements MultiplayerProfile
     return {
       publisherType: row.publisher_type,
       publisherUserId: nullablePositiveInteger(row.publisher_user_id, "publisher_user_id"),
+      contentHash: requestHash(row.content_hash),
     };
   }
 
@@ -194,10 +198,16 @@ export class D1MultiplayerProfileRequestRepository implements MultiplayerProfile
     if (input.requestedByUserId !== null) {
       assertPositiveId(input.requestedByUserId, "requestedByUserId");
     }
+    if (!isSha256ContentHash(input.contentHash)) {
+      throw new RangeError("contentHash must be a lowercase SHA-256 hex digest");
+    }
     assertNowIso(input.nowIso);
 
     const owner = await this.findExactVersionOwner(input.gameId, input.gameVersionId);
     if (!owner) return { status: "REJECTED", code: "GAME_VERSION_NOT_FOUND" };
+    if (owner.contentHash !== input.contentHash) {
+      return { status: "REJECTED", code: "REQUEST_CONFLICT" };
+    }
     if (
       (owner.publisherType === "OWOGG" && input.requestedByUserId !== null) ||
       (owner.publisherType === "USER" && owner.publisherUserId !== input.requestedByUserId)
@@ -205,11 +215,12 @@ export class D1MultiplayerProfileRequestRepository implements MultiplayerProfile
       return { status: "REJECTED", code: "REQUESTER_NOT_OWNER" };
     }
 
-    const canonicalJson = serializeManagedMultiplayerProfileRequestV1(input.request);
-    const hash = await hashManagedMultiplayerProfileRequestV1(input.request);
+    const canonicalJson = serializeMultiplayerRuntimeProfileRequestV1(input.request);
+    const hash = await hashMultiplayerRuntimeProfileRequestV1(input.request);
     const existing = await this.findByExactVersion(input.gameVersionId);
     if (existing) {
       return existing.gameId === input.gameId &&
+        existing.contentHash === input.contentHash &&
         existing.requestHash === hash &&
         existing.requestJson === canonicalJson &&
         sameNullable(existing.requestedByUserId, input.requestedByUserId)
@@ -222,14 +233,15 @@ export class D1MultiplayerProfileRequestRepository implements MultiplayerProfile
       write = await this.db
         .prepare(
           `INSERT OR IGNORE INTO multiplayer_profile_requests (
-             game_id, game_version_id, request_schema_version, request_hash, request_json,
+             game_id, game_version_id, content_hash, request_schema_version, request_hash, request_json,
              requested_by_user_id, status, reviewed_by_admin_id, reviewed_at,
              decision_reason_code, created_at, updated_at
-           ) VALUES (?, ?, 1, ?, ?, ?, 'PENDING_REVIEW', NULL, NULL, NULL, ?, ?)`,
+           ) VALUES (?, ?, ?, 1, ?, ?, ?, 'PENDING_REVIEW', NULL, NULL, NULL, ?, ?)`,
         )
         .bind(
           input.gameId,
           input.gameVersionId,
+          input.contentHash,
           hash,
           canonicalJson,
           input.requestedByUserId,
@@ -240,6 +252,9 @@ export class D1MultiplayerProfileRequestRepository implements MultiplayerProfile
     } catch (error) {
       const currentOwner = await this.findExactVersionOwner(input.gameId, input.gameVersionId);
       if (!currentOwner) return { status: "REJECTED", code: "GAME_VERSION_NOT_FOUND" };
+      if (currentOwner.contentHash !== input.contentHash) {
+        return { status: "REJECTED", code: "REQUEST_CONFLICT" };
+      }
       if (
         (currentOwner.publisherType === "OWOGG" && input.requestedByUserId !== null) ||
         (currentOwner.publisherType === "USER" &&
@@ -256,6 +271,7 @@ export class D1MultiplayerProfileRequestRepository implements MultiplayerProfile
     }
     if (
       stored.gameId !== input.gameId ||
+      stored.contentHash !== input.contentHash ||
       stored.requestHash !== hash ||
       stored.requestJson !== canonicalJson ||
       !sameNullable(stored.requestedByUserId, input.requestedByUserId)

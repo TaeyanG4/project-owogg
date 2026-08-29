@@ -28,7 +28,7 @@ CREATE TABLE user_progress (
 function completion(sourceId: string) {
   return {
     userId: 1,
-    gameId: "multiplayer-omok",
+    gameId: "multiplayer-relay-demo",
     sourceType: "multiplayer_match",
     sourceId,
     xpPerCompletion: 10,

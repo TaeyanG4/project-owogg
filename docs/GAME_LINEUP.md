@@ -8,6 +8,12 @@
 
 ## 1. 🎯 현재 서비스 중인 기본 게임 (4종)
 
+> 이 표는 재작성 후보를 정리한 문서 snapshot이며 runtime authority가 아닙니다. 통합 v1 재작성 페이즈를
+> 시작할 때 D1/B2의 실제 live catalog를 read-only로 조회해 최종 대상을 동결합니다. 각 게임은 구 규격과
+> 호환시키지 않고 최신 `owogg.json` v1, 필요한 PlayConfig/verifier/managed-online 경계에 맞춰 새로
+> 작성하며 standalone·strict manifest·authority 테스트를 통과한 ZIP과 SHA-256을 전달합니다. 기존 live
+> 게임 삭제와 새 ZIP 등록은 사용자가 수행합니다.
+
 | 게임 ID / Slug  | 타이틀             | 카테고리          | 스코어 단위 / 방향            | 주요 특징                                                    |
 | :-------------- | :----------------- | :---------------- | :---------------------------- | :----------------------------------------------------------- |
 | `reaction-time` | 반응속도 테스트    | `reaction`        | `ms` (asc, 낮을수록 우수)     | 시각 자극에 대한 밀리초 단위 반응속도 측정, 티어 시스템 연동 |
@@ -68,19 +74,26 @@
 
 ## 3. 📝 신규 게임 기획 및 업로드 매니페스트 템플릿
 
-새로운 게임 아이디어를 구체화할 때 아래 표준 규격에 맞추어 작성합니다:
+새로운 게임 아이디어를 구체화할 때 아래 통합 Game Creator Manifest v1 규격에 맞추어 작성합니다:
 
 ```json
 {
-  "slug": "game-slug",
-  "title": "게임 타이틀",
-  "genre": "reaction",
-  "mode": "single",
-  "shortDescription": "게임 한 줄 요약",
-  "description": "게임 상세 설명"
+  "$schema": "https://owogg.com/schemas/manifest/v1.json",
+  "schemaVersion": 1,
+  "game": {
+    "slug": "game-slug",
+    "title": "게임 타이틀",
+    "genre": "reaction",
+    "mode": "single",
+    "playModes": ["single"],
+    "shortDescription": "게임 한 줄 요약",
+    "description": "게임 상세 설명"
+  },
+  "progression": { "type": "none" },
+  "result": { "score": null }
 }
 ```
 
 같은 ZIP 루트에 `index.html`과 `owogg.logo.svg`(또는 png/jpg/jpeg/webp)를 넣습니다. 공식 여부와
-제작자명은 이 JSON에 쓰지 않습니다. 관리자 센터 업로드는 서버가 `OWOGG`, 사용자 업로드는 인증된
+제작자명은 manifest에 쓰지 않습니다. 관리자 센터 업로드는 서버가 `OWOGG`, 사용자 업로드는 인증된
 사용자 닉네임으로 결정합니다. 점수·리더보드·XP 정책은 관리자 검토 대상 canonical metadata입니다.

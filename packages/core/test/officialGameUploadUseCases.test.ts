@@ -10,6 +10,7 @@ import {
   type GameBundleStorageRepository,
   type GameCanonicalDocument,
   type GameCanonicalRepository,
+  type GameVerifierCatalog,
   type GameIdentity,
   type GamePublicationFacts,
   type GamePublicationTarget,
@@ -232,6 +233,7 @@ const files = {
         description: "OWOGG 관리자 업로드 테스트",
         genre: "arcade",
         mode: "single",
+        playModes: ["single"],
       },
       progression: { type: "none" },
       result: { score: null },
@@ -249,13 +251,16 @@ const archives: BundleArchiveReader = {
   read: () => files,
 };
 
-function multiplayerArchives(): BundleArchiveReader {
+function multiplayerArchives(
+  runtimeKind: "relay" | "worker" | "container" = "relay",
+  features: { joinInProgress?: boolean; spectators?: boolean } = {},
+): BundleArchiveReader {
   const multiplayerFiles = {
     ...files,
     "owogg.json": encoder.encode(
       JSON.stringify({
-        $schema: "https://owogg.com/schemas/manifest/v2.json",
-        schemaVersion: 2,
+        $schema: "https://owogg.com/schemas/manifest/v1.json",
+        schemaVersion: 1,
         game: {
           slug: "admin-game",
           title: "관리자 온라인 게임",
@@ -267,23 +272,17 @@ function multiplayerArchives(): BundleArchiveReader {
         result: { score: null },
         leaderboard: { enabled: false },
         multiplayer: {
-          requestVersion: 1,
-          kind: "managed-template",
-          template: { id: "turn-grid", version: 1 },
-          players: { min: 2, max: 2 },
-          requirements: {
-            simulation: "turn",
-            lifecycle: "match",
-            persistence: "match",
-            latency: "relaxed",
+          version: 1,
+          transport: { kind: "websocket", protocolVersion: 1 },
+          runtime: { kind: runtimeKind },
+          players: { min: 2, max: 8 },
+          features: {
             reconnect: "resume",
-            hiddenInformation: false,
-            simultaneousResponse: false,
-            joinInProgress: false,
-            spectators: false,
+            directMessages: true,
+            hostSnapshot: true,
+            joinInProgress: features.joinInProgress ?? false,
+            spectators: features.spectators ?? false,
           },
-          config: { boardWidth: 15, boardHeight: 15, winLength: 5 },
-          client: { protocolVersion: 1 },
         },
       }),
     ),
@@ -298,6 +297,88 @@ function multiplayerArchives(): BundleArchiveReader {
     read: () => multiplayerFiles,
   };
 }
+
+function playConfigArchives(): BundleArchiveReader {
+  const playConfigFiles = {
+    ...files,
+    "owogg.json": encoder.encode(
+      JSON.stringify({
+        schemaVersion: 1,
+        game: {
+          slug: "admin-game",
+          title: "검증 게임",
+          genre: "arcade",
+          mode: "single",
+          playModes: ["single"],
+        },
+        difficulties: [{ id: "normal", title: "Normal", default: true }],
+        playConfig: {
+          version: 1,
+          rulesetRevision: 1,
+          verifierId: "test/score-v1",
+          variants: [{ id: "standard", title: "Standard", default: true }],
+          allowedConfigs: [{ difficultyId: "normal", variantId: "standard", rewardFactor: 1 }],
+        },
+        progression: { type: "none" },
+        result: {
+          score: {
+            unit: "points",
+            direction: "desc",
+            range: { min: 0, max: 1_000, outOfRange: "reject" },
+          },
+        },
+        leaderboard: { enabled: true },
+      }),
+    ),
+  };
+  return {
+    readMetadata: () =>
+      Object.entries(playConfigFiles).map(([path, bytes]) => ({
+        path,
+        declaredSize: bytes.byteLength,
+        compressedSize: bytes.byteLength,
+      })),
+    read: () => playConfigFiles,
+  };
+}
+
+test("official PlayConfig upload rejects an unregistered verifier before D1/B2 mutation", async () => {
+  const repository = new FakeOfficialRepository();
+  const storage = new FakeStorage();
+  const canonicals = new FakeCanonicals();
+  const publication = new GamePublicationService(repository, storage, playConfigArchives());
+  const useCases = new OfficialGameUploadUseCases(repository, storage, canonicals, publication);
+
+  await assert.rejects(
+    () => useCases.upload({ bytes: new Uint8Array([1, 2, 3]).buffer }),
+    (error: unknown) =>
+      error instanceof OfficialGameUploadFailure && error.code === "VERIFIER_NOT_REGISTERED",
+  );
+  assert.equal(repository.version, null);
+  assert.equal(storage.objects.size, 0);
+  assert.equal(canonicals.document, null);
+});
+
+test("official PlayConfig upload accepts an explicitly registered trusted verifier ID", async () => {
+  const repository = new FakeOfficialRepository();
+  const storage = new FakeStorage();
+  const canonicals = new FakeCanonicals();
+  const publication = new GamePublicationService(repository, storage, playConfigArchives());
+  const verifierCatalog: GameVerifierCatalog = { has: (id) => id === "test/score-v1" };
+  const useCases = new OfficialGameUploadUseCases(
+    repository,
+    storage,
+    canonicals,
+    publication,
+    undefined,
+    undefined,
+    verifierCatalog,
+  );
+
+  await useCases.upload({ bytes: new Uint8Array([1, 2, 3]).buffer });
+  assert.equal(canonicals.document?.playConfig?.verifierId, "test/score-v1");
+  assert.equal(repository.activated?.versionId, 11);
+});
 
 test("admin upload publishes one OWOGG D1/B2 game and ignores archive authority spoofing", async () => {
   const repository = new FakeOfficialRepository();
@@ -320,7 +401,7 @@ test("admin upload publishes one OWOGG D1/B2 game and ignores archive authority 
   assert.ok(storage.objects.has("games/7/logo.svg"));
 });
 
-test("official owogg.json v2 upload submits the same managed request with no Creator identity", async () => {
+test("official owogg.json v1 upload submits the same Relay request with no Creator identity", async () => {
   const repository = new FakeOfficialRepository();
   const storage = new FakeStorage();
   const canonicals = new FakeCanonicals();
@@ -342,11 +423,55 @@ test("official owogg.json v2 upload submits the same managed request with no Cre
   assert.equal(requests.submissions[0]?.gameId, 7);
   assert.equal(requests.submissions[0]?.gameVersionId, 11);
   assert.equal(requests.submissions[0]?.requestedByUserId, null);
-  assert.equal(requests.submissions[0]?.request.template.id, "turn-grid");
+  assert.equal(requests.submissions[0]?.request.runtime.kind, "relay");
   assert.equal(repository.activated?.versionId, 11);
 });
 
-test("official managed-request conflict fails closed before the version becomes live", async () => {
+test("official upload rejects unavailable runtimes and Relay capabilities before D1/B2 mutation", async () => {
+  const cases = [
+    {
+      archive: multiplayerArchives("worker"),
+      code: "MULTIPLAYER_RUNTIME_NOT_AVAILABLE" as const,
+    },
+    {
+      archive: multiplayerArchives("container"),
+      code: "MULTIPLAYER_RUNTIME_NOT_AVAILABLE" as const,
+    },
+    {
+      archive: multiplayerArchives("relay", { spectators: true }),
+      code: "MULTIPLAYER_CAPABILITY_NOT_AVAILABLE" as const,
+    },
+  ];
+
+  for (const { archive, code } of cases) {
+    const repository = new FakeOfficialRepository();
+    const storage = new FakeStorage();
+    const canonicals = new FakeCanonicals();
+    const requests = new FakeMultiplayerProfileRequests();
+    const publication = new GamePublicationService(repository, storage, archive);
+    const useCases = new OfficialGameUploadUseCases(
+      repository,
+      storage,
+      canonicals,
+      publication,
+      undefined,
+      requests,
+    );
+
+    await assert.rejects(
+      () => useCases.upload({ bytes: new Uint8Array([1, 2, 3]).buffer }),
+      (error: unknown) => error instanceof OfficialGameUploadFailure && error.code === code,
+    );
+    assert.equal(repository.version, null);
+    assert.equal(repository.logoKey, null);
+    assert.equal(repository.activated, null);
+    assert.equal(storage.objects.size, 0);
+    assert.equal(canonicals.document, null);
+    assert.equal(requests.submissions.length, 0);
+  }
+});
+
+test("official Relay-request conflict fails closed before the version becomes live", async () => {
   const repository = new FakeOfficialRepository();
   const storage = new FakeStorage();
   const canonicals = new FakeCanonicals();

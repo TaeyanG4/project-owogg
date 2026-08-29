@@ -1,0 +1,62 @@
+{
+  "$schema": "https://owogg.com/schemas/manifest/v1.json",
+  "schemaVersion": 1,
+  "game": {
+    "slug": "verified-aim-test",
+    "title": "Verified Aim Test",
+    "genre": "skill",
+    "mode": "single",
+    "playModes": ["single"],
+    "shortDescription": "서버가 seed 기반 표적과 플레이 증거를 검증하는 OWOGG PlayConfig 참조 게임",
+    "description": "게임은 점수를 제출하지 않습니다. OWOGG 서버가 승인한 난이도와 모드, challenge seed를 바탕으로 표적 기록을 검증하고 완료 시간을 계산합니다.",
+    "tags": ["aim", "verified", "reference"]
+  },
+  "input": ["mouse", "touch"],
+  "presentation": {
+    "orientation": "any",
+    "aspectRatio": "1:1"
+  },
+  "difficulties": [
+    { "id": "normal", "title": "Normal", "default": true },
+    { "id": "hard", "title": "Hard" }
+  ],
+  "playConfig": {
+    "version": 1,
+    "rulesetRevision": 1,
+    "verifierId": "verified-aim-test-v1",
+    "variants": [
+      { "id": "standard", "title": "Standard", "default": true },
+      { "id": "precision", "title": "Precision" }
+    ],
+    "allowedConfigs": [
+      { "difficultyId": "normal", "variantId": "standard", "rewardFactor": 1 },
+      { "difficultyId": "normal", "variantId": "precision", "rewardFactor": 1.1 },
+      { "difficultyId": "hard", "variantId": "standard", "rewardFactor": 1.25 },
+      { "difficultyId": "hard", "variantId": "precision", "rewardFactor": 1.5 }
+    ]
+  },
+  "progression": {
+    "type": "stage",
+    "range": { "min": 0, "max": 10, "outOfRange": "reject" }
+  },
+  "result": {
+    "outcome": { "values": ["success"] },
+    "score": {
+      "unit": "ms",
+      "direction": "asc",
+      "precision": 0,
+      "range": { "min": 0, "max": 120000, "outOfRange": "reject" }
+    },
+    "metrics": {
+      "hits": {
+        "type": "integer",
+        "range": { "min": 0, "max": 10, "outOfRange": "reject" }
+      }
+    }
+  },
+  "leaderboard": { "enabled": true },
+  "events": {
+    "target_hit": { "maxPerAttempt": 10 },
+    "completed": { "maxPerAttempt": 1 }
+  }
+}

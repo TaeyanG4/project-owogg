@@ -26,11 +26,17 @@ import { GamePlayAdSlot } from "../../components/game/GamePlayAdSlot";
 import { GameRecommendations } from "../../components/game/GameRecommendations";
 import { XIcon } from "../../components/ui/XIcon";
 import { IframeRuntime } from "./runtime/IframeRuntime";
-import { MultiplayerGameSurface } from "./runtime/MultiplayerGameSurface";
+import {
+  MultiplayerGameSurface,
+  readMultiplayerRoomShareValue,
+  supportsPrivateOpenRoomLauncher,
+} from "./runtime/MultiplayerGameSurface";
+import { fetchMultiplayerGameAvailability } from "./runtime/multiplayerRoomApi";
 import type { MultiplayerRuntimeResolution } from "./runtime/multiplayerRuntimeResolution";
-import { fetchGameSession } from "./gameSessionApi";
+import { fetchGameSession, fetchPlayConfigGameSession } from "./gameSessionApi";
 import { acceptGameResult } from "./gameResultAcceptApi";
 import { createGameResultFlow } from "./gameResultFlow";
+import { leaderboardVariantLabel } from "../scores/variantLabel";
 import { resolvePresentationLayout } from "./presentationLayoutResolver";
 import {
   shouldShowFullscreenControl,
@@ -39,7 +45,17 @@ import {
 } from "./presentationAdvisory";
 import { gamePlayUrl } from "../../lib/api/config";
 import type { Dictionary } from "../i18n/dictionary";
-import type { LeaderRecord, PublicGame } from "@owogg/contracts";
+import type {
+  LeaderRecord,
+  MultiplayerGameAvailabilityResponse,
+  PublicGame,
+} from "@owogg/contracts";
+import type {
+  GamePlayMode,
+  JsonSafeValue,
+  PlayConfigSelection,
+  PublicPlayConfigDescriptor,
+} from "@owogg/game-sdk/bridge";
 import { fetchPublicGame, usePublicGames } from "../publicGamesApi";
 import { publicGameToCard } from "../catalog/publicGameAdapter";
 import { selectRecommendedGameCards } from "./gameRecommendations";
@@ -82,6 +98,7 @@ export function formatMetadataKey(key: string, dict: Dictionary["gamePlay"]): st
     // Memory games can report their reached level through runtime.complete metadata.
     sequenceLength: dict.metadataSequenceLength,
     grade: dict.metadataGrade,
+    authoritativeRawScore: dict.metadataAuthoritativeRawScore,
   };
   return map[key] ?? key;
 }
@@ -101,30 +118,66 @@ export function resolveGameRuntimeUrl(slug: string): string {
   return gamePlayUrl(slug);
 }
 
-/**
- * Coarse catalog gate before the D1/B2-backed multiplayer availability probe. TAXONOMY can state
- * online play exactly; legacy GENRE_MODE only knows `multi`, so the server profile decides whether
- * that game uses the online runtime or falls back to the unchanged local iframe path.
- */
+/** Public exact topology gate before the D1/B2-backed multiplayer availability probe. This is
+ * discovery only: an approved exact-version server profile remains the online authority. */
 export function isPotentialOnlineMultiplayerGame(game: PublicGame | null): boolean {
   if (!game) return false;
-  return game.catalog.type === "TAXONOMY"
-    ? game.catalog.modes.includes("online-multi")
-    : game.catalog.mode === "multi";
+  return game.playModes.includes("online-multi");
 }
 
-/**
- * A coarse `multi` catalog entry cannot decide which attempt authority to use. The parent waits
- * for the D1/B2-backed profile probe: an approved online profile must never mint a generic score
- * session, while an unavailable legacy game keeps the existing result flow unchanged.
- */
+/** Resolves a singleton declaration immediately; a hybrid declaration remains unresolved until
+ * the game asks the Host to select one of its approved choices. */
+export function resolvedGamePlayMode(
+  game: PublicGame | null,
+  selectedPlayMode: GamePlayMode | null,
+): GamePlayMode | null {
+  if (!game) return null;
+  if (game.playModes.length === 1) return game.playModes[0] ?? null;
+  return selectedPlayMode !== null && game.playModes.includes(selectedPlayMode)
+    ? selectedPlayMode
+    : null;
+}
+
+export function resolvedGenericGamePlayMode(
+  game: PublicGame | null,
+  selectedPlayMode: GamePlayMode | null,
+): "single" | "local-multi" | null {
+  const resolved = resolvedGamePlayMode(game, selectedPlayMode);
+  return resolved === "single" || resolved === "local-multi" ? resolved : null;
+}
+
+export function shouldRenderManagedMultiplayer(
+  game: PublicGame | null,
+  selectedPlayMode: GamePlayMode | null,
+): boolean {
+  return resolvedGamePlayMode(game, selectedPlayMode) === "online-multi";
+}
+
+/** The parent waits for the D1/B2-backed profile probe: an approved online profile must never mint
+ * a generic score session, while an unavailable game keeps the local iframe path unchanged. */
 export function shouldStartGenericGameSession(
   game: PublicGame | null,
   resolution: { readonly gameSlug: string; readonly mode: MultiplayerRuntimeResolution } | null,
 ): boolean {
   if (!game) return false;
+  if (game.playConfig) return false;
   if (!isPotentialOnlineMultiplayerGame(game)) return true;
-  return resolution?.gameSlug === game.slug && resolution.mode === "LEGACY";
+  return resolution?.gameSlug === game.slug && resolution.mode === "GENERIC";
+}
+
+/** Public canonical choices passed into HOST_INIT. No verifier id or session identity is present. */
+export function buildPublicPlayConfigDescriptor(
+  game: PublicGame | null,
+): PublicPlayConfigDescriptor | null {
+  if (!game?.playConfig) return null;
+  const difficulties = game.difficulty?.levels ?? [{ id: "normal", label: "Normal" }];
+  return {
+    defaultDifficultyId: game.difficulty?.defaultLevelId ?? "normal",
+    defaultVariantId: game.playConfig.defaultVariantId,
+    difficulties: difficulties.map((difficulty) => ({ ...difficulty })),
+    variants: game.playConfig.variants.map((variant) => ({ ...variant })),
+    allowedConfigs: game.playConfig.allowedConfigs.map((config) => ({ ...config })),
+  };
 }
 
 /**
@@ -479,6 +532,11 @@ export function GameHost({ slug }: GameHostProps) {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [result, setResult] = useState<GameResult | null>(null);
+  const [authoritativePlayConfig, setAuthoritativePlayConfig] = useState<{
+    readonly difficultyId: string;
+    readonly variantId: string;
+  } | null>(null);
+  const [attemptPlayConfig, setAttemptPlayConfig] = useState<PlayConfigSelection | null>(null);
   const [isTheaterMode, setIsTheaterMode] = useState(false);
   const [isMobilePlayOpen, setIsMobilePlayOpen] = useState(false);
   const [gameShareState, setGameShareState] = useState<"idle" | "shared">("idle");
@@ -505,6 +563,22 @@ export function GameHost({ slug }: GameHostProps) {
     readonly gameSlug: string;
     readonly mode: MultiplayerRuntimeResolution;
   } | null>(null);
+  const [selectedPlayMode, setSelectedPlayMode] = useState<GamePlayMode | null>(null);
+  const selectedPlayModeRef = useRef<GamePlayMode | null>(null);
+  type AvailableMultiplayerGame = Extract<
+    MultiplayerGameAvailabilityResponse,
+    { readonly status: "AVAILABLE" }
+  >;
+  const [approvedOnlineAvailability, setApprovedOnlineAvailability] =
+    useState<AvailableMultiplayerGame | null>(null);
+  const approvedOnlineAvailabilityRef = useRef<AvailableMultiplayerGame | null>(null);
+  const topologyGenerationRef = useRef(0);
+  const verifiedSessionGenerationRef = useRef(0);
+  const verifiedSessionRef = useRef<{
+    readonly token: string;
+    readonly expiresAt: string;
+    readonly playMode: "single" | "local-multi";
+  } | null>(null);
   const localizedTitle = game?.title;
   const catalogCards = useMemo(() => publicGames.map(publicGameToCard), [publicGames]);
   const currentGameCard = useMemo(
@@ -522,6 +596,20 @@ export function GameHost({ slug }: GameHostProps) {
     () => toScoreConfig(game?.policy.score ?? null),
     [game?.policy.score],
   );
+  const bridgePlayConfig = useMemo(() => buildPublicPlayConfigDescriptor(game), [game]);
+  const authoritativeDifficultyLabel = authoritativePlayConfig
+    ? localizedDifficultyLabel(
+        authoritativePlayConfig.difficultyId,
+        game?.difficulty?.levels.find((level) => level.id === authoritativePlayConfig.difficultyId)
+          ?.label ?? authoritativePlayConfig.difficultyId,
+        dict.gamePlay,
+      )
+    : null;
+  const authoritativeVariantLabel = authoritativePlayConfig
+    ? leaderboardVariantLabel(game, authoritativePlayConfig.variantId)
+    : null;
+  const renderManagedMultiplayer = shouldRenderManagedMultiplayer(game, selectedPlayMode);
+  const hasGameOwnedPlayModeSelection = (game?.playModes.length ?? 0) > 1;
   const isDisabled = useIsGameDisabled(slug);
 
   // Presentation layout — see presentationLayoutResolver.ts's own doc comment for the math, and
@@ -652,6 +740,18 @@ export function GameHost({ slug }: GameHostProps) {
     iframeAttemptDifficultyRef.current = undefined;
   }, [game]);
 
+  useEffect(() => {
+    const singletonMode = game?.playModes.length === 1 ? (game.playModes[0] ?? null) : null;
+    topologyGenerationRef.current += 1;
+    verifiedSessionGenerationRef.current += 1;
+    selectedPlayModeRef.current = singletonMode;
+    approvedOnlineAvailabilityRef.current = null;
+    verifiedSessionRef.current = null;
+    setSelectedPlayMode(singletonMode);
+    setApprovedOnlineAvailability(null);
+    setMultiplayerRuntimeResolution(null);
+  }, [game]);
+
   // The generic Game Session is acquired before each attempt and held only in this parent-side
   // controller. It is never included in HOST_INIT or any iframe bridge message.
   const resultFlow = useMemo(
@@ -699,6 +799,155 @@ export function GameHost({ slug }: GameHostProps) {
     [slug],
   );
 
+  const handleIframeSelectPlayMode = useCallback(
+    async (playMode: GamePlayMode) => {
+      if (!game || game.playModes.length < 2 || !game.playModes.includes(playMode)) {
+        return { ok: false, code: "INVALID_PLAY_MODE" } as const;
+      }
+      const generation = topologyGenerationRef.current;
+      if (playMode === "online-multi") {
+        try {
+          const availability = await fetchMultiplayerGameAvailability(slug);
+          if (
+            generation !== topologyGenerationRef.current ||
+            game.slug !== slug ||
+            !supportsPrivateOpenRoomLauncher(availability)
+          ) {
+            return { ok: false, code: "MODE_UNAVAILABLE" } as const;
+          }
+          approvedOnlineAvailabilityRef.current = availability;
+        } catch {
+          return { ok: false, code: "MODE_UNAVAILABLE" } as const;
+        }
+      } else {
+        approvedOnlineAvailabilityRef.current = null;
+      }
+      return { ok: true, playMode } as const;
+    },
+    [game, slug],
+  );
+
+  const handleIframePlayModeSelected = useCallback(
+    (playMode: GamePlayMode) => {
+      verifiedSessionGenerationRef.current += 1;
+      verifiedSessionRef.current = null;
+      setAttemptPlayConfig(null);
+      setAuthoritativePlayConfig(null);
+      selectedPlayModeRef.current = playMode;
+      setSelectedPlayMode(playMode);
+      if (playMode === "online-multi") {
+        const approved = approvedOnlineAvailabilityRef.current;
+        if (!approved) return;
+        setApprovedOnlineAvailability(approved);
+        setMultiplayerRuntimeResolution({ gameSlug: slug, mode: "ONLINE" });
+        return;
+      }
+      approvedOnlineAvailabilityRef.current = null;
+      setApprovedOnlineAvailability(null);
+      setMultiplayerRuntimeResolution({ gameSlug: slug, mode: "GENERIC" });
+    },
+    [slug],
+  );
+
+  const handleIframeRequestStart = useCallback(
+    async (selection: PlayConfigSelection) => {
+      if (!game?.playConfig || !bridgePlayConfig) {
+        return { ok: false, code: "INVALID_PLAY_CONFIG" } as const;
+      }
+      const allowed = game.playConfig.allowedConfigs.find(
+        (candidate) =>
+          candidate.difficultyId === selection.difficultyId &&
+          candidate.variantId === selection.variantId,
+      );
+      if (!allowed) return { ok: false, code: "INVALID_PLAY_CONFIG" } as const;
+      const playMode = resolvedGenericGamePlayMode(game, selectedPlayModeRef.current);
+      if (!playMode) return { ok: false, code: "GAME_UNAVAILABLE" } as const;
+      if (authLoading) return { ok: false, code: "AUTH_REQUIRED" } as const;
+      if (!isAuthenticated) {
+        verifiedSessionRef.current = null;
+        setAttemptPlayConfig({ ...selection });
+        return {
+          ok: true,
+          context: {
+            ranked: false,
+            playConfig: { ...selection },
+            rulesetRevision: game.playConfig.rulesetRevision,
+            challengeSeed: crypto.randomUUID(),
+            rewardFactor: allowed.rewardFactor,
+          },
+        } as const;
+      }
+
+      const generation = verifiedSessionGenerationRef.current;
+      try {
+        const session = await fetchPlayConfigGameSession(slug, {
+          playMode,
+          playConfig: { ...selection },
+        });
+        if (
+          generation !== verifiedSessionGenerationRef.current ||
+          selectedPlayModeRef.current !== playMode
+        ) {
+          return { ok: false, code: "GAME_UNAVAILABLE" } as const;
+        }
+        verifiedSessionRef.current = {
+          token: session.token,
+          expiresAt: session.expiresAt,
+          playMode,
+        };
+        setAttemptPlayConfig({ ...session.startContext.playConfig });
+        return { ok: true, context: session.startContext } as const;
+      } catch {
+        if (generation === verifiedSessionGenerationRef.current) {
+          verifiedSessionRef.current = null;
+        }
+        return { ok: false, code: "SESSION_UNAVAILABLE" } as const;
+      }
+    },
+    [authLoading, bridgePlayConfig, game, isAuthenticated, slug],
+  );
+
+  // A shared room link is already an explicit online choice. Preserve the existing one-click
+  // admission behavior for hybrid games, but still resolve the exact-version profile before the
+  // room UI mounts. Invalid/stale links simply leave the game-owned selector visible.
+  useEffect(() => {
+    if (
+      !game ||
+      game.playModes.length < 2 ||
+      !game.playModes.includes("online-multi") ||
+      typeof window === "undefined"
+    ) {
+      return;
+    }
+    const sharedRoom = readMultiplayerRoomShareValue(window.location.href);
+    if (!/^[A-Za-z0-9_-]{12,64}$/.test(sharedRoom.publicCode)) return;
+
+    let active = true;
+    const generation = topologyGenerationRef.current;
+    void fetchMultiplayerGameAvailability(slug)
+      .then((availability) => {
+        if (
+          !active ||
+          generation !== topologyGenerationRef.current ||
+          selectedPlayModeRef.current !== null ||
+          !supportsPrivateOpenRoomLauncher(availability)
+        ) {
+          return;
+        }
+        approvedOnlineAvailabilityRef.current = availability;
+        selectedPlayModeRef.current = "online-multi";
+        verifiedSessionGenerationRef.current += 1;
+        verifiedSessionRef.current = null;
+        setApprovedOnlineAvailability(availability);
+        setSelectedPlayMode("online-multi");
+        setMultiplayerRuntimeResolution({ gameSlug: slug, mode: "ONLINE" });
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [game, slug]);
+
   // One generic detail fetch supplies canonical policy/presentation/media for both publishers.
   // No static manifest or sandbox-specific resolver is consulted on the primary play path.
   useEffect(() => {
@@ -708,6 +957,8 @@ export function GameHost({ slug }: GameHostProps) {
     setGame(null);
     setError(null);
     setResult(null);
+    setAttemptPlayConfig(null);
+    setAuthoritativePlayConfig(null);
     setIsTheaterMode(false);
     setIsMobilePlayOpen(false);
     fetchPublicGame(slug)
@@ -735,13 +986,27 @@ export function GameHost({ slug }: GameHostProps) {
 
   // Reset / Retry Game Attempt
   const handleRetryGame = useCallback(() => {
+    verifiedSessionGenerationRef.current += 1;
+    verifiedSessionRef.current = null;
     setResult(null);
+    setAttemptPlayConfig(null);
+    setAuthoritativePlayConfig(null);
     setSubmissionState("idle");
     setSubmissionError(null);
     setResultLeaderboard(null);
     setSessionId(crypto.randomUUID());
     setAttemptKey((prev) => prev + 1);
   }, []);
+
+  const handleReturnToModeSelection = useCallback(() => {
+    topologyGenerationRef.current += 1;
+    selectedPlayModeRef.current = null;
+    approvedOnlineAvailabilityRef.current = null;
+    setSelectedPlayMode(null);
+    setApprovedOnlineAvailability(null);
+    setMultiplayerRuntimeResolution(null);
+    handleRetryGame();
+  }, [handleRetryGame]);
 
   // Forces a fresh iframe mount when the difficulty selector changes for a game that has real
   // difficulty tiers (aim-test today). The Game Bridge's HOST_INIT bootstrap is a one-time
@@ -772,13 +1037,18 @@ export function GameHost({ slug }: GameHostProps) {
     }
   }, [selectedDifficultyId, game, handleRetryGame]);
 
-  // Fetch a compact leaderboard preview as soon as the game ends (not gated on score
-  // submission succeeding — guests and rejected submissions still get competitive context).
-  // Skipped entirely for games with supportsLeaderboard: false.
+  // Fetch a compact leaderboard preview as soon as a legacy/guest result exists. Authenticated
+  // PlayConfig attempts wait for the authoritative response so the server-approved difficulty is
+  // used and a client-displayed score cannot trigger an early, wrong-scope read.
   useEffect(() => {
     if (!result || result.score === undefined || !game?.policy.leaderboard) return;
+    if (game.playConfig && isAuthenticated && submissionState !== "success") return;
     let isMounted = true;
-    fetchLeaderboardApi(slug, selectedDifficultyId)
+    const leaderboardDifficultyId =
+      authoritativePlayConfig?.difficultyId ??
+      attemptPlayConfig?.difficultyId ??
+      selectedDifficultyId;
+    fetchLeaderboardApi(slug, leaderboardDifficultyId)
       .then((records) => {
         if (isMounted) setResultLeaderboard(records.slice(0, 5));
       })
@@ -788,7 +1058,16 @@ export function GameHost({ slug }: GameHostProps) {
     return () => {
       isMounted = false;
     };
-  }, [result, game, slug, selectedDifficultyId]);
+  }, [
+    result,
+    game,
+    slug,
+    selectedDifficultyId,
+    isAuthenticated,
+    submissionState,
+    authoritativePlayConfig?.difficultyId,
+    attemptPlayConfig?.difficultyId,
+  ]);
 
   // Share Result — scoped to X (official web intent) and a screenshot-copy of the result card.
   // A dedicated Discord button used to sit here too, but it only ever copied the same text a
@@ -996,11 +1275,82 @@ export function GameHost({ slug }: GameHostProps) {
   );
 
   const handleIframeComplete = useCallback(
-    (bridgeResult: OwoggCompletionPayload & { metadata?: Record<string, unknown> }) => {
+    (
+      bridgeResult: OwoggCompletionPayload & {
+        metadata?: Record<string, unknown>;
+        evidence?: JsonSafeValue;
+      },
+    ) => {
+      if (game?.playConfig) {
+        const generation = verifiedSessionGenerationRef.current;
+        const session = verifiedSessionRef.current;
+        verifiedSessionRef.current = null;
+        setAuthoritativePlayConfig(null);
+        const pendingResult = buildGameResultFromBridgeComplete(bridgeResult, { slug, sessionId });
+        setResult(pendingResult);
+
+        if (!isAuthenticated) {
+          setSubmissionState("guest");
+          return;
+        }
+        if (!session || bridgeResult.evidence === undefined) {
+          setSubmissionState("error");
+          setSubmissionError(dict.gamePlay.errorSubmitFallback);
+          return;
+        }
+
+        setSubmissionState("submitting");
+        setSubmissionError(null);
+        const playToken = consumeActivePlayToken();
+        void acceptGameResult(slug, {
+          token: session.token,
+          evidence: bridgeResult.evidence,
+          ...(playToken ? { playToken } : {}),
+        })
+          .then((accepted) => {
+            if (generation !== verifiedSessionGenerationRef.current) return;
+            const score = accepted.competitiveScore;
+            if (score === null) throw new Error(dict.gamePlay.errorSubmitFallback);
+            const rawScore = accepted.rawScore;
+            const metadata = {
+              ...(bridgeResult.metadata ?? {}),
+              ...(rawScore !== null && rawScore !== score
+                ? { authoritativeRawScore: rawScore }
+                : {}),
+            };
+            const authoritative = buildGameResultFromBridgeComplete(
+              { score, ...(Object.keys(metadata).length > 0 ? { metadata } : {}) },
+              { slug, sessionId },
+            );
+            setResult(authoritative);
+            setAuthoritativePlayConfig({
+              difficultyId: accepted.difficultyId,
+              variantId: accepted.variantId,
+            });
+            saveLocalBestScore(slug, score, scoreConfig?.direction === "asc");
+            setSubmissionState("success");
+          })
+          .catch((error: unknown) => {
+            if (generation !== verifiedSessionGenerationRef.current) return;
+            setSubmissionState("error");
+            setSubmissionError(
+              error instanceof Error ? error.message : dict.gamePlay.errorSubmitFallback,
+            );
+          });
+        return;
+      }
       const gameResult = buildGameResultFromBridgeComplete(bridgeResult, { slug, sessionId });
       void runtime.complete(gameResult);
     },
-    [runtime, slug, sessionId],
+    [
+      dict.gamePlay.errorSubmitFallback,
+      game?.playConfig,
+      isAuthenticated,
+      runtime,
+      scoreConfig?.direction,
+      sessionId,
+      slug,
+    ],
   );
 
   const handleIframeError = useCallback(
@@ -1055,6 +1405,20 @@ export function GameHost({ slug }: GameHostProps) {
             <p className="text-2xl font-black text-brand mb-1">
               {result.outcome ?? dict.gamePlay.resultTitle}
             </p>
+          )}
+
+          {authoritativeDifficultyLabel && authoritativeVariantLabel && (
+            <div
+              data-testid="authoritative-play-config"
+              className="mt-3 flex items-center justify-center gap-2 text-xs font-bold text-text-secondary"
+            >
+              <span className="rounded-full border border-border bg-surface px-2.5 py-1">
+                {authoritativeDifficultyLabel}
+              </span>
+              <span className="rounded-full border border-border bg-surface px-2.5 py-1">
+                {dict.ranking.modeHeader}: {authoritativeVariantLabel}
+              </span>
+            </div>
           )}
 
           {resultTier && (
@@ -1169,8 +1533,11 @@ export function GameHost({ slug }: GameHostProps) {
                           <span className="truncate">{record.playerName}</span>
                         </span>
                       )}
-                      <span className="shrink-0 font-black text-brand-light">
-                        {record.formattedScore}
+                      <span className="flex shrink-0 items-center gap-2">
+                        <span className="text-[10px] font-bold text-text-muted">
+                          {leaderboardVariantLabel(game, record.variantId)}
+                        </span>
+                        <span className="font-black text-brand-light">{record.formattedScore}</span>
                       </span>
                     </li>
                   ))}
@@ -1353,16 +1720,21 @@ export function GameHost({ slug }: GameHostProps) {
                     className="flex w-full items-center justify-center overflow-hidden"
                     ref={iframeAreaRef}
                   >
-                    {isPotentialOnlineMultiplayerGame(game) ? (
+                    {renderManagedMultiplayer ? (
                       <MultiplayerGameSurface
                         gameSlug={slug}
-                        src={resolveGameRuntimeUrl(slug)}
                         title={localizedTitle ?? slug}
                         attemptKey={attemptKey}
                         viewer={
                           user ? { nickname: user.nickname, avatarUrl: user.avatar_url } : null
                         }
                         onRuntimeResolved={handleMultiplayerRuntimeResolved}
+                        {...(approvedOnlineAvailability
+                          ? { initialAvailability: approvedOnlineAvailability }
+                          : {})}
+                        {...(hasGameOwnedPlayModeSelection
+                          ? { onExitToModeSelection: handleReturnToModeSelection }
+                          : {})}
                         frameClassName={renderedIframeFrameClassName}
                         {...(iframeFrameStyle ? { frameStyle: iframeFrameStyle } : {})}
                         {...(iframeElementStyle ? { iframeStyle: iframeElementStyle } : {})}
@@ -1375,7 +1747,20 @@ export function GameHost({ slug }: GameHostProps) {
                             frameClassName={renderedIframeFrameClassName}
                             frameStyle={iframeFrameStyle}
                             iframeStyle={iframeElementStyle}
-                            {...(game?.difficulty ? { difficultyId: selectedDifficultyId } : {})}
+                            {...(game?.difficulty && !bridgePlayConfig
+                              ? { difficultyId: selectedDifficultyId }
+                              : {})}
+                            {...(bridgePlayConfig ? { playConfig: bridgePlayConfig } : {})}
+                            {...(game ? { playModes: game.playModes } : {})}
+                            {...(bridgePlayConfig
+                              ? { onRequestStart: handleIframeRequestStart }
+                              : {})}
+                            {...(hasGameOwnedPlayModeSelection
+                              ? {
+                                  onSelectPlayMode: handleIframeSelectPlayMode,
+                                  onPlayModeSelected: handleIframePlayModeSelected,
+                                }
+                              : {})}
                             onStarted={handleIframeStarted}
                             onEvent={handleIframeEvent}
                             onComplete={handleIframeComplete}
@@ -1393,7 +1778,18 @@ export function GameHost({ slug }: GameHostProps) {
                         frameClassName={renderedIframeFrameClassName}
                         frameStyle={iframeFrameStyle}
                         iframeStyle={iframeElementStyle}
-                        {...(game?.difficulty ? { difficultyId: selectedDifficultyId } : {})}
+                        {...(game?.difficulty && !bridgePlayConfig
+                          ? { difficultyId: selectedDifficultyId }
+                          : {})}
+                        {...(bridgePlayConfig ? { playConfig: bridgePlayConfig } : {})}
+                        {...(game ? { playModes: game.playModes } : {})}
+                        {...(bridgePlayConfig ? { onRequestStart: handleIframeRequestStart } : {})}
+                        {...(hasGameOwnedPlayModeSelection
+                          ? {
+                              onSelectPlayMode: handleIframeSelectPlayMode,
+                              onPlayModeSelected: handleIframePlayModeSelected,
+                            }
+                          : {})}
                         onStarted={handleIframeStarted}
                         onEvent={handleIframeEvent}
                         onComplete={handleIframeComplete}
@@ -1434,7 +1830,7 @@ export function GameHost({ slug }: GameHostProps) {
                     )}
                   </div>
 
-                  {game?.difficulty && (
+                  {game?.difficulty && !game.playConfig && (
                     <div className="ml-1 hidden shrink-0 items-center gap-1 rounded-full border border-border/80 bg-surface-raised p-1 sm:flex">
                       {game.difficulty.levels.map((level) => {
                         const isSelected = level.id === selectedDifficultyId;
@@ -1487,7 +1883,7 @@ export function GameHost({ slug }: GameHostProps) {
                 />
               </div>
 
-              {game?.difficulty && (
+              {game?.difficulty && !game.playConfig && (
                 <div className="flex items-center gap-1 border-t border-border/60 bg-surface px-3 py-2 sm:hidden">
                   {game.difficulty.levels.map((level) => {
                     const isSelected = level.id === selectedDifficultyId;

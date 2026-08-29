@@ -11,8 +11,6 @@ import {
   MultiplayerJoinTicketResponseSchema,
   MultiplayerJoinRoomRequestSchema,
   MultiplayerLeaveRoomRequestSchema,
-  MultiplayerRematchRequestSchema,
-  MultiplayerRematchResponseSchema,
   MultiplayerRoomAdmissionResponseSchema,
   MultiplayerRoomPlayerSchema,
   MultiplayerRoomResponseSchema,
@@ -25,11 +23,10 @@ import {
 import {
   MULTIPLAYER_ERROR_HTTP_STATUS,
   MULTIPLAYER_WEBSOCKET_PROTOCOL,
-  isSupportedMultiplayerRuntimeProfile,
+  isApprovedRelayMultiplayerProfileV1,
   parseMultiplayerWebSocketProtocols,
   verifyMultiplayerJoinTicket,
   type MultiplayerErrorCode,
-  type MultiplayerRematchResult,
 } from "@owogg/core";
 import { createContainer } from "../container.js";
 import { readB2Config } from "./devGames.js";
@@ -46,7 +43,6 @@ import {
   MULTIPLAYER_INTERNAL_LOBBY_SIGNAL_CONNECT_PATH,
   MULTIPLAYER_INTERNAL_LOBBY_SIGNAL_NOTIFY_PATH,
   MULTIPLAYER_INTERNAL_PROTOCOL_HEADER,
-  MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH,
   encodeVerifiedMultiplayerLobbySignalClaims,
   encodeVerifiedMultiplayerClaims,
 } from "../multiplayer/internalProtocol.js";
@@ -69,10 +65,6 @@ const PUBLIC_MESSAGES: Readonly<Record<MultiplayerErrorCode, string>> = {
   PLAYERS_NOT_READY: "모든 참가자가 준비되고 최소 인원이 모여야 시작할 수 있습니다.",
   MATCH_NOT_ACTIVE: "진행 중인 매치가 아닙니다.",
   NOT_PARTICIPANT: "이 게임 방의 참가자가 아닙니다.",
-  NOT_YOUR_TURN: "현재 행동할 차례가 아닙니다.",
-  ACTION_INVALID: "허용되지 않은 행동입니다.",
-  ACTION_CONFLICT: "동시에 처리된 행동과 충돌했습니다.",
-  ACTION_ID_REUSED: "이미 다른 행동에 사용된 식별자입니다.",
   STALE_GENERATION: "연결 상태가 변경되었습니다. 다시 동기화해주세요.",
   TICKET_INVALID: "연결 티켓이 유효하지 않습니다.",
   TICKET_EXPIRED: "연결 티켓이 만료되었습니다.",
@@ -145,6 +137,7 @@ function publicRoom(instance: {
   readonly publicCode: string;
   readonly gameId: number;
   readonly gameVersionId: number;
+  readonly contentHash: string;
   readonly profileRevision: number;
   readonly visibility: "PUBLIC" | "UNLISTED" | "PRIVATE";
   readonly joinPolicy: "OPEN" | "INVITE_ONLY";
@@ -160,6 +153,7 @@ function publicRoom(instance: {
     publicCode: instance.publicCode,
     gameId: instance.gameId,
     gameVersionId: instance.gameVersionId,
+    contentHash: instance.contentHash,
     profileRevision: instance.profileRevision,
     visibility: instance.visibility,
     joinPolicy: instance.joinPolicy,
@@ -229,47 +223,6 @@ async function readPublicRoomPlayers(
     const user = users[index];
     return user ? [publicRoomPlayer(participant, user)] : [];
   });
-}
-
-function publicRematch(result: Extract<MultiplayerRematchResult, { readonly ok: true }>) {
-  return MultiplayerRematchResponseSchema.parse({
-    state: result.state,
-    requestedBySelf: result.requestedBySelf,
-    requestedByOpponent: result.requestedByOpponent,
-    room:
-      result.state === "STARTED"
-        ? {
-            replayed: false,
-            instance: publicRoom(result.instance),
-            participant: publicParticipant(result.participant),
-          }
-        : null,
-  });
-}
-
-function notifyRematchChange(c: Context<ApiEnv>, instanceId: string, generation: number): void {
-  const namespace = c.env.MULTIPLAYER_INSTANCES;
-  if (!namespace) return;
-  const notification = namespace
-    .get(namespace.idFromName(instanceId))
-    .fetch(
-      new Request(`https://multiplayer.internal${MULTIPLAYER_INTERNAL_REMATCH_NOTIFY_PATH}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          [MULTIPLAYER_INTERNAL_PROTOCOL_HEADER]: MULTIPLAYER_WEBSOCKET_PROTOCOL,
-        },
-        body: JSON.stringify({ generation }),
-      }),
-    )
-    .then(() => undefined)
-    .catch(() => undefined);
-  try {
-    c.executionCtx.waitUntil(notification);
-  } catch {
-    // Hono's direct unit-test request helper has no ExecutionContext. The already-started promise
-    // remains harmless; production Workers always attach it to waitUntil.
-  }
 }
 
 async function notifyLobbySignal(
@@ -399,7 +352,11 @@ multiplayerRouter.get("/games/:gameSlug", async (c) => {
       runtime.identity.id,
       runtime.liveVersion.id,
     );
-    if (!profileRecord || !isSupportedMultiplayerRuntimeProfile(profileRecord.profile)) {
+    if (
+      !profileRecord ||
+      !isApprovedRelayMultiplayerProfileV1(profileRecord.profile) ||
+      profileRecord.profile.contentHash !== runtime.liveVersion.contentHash
+    ) {
       return unavailable();
     }
     const profile = profileRecord.profile;
@@ -410,16 +367,19 @@ multiplayerRouter.get("/games/:gameSlug", async (c) => {
         protocolVersion: 1,
         gameSlug,
         profile: {
+          gameVersionId: profile.gameVersionId,
+          contentHash: profile.contentHash,
           profileRevision: profile.profileRevision,
-          resolvedClass: profile.resolvedClass,
-          simulationModel: profile.simulationModel,
-          rulesetKey: profile.rulesetKey,
-          rulesetRevision: profile.rulesetRevision,
+          transportKind: profile.transportKind,
+          runtimeKind: profile.runtimeKind,
           reconnectPolicy: profile.reconnectPolicy,
+          directMessages: profile.directMessages,
+          hostSnapshot: profile.hostSnapshot,
           minPlayers: profile.minPlayers,
           maxPlayers: profile.maxPlayers,
           allowedVisibility: profile.allowedVisibility,
           allowedJoinPolicies: profile.allowedJoinPolicies,
+          resultTrust: profile.resultTrust,
         },
       }),
       200,
@@ -661,67 +621,6 @@ multiplayerRouter.post("/instances/:instanceId/start", async (c) => {
     }),
     200,
   );
-});
-
-multiplayerRouter.get("/instances/:instanceId/rematch", async (c) => {
-  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED) || !runtimeReady(c.env)) {
-    return failure(c, "MULTIPLAYER_UNAVAILABLE");
-  }
-  const parsed = MultiplayerRematchRequestSchema.safeParse({
-    expectedGeneration: Number(c.req.query("generation")),
-  });
-  if (!parsed.success) return failure(c, "INVALID_REQUEST");
-
-  const sessionId = getCookie(c, "owogg_session");
-  if (!sessionId) return failure(c, "UNAUTHENTICATED");
-  const container = createContainer(c.env.DB, readB2Config(c.env));
-  const authenticated = await container.sessionRepo.findSession(sessionId);
-  if (!authenticated) return failure(c, "UNAUTHENTICATED");
-  const rateLimit = await takeRateLimit(c.env, `multiplayer:rematch:user:${authenticated.user.id}`);
-  if (rateLimit === "DENIED") return failure(c, "RATE_LIMITED");
-  if (rateLimit === "UNAVAILABLE") return failure(c, "MULTIPLAYER_UNAVAILABLE");
-
-  const result = await container.multiplayerRoomUseCases.getRematchStatus({
-    userId: authenticated.user.id,
-    instanceId: c.req.param("instanceId"),
-    expectedGeneration: parsed.data.expectedGeneration,
-  });
-  if (!result.ok) return failure(c, result.code);
-  c.header("Cache-Control", "no-store");
-  return c.json(publicRematch(result), 200);
-});
-
-multiplayerRouter.post("/instances/:instanceId/rematch", async (c) => {
-  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED) || !runtimeReady(c.env)) {
-    return failure(c, "MULTIPLAYER_UNAVAILABLE");
-  }
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return failure(c, "INVALID_REQUEST");
-  }
-  const parsed = MultiplayerRematchRequestSchema.safeParse(body);
-  if (!parsed.success) return failure(c, "INVALID_REQUEST");
-
-  const sessionId = getCookie(c, "owogg_session");
-  if (!sessionId) return failure(c, "UNAUTHENTICATED");
-  const container = createContainer(c.env.DB, readB2Config(c.env));
-  const authenticated = await container.sessionRepo.findSession(sessionId);
-  if (!authenticated) return failure(c, "UNAUTHENTICATED");
-  const rateLimit = await takeRateLimit(c.env, `multiplayer:rematch:user:${authenticated.user.id}`);
-  if (rateLimit === "DENIED") return failure(c, "RATE_LIMITED");
-  if (rateLimit === "UNAVAILABLE") return failure(c, "MULTIPLAYER_UNAVAILABLE");
-
-  const result = await container.multiplayerRoomUseCases.requestRematch({
-    userId: authenticated.user.id,
-    instanceId: c.req.param("instanceId"),
-    expectedGeneration: parsed.data.expectedGeneration,
-  });
-  if (!result.ok) return failure(c, result.code);
-  notifyRematchChange(c, c.req.param("instanceId"), parsed.data.expectedGeneration);
-  c.header("Cache-Control", "no-store");
-  return c.json(publicRematch(result), 200);
 });
 
 multiplayerRouter.post("/instances/:instanceId/leave", async (c) => {

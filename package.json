@@ -25,6 +25,7 @@
     "staging:cloudflare:preflight": "tsx scripts/staging-cloudflare-domains.ts",
     "staging:d1:verify": "tsx scripts/staging-d1-target.ts",
     "branches:audit": "tsx scripts/branch-audit.ts",
+    "multiplayer:cost:model": "tsx scripts/relay-cost-model.ts",
     "e2e": "tsx e2e/run.ts",
     "verify": "pnpm install --frozen-lockfile && pnpm format:check && pnpm docs:check && pnpm architecture:check && pnpm lint && pnpm typecheck && pnpm typecheck:scripts && pnpm test && pnpm test:scripts && pnpm build",
     "deploy": "pnpm --filter @owogg/api deploy && pnpm --filter @owogg/web deploy",

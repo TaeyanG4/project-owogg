@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import {
+  GAME_CANONICAL_SCHEMA_VERSION,
   MultiplayerRoomUseCases,
   createMultiplayerTicketKeyring,
   type MultiplayerInstanceRepository,
@@ -19,7 +20,8 @@ const NOW = "2026-08-26T03:00:00.000Z";
 const GAME_ID = 11;
 const VERSION_ID = 12;
 const PROFILE_ID = 13;
-const GAME_SLUG = "official-omok";
+const GAME_SLUG = "relay-demo";
+const CONTENT_HASH = "e".repeat(64);
 const keyring = createMultiplayerTicketKeyring({
   kid: "room_test_key",
   secret: "room-use-case-ticket-secret-32-bytes-minimum",
@@ -52,8 +54,8 @@ function runtimeGame(): RuntimeGame {
     liveVersion: {
       id: VERSION_ID,
       gameId: GAME_ID,
-      objectKey: "uploads/11/omok.zip",
-      contentHash: "omok-content-hash",
+      objectKey: "uploads/11/relay-demo.zip",
+      contentHash: CONTENT_HASH,
       bundleBytes: 100,
       publishStatus: "READY",
       publishError: null,
@@ -64,11 +66,11 @@ function runtimeGame(): RuntimeGame {
       uploadedAt: NOW,
     },
     canonical: {
-      schemaVersion: 3,
+      schemaVersion: GAME_CANONICAL_SCHEMA_VERSION,
       slug: GAME_SLUG,
-      title: "오목",
-      shortDescription: "두 명이 두는 오목",
-      description: "서버 권위형 오목",
+      title: "Relay Demo",
+      shortDescription: "두 명이 참여하는 Relay fixture",
+      description: "게임 규칙을 해석하지 않는 Relay fixture",
       publisher: { official: true },
       policy: { score: null, leaderboard: false, xpPerCompletion: 0, requiresAuth: true },
       supportsReplay: false,
@@ -80,7 +82,7 @@ function runtimeGame(): RuntimeGame {
         inputMethods: ["mouse", "touch"],
         minPlayers: 2,
         maxPlayers: 2,
-        thumbnail: "/api/games/official-omok/logo",
+        thumbnail: "/api/games/relay-demo/logo",
       },
       updatedAt: NOW,
     },
@@ -89,11 +91,12 @@ function runtimeGame(): RuntimeGame {
 
 function seedAuthority(
   raw: ReturnType<typeof createDatabase>["raw"],
-  joinPolicy: "OPEN" | "INVITE_ONLY" = "INVITE_ONLY",
+  joinPolicy: "OPEN" = "OPEN",
 ): void {
   raw.prepare("INSERT INTO users (id, nickname) VALUES (1, 'Host One')").run();
   raw.prepare("INSERT INTO users (id, nickname) VALUES (2, 'Player Two')").run();
   raw.prepare("INSERT INTO users (id, nickname) VALUES (3, 'Player Three')").run();
+  raw.prepare("INSERT INTO users (id, nickname) VALUES (4, 'Admin')").run();
   raw
     .prepare(
       `INSERT INTO games (
@@ -107,12 +110,29 @@ function seedAuthority(
       `INSERT INTO game_versions (
          id, game_id, object_key, content_hash, bundle_bytes, publish_status,
          uploaded_at, moderation_status
-       ) VALUES (?, ?, 'uploads/11/omok.zip', 'omok-content-hash', 100, 'READY', ?, NULL)`,
+       ) VALUES (?, ?, 'uploads/11/relay-demo.zip', ?, 100, 'READY', ?, NULL)`,
     )
-    .run(VERSION_ID, GAME_ID, NOW);
+    .run(VERSION_ID, GAME_ID, CONTENT_HASH, NOW);
   raw
     .prepare("UPDATE games SET live_version_id = ?, visibility = 'PUBLIC' WHERE id = ?")
     .run(VERSION_ID, GAME_ID);
+  raw
+    .prepare(
+      `INSERT INTO admin_accounts (
+         id, user_id, google_sub, username, password_hash, role, status,
+         must_change_password, created_at, updated_at, password_changed_at
+       ) VALUES (1, 4, 'room-admin', 'roomadmin', 'hash', 'ADMIN', 'ACTIVE', 0, ?, ?, ?)`,
+    )
+    .run(NOW, NOW, NOW);
+  raw
+    .prepare(
+      `INSERT INTO multiplayer_profile_requests (
+         id, game_id, game_version_id, content_hash, request_schema_version, request_hash,
+         request_json, requested_by_user_id, status, reviewed_by_admin_id, reviewed_at,
+         created_at, updated_at
+       ) VALUES (1, ?, ?, ?, 1, ?, '{}', NULL, 'APPROVED', 1, ?, ?, ?)`,
+    )
+    .run(GAME_ID, VERSION_ID, CONTENT_HASH, "a".repeat(64), NOW, NOW, NOW);
   raw
     .prepare(
       `INSERT INTO multiplayer_profiles (
@@ -121,15 +141,31 @@ function seedAuthority(
          ruleset_key, ruleset_revision, resolved_config_json, lifecycle, persistence,
          latency_profile, reconnect_policy, min_players, max_players, allowed_visibility_json,
          allowed_join_policies_json, max_action_bytes, max_state_bytes, action_rate_limit,
-         reward_policy_id, enabled, approved_at, updated_at
+         reward_policy_id, enabled, approved_at, updated_at, profile_kind, content_hash,
+         transport_kind, runtime_kind, direct_messages, host_snapshot, host_departure_policy,
+         result_trust, max_message_bytes, max_snapshot_bytes, messages_per_second,
+         room_bytes_per_second, room_ttl_seconds
        ) VALUES (
-         ?, NULL, NULL, 1, ?, ?, 1, 1, 'M1', 'turn', 'durable-object',
-         'official:omok', 1, '{"boardSize":15,"winLength":5}', 'match', 'match',
+         ?, 1, ?, 1, ?, ?, 1, 1, 'M1', 'event', 'durable-object',
+         'legacy:disabled', 1, '{}', 'match', 'match',
          'relaxed', 'resume', 2, 2, '["PRIVATE"]', ?,
-         1024, 8192, 5, NULL, 1, ?, ?
+         4096, 1, 20, NULL, 0, ?, ?, 'RELAY', ?, 'websocket', 'relay', 1, 1,
+         'close', 'UNVERIFIED', 4096, 16384, 20, 262144, 7200
        )`,
     )
-    .run(PROFILE_ID, GAME_ID, VERSION_ID, JSON.stringify([joinPolicy]), NOW, NOW);
+    .run(
+      PROFILE_ID,
+      "a".repeat(64),
+      GAME_ID,
+      VERSION_ID,
+      JSON.stringify([joinPolicy]),
+      NOW,
+      NOW,
+      CONTENT_HASH,
+    );
+  raw
+    .prepare("UPDATE multiplayer_profiles SET enabled = 1, updated_at = ? WHERE id = ?")
+    .run(NOW, PROFILE_ID);
 }
 
 function tokenFactory() {
@@ -142,15 +178,8 @@ function tokenFactory() {
   };
 }
 
-async function sha256(value: string): Promise<string> {
-  const digest = new Uint8Array(
-    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)),
-  );
-  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
 function harness(
-  joinPolicy: "OPEN" | "INVITE_ONLY" = "INVITE_ONLY",
+  joinPolicy: "OPEN" = "OPEN",
   decorateInstances?: (instances: D1MultiplayerInstanceRepository) => MultiplayerInstanceRepository,
 ) {
   const { db, raw } = createDatabase();
@@ -196,7 +225,7 @@ async function createRoom(
     userId,
     gameSlug: GAME_SLUG,
     visibility: "PRIVATE",
-    joinPolicy: "INVITE_ONLY",
+    joinPolicy: "OPEN",
     idempotencyKey,
   });
   assert.equal(result.ok, true);
@@ -239,14 +268,14 @@ test("room creation replays across time and refuses access outside the approved 
     userId: 1,
     gameSlug: GAME_SLUG,
     visibility: "PRIVATE",
-    joinPolicy: "OPEN",
+    joinPolicy: "INVITE_ONLY",
     idempotencyKey: "room_request_0000000001",
   });
   assert.deepEqual(conflict, { ok: false, code: "FORBIDDEN" });
 });
 
-test("a host creates an idempotent one-use invite and exactly one other account can consume it", async () => {
-  const { rooms, advance, instances } = harness();
+test("generic Relay rooms reject the retired invite-only credential path", async () => {
+  const { rooms } = harness();
   const created = await createRoom(rooms);
   const inviteInput = {
     userId: 1,
@@ -256,27 +285,7 @@ test("a host creates an idempotent one-use invite and exactly one other account 
     keyring,
   } as const;
   const invite = await rooms.createInvite(inviteInput);
-  assert.equal(invite.ok, true);
-  if (!invite.ok) return;
-  advance(10_000);
-  const replay = await rooms.createInvite(inviteInput);
-  assert.deepEqual(replay, { ...invite, replayed: true });
-
-  const [second, third] = await Promise.all([
-    rooms.joinRoom({
-      userId: 2,
-      publicCode: created.instance.publicCode,
-      inviteToken: invite.inviteToken,
-    }),
-    rooms.joinRoom({
-      userId: 3,
-      publicCode: created.instance.publicCode,
-      inviteToken: invite.inviteToken,
-    }),
-  ]);
-  const successes = [second, third].filter((result) => result.ok);
-  assert.equal(successes.length, 1);
-  assert.equal((await instances.listParticipants(created.instance.id)).length, 2);
+  assert.deepEqual(invite, { ok: false, code: "FORBIDDEN" });
 });
 
 test("self-join replays the host seat instead of creating a self-match participant", async () => {
@@ -306,19 +315,10 @@ test("participants enter READY while only the host start request creates one ACT
     expectedGeneration: 1,
   });
   assert.deepEqual(prematureStart, { ok: false, code: "PLAYERS_NOT_READY" });
-  const invite = await rooms.createInvite({
-    userId: 1,
-    instanceId: created.instance.id,
-    expectedGeneration: 1,
-    idempotencyKey: "invite_request_00000002",
-    keyring,
-  });
-  assert.equal(invite.ok, true);
-  if (!invite.ok) return;
   const joined = await rooms.joinRoom({
     userId: 2,
     publicCode: created.instance.publicCode,
-    inviteToken: invite.inviteToken,
+    inviteToken: null,
   });
   assert.equal(joined.ok, true);
   if (!joined.ok) return;
@@ -412,20 +412,10 @@ test("a PRIVATE OPEN room accepts its opaque room code without an invite token",
 test("a voluntary lobby leave can rejoin while a host-closed room is no longer discoverable", async () => {
   const { rooms, instances } = harness();
   const created = await createRoom(rooms);
-  const invite = await rooms.createInvite({
-    userId: 1,
-    instanceId: created.instance.id,
-    expectedGeneration: 1,
-    idempotencyKey: "invite_request_rejoin_0001",
-    keyring,
-  });
-  assert.equal(invite.ok, true);
-  if (!invite.ok) return;
-
   const joined = await rooms.joinRoom({
     userId: 2,
     publicCode: created.instance.publicCode,
-    inviteToken: invite.inviteToken,
+    inviteToken: null,
   });
   assert.equal(joined.ok, true);
   if (!joined.ok) return;
@@ -479,137 +469,5 @@ test("a voluntary lobby leave can rejoin while a host-closed room is no longer d
       inviteToken: null,
     }),
     { ok: false, code: "INSTANCE_NOT_FOUND" },
-  );
-});
-
-test("a committed rematch survives a lost repository response and opens one next generation", async () => {
-  let loseStartedResponse = true;
-  const { rooms, matches, instances } = harness(
-    "INVITE_ONLY",
-    (storedInstances) =>
-      new Proxy(storedInstances, {
-        get(target, property, receiver) {
-          if (property === "requestRematch") {
-            return async (...args: Parameters<MultiplayerInstanceRepository["requestRematch"]>) => {
-              const result = await target.requestRematch(...args);
-              if (result.status === "STARTED" && loseStartedResponse) {
-                loseStartedResponse = false;
-                throw new Error("simulated post-commit transport loss");
-              }
-              return result;
-            };
-          }
-          const value = Reflect.get(target, property, receiver) as unknown;
-          return typeof value === "function" ? value.bind(target) : value;
-        },
-      }),
-  );
-  const created = await createRoom(rooms);
-  const invite = await rooms.createInvite({
-    userId: 1,
-    instanceId: created.instance.id,
-    expectedGeneration: 1,
-    idempotencyKey: "invite_request_rematch_01",
-    keyring,
-  });
-  assert.equal(invite.ok, true);
-  if (!invite.ok) return;
-  const joined = await rooms.joinRoom({
-    userId: 2,
-    publicCode: created.instance.publicCode,
-    inviteToken: invite.inviteToken,
-  });
-  assert.equal(joined.ok, true);
-  if (!joined.ok) return;
-  const started = await rooms.startRoom({
-    userId: 1,
-    instanceId: created.instance.id,
-    expectedGeneration: 1,
-  });
-  assert.equal(started.ok, true);
-
-  const match = await matches.findMatchByInstanceGeneration(created.instance.id, 1);
-  assert.equal(match?.status, "ACTIVE");
-  if (!match) return;
-  const participants = await instances.listParticipants(created.instance.id);
-  const terminalResultJson = JSON.stringify({ kind: "DRAW", revision: 0 });
-  const finalized = await matches.finalize({
-    matchId: match.id,
-    expectedStateRevision: 0,
-    terminalResultJson,
-    terminalResultHash: await sha256(terminalResultJson),
-    players: participants.map((participant) => ({
-      userId: participant.userId,
-      participantId: participant.id,
-      outcome: "DRAW" as const,
-      placement: null,
-      resultJson: JSON.stringify({ outcome: "DRAW", generation: 1 }),
-      rewardEligible: false,
-      reward: null,
-    })),
-    nowIso: NOW,
-  });
-  assert.equal(finalized.status, "COMMITTED");
-  assert.equal(
-    await instances.transition({
-      instanceId: created.instance.id,
-      expectedStatus: "ACTIVE",
-      expectedGeneration: 1,
-      nextStatus: "CLOSING",
-      nextGeneration: 1,
-      closedAt: null,
-      abortCode: null,
-      nowIso: NOW,
-    }),
-    true,
-  );
-
-  const hostRequest = await rooms.requestRematch({
-    userId: 1,
-    instanceId: created.instance.id,
-    expectedGeneration: 1,
-  });
-  assert.equal(hostRequest.ok, true);
-  if (!hostRequest.ok) return;
-  assert.equal(hostRequest.state, "WAITING");
-  assert.equal((await instances.findById(created.instance.id))?.generation, 1);
-
-  const opponentStatus = await rooms.getRematchStatus({
-    userId: 2,
-    instanceId: created.instance.id,
-    expectedGeneration: 1,
-  });
-  assert.equal(opponentStatus.ok, true);
-  if (!opponentStatus.ok) return;
-  assert.equal(opponentStatus.state, "OPPONENT_REQUESTED");
-
-  const accepted = await rooms.requestRematch({
-    userId: 2,
-    instanceId: created.instance.id,
-    expectedGeneration: 1,
-  });
-  assert.equal(accepted.ok, true);
-  if (!accepted.ok) return;
-  assert.equal(accepted.state, "STARTED");
-  assert.equal(accepted.instance.generation, 2);
-  assert.equal(accepted.instance.status, "LOBBY");
-  assert.deepEqual(
-    (await instances.listParticipants(created.instance.id)).map(
-      (participant) => participant.status,
-    ),
-    ["JOINED", "READY"],
-  );
-  assert.equal((await instances.findLease(created.instance.id))?.generation, 2);
-
-  const rematchStarted = await rooms.startRoom({
-    userId: 1,
-    instanceId: created.instance.id,
-    expectedGeneration: 2,
-  });
-  assert.equal(rematchStarted.ok, true);
-  assert.equal((await instances.findById(created.instance.id))?.status, "ACTIVE");
-  assert.equal(
-    (await matches.findMatchByInstanceGeneration(created.instance.id, 2))?.status,
-    "ACTIVE",
   );
 });

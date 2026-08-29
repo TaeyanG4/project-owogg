@@ -5,7 +5,6 @@ import {
   MULTIPLAYER_JOIN_POLICIES,
   MULTIPLAYER_PARTICIPANT_ROLES,
   MULTIPLAYER_PARTICIPANT_STATUSES,
-  MULTIPLAYER_REMATCH_WINDOW_MS,
   MULTIPLAYER_VISIBILITIES,
   type AdvanceMultiplayerConnectionInput,
   type AdminKillMultiplayerInstanceInput,
@@ -22,15 +21,13 @@ import {
   type MultiplayerInstanceAdminActionRecord,
   type MultiplayerInstanceRepository,
   type MultiplayerParticipantRecord,
-  type RequestMultiplayerRematchInput,
-  type RequestMultiplayerRematchResult,
   type TransitionMultiplayerParticipantInput,
   type TransitionMultiplayerInstanceInput,
 } from "@owogg/core";
 import type { D1Database, D1Result } from "./D1UserRepository.js";
 
 const INSTANCE_SELECT_COLUMNS =
-  "id, public_code, created_by_user_id, create_idempotency_hash, game_id, game_version_id, profile_id, profile_revision, visibility, join_policy, lifecycle, status, generation, participant_count, max_players, expires_at, closed_at, abort_code, created_at, updated_at";
+  "id, public_code, created_by_user_id, create_idempotency_hash, game_id, game_version_id, content_hash, profile_id, profile_revision, visibility, join_policy, lifecycle, status, generation, participant_count, max_players, expires_at, closed_at, abort_code, created_at, updated_at";
 const PARTICIPANT_SELECT_COLUMNS =
   "id, instance_id, user_id, role, seat_index, status, connection_generation, joined_at, ready_at, left_at, updated_at";
 const INVITE_SELECT_COLUMNS =
@@ -104,6 +101,7 @@ export function mapMultiplayerInstanceRow(row: Record<string, unknown>): Multipl
     createIdempotencyHash: requiredString(row.create_idempotency_hash, "create_idempotency_hash"),
     gameId: requiredPositiveInteger(row.game_id, "game_id"),
     gameVersionId: requiredPositiveInteger(row.game_version_id, "game_version_id"),
+    contentHash: sha256Hex(row.content_hash, "content_hash"),
     profileId: requiredPositiveInteger(row.profile_id, "profile_id"),
     profileRevision: requiredPositiveInteger(row.profile_revision, "profile_revision"),
     visibility: enumValue(row.visibility, "visibility", MULTIPLAYER_VISIBILITIES),
@@ -215,6 +213,7 @@ function sameCreateSemantics(
     instance.createIdempotencyHash === input.createIdempotencyHash &&
     instance.gameId === input.gameId &&
     instance.gameVersionId === input.gameVersionId &&
+    instance.contentHash === input.contentHash &&
     instance.profileId === input.profileId &&
     instance.profileRevision === input.profileRevision &&
     instance.visibility === input.visibility &&
@@ -266,11 +265,11 @@ export class D1MultiplayerInstanceRepository implements MultiplayerInstanceRepos
           .prepare(
             `INSERT OR IGNORE INTO multiplayer_instances (
                id, public_code, created_by_user_id, create_idempotency_hash,
-               game_id, game_version_id, profile_id, profile_revision,
+               game_id, game_version_id, content_hash, profile_id, profile_revision,
                visibility, join_policy, lifecycle, status, generation,
                participant_count, max_players, expires_at, created_at, updated_at
              ) VALUES (
-               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CREATED', 1, 0, ?, ?, ?, ?
+               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CREATED', 1, 0, ?, ?, ?, ?
              )`,
           )
           .bind(
@@ -280,6 +279,7 @@ export class D1MultiplayerInstanceRepository implements MultiplayerInstanceRepos
             input.createIdempotencyHash,
             input.gameId,
             input.gameVersionId,
+            input.contentHash,
             input.profileId,
             input.profileRevision,
             input.visibility,
@@ -779,187 +779,6 @@ export class D1MultiplayerInstanceRepository implements MultiplayerInstanceRepos
     return this.findParticipant(input.instanceId, input.userId);
   }
 
-  async listRematchRequesterParticipantIds(
-    instanceId: string,
-    generation: number,
-  ): Promise<readonly string[]> {
-    const result = await this.db
-      .prepare(
-        `SELECT participant_id
-         FROM multiplayer_rematch_requests
-         WHERE instance_id = ? AND generation = ?
-         ORDER BY requested_at, participant_id`,
-      )
-      .bind(instanceId, generation)
-      .all<{ participant_id: string }>();
-    return (result.results ?? []).map((row) =>
-      requiredString(row.participant_id, "participant_id"),
-    );
-  }
-
-  async requestRematch(
-    input: RequestMultiplayerRematchInput,
-  ): Promise<RequestMultiplayerRematchResult> {
-    const current = await this.findById(input.instanceId);
-    if (!current) return { status: "REJECTED", code: "INSTANCE_NOT_FOUND" };
-    if (current.generation !== input.expectedGeneration) {
-      if (current.generation === input.expectedGeneration + 1) {
-        return this.classifyRematchAfterWrite(input, false);
-      }
-      return { status: "REJECTED", code: "STALE_GENERATION" };
-    }
-    const participant = await this.findParticipant(input.instanceId, input.userId);
-    if (!participant || participant.id !== input.participantId || participant.status !== "READY") {
-      return { status: "REJECTED", code: "NOT_PARTICIPANT" };
-    }
-    if (current.status !== "CLOSING" || current.expiresAt <= input.nowIso) {
-      return { status: "REJECTED", code: "INSTANCE_NOT_JOINABLE" };
-    }
-
-    const existingRequesters = await this.listRematchRequesterParticipantIds(
-      input.instanceId,
-      input.expectedGeneration,
-    );
-    const replayed = existingRequesters.includes(input.participantId);
-    try {
-      await this.db.batch([
-        this.db
-          .prepare(
-            `INSERT OR IGNORE INTO multiplayer_rematch_requests (
-               instance_id, generation, participant_id, requested_at
-             )
-             SELECT instance.id, instance.generation, participant.id, ?
-             FROM multiplayer_instances instance
-             JOIN multiplayer_participants participant
-               ON participant.instance_id = instance.id
-             WHERE instance.id = ?
-               AND instance.generation = ?
-               AND instance.status = 'CLOSING'
-               AND instance.expires_at > ?
-               AND participant.id = ?
-               AND participant.user_id = ?
-               AND participant.status = 'READY'`,
-          )
-          .bind(
-            input.nowIso,
-            input.instanceId,
-            input.expectedGeneration,
-            input.nowIso,
-            input.participantId,
-            input.userId,
-          ),
-        this.db
-          .prepare(
-            `UPDATE multiplayer_instances
-             SET status = 'LOBBY', generation = generation + 1,
-                 closed_at = NULL, abort_code = NULL, updated_at = ?
-             WHERE id = ?
-               AND generation = ?
-               AND status = 'CLOSING'
-               AND expires_at > ?
-               AND participant_count >= 2
-               AND participant_count = (
-                 SELECT COUNT(*)
-                 FROM multiplayer_participants participant
-                 WHERE participant.instance_id = multiplayer_instances.id
-                   AND participant.status = 'READY'
-               )
-               AND participant_count = (
-                 SELECT COUNT(DISTINCT request.participant_id)
-                 FROM multiplayer_rematch_requests request
-                 WHERE request.instance_id = multiplayer_instances.id
-                   AND request.generation = multiplayer_instances.generation
-               )
-               AND EXISTS (
-                 SELECT 1
-                 FROM multiplayer_matches match
-                 WHERE match.instance_id = multiplayer_instances.id
-                   AND match.generation = multiplayer_instances.generation
-                   AND match.status = 'COMMITTED'
-                   AND match.committed_at IS NOT NULL
-                   AND unixepoch(?) < unixepoch(match.committed_at) + ?
-               )`,
-          )
-          .bind(
-            input.nowIso,
-            input.instanceId,
-            input.expectedGeneration,
-            input.nowIso,
-            input.nowIso,
-            MULTIPLAYER_REMATCH_WINDOW_MS / 1_000,
-          ),
-        // The generation-advance trigger deliberately clears every READY flag first. Restore the
-        // next lobby's role-specific defaults in the same D1 batch so callers never observe a
-        // committed generation that still needs a separate best-effort readiness write. Keeping
-        // this atomic also removes two follow-up D1 operations from every accepted rematch.
-        this.db
-          .prepare(
-            `UPDATE multiplayer_participants
-             SET status = CASE WHEN role = 'HOST' THEN 'JOINED' ELSE 'READY' END,
-                 ready_at = CASE WHEN role = 'HOST' THEN NULL ELSE ? END,
-                 left_at = NULL,
-                 updated_at = ?
-             WHERE instance_id = ?
-               AND status = 'JOINED'
-               AND EXISTS (
-                 SELECT 1
-                 FROM multiplayer_instances instance
-                 WHERE instance.id = multiplayer_participants.instance_id
-                   AND instance.generation = ? + 1
-                   AND instance.status = 'LOBBY'
-               )`,
-          )
-          .bind(input.nowIso, input.nowIso, input.instanceId, input.expectedGeneration),
-      ]);
-    } catch {
-      return this.classifyRematchAfterWrite(input, replayed);
-    }
-    return this.classifyRematchAfterWrite(input, replayed);
-  }
-
-  private async classifyRematchAfterWrite(
-    input: RequestMultiplayerRematchInput,
-    replayed: boolean,
-  ): Promise<RequestMultiplayerRematchResult> {
-    const [instance, participant, requesterParticipantIds] = await Promise.all([
-      this.findById(input.instanceId),
-      this.findParticipant(input.instanceId, input.userId),
-      this.listRematchRequesterParticipantIds(input.instanceId, input.expectedGeneration),
-    ]);
-    if (!instance) return { status: "REJECTED", code: "INSTANCE_NOT_FOUND" };
-    if (!participant || participant.id !== input.participantId) {
-      return { status: "REJECTED", code: "NOT_PARTICIPANT" };
-    }
-    if (
-      instance.generation === input.expectedGeneration + 1 &&
-      (instance.status === "LOBBY" ||
-        instance.status === "STARTING" ||
-        instance.status === "ACTIVE")
-    ) {
-      return {
-        status: "STARTED",
-        instance,
-        participant,
-        requesterParticipantIds,
-      };
-    }
-    if (instance.generation !== input.expectedGeneration) {
-      return { status: "REJECTED", code: "STALE_GENERATION" };
-    }
-    if (instance.status !== "CLOSING") {
-      return { status: "REJECTED", code: "INSTANCE_NOT_JOINABLE" };
-    }
-    if (!requesterParticipantIds.includes(input.participantId)) {
-      return { status: "REJECTED", code: "INTERNAL_RETRYABLE" };
-    }
-    return {
-      status: replayed ? "REPLAYED" : "REQUESTED",
-      instance,
-      participant,
-      requesterParticipantIds,
-    };
-  }
-
   async findLease(instanceId: string): Promise<GameVersionLeaseRecord | null> {
     const row = await this.db
       .prepare(
@@ -970,6 +789,21 @@ export class D1MultiplayerInstanceRepository implements MultiplayerInstanceRepos
       .bind(instanceId)
       .first<Record<string, unknown>>();
     return row ? mapGameVersionLeaseRow(row) : null;
+  }
+
+  async hasActiveVersionLease(gameVersionId: number, nowIso: string): Promise<boolean> {
+    if (!Number.isInteger(gameVersionId) || gameVersionId <= 0) return false;
+    if (Number.isNaN(Date.parse(nowIso))) return false;
+    const row = await this.db
+      .prepare(
+        `SELECT 1 AS present
+         FROM game_version_leases
+         WHERE game_version_id = ? AND status = 'ACTIVE' AND expires_at > ?
+         LIMIT 1`,
+      )
+      .bind(gameVersionId, nowIso)
+      .first<{ present: number }>();
+    return row?.present === 1;
   }
 
   async adminKill(

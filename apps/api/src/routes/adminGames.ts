@@ -1,10 +1,11 @@
 import { Hono } from "hono";
 import {
-  AdminOfficialMultiplayerProfileResponseSchema,
-  AdminOfficialMultiplayerProfileUpdateRequestSchema,
   AdminManagedMultiplayerProfileRequestListResponseSchema,
+  AdminManagedMultiplayerProfileListResponseSchema,
   AdminManagedMultiplayerProfileReviewRequestSchema,
   AdminManagedMultiplayerProfileReviewResponseSchema,
+  AdminManagedMultiplayerProfileActivationRequestSchema,
+  AdminManagedMultiplayerProfileActivationResponseSchema,
   AdminGameListResponseSchema,
   AdminGameListQuerySchema,
   AdminGameToggleRequestSchema,
@@ -16,12 +17,11 @@ import {
 import {
   OfficialGameDeleteFailure,
   OfficialGameUploadFailure,
-  resolveManagedMultiplayerProfileRequestV1,
-  toOwoggManagedMultiplayerRequestV1,
+  isApprovedRelayMultiplayerProfileV1,
+  resolveMultiplayerRuntimeProfileRequestV1,
+  toOwoggMultiplayerRuntimeRequestV1,
   type MultiplayerProfileRecord,
   type MultiplayerProfileRequestRecord,
-  type OfficialMultiplayerProfileFailureCode,
-  type OfficialMultiplayerProfileResult,
 } from "@owogg/core";
 import { createContainer } from "../container.js";
 import { isTrustedAdminOrigin } from "../auth/admin.js";
@@ -37,69 +37,37 @@ import { purgePublicGameReadCache } from "./publicGameCache.js";
 
 export const adminGamesRouter = new Hono<ApiEnv>();
 
-function multiplayerProfileFailure(code: OfficialMultiplayerProfileFailureCode) {
-  const status = code === "GAME_NOT_FOUND" || code === "PROFILE_NOT_FOUND" ? 404 : 409;
-  const message =
-    code === "GAME_NOT_FOUND"
-      ? "현재 게시된 exact 게임 버전을 찾을 수 없습니다."
-      : code === "PROFILE_NOT_FOUND"
-        ? "현재 live 버전에 비활성화할 멀티플레이 프로필이 없습니다."
-        : code === "OFFICIAL_GAME_REQUIRED"
-          ? "OWOGG 공식 게임만 이 관리 경로에서 프로필을 승인할 수 있습니다."
-          : code === "PRESET_GAME_MISMATCH"
-            ? "OMOK_V1 프로필은 official-omok 게임에만 적용할 수 있습니다."
-            : code === "MULTIPLAYER_MANIFEST_REQUIRED"
-              ? "owogg.json이 멀티플레이 게임으로 선언되어 있지 않습니다."
-              : code === "LEADERBOARD_FORBIDDEN"
-                ? "멀티플레이 게임은 score, leaderboard, client completion XP를 선언할 수 없습니다."
-                : "현재 live 버전의 멀티플레이 프로필 상태가 충돌합니다.";
-  return { body: { error: { code, message } }, status } as const;
-}
-
-function multiplayerProfileResponse(
-  result: Extract<OfficialMultiplayerProfileResult, { ok: true }>,
-) {
-  const profile = result.record?.profile;
-  return AdminOfficialMultiplayerProfileResponseSchema.parse({
-    gameSlug: result.gameSlug,
-    gameVersionId: result.gameVersionId,
-    preset: "OMOK_V1",
-    status: !result.record ? "NONE" : profile?.enabled ? "ENABLED" : "DISABLED",
-    profile:
-      !result.record || !profile
-        ? null
-        : {
-            id: result.record.id,
-            profileRevision: profile.profileRevision,
-            enabled: profile.enabled,
-            rulesetKey: profile.rulesetKey,
-            rulesetRevision: profile.rulesetRevision,
-            resolvedClass: profile.resolvedClass,
-            simulationModel: profile.simulationModel,
-            reconnectPolicy: profile.reconnectPolicy,
-            minPlayers: profile.minPlayers,
-            maxPlayers: profile.maxPlayers,
-            allowedVisibility: profile.allowedVisibility,
-            allowedJoinPolicies: profile.allowedJoinPolicies,
-            rewardPolicyId: profile.rewardPolicyId,
-            leaderboardEnabled: false,
-            updatedAt: result.record.updatedAt,
-          },
-  });
-}
-
 function managedMultiplayerRequestResponse(record: MultiplayerProfileRequestRecord) {
-  const resolution = resolveManagedMultiplayerProfileRequestV1(record.request);
-  if (resolution.status !== "SUPPORTED_V1") {
-    throw new Error(`Stored multiplayer request ${record.id} is not supported by V1`);
-  }
+  const resolution = resolveMultiplayerRuntimeProfileRequestV1(record.request);
+  const publicResolution =
+    resolution.status === "SUPPORTED_V1"
+      ? {
+          status: resolution.status,
+          transportKind: resolution.transportKind,
+          runtimeKind: resolution.runtimeKind,
+          protocolVersion: resolution.protocolVersion,
+          resultTrust: resolution.resultTrust,
+        }
+      : resolution.status === "RUNTIME_NOT_AVAILABLE"
+        ? {
+            status: resolution.status,
+            runtimeKind: resolution.runtimeKind,
+            reason: resolution.reason,
+          }
+        : {
+            status: resolution.status,
+            runtimeKind: resolution.runtimeKind,
+            unsupportedCapabilities: resolution.unsupportedCapabilities,
+            reason: resolution.reason,
+          };
   return {
     id: record.id,
     gameId: record.gameId,
     gameVersionId: record.gameVersionId,
+    contentHash: record.contentHash,
     requestSchemaVersion: record.requestSchemaVersion,
     requestHash: record.requestHash,
-    request: toOwoggManagedMultiplayerRequestV1(record.request),
+    request: toOwoggMultiplayerRuntimeRequestV1(record.request),
     requestedByUserId: record.requestedByUserId,
     status: record.status,
     reviewedByAdminId: record.reviewedByAdminId,
@@ -107,27 +75,27 @@ function managedMultiplayerRequestResponse(record: MultiplayerProfileRequestReco
     decisionReasonCode: record.decisionReasonCode,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
-    resolution: {
-      status: "SUPPORTED_V1" as const,
-      resolvedClass: resolution.resolvedClass,
-      runtimeBackend: resolution.runtimeBackend,
-    },
+    resolution: publicResolution,
   };
 }
 
 function managedMultiplayerProfileResponse(record: MultiplayerProfileRecord | null) {
-  if (!record) return null;
+  if (!record || !isApprovedRelayMultiplayerProfileV1(record.profile)) return null;
   return {
     id: record.id,
+    gameVersionId: record.profile.gameVersionId,
+    contentHash: record.profile.contentHash,
     profileRevision: record.profile.profileRevision,
     enabled: record.profile.enabled,
-    resolvedClass: record.profile.resolvedClass,
-    simulationModel: record.profile.simulationModel,
-    rulesetKey: record.profile.rulesetKey,
-    rulesetRevision: record.profile.rulesetRevision,
+    transportKind: record.profile.transportKind,
+    runtimeKind: record.profile.runtimeKind,
+    protocolVersion: record.profile.protocolVersion,
+    reconnect: record.profile.reconnectPolicy,
+    directMessages: record.profile.directMessages,
+    hostSnapshot: record.profile.hostSnapshot,
     minPlayers: record.profile.minPlayers,
     maxPlayers: record.profile.maxPlayers,
-    rewardPolicyId: null,
+    resultTrust: record.profile.resultTrust,
     updatedAt: record.updatedAt,
   };
 }
@@ -151,11 +119,17 @@ function officialUpdateFailure(error: unknown) {
           ? "동일한 slug가 사용자 제작 게임에 이미 사용되고 있습니다."
           : error.code === "PUBLISH_FAILED"
             ? "OWOGG 게임 변경사항을 D1/B2에 게시하지 못했습니다."
-            : error.code === "LOGO_INVALID"
-              ? "png, jpg, jpeg, webp, svg 형식의 로고 파일이 필요합니다."
-              : error.code === "LOGO_TOO_LARGE"
-                ? "로고 이미지 용량이 최대 허용치를 초과했습니다."
-                : "게임 ZIP 또는 owogg.json Game Creator Manifest v1이 올바르지 않습니다.";
+            : error.code === "VERIFIER_NOT_REGISTERED"
+              ? "playConfig.verifierId에 대응하는 검토 완료 서버 검증기가 등록되지 않았습니다."
+              : error.code === "MULTIPLAYER_RUNTIME_NOT_AVAILABLE"
+                ? "현재는 websocket + relay runtime만 지원합니다."
+                : error.code === "MULTIPLAYER_CAPABILITY_NOT_AVAILABLE"
+                  ? "현재 Relay는 join-in-progress와 spectator를 지원하지 않습니다."
+                  : error.code === "LOGO_INVALID"
+                    ? "png, jpg, jpeg, webp, svg 형식의 로고 파일이 필요합니다."
+                    : error.code === "LOGO_TOO_LARGE"
+                      ? "로고 이미지 용량이 최대 허용치를 초과했습니다."
+                      : "게임 ZIP 또는 owogg.json Game Creator Manifest v1이 올바르지 않습니다.";
   return { body: { error: { code: error.code, message } }, status } as const;
 }
 
@@ -222,6 +196,32 @@ adminGamesRouter.get("/multiplayer-requests", async (c) => {
   );
 });
 
+// Approved Relay profiles remain discoverable after review so activation is a durable,
+// deliberately separate admin action instead of transient UI state from the review response.
+adminGamesRouter.get("/multiplayer-profiles", async (c) => {
+  const admin = await requireElevatedAdmin(c);
+  if (isElevatedAdminResponse(admin)) return admin;
+  const denied = requirePermission(admin, "games.moderate");
+  if (denied) return denied;
+  const rawLimit = c.req.query("limit");
+  const limit = rawLimit === undefined ? 50 : Number(rawLimit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    return c.json(
+      { error: { code: "INVALID_REQUEST", message: "limit은 1~100 정수여야 합니다." } },
+      400,
+    );
+  }
+  const container = createContainer(c.env.DB, readB2Config(c.env));
+  const profiles =
+    await container.managedMultiplayerProfileReviewUseCases.listManagedProfiles(limit);
+  return c.json(
+    AdminManagedMultiplayerProfileListResponseSchema.parse({
+      profiles: profiles.map(managedMultiplayerProfileResponse),
+    }),
+    200,
+  );
+});
+
 adminGamesRouter.post("/multiplayer-requests/:requestId/review", async (c) => {
   const admin = await requireElevatedAdmin(c);
   if (isElevatedAdminResponse(admin)) return admin;
@@ -276,11 +276,13 @@ adminGamesRouter.post("/multiplayer-requests/:requestId/review", async (c) => {
           message:
             result.code === "REQUEST_NOT_FOUND"
               ? "멀티플레이 요청을 찾을 수 없습니다."
-              : result.code === "REQUEST_NOT_SUPPORTED"
-                ? "현재 V1 런타임이 지원하지 않는 요청입니다."
-                : result.code === "VERSION_NOT_ELIGIBLE"
-                  ? "게임 exact version의 게시·심사 상태가 아직 프로필 생성 조건을 충족하지 않습니다."
-                  : "이미 결정됐거나 다른 프로필과 충돌한 요청입니다.",
+              : result.code === "MULTIPLAYER_RUNTIME_NOT_AVAILABLE"
+                ? "요청한 멀티플레이 runtime은 아직 활성화할 수 없습니다."
+                : result.code === "MULTIPLAYER_CAPABILITY_NOT_AVAILABLE"
+                  ? "요청한 Relay 기능은 아직 지원되지 않습니다."
+                  : result.code === "PROFILE_CREATE_FAILED"
+                    ? "승인 결정은 저장됐지만 exact-version Relay profile 생성에 실패했습니다. 같은 요청을 다시 승인해 복구할 수 있습니다."
+                    : "이미 결정된 멀티플레이 요청입니다.",
         },
       },
       status,
@@ -295,70 +297,63 @@ adminGamesRouter.post("/multiplayer-requests/:requestId/review", async (c) => {
   );
 });
 
-// Trusted control-plane approval for the current OWOGG live version. A ZIP cannot invoke this or
-// choose server authority; a managed elevated admin explicitly activates the allowlisted preset.
-adminGamesRouter.get("/:gameId/multiplayer-profile", async (c) => {
-  const admin = await requireElevatedAdmin(c);
-  if (isElevatedAdminResponse(admin)) return admin;
-  const denied = requirePermission(admin, "games.moderate");
-  if (denied) return denied;
-  const container = createContainer(c.env.DB, readB2Config(c.env));
-  if (!container.gameBundlesConfigured) {
-    return c.json(
-      { error: { code: "GAME_BUNDLES_NOT_CONFIGURED", message: "B2 구성이 필요합니다." } },
-      503,
-    );
-  }
-  const result = await container.officialMultiplayerProfileUseCases.get(c.req.param("gameId"));
-  if (!result.ok) {
-    const failure = multiplayerProfileFailure(result.code);
-    return c.json(failure.body, failure.status);
-  }
-  return c.json(multiplayerProfileResponse(result), 200);
-});
-
-adminGamesRouter.post("/:gameId/multiplayer-profile", async (c) => {
+adminGamesRouter.post("/multiplayer-profiles/:profileId/activation", async (c) => {
   const admin = await requireElevatedAdmin(c);
   if (isElevatedAdminResponse(admin)) return admin;
   const denied = requirePermission(admin, "games.moderate");
   if (denied) return denied;
   if (!admin.account) {
     return c.json(
-      {
-        error: {
-          code: "MANAGED_ADMIN_REQUIRED",
-          message: "감사 가능한 관리 계정으로 로그인해야 멀티플레이 프로필을 변경할 수 있습니다.",
-        },
-      },
+      { error: { code: "MANAGED_ADMIN_REQUIRED", message: "감사 가능한 관리 계정이 필요합니다." } },
       403,
     );
   }
-  const body = await c.req.json().catch(() => null);
-  const parsed = AdminOfficialMultiplayerProfileUpdateRequestSchema.safeParse(body);
+  const profileId = Number(c.req.param("profileId"));
+  if (!Number.isSafeInteger(profileId) || profileId <= 0) {
+    return c.json(
+      { error: { code: "INVALID_REQUEST", message: "프로필 ID가 올바르지 않습니다." } },
+      400,
+    );
+  }
+  const parsed = AdminManagedMultiplayerProfileActivationRequestSchema.safeParse(
+    await c.req.json().catch(() => null),
+  );
   if (!parsed.success) {
     return c.json(
-      { error: { code: "INVALID_REQUEST", message: "프로필 설정이 올바르지 않습니다." } },
+      { error: { code: "INVALID_REQUEST", message: "활성화 요청이 올바르지 않습니다." } },
       400,
     );
   }
   const container = createContainer(c.env.DB, readB2Config(c.env));
-  if (!container.gameBundlesConfigured) {
-    return c.json(
-      { error: { code: "GAME_BUNDLES_NOT_CONFIGURED", message: "B2 구성이 필요합니다." } },
-      503,
-    );
-  }
-  const result = await container.officialMultiplayerProfileUseCases.setEnabled({
-    gameSlug: c.req.param("gameId"),
+  const result = await container.managedMultiplayerProfileReviewUseCases.setProfileEnabled({
+    profileId,
     enabled: parsed.data.enabled,
     changedByAdminId: admin.account.id,
-    disabledReasonCode: parsed.data.reasonCode ?? null,
+    reasonCode: parsed.data.reasonCode,
   });
   if (!result.ok) {
-    const failure = multiplayerProfileFailure(result.code);
-    return c.json(failure.body, failure.status);
+    return c.json(
+      {
+        error: {
+          code: result.code,
+          message:
+            result.code === "PROFILE_NOT_FOUND"
+              ? "일반 Relay 프로필을 찾을 수 없습니다."
+              : result.code === "PROFILE_NOT_MANAGED"
+                ? "승인 요청에 연결된 일반 Relay 프로필만 변경할 수 있습니다."
+                : "다른 프로필 활성화 또는 exact-version 상태와 충돌했습니다.",
+        },
+      },
+      result.code === "PROFILE_NOT_FOUND" ? 404 : 409,
+    );
   }
-  return c.json(multiplayerProfileResponse(result), 200);
+  return c.json(
+    AdminManagedMultiplayerProfileActivationResponseSchema.parse({
+      request: managedMultiplayerRequestResponse(result.request),
+      profile: managedMultiplayerProfileResponse(result.profile),
+    }),
+    200,
+  );
 });
 
 // POST /api/admin/games/upload — publishes a ZIP as an official OWOGG game. Authority comes only

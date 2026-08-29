@@ -1,5 +1,5 @@
 /**
- * The Host <-> Game postMessage/MessageChannel protocol — six message types, no generic RPC
+ * The Host <-> Game postMessage/MessageChannel protocol — a small explicit message union, no generic RPC
  * framework (YAGNI; see the Game Platform migration plan's explicit "don't build more than this"
  * note on Game Bridge). Both `client.ts` (runs inside the game's iframe) and the host-side
  * controller (apps/web/app/features/game/runtime/) import these same validators, so there is
@@ -14,24 +14,101 @@
  * host controller for why "ignore, don't throw" is the correct response.
  */
 
-/** Bootstrap message, Host -> Game. The only host-originated message in this protocol — see
+/** Runtime topology is deliberately separate from PlayConfig's competitive difficulty/variant. */
+export type GamePlayMode = "single" | "local-multi" | "online-multi";
+
+/** Bootstrap message, Host -> Game. The only host-originated window message in this protocol — see
  * the host controller's doc comment for why sending it is the one place `postMessage(..., "*")`
  * (rather than a MessagePort) is used at all.
  *
- * `difficultyId` (2026-08-19) is the one deliberate, backward-compatible expansion of this
- * message: optional, so every existing bootstrap that never set it (reaction-time, Game Creator games,
- * ball-dodge) keeps validating exactly as before — see isHostInitMessage. Only a game with real
- * difficulty tiers (aim-test) reads it; every other standalone game's own bridgeRuntime.ts simply
- * ignores an absent value and falls back to its own default. Never auth/token/API address — the
- * Game Bridge's own boundary (see gameBridgeHost.ts) still carries nothing else. */
+ * `difficultyId` supports the simple host-selected path. `playConfig` supports the verifier-backed
+ * game-selected path. They are mutually exclusive, and neither ever contains an auth token,
+ * attempt identity, verifier identity, or API address. */
 export interface HostInitMessage {
   readonly type: "HOST_INIT";
   readonly difficultyId?: string;
+  readonly playConfig?: PublicPlayConfigDescriptor;
+  /** Approved topology choices for an in-game launcher. It grants no online authority by itself. */
+  readonly playModes?: readonly GamePlayMode[];
 }
 
 /** Same order-of-magnitude cap as GAME_ERROR's `message` — bounds an arbitrary-length string a
  * compromised/buggy host could otherwise send, even though the host is OwOGG's own code today. */
 const MAX_DIFFICULTY_ID_LENGTH = 100;
+const MAX_PLAY_CONFIG_ID_LENGTH = 100;
+const MAX_PLAY_CONFIG_LABEL_LENGTH = 60;
+const MAX_CHALLENGE_SEED_LENGTH = 128;
+
+export type JsonSafeValue =
+  | null
+  | string
+  | number
+  | boolean
+  | readonly JsonSafeValue[]
+  | { readonly [key: string]: JsonSafeValue };
+
+export interface PlayConfigSelection {
+  readonly difficultyId: string;
+  readonly variantId: string;
+}
+
+export interface PublicPlayConfigDescriptor {
+  readonly defaultDifficultyId: string;
+  readonly defaultVariantId: string;
+  readonly difficulties: readonly {
+    readonly id: string;
+    readonly label: string;
+  }[];
+  readonly variants: readonly {
+    readonly id: string;
+    readonly label: string;
+  }[];
+  readonly allowedConfigs: readonly {
+    readonly difficultyId: string;
+    readonly variantId: string;
+    readonly rewardFactor: number;
+  }[];
+}
+
+export interface AuthorizedStartContext {
+  readonly ranked: boolean;
+  readonly playConfig: PlayConfigSelection;
+  readonly rulesetRevision: number;
+  readonly challengeSeed: string;
+  readonly rewardFactor: number;
+}
+
+export type HostStartErrorCode =
+  | "ALREADY_REQUESTED"
+  | "INVALID_PLAY_CONFIG"
+  | "AUTH_REQUIRED"
+  | "SESSION_UNAVAILABLE"
+  | "GAME_UNAVAILABLE";
+
+export interface HostStartMessage {
+  readonly type: "HOST_START";
+  readonly context: AuthorizedStartContext;
+}
+
+export interface HostStartErrorMessage {
+  readonly type: "HOST_START_ERROR";
+  readonly code: HostStartErrorCode;
+}
+
+export type HostPlayModeErrorCode = "ALREADY_SELECTED" | "INVALID_PLAY_MODE" | "MODE_UNAVAILABLE";
+
+export interface HostPlayModeSelectedMessage {
+  readonly type: "HOST_PLAY_MODE_SELECTED";
+  readonly playMode: GamePlayMode;
+}
+
+export interface HostPlayModeErrorMessage {
+  readonly type: "HOST_PLAY_MODE_ERROR";
+  readonly code: HostPlayModeErrorCode;
+}
+
+export type HostToGameMessage =
+  HostStartMessage | HostStartErrorMessage | HostPlayModeSelectedMessage | HostPlayModeErrorMessage;
 
 export interface GameReadyMessage {
   readonly type: "GAME_READY";
@@ -48,6 +125,17 @@ export interface GameCompleteMessage {
   readonly progression?: { readonly value: number };
   readonly metrics?: Record<string, number>;
   readonly metadata?: Record<string, unknown>;
+  readonly evidence?: JsonSafeValue;
+}
+
+export interface GameRequestStartMessage {
+  readonly type: "GAME_REQUEST_START";
+  readonly playConfig: PlayConfigSelection;
+}
+
+export interface GameSelectPlayModeMessage {
+  readonly type: "GAME_SELECT_PLAY_MODE";
+  readonly playMode: GamePlayMode;
 }
 
 export interface GameEventMessage {
@@ -68,12 +156,14 @@ export interface GameErrorMessage {
 export type GameToHostMessage =
   | GameReadyMessage
   | GameStartedMessage
+  | GameRequestStartMessage
+  | GameSelectPlayModeMessage
   | GameEventMessage
   | GameCompleteMessage
   | GameCancelMessage
   | GameErrorMessage;
 
-export type GameBridgeMessage = HostInitMessage | GameToHostMessage;
+export type GameBridgeMessage = HostInitMessage | HostToGameMessage | GameToHostMessage;
 
 /** A message larger than this is rejected before its fields are even inspected — bounds how much
  * an iframe (untrusted code) can make the host process per message, independent of any one
@@ -111,8 +201,12 @@ export function isWithinBridgePayloadLimit(data: unknown): boolean {
  * needs to avoid for untrusted iframe input. */
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
+  try {
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+  } catch {
+    return false;
+  }
 }
 
 const JSON_SAFE_MAX_DEPTH = 16;
@@ -144,8 +238,130 @@ export function isJsonSafeValue(value: unknown, maxDepth = JSON_SAFE_MAX_DEPTH):
   return false;
 }
 
-/** Validates the one host-originated message. Called by the game-side client when it receives the
- * bootstrap postMessage — see client.ts. Exact shape: any key besides `type`/`difficultyId` makes
+function isBoundedId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= MAX_PLAY_CONFIG_ID_LENGTH &&
+    value.trim() === value
+  );
+}
+
+function isBoundedLabel(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= MAX_PLAY_CONFIG_LABEL_LENGTH &&
+    value.trim().length > 0
+  );
+}
+
+export function isGamePlayMode(value: unknown): value is GamePlayMode {
+  return value === "single" || value === "local-multi" || value === "online-multi";
+}
+
+export function isGamePlayModeList(value: unknown): value is readonly GamePlayMode[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 3) return false;
+  if (!value.every(isGamePlayMode)) return false;
+  return new Set(value).size === value.length;
+}
+
+export function isPlayConfigSelection(value: unknown): value is PlayConfigSelection {
+  if (!isPlainObject(value)) return false;
+  const keys = Object.keys(value);
+  return (
+    keys.length === 2 &&
+    keys.every((key) => key === "difficultyId" || key === "variantId") &&
+    isBoundedId(value.difficultyId) &&
+    isBoundedId(value.variantId)
+  );
+}
+
+export function isPublicPlayConfigDescriptor(value: unknown): value is PublicPlayConfigDescriptor {
+  if (!isPlainObject(value)) return false;
+  if (
+    !Object.keys(value).every((key) =>
+      [
+        "defaultDifficultyId",
+        "defaultVariantId",
+        "difficulties",
+        "variants",
+        "allowedConfigs",
+      ].includes(key),
+    ) ||
+    Object.keys(value).length !== 5 ||
+    !isBoundedId(value.defaultDifficultyId) ||
+    !isBoundedId(value.defaultVariantId) ||
+    !Array.isArray(value.difficulties) ||
+    value.difficulties.length === 0 ||
+    !Array.isArray(value.variants) ||
+    value.variants.length === 0 ||
+    !Array.isArray(value.allowedConfigs) ||
+    value.allowedConfigs.length === 0
+  ) {
+    return false;
+  }
+
+  const difficulties = value.difficulties;
+  const variants = value.variants;
+  const allowedConfigs = value.allowedConfigs;
+  if (
+    difficulties.some(
+      (entry) =>
+        !isPlainObject(entry) ||
+        Object.keys(entry).length !== 2 ||
+        !Object.keys(entry).every((key) => key === "id" || key === "label") ||
+        !isBoundedId(entry.id) ||
+        !isBoundedLabel(entry.label),
+    ) ||
+    variants.some(
+      (entry) =>
+        !isPlainObject(entry) ||
+        Object.keys(entry).length !== 2 ||
+        !Object.keys(entry).every((key) => key === "id" || key === "label") ||
+        !isBoundedId(entry.id) ||
+        !isBoundedLabel(entry.label),
+    ) ||
+    allowedConfigs.some(
+      (entry) =>
+        !isPlainObject(entry) ||
+        Object.keys(entry).length !== 3 ||
+        !Object.keys(entry).every((key) =>
+          ["difficultyId", "variantId", "rewardFactor"].includes(key),
+        ) ||
+        !isBoundedId(entry.difficultyId) ||
+        !isBoundedId(entry.variantId) ||
+        typeof entry.rewardFactor !== "number" ||
+        !Number.isFinite(entry.rewardFactor) ||
+        entry.rewardFactor <= 0,
+    )
+  ) {
+    return false;
+  }
+
+  const difficultyIds = difficulties.map((entry) => entry.id as string);
+  const variantIds = variants.map((entry) => entry.id as string);
+  const pairs = allowedConfigs.map(
+    (entry) => `${String(entry.difficultyId)}\u0000${String(entry.variantId)}`,
+  );
+  return (
+    new Set(difficultyIds).size === difficultyIds.length &&
+    new Set(variantIds).size === variantIds.length &&
+    new Set(pairs).size === pairs.length &&
+    difficultyIds.includes(value.defaultDifficultyId) &&
+    variantIds.includes(value.defaultVariantId) &&
+    allowedConfigs.every(
+      (entry) =>
+        difficultyIds.includes(entry.difficultyId as string) &&
+        variantIds.includes(entry.variantId as string),
+    ) &&
+    pairs.includes(`${value.defaultDifficultyId}\u0000${value.defaultVariantId}`)
+  );
+}
+
+/** Validates the one host-originated window message. Called by the game-side client when it receives the
+ * bootstrap postMessage — see client.ts. Exact shape: any key besides
+ * `type`/`difficultyId`/`playConfig`/`playModes` makes
  * this `false`, the same "no smuggled data" posture `parseGameToHostMessage` takes on every
  * game -> host message. `difficultyId` itself is optional (see HostInitMessage's own doc comment)
  * but must be a real, bounded, non-empty string when present — an empty string is never a
@@ -154,7 +370,13 @@ export function isHostInitMessage(data: unknown): data is HostInitMessage {
   if (!isPlainObject(data) || data.type !== "HOST_INIT") return false;
 
   const keys = Object.keys(data);
-  if (!keys.every((k) => k === "type" || k === "difficultyId")) return false;
+  if (
+    !keys.every(
+      (k) => k === "type" || k === "difficultyId" || k === "playConfig" || k === "playModes",
+    )
+  ) {
+    return false;
+  }
 
   if ("difficultyId" in data && data.difficultyId !== undefined) {
     if (typeof data.difficultyId !== "string") return false;
@@ -163,12 +385,113 @@ export function isHostInitMessage(data: unknown): data is HostInitMessage {
     }
   }
 
+  if ("playConfig" in data && data.playConfig !== undefined) {
+    if (!isPublicPlayConfigDescriptor(data.playConfig)) return false;
+    if (data.difficultyId !== undefined) return false;
+  }
+
+  if ("playModes" in data && data.playModes !== undefined) {
+    if (!isGamePlayModeList(data.playModes)) return false;
+  }
+
   return true;
+}
+
+function parseAuthorizedStartContext(value: unknown): AuthorizedStartContext | null {
+  if (!isPlainObject(value)) return null;
+  const keys = Object.keys(value);
+  if (
+    keys.length !== 5 ||
+    !keys.every((key) =>
+      ["ranked", "playConfig", "rulesetRevision", "challengeSeed", "rewardFactor"].includes(key),
+    ) ||
+    typeof value.ranked !== "boolean" ||
+    !isPlayConfigSelection(value.playConfig) ||
+    typeof value.rulesetRevision !== "number" ||
+    !Number.isSafeInteger(value.rulesetRevision) ||
+    value.rulesetRevision <= 0 ||
+    typeof value.challengeSeed !== "string" ||
+    value.challengeSeed.length < 16 ||
+    value.challengeSeed.length > MAX_CHALLENGE_SEED_LENGTH ||
+    !/^[A-Za-z0-9_-]+$/.test(value.challengeSeed) ||
+    typeof value.rewardFactor !== "number" ||
+    !Number.isFinite(value.rewardFactor) ||
+    value.rewardFactor <= 0
+  ) {
+    return null;
+  }
+  return {
+    ranked: value.ranked,
+    playConfig: { ...value.playConfig },
+    rulesetRevision: value.rulesetRevision,
+    challengeSeed: value.challengeSeed,
+    rewardFactor: value.rewardFactor,
+  };
+}
+
+const HOST_START_ERROR_CODES = [
+  "ALREADY_REQUESTED",
+  "INVALID_PLAY_CONFIG",
+  "AUTH_REQUIRED",
+  "SESSION_UNAVAILABLE",
+  "GAME_UNAVAILABLE",
+] as const satisfies readonly HostStartErrorCode[];
+
+const HOST_PLAY_MODE_ERROR_CODES = [
+  "ALREADY_SELECTED",
+  "INVALID_PLAY_MODE",
+  "MODE_UNAVAILABLE",
+] as const satisfies readonly HostPlayModeErrorCode[];
+
+export function parseHostToGameMessage(data: unknown): HostToGameMessage | null {
+  if (!isWithinBridgePayloadLimit(data)) return null;
+  if (!isPlainObject(data) || typeof data.type !== "string") return null;
+  const keys = Object.keys(data);
+  if (data.type === "HOST_START") {
+    if (keys.length !== 2 || !keys.every((key) => key === "type" || key === "context")) {
+      return null;
+    }
+    const context = parseAuthorizedStartContext(data.context);
+    return context ? { type: "HOST_START", context } : null;
+  }
+  if (data.type === "HOST_START_ERROR") {
+    if (
+      keys.length !== 2 ||
+      !keys.every((key) => key === "type" || key === "code") ||
+      typeof data.code !== "string" ||
+      !(HOST_START_ERROR_CODES as readonly string[]).includes(data.code)
+    ) {
+      return null;
+    }
+    return { type: "HOST_START_ERROR", code: data.code as HostStartErrorCode };
+  }
+  if (data.type === "HOST_PLAY_MODE_SELECTED") {
+    if (
+      keys.length !== 2 ||
+      !keys.every((key) => key === "type" || key === "playMode") ||
+      !isGamePlayMode(data.playMode)
+    ) {
+      return null;
+    }
+    return { type: "HOST_PLAY_MODE_SELECTED", playMode: data.playMode };
+  }
+  if (data.type === "HOST_PLAY_MODE_ERROR") {
+    if (
+      keys.length !== 2 ||
+      !keys.every((key) => key === "type" || key === "code") ||
+      typeof data.code !== "string" ||
+      !(HOST_PLAY_MODE_ERROR_CODES as readonly string[]).includes(data.code)
+    ) {
+      return null;
+    }
+    return { type: "HOST_PLAY_MODE_ERROR", code: data.code as HostPlayModeErrorCode };
+  }
+  return null;
 }
 
 /** Validates any message the game may send. Called by the host-side bridge controller for every
  * message received on the MessagePort — see apps/web/app/features/game/runtime/gameBridgeHost.ts.
- * Returns `null` for anything that isn't exactly one of the five known shapes, INCLUDING a
+ * Returns `null` for anything that isn't exactly one of the known shapes, INCLUDING a
  * structurally-plausible object with an extra/wrong-typed field — a lenient parser here is exactly
  * how an untrusted game could smuggle unexpected data into host state. */
 export function parseGameToHostMessage(data: unknown): GameToHostMessage | null {
@@ -183,10 +506,32 @@ export function parseGameToHostMessage(data: unknown): GameToHostMessage | null 
     case "GAME_CANCEL":
       return keys.length === 1 ? ({ type: data.type } as GameToHostMessage) : null;
 
+    case "GAME_REQUEST_START":
+      if (
+        keys.length !== 2 ||
+        !keys.every((key) => key === "type" || key === "playConfig") ||
+        !isPlayConfigSelection(data.playConfig)
+      ) {
+        return null;
+      }
+      return { type: "GAME_REQUEST_START", playConfig: { ...data.playConfig } };
+
+    case "GAME_SELECT_PLAY_MODE":
+      if (
+        keys.length !== 2 ||
+        !keys.every((key) => key === "type" || key === "playMode") ||
+        !isGamePlayMode(data.playMode)
+      ) {
+        return null;
+      }
+      return { type: "GAME_SELECT_PLAY_MODE", playMode: data.playMode };
+
     case "GAME_COMPLETE": {
       if (
         !keys.every((k) =>
-          ["type", "outcome", "score", "progression", "metrics", "metadata"].includes(k),
+          ["type", "outcome", "score", "progression", "metrics", "metadata", "evidence"].includes(
+            k,
+          ),
         )
       )
         return null;
@@ -221,6 +566,9 @@ export function parseGameToHostMessage(data: unknown): GameToHostMessage | null 
       if ("metadata" in data && data.metadata !== undefined) {
         if (!isPlainObject(data.metadata) || !isJsonSafeValue(data.metadata)) return null;
       }
+      if ("evidence" in data && data.evidence !== undefined && !isJsonSafeValue(data.evidence)) {
+        return null;
+      }
       return {
         type: "GAME_COMPLETE",
         ...(data.outcome !== undefined
@@ -236,6 +584,7 @@ export function parseGameToHostMessage(data: unknown): GameToHostMessage | null 
         ...(data.metadata !== undefined
           ? { metadata: data.metadata as Record<string, unknown> }
           : {}),
+        ...(data.evidence !== undefined ? { evidence: data.evidence as JsonSafeValue } : {}),
       };
     }
 

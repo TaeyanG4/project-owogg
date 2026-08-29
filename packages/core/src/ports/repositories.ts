@@ -61,11 +61,14 @@ export interface Score {
   /** "normal" for every game without a manifest `difficulty` config — see
    * domain/scoreValidation.ts's validateDifficulty for how this gets normalized on submission. */
   difficulty: string;
+  variant_id: string;
+  ruleset_revision: number;
   created_at: string;
 }
 
 export interface UserPersonalBestAggregate {
   game_id: string;
+  ruleset_revision: number;
   min_score: number;
   max_score: number;
 }
@@ -131,6 +134,7 @@ export interface ScoreRepository {
     limit?: number,
     direction?: "asc" | "desc",
     difficulty?: string,
+    rulesetRevision?: number,
   ): Promise<Score[]>;
   getUserPersonalBests(userId: number): Promise<UserPersonalBestAggregate[]>;
 }
@@ -394,6 +398,8 @@ export interface ServerGameLeaderboardEntry {
   avatarUrl: string | null;
   gameId: string;
   score: number;
+  variantId: string;
+  rulesetRevision: number;
   formattedScore: string;
   createdAt: string;
 }
@@ -490,6 +496,7 @@ export interface DiscordGuildRepository {
     gameId: string,
     direction?: "asc" | "desc",
     limit?: number,
+    rulesetRevision?: number,
   ): Promise<ServerGameLeaderboardEntry[]>;
 
   getGuildUserXpRank(
@@ -751,6 +758,7 @@ export interface StreamerRepository {
     mode: "score" | "xp";
     gameId?: string;
     direction?: "asc" | "desc";
+    rulesetRevision?: number;
     platform?: StreamerPlatformType;
     limit?: number;
     offset?: number;

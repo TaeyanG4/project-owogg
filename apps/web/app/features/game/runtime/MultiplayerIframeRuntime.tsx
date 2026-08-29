@@ -1,17 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Check, Copy, Link2, LogOut } from "lucide-react";
-import type {
-  MultiplayerRematchResponse,
-  MultiplayerRoomPlayer,
-  MultiplayerRoomResponse,
-} from "@owogg/contracts";
-import { ApiClientError } from "../../../lib/api/errors";
+import type { MultiplayerRoomPlayer, MultiplayerRoomResponse } from "@owogg/contracts";
 import { GameFrame } from "../GameFrame";
 import {
   createMultiplayerBridgeHost,
   type MultiplayerBridgeHost,
   type MultiplayerParentConnectionState,
-  type MultiplayerPlayerConnectionState,
 } from "./multiplayerBridgeHost";
 import { MultiplayerConnectionOverlay } from "./MultiplayerConnectionOverlay";
 import {
@@ -19,55 +13,24 @@ import {
   openMultiplayerParentTransport,
   type MultiplayerParentTransport,
 } from "./multiplayerTransport";
-import {
-  fetchMultiplayerRematchStatus,
-  fetchMultiplayerRoomRoster,
-  leaveMultiplayerRoom,
-  requestMultiplayerRematch,
-} from "./multiplayerRoomApi";
+import { fetchMultiplayerRoomRoster, leaveMultiplayerRoom } from "./multiplayerRoomApi";
 
-function PlayerProfileCard({
+function PlayerRosterCard({
   player,
-  seatIndex,
   selfParticipantId,
-  connection,
 }: {
-  readonly player: MultiplayerRoomPlayer | undefined;
-  readonly seatIndex: 0 | 1;
+  readonly player: MultiplayerRoomPlayer;
   readonly selfParticipantId: string;
-  readonly connection?: MultiplayerPlayerConnectionState;
 }) {
-  const isSelf = player?.participantId === selfParticipantId;
-  const participantLabel = player?.role === "HOST" ? "방장" : "플레이어";
-  const connectionLabel =
-    connection?.status === "RECONNECTING"
-      ? "재접속 대기"
-      : connection?.status === "LEFT"
-        ? "나감"
-        : connection?.status === "TIMED_OUT"
-          ? "연결 만료"
-          : null;
+  const isSelf = player.participantId === selfParticipantId;
+  const participantLabel = player.role === "HOST" ? "방장" : "플레이어";
   return (
-    <div
-      className={`flex min-w-0 items-center gap-2.5 ${seatIndex === 1 ? "justify-end text-right" : ""}`}
-    >
-      {seatIndex === 1 && (
-        <span className="hidden min-w-0 sm:block">
-          <span className="block truncate text-sm font-black text-text-primary">
-            {player?.nickname ?? "상대 대기 중"}
-          </span>
-          <span className="block text-xs font-bold text-text-muted">
-            {player
-              ? `${participantLabel}${isSelf ? " · 나" : ""}${connectionLabel ? ` · ${connectionLabel}` : ""}`
-              : `슬롯 ${seatIndex + 1}`}
-          </span>
-        </span>
-      )}
+    <div className="flex min-w-0 items-center gap-2.5 rounded-xl border border-white/10 bg-black/15 px-3 py-2">
       <span
         className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-brand/35 bg-brand/10 text-sm font-black text-text-primary"
         aria-hidden="true"
       >
-        {player?.avatarUrl ? (
+        {player.avatarUrl ? (
           <img
             src={player.avatarUrl}
             alt=""
@@ -75,92 +38,19 @@ function PlayerProfileCard({
             className="h-full w-full object-cover"
           />
         ) : (
-          player?.nickname.trim().charAt(0) || String(seatIndex + 1)
+          player.nickname.trim().charAt(0) || String(player.seatIndex + 1)
         )}
       </span>
-      {seatIndex === 0 && (
-        <span className="hidden min-w-0 sm:block">
-          <span className="block truncate text-sm font-black text-text-primary">
-            {player?.nickname ?? "플레이어 대기 중"}
-          </span>
-          <span className="block text-xs font-bold text-text-muted">
-            {player
-              ? `${participantLabel}${isSelf ? " · 나" : ""}${connectionLabel ? ` · ${connectionLabel}` : ""}`
-              : `슬롯 ${seatIndex + 1}`}
-          </span>
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-black text-text-primary">
+          {player.nickname}
         </span>
-      )}
+        <span className="block text-xs font-bold text-text-muted">
+          {`슬롯 ${player.seatIndex + 1} · ${participantLabel}${isSelf ? " · 나" : ""}`}
+        </span>
+      </span>
     </div>
   );
-}
-
-export function multiplayerTerminalLabel(result: unknown, viewer: number | string): string {
-  if (typeof result !== "object" || result === null || Array.isArray(result)) return "경기 종료";
-  const terminal = result as Record<string, unknown>;
-  if (terminal.kind === "DRAW") return "무승부";
-  if (
-    terminal.kind === "FORFEIT" &&
-    typeof terminal.winnerParticipantId === "string" &&
-    typeof viewer === "string"
-  ) {
-    return terminal.winnerParticipantId === viewer ? "기권승" : "기권패";
-  }
-  if (
-    terminal.kind === "WIN" &&
-    typeof terminal.winnerParticipantId === "string" &&
-    typeof viewer === "string"
-  ) {
-    return terminal.winnerParticipantId === viewer ? "승리" : "패배";
-  }
-  if (
-    terminal.kind === "WIN" &&
-    (terminal.winnerSeatIndex === 0 || terminal.winnerSeatIndex === 1)
-  ) {
-    return terminal.winnerSeatIndex === viewer ? "승리" : "패배";
-  }
-  return "경기 종료";
-}
-
-function PeerConnectionNotice({ state }: { readonly state: MultiplayerPlayerConnectionState }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (state.status !== "RECONNECTING") return;
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
-  }, [state.status]);
-
-  const message = multiplayerPeerConnectionMessage(state, now);
-  if (!message) return null;
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      className={`border-b px-4 py-2.5 text-center text-sm font-bold ${
-        state.status === "RECONNECTING"
-          ? "border-amber-300/20 bg-amber-300/10 text-amber-100"
-          : "border-red-300/20 bg-red-400/10 text-red-200"
-      }`}
-    >
-      {message}
-    </div>
-  );
-}
-
-export function multiplayerPeerConnectionMessage(
-  state: MultiplayerPlayerConnectionState,
-  nowMs = Date.now(),
-): string | null {
-  if (state.status === "CONNECTED") return null;
-  if (state.status !== "RECONNECTING") {
-    return state.status === "LEFT"
-      ? "상대가 게임에서 나갔습니다."
-      : "상대가 30초 안에 재접속하지 않아 기권 처리되었습니다.";
-  }
-  const seconds = Math.max(0, Math.ceil((Date.parse(state.reconnectDeadlineAt) - nowMs) / 1_000));
-  return seconds > 0
-    ? `상대 네트워크 연결이 불안정합니다. ${seconds}초 동안 재접속을 기다립니다.`
-    : "재접속 유예 시간이 끝났습니다. 공식 기권 결과를 확인하고 있습니다.";
 }
 
 export function multiplayerRoomClipboardValue(
@@ -196,7 +86,6 @@ export interface MultiplayerIframeRuntimeProps {
   readonly iframeStyle?: CSSProperties;
   readonly shareValue?: string;
   readonly initialPlayers?: readonly MultiplayerRoomPlayer[];
-  readonly onRoomChange: (room: MultiplayerRoomResponse) => void;
   readonly onExit: () => void;
 }
 
@@ -206,9 +95,12 @@ export function multiplayerRuntimeInitialRoster(
 ): readonly MultiplayerRoomPlayer[] | null {
   if (
     !initialPlayers ||
+    initialPlayers.length < 2 ||
+    initialPlayers.length > 8 ||
     initialPlayers.length !== room.instance.participantCount ||
     !initialPlayers.some((player) => player.participantId === room.participant.id) ||
-    new Set(initialPlayers.map((player) => player.participantId)).size !== initialPlayers.length
+    new Set(initialPlayers.map((player) => player.participantId)).size !== initialPlayers.length ||
+    new Set(initialPlayers.map((player) => player.seatIndex)).size !== initialPlayers.length
   ) {
     return null;
   }
@@ -216,9 +108,8 @@ export function multiplayerRuntimeInitialRoster(
 }
 
 /**
- * Parent-owned multiplayer runtime. It intentionally does not create the legacy GAME_COMPLETE
- * bridge: the sandbox receives only MULTI_INIT and canonical server projections, while tickets,
- * socket URLs, reconnect generations, leave fallback, and result presentation stay in GameHost.
+ * Parent-owned Relay runtime. The sandbox receives only sanitized multiplayer messages while
+ * tickets, socket URLs, reconnect generations, and leave fallback stay in the parent.
  */
 export function MultiplayerIframeRuntime({
   src,
@@ -230,7 +121,6 @@ export function MultiplayerIframeRuntime({
   iframeStyle,
   shareValue,
   initialPlayers,
-  onRoomChange,
   onExit,
 }: MultiplayerIframeRuntimeProps) {
   const [connectionState, setConnectionState] = useState<MultiplayerParentConnectionState>({
@@ -245,21 +135,12 @@ export function MultiplayerIframeRuntime({
   const [players, setPlayers] = useState<readonly MultiplayerRoomPlayer[]>(
     () => multiplayerRuntimeInitialRoster(room, initialPlayers) ?? [],
   );
-  const [playerConnections, setPlayerConnections] = useState<
-    ReadonlyMap<string, MultiplayerPlayerConnectionState>
-  >(new Map());
-  const [rematchState, setRematchState] = useState<
-    "CHECKING" | "AVAILABLE" | "WAITING" | "OPPONENT_REQUESTED" | "STARTING" | "UNAVAILABLE"
-  >("CHECKING");
-  const [rematchBusy, setRematchBusy] = useState(false);
-  const [rematchError, setRematchError] = useState<string | null>(null);
   const bridgeRef = useRef<MultiplayerBridgeHost | null>(null);
   const transportRef = useRef<MultiplayerParentTransport | null>(null);
   const openAttemptRef = useRef(0);
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rosterRequestRef = useRef(0);
-  const rematchRequestRef = useRef(0);
 
   const refreshRoster = useCallback(() => {
     const request = ++rosterRequestRef.current;
@@ -270,7 +151,7 @@ export function MultiplayerIframeRuntime({
         setPlayers(response.players);
       })
       .catch(() => {
-        // Roster decoration is non-authoritative and must never interrupt the match transport.
+        // Roster decoration must never interrupt the Relay transport.
       });
   }, [room.instance.id]);
 
@@ -306,11 +187,6 @@ export function MultiplayerIframeRuntime({
     setRetryKey(0);
     const rosterSeed = multiplayerRuntimeInitialRoster(room, initialPlayers);
     setPlayers(rosterSeed ?? []);
-    setPlayerConnections(new Map());
-    setRematchState("CHECKING");
-    setRematchBusy(false);
-    setRematchError(null);
-    rematchRequestRef.current += 1;
     if (rosterSeed) rosterRequestRef.current += 1;
     else refreshRoster();
   }, [
@@ -322,48 +198,6 @@ export function MultiplayerIframeRuntime({
     room.instance.generation,
     room.participant.connectionGeneration,
   ]);
-
-  const applyRematchResponse = useCallback(
-    (response: MultiplayerRematchResponse) => {
-      setRematchError(null);
-      if (response.state === "STARTED") {
-        setRematchState("STARTING");
-        onRoomChange(response.room);
-        return;
-      }
-      setRematchState(response.state);
-    },
-    [onRoomChange],
-  );
-
-  const refreshRematch = useCallback(() => {
-    const request = ++rematchRequestRef.current;
-    void fetchMultiplayerRematchStatus({
-      instanceId: room.instance.id,
-      expectedGeneration: room.instance.generation,
-    })
-      .then((response) => {
-        if (request === rematchRequestRef.current) applyRematchResponse(response);
-      })
-      .catch((reason: unknown) => {
-        if (request !== rematchRequestRef.current) return;
-        if (reason instanceof ApiClientError && reason.code === "INSTANCE_NOT_JOINABLE") {
-          setRematchState("UNAVAILABLE");
-          setRematchError(null);
-          return;
-        }
-        setRematchError(
-          reason instanceof Error && reason.message
-            ? reason.message
-            : "재대결 상태를 확인하지 못했습니다.",
-        );
-      });
-  }, [applyRematchResponse, room.instance.generation, room.instance.id]);
-
-  useEffect(() => {
-    if (connectionState.status !== "TERMINAL_COMMITTED") return;
-    refreshRematch();
-  }, [connectionState.status, refreshRematch]);
 
   const handleConnectionState = useCallback(
     (nextState: MultiplayerParentConnectionState) => {
@@ -402,6 +236,10 @@ export function MultiplayerIframeRuntime({
       void openMultiplayerParentTransport({
         instanceId: room.instance.id,
         expectedConnectionGeneration: connectionGeneration,
+        expectedGameVersionId: room.instance.gameVersionId,
+        expectedContentHash: room.instance.contentHash,
+        expectedProfileRevision: room.instance.profileRevision,
+        expectedGeneration: room.instance.generation,
       })
         .then((transport) => {
           if (openAttempt !== openAttemptRef.current) {
@@ -415,17 +253,7 @@ export function MultiplayerIframeRuntime({
             contentWindow,
             transport.socket,
             transport.bootstrap,
-            {
-              onConnectionState: handleConnectionState,
-              onRematchChange: refreshRematch,
-              onPlayerConnectionChange: (state) => {
-                setPlayerConnections((current) => {
-                  const next = new Map(current);
-                  next.set(state.participantId, state);
-                  return next;
-                });
-              },
-            },
+            { onConnectionState: handleConnectionState },
           );
         })
         .catch((error: unknown) => {
@@ -439,7 +267,16 @@ export function MultiplayerIframeRuntime({
           });
         });
     },
-    [closeCurrent, connectionGeneration, handleConnectionState, refreshRematch, room.instance.id],
+    [
+      closeCurrent,
+      connectionGeneration,
+      handleConnectionState,
+      room.instance.contentHash,
+      room.instance.gameVersionId,
+      room.instance.generation,
+      room.instance.id,
+      room.instance.profileRevision,
+    ],
   );
 
   const retry = useCallback(() => {
@@ -457,14 +294,8 @@ export function MultiplayerIframeRuntime({
         expectedGeneration: room.instance.generation,
       });
     } catch {
-      // The authenticated HTTP control path is authoritative and serializes through the same
-      // Durable Object as gameplay. Only fall back to the already-authenticated socket if the
-      // HTTP response is lost; sending both concurrently can turn a forfeit into an abort race.
-      if (
-        connectionState.status !== "DISCONNECTED" &&
-        connectionState.status !== "TERMINAL_COMMITTED" &&
-        connectionState.status !== "ABORTED"
-      ) {
+      // Fall back to the already-authenticated socket only when the HTTP control response is lost.
+      if (connectionState.status !== "DISCONNECTED" && connectionState.status !== "CLOSED") {
         bridgeRef.current?.leave();
       }
     } finally {
@@ -472,27 +303,6 @@ export function MultiplayerIframeRuntime({
       onExit();
     }
   }, [closeCurrent, connectionState.status, onExit, room.instance.generation, room.instance.id]);
-
-  const requestRematch = useCallback(async () => {
-    setRematchBusy(true);
-    setRematchError(null);
-    try {
-      applyRematchResponse(
-        await requestMultiplayerRematch({
-          instanceId: room.instance.id,
-          expectedGeneration: room.instance.generation,
-        }),
-      );
-    } catch (reason) {
-      setRematchError(
-        reason instanceof Error && reason.message
-          ? reason.message
-          : "재대결을 요청하지 못했습니다.",
-      );
-    } finally {
-      setRematchBusy(false);
-    }
-  }, [applyRematchResponse, room.instance.generation, room.instance.id]);
 
   const copyRoom = useCallback(
     async (kind: "CODE" | "LINK") => {
@@ -509,90 +319,20 @@ export function MultiplayerIframeRuntime({
     [room.instance.publicCode, shareValue],
   );
 
-  const canonicalResult =
-    connectionState.status === "TERMINAL_COMMITTED" ? (
-      <div>
-        <p className="text-xs font-bold uppercase tracking-[0.2em] text-text-muted">
-          공식 경기 결과
-        </p>
-        <p className="mt-2 text-4xl font-black text-text-primary">
-          {multiplayerTerminalLabel(connectionState.result, room.participant.id)}
-        </p>
-      </div>
-    ) : undefined;
-
-  const rematchActions =
-    connectionState.status === "TERMINAL_COMMITTED" ? (
-      <div className="mt-5 border-t border-border pt-5">
-        {rematchState === "OPPONENT_REQUESTED" ? (
-          <p className="text-sm font-bold text-brand-light">상대방이 재대결을 요청했습니다.</p>
-        ) : rematchState === "WAITING" ? (
-          <p className="text-sm font-semibold text-text-secondary">
-            상대방의 재대결 응답을 기다리는 중입니다.
-          </p>
-        ) : rematchState === "STARTING" ? (
-          <p className="text-sm font-semibold text-text-secondary">새 경기를 준비하고 있습니다.</p>
-        ) : rematchState === "UNAVAILABLE" ? (
-          <p className="text-sm font-semibold text-text-muted">
-            재대결 가능 시간이 종료되었습니다.
-          </p>
-        ) : (
-          <p className="text-sm text-text-secondary">같은 상대와 한 판 더 진행할 수 있습니다.</p>
-        )}
-        {(rematchState === "AVAILABLE" || rematchState === "OPPONENT_REQUESTED") && (
-          <button
-            type="button"
-            disabled={rematchBusy}
-            onClick={() => void requestRematch()}
-            className="mt-3 rounded-xl bg-brand px-5 py-2.5 text-sm font-black text-white disabled:cursor-wait disabled:opacity-60"
-          >
-            {rematchBusy
-              ? "처리 중"
-              : rematchState === "OPPONENT_REQUESTED"
-                ? "재대결 수락"
-                : "다시하기"}
-          </button>
-        )}
-        {rematchState === "CHECKING" && (
-          <p className="mt-2 text-xs font-semibold text-text-muted">재대결 가능 여부 확인 중</p>
-        )}
-        {rematchError && (
-          <p role="alert" className="mt-2 text-xs font-semibold text-accent-red">
-            {rematchError}
-          </p>
-        )}
-      </div>
-    ) : undefined;
-
-  const leftPlayer = players.find((player) => player.seatIndex === 0);
-  const rightPlayer = players.find((player) => player.seatIndex === 1);
-  const leftConnection = leftPlayer ? playerConnections.get(leftPlayer.participantId) : undefined;
-  const rightConnection = rightPlayer
-    ? playerConnections.get(rightPlayer.participantId)
-    : undefined;
-  const opponent = players.find((player) => player.participantId !== room.participant.id);
-  const opponentConnection = opponent ? playerConnections.get(opponent.participantId) : undefined;
+  const orderedPlayers = [...players].sort((left, right) => left.seatIndex - right.seatIndex);
   const connectionLabel =
     connectionState.status === "CONNECTED"
       ? "서버 연결됨"
       : connectionState.status === "CONNECTING"
         ? "연결 중"
-        : connectionState.status === "TERMINAL_PENDING"
-          ? "결과 저장 중"
-          : connectionState.status === "TERMINAL_COMMITTED"
-            ? "경기 종료"
-            : "연결 확인 필요";
+        : connectionState.status === "CLOSED"
+          ? "방 종료"
+          : "연결 확인 필요";
 
   return (
     <div className="w-full bg-[#08090d]">
-      <div className="grid min-h-20 grid-cols-2 items-center gap-3 border-b border-white/10 bg-surface-raised px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:px-4">
-        <PlayerProfileCard
-          player={leftPlayer}
-          seatIndex={0}
-          selfParticipantId={room.participant.id}
-          {...(leftConnection ? { connection: leftConnection } : {})}
-        />
-        <div className="order-3 col-span-2 flex min-w-0 flex-col items-center gap-2 sm:order-none sm:col-span-1">
+      <div className="border-b border-white/10 bg-surface-raised px-3 py-3 sm:px-4">
+        <div className="flex min-w-0 flex-col items-center gap-2">
           <div className="flex max-w-full flex-wrap items-stretch justify-center gap-2">
             <span className="flex min-h-11 items-center gap-2 rounded-xl border border-border bg-surface px-3.5 py-2">
               <span className="text-xs font-black uppercase tracking-wider text-text-muted">
@@ -653,16 +393,21 @@ export function MultiplayerIframeRuntime({
             {connectionLabel}
           </span>
         </div>
-        <div className="order-2 sm:order-none">
-          <PlayerProfileCard
-            player={rightPlayer}
-            seatIndex={1}
-            selfParticipantId={room.participant.id}
-            {...(rightConnection ? { connection: rightConnection } : {})}
-          />
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {orderedPlayers.map((player) => (
+            <PlayerRosterCard
+              key={player.participantId}
+              player={player}
+              selfParticipantId={room.participant.id}
+            />
+          ))}
+          {orderedPlayers.length === 0 && (
+            <p className="col-span-full py-2 text-center text-sm font-semibold text-text-muted">
+              참가자 정보를 불러오는 중입니다.
+            </p>
+          )}
         </div>
       </div>
-      {opponentConnection && <PeerConnectionNotice state={opponentConnection} />}
       <div className="relative w-full overflow-hidden">
         <GameFrame
           key={`${attemptKey}:${room.instance.generation}:${retryKey}`}
@@ -678,8 +423,6 @@ export function MultiplayerIframeRuntime({
         />
         <MultiplayerConnectionOverlay
           state={connectionState}
-          canonicalResult={canonicalResult}
-          terminalActions={rematchActions}
           onRetry={retry}
           onLeave={() => void leave()}
           hideConnectedStatus

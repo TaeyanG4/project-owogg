@@ -20,6 +20,7 @@ import { SANDBOX_GAME_POLICY } from "../src/domain/sandboxGames.js";
 import type { SandboxGameBundleManifest } from "../src/domain/sandboxGameBundle.js";
 import { OWOGG_GAME_CREATOR_MANIFEST_FILENAME } from "../src/domain/gameCreatorManifest.js";
 import type { GameCanonicalRepository } from "../src/modules/game/ports/gameCanonicalRepository.js";
+import type { GameVerifierCatalog } from "../src/ports/gameVerifier.js";
 import type {
   MultiplayerProfileRequestRecord,
   MultiplayerProfileRequestRepository,
@@ -45,21 +46,28 @@ const MINIMAL_BUNDLE: Record<string, Uint8Array> = {
 };
 
 function creatorManifestBytes(game: Record<string, unknown>): Uint8Array {
+  const playModes =
+    game.playModes ??
+    (game.mode === "single" ? ["single"] : game.mode === "multi" ? ["local-multi"] : undefined);
   return bytes(
     JSON.stringify({
       schemaVersion: 1,
-      game,
+      game: { ...game, ...(playModes !== undefined ? { playModes } : {}) },
       progression: { type: "none" },
       result: { score: null },
     }),
   );
 }
 
-function multiplayerCreatorManifestBytes(slug = "my-game"): Uint8Array {
+function multiplayerCreatorManifestBytes(
+  slug = "my-game",
+  runtimeKind: "relay" | "worker" | "container" = "relay",
+  features: { joinInProgress?: boolean; spectators?: boolean } = {},
+): Uint8Array {
   return bytes(
     JSON.stringify({
-      $schema: "https://owogg.com/schemas/manifest/v2.json",
-      schemaVersion: 2,
+      $schema: "https://owogg.com/schemas/manifest/v1.json",
+      schemaVersion: 1,
       game: {
         slug,
         title: "Online Grid",
@@ -71,23 +79,17 @@ function multiplayerCreatorManifestBytes(slug = "my-game"): Uint8Array {
       result: { score: null },
       leaderboard: { enabled: false },
       multiplayer: {
-        requestVersion: 1,
-        kind: "managed-template",
-        template: { id: "turn-grid", version: 1 },
-        players: { min: 2, max: 2 },
-        requirements: {
-          simulation: "turn",
-          lifecycle: "match",
-          persistence: "match",
-          latency: "relaxed",
+        version: 1,
+        transport: { kind: "websocket", protocolVersion: 1 },
+        runtime: { kind: runtimeKind },
+        players: { min: 2, max: 8 },
+        features: {
           reconnect: "resume",
-          hiddenInformation: false,
-          simultaneousResponse: false,
-          joinInProgress: false,
-          spectators: false,
+          directMessages: true,
+          hostSnapshot: true,
+          joinInProgress: features.joinInProgress ?? false,
+          spectators: features.spectators ?? false,
         },
-        config: { boardWidth: 15, boardHeight: 15, winLength: 5 },
-        client: { protocolVersion: 1 },
       },
     }),
   );
@@ -522,6 +524,7 @@ function createUseCases(
   entries?: Record<string, Uint8Array>,
   canonicalRepo: ReturnType<typeof createFakeCanonicalRepo> = createFakeCanonicalRepo(),
   multiplayerProfileRequests?: MultiplayerProfileRequestRepository,
+  gameVerifierCatalog?: GameVerifierCatalog,
 ) {
   const repo = createFakeRepo();
   const storage = createFakeStorage();
@@ -544,6 +547,7 @@ function createUseCases(
     canonicalRepo,
     archiveWriter,
     multiplayerProfileRequests,
+    gameVerifierCatalog,
   );
   return {
     useCases,
@@ -1601,7 +1605,7 @@ test("uploadVersion publishes each bundle file as its own versioned object and r
   assert.ok(storage.putKeys.includes(`games/${game.id}/${version.id}/owogg.json`));
 });
 
-test("owogg.json v2 upload stores its managed request against the exact USER version", async () => {
+test("owogg.json v1 upload stores its Relay request against the exact USER version", async () => {
   const requests = createFakeMultiplayerProfileRequests();
   const entries = {
     ...MINIMAL_BUNDLE,
@@ -1630,10 +1634,65 @@ test("owogg.json v2 upload stores its managed request against the exact USER ver
   assert.equal(requests.submissions[0]?.gameId, game.id);
   assert.equal(requests.submissions[0]?.gameVersionId, version.id);
   assert.equal(requests.submissions[0]?.requestedByUserId, 7);
-  assert.equal(requests.submissions[0]?.request.template.id, "turn-grid");
+  assert.equal(requests.submissions[0]?.request.runtime.kind, "relay");
 });
 
-test("a failed managed-request insert is retryable through exact-version republish", async () => {
+test("USER upload rejects unavailable runtimes and Relay capabilities before version publication", async () => {
+  const cases = [
+    {
+      manifest: multiplayerCreatorManifestBytes("my-game", "worker"),
+      code: "MULTIPLAYER_RUNTIME_NOT_AVAILABLE" as const,
+    },
+    {
+      manifest: multiplayerCreatorManifestBytes("my-game", "container"),
+      code: "MULTIPLAYER_RUNTIME_NOT_AVAILABLE" as const,
+    },
+    {
+      manifest: multiplayerCreatorManifestBytes("my-game", "relay", {
+        joinInProgress: true,
+      }),
+      code: "MULTIPLAYER_CAPABILITY_NOT_AVAILABLE" as const,
+    },
+  ];
+
+  for (const { manifest, code } of cases) {
+    const requests = createFakeMultiplayerProfileRequests();
+    const entries = {
+      ...MINIMAL_BUNDLE,
+      [OWOGG_GAME_CREATOR_MANIFEST_FILENAME]: manifest,
+    };
+    const { useCases, repo, storage } = createUseCases(
+      entries,
+      createFakeCanonicalRepo(),
+      requests,
+    );
+    const game = await useCases.createGame({
+      slug: "my-game",
+      developerUserId: 7,
+      title: "Online Grid",
+      shortDescription: null,
+      description: null,
+      genre: "board",
+      mode: "multi",
+    });
+
+    await assert.rejects(
+      () =>
+        useCases.uploadVersion({
+          gameId: game.id,
+          actingUserId: 7,
+          isAdmin: false,
+          bytes: new ArrayBuffer(10),
+        }),
+      (error: unknown) => error instanceof SandboxGameUseCaseFailure && error.code === code,
+    );
+    assert.equal(repo.versions.size, 0);
+    assert.equal(storage.putKeys.length, 0);
+    assert.equal(requests.submissions.length, 0);
+  }
+});
+
+test("a failed Relay-request insert is retryable through exact-version republish", async () => {
   const requests = createFakeMultiplayerProfileRequests();
   requests.rejectNext = true;
   const entries = {
@@ -2832,6 +2891,73 @@ function manifestEntries(
     ...(hasLogo ? {} : { "owogg.logo.png": bytes("fake-logo-bytes") }),
   };
 }
+
+function playConfigManifestEntries(): Record<string, Uint8Array> {
+  return {
+    ...MINIMAL_BUNDLE,
+    "owogg.logo.png": bytes("fake-logo-bytes"),
+    [OWOGG_GAME_CREATOR_MANIFEST_FILENAME]: bytes(
+      JSON.stringify({
+        schemaVersion: 1,
+        game: {
+          slug: "verified-game",
+          title: "Verified Game",
+          genre: "action",
+          mode: "single",
+          playModes: ["single"],
+        },
+        difficulties: [{ id: "normal", title: "Normal", default: true }],
+        playConfig: {
+          version: 1,
+          rulesetRevision: 1,
+          verifierId: "test/score-v1",
+          variants: [{ id: "standard", title: "Standard", default: true }],
+          allowedConfigs: [{ difficultyId: "normal", variantId: "standard", rewardFactor: 1 }],
+        },
+        progression: { type: "none" },
+        result: {
+          score: {
+            unit: "points",
+            direction: "desc",
+            range: { min: 0, max: 1_000, outOfRange: "reject" },
+          },
+        },
+        leaderboard: { enabled: true },
+      }),
+    ),
+  };
+}
+
+test("USER PlayConfig registration rejects an unregistered verifier before creating a game row", async () => {
+  const { useCases, repo, storage } = createUseCases(playConfigManifestEntries());
+
+  await assert.rejects(
+    () => useCases.createGameFromBundle({ developerUserId: 1, bytes: new ArrayBuffer(10) }),
+    (error: unknown) =>
+      error instanceof SandboxGameUseCaseFailure && error.code === "VERIFIER_NOT_REGISTERED",
+  );
+  assert.equal(repo.games.size, 0);
+  assert.equal(repo.versions.size, 0);
+  assert.equal(storage.putKeys.length, 0);
+});
+
+test("USER PlayConfig registration accepts an explicitly registered trusted verifier ID", async () => {
+  const verifierCatalog: GameVerifierCatalog = { has: (id) => id === "test/score-v1" };
+  const canonicalRepo = createFakeCanonicalRepo();
+  const { useCases, repo } = createUseCases(
+    playConfigManifestEntries(),
+    canonicalRepo,
+    undefined,
+    verifierCatalog,
+  );
+
+  const created = await useCases.createGameFromBundle({
+    developerUserId: 1,
+    bytes: new ArrayBuffer(10),
+  });
+  assert.equal(created.game.slug, "verified-game");
+  assert.equal(repo.versions.size, 1);
+});
 
 test("createGameFromBundle creates the game and its first version from the embedded manifest", async () => {
   const { useCases, repo } = createUseCases(

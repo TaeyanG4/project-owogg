@@ -25,6 +25,7 @@ export interface MultiplayerInstanceRecord {
   readonly createIdempotencyHash: string;
   readonly gameId: number;
   readonly gameVersionId: number;
+  readonly contentHash: string;
   readonly profileId: number;
   readonly profileRevision: number;
   readonly visibility: MultiplayerVisibility;

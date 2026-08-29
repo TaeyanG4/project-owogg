@@ -1,51 +1,49 @@
-import {
-  MULTIPLAYER_LATENCY_PROFILES,
-  MULTIPLAYER_LIFECYCLES,
-  MULTIPLAYER_RECONNECT_POLICIES,
-  MULTIPLAYER_SIMULATION_MODELS,
-  MULTIPLAYER_V1_MAX_PLAYERS,
-  type MultiplayerLatencyProfile,
-  type MultiplayerLifecycle,
-  type MultiplayerReconnectPolicy,
-  type MultiplayerSimulationModel,
-} from "./multiplayerCapability.js";
-
 export const MULTIPLAYER_PROFILE_VERSION = 1 as const;
 export const MULTIPLAYER_PROTOCOL_VERSION = 1 as const;
-export const MULTIPLAYER_RUNTIME_BACKENDS = ["durable-object"] as const;
+export const MULTIPLAYER_V1_MAX_PLAYERS = 8;
+export const MULTIPLAYER_RECONNECT_POLICIES = ["none", "resume"] as const;
 export const MULTIPLAYER_VISIBILITIES = ["PUBLIC", "UNLISTED", "PRIVATE"] as const;
 export const MULTIPLAYER_JOIN_POLICIES = ["OPEN", "INVITE_ONLY"] as const;
 
-export type MultiplayerRuntimeBackend = (typeof MULTIPLAYER_RUNTIME_BACKENDS)[number];
+export type MultiplayerReconnectPolicy = (typeof MULTIPLAYER_RECONNECT_POLICIES)[number];
 export type MultiplayerVisibility = (typeof MULTIPLAYER_VISIBILITIES)[number];
 export type MultiplayerJoinPolicy = (typeof MULTIPLAYER_JOIN_POLICIES)[number];
 
-export interface ApprovedMultiplayerProfileV1 {
+/** The only profile shape that can be approved or activated after the Relay cutover. */
+export interface ApprovedRelayMultiplayerProfileV1 {
   readonly profileVersion: typeof MULTIPLAYER_PROFILE_VERSION;
   readonly gameId: number;
   readonly gameVersionId: number;
-  readonly sourceRequestHash: string | null;
+  readonly contentHash: string;
+  readonly sourceRequestHash: string;
   readonly profileRevision: number;
+  readonly transportKind: "websocket";
+  readonly runtimeKind: "relay";
   readonly protocolVersion: typeof MULTIPLAYER_PROTOCOL_VERSION;
-  readonly resolvedClass: "M1" | "M2";
-  readonly simulationModel: Extract<MultiplayerSimulationModel, "turn" | "event" | "realtime">;
-  readonly runtimeBackend: MultiplayerRuntimeBackend;
-  readonly rulesetKey: string;
-  readonly rulesetRevision: number;
-  readonly resolvedConfigJson: string;
-  readonly lifecycle: Extract<MultiplayerLifecycle, "match" | "continuous">;
-  readonly persistence: "match";
-  readonly latencyProfile: Extract<MultiplayerLatencyProfile, "relaxed" | "interactive">;
+  readonly lifecycle: "match";
   readonly reconnectPolicy: MultiplayerReconnectPolicy;
+  readonly directMessages: boolean;
+  readonly hostSnapshot: boolean;
   readonly minPlayers: number;
   readonly maxPlayers: number;
-  readonly allowedVisibility: readonly MultiplayerVisibility[];
-  readonly allowedJoinPolicies: readonly MultiplayerJoinPolicy[];
-  readonly maxActionBytes: number;
-  readonly maxStateBytes: number;
-  readonly actionRateLimit: number;
-  readonly rewardPolicyId: string | null;
+  readonly allowedVisibility: readonly ["PRIVATE"];
+  readonly allowedJoinPolicies: readonly ["OPEN"];
+  readonly hostDeparturePolicy: "close";
+  readonly resultTrust: "UNVERIFIED";
+  readonly maxMessageBytes: number;
+  readonly maxSnapshotBytes: number;
+  readonly messagesPerSecond: number;
+  readonly roomBytesPerSecond: number;
+  readonly roomTtlSeconds: number;
   readonly enabled: boolean;
+}
+
+export type ApprovedMultiplayerProfileV1 = ApprovedRelayMultiplayerProfileV1;
+
+export function isApprovedRelayMultiplayerProfileV1(
+  profile: ApprovedMultiplayerProfileV1,
+): profile is ApprovedRelayMultiplayerProfileV1 {
+  return profile.runtimeKind === "relay";
 }
 
 export class MultiplayerProfileValidationError extends Error {
@@ -73,11 +71,14 @@ function exactKeys(
   for (const key of Object.keys(source)) {
     if (!allowed.includes(key)) invalid(`${path}.${key} is not allowed`);
   }
+  for (const key of allowed) {
+    if (!(key in source)) invalid(`${path}.${key} is required`);
+  }
 }
 
 function positiveInteger(source: Record<string, unknown>, key: string): number {
   const value = source[key];
-  if (!Number.isInteger(value) || (value as number) <= 0) {
+  if (!Number.isSafeInteger(value) || (value as number) <= 0) {
     invalid(`${key} must be a positive integer`);
   }
   return value as number;
@@ -90,77 +91,30 @@ function boundedInteger(
   maximum: number,
 ): number {
   const value = source[key];
-  if (!Number.isInteger(value) || (value as number) < minimum || (value as number) > maximum) {
+  if (!Number.isSafeInteger(value) || (value as number) < minimum || (value as number) > maximum) {
     invalid(`${key} must be an integer between ${minimum} and ${maximum}`);
   }
   return value as number;
 }
 
-function enumValue<T extends string>(
-  source: Record<string, unknown>,
-  key: string,
-  allowed: readonly T[],
-): T {
+function booleanValue(source: Record<string, unknown>, key: string): boolean {
   const value = source[key];
-  if (typeof value !== "string" || !(allowed as readonly string[]).includes(value)) {
-    invalid(`${key} must be one of ${allowed.join(", ")}`);
-  }
-  return value as T;
-}
-
-function nullableIdentifier(source: Record<string, unknown>, key: string): string | null {
-  const value = source[key];
-  if (value === null) return null;
-  if (typeof value !== "string" || !/^[a-z0-9][a-z0-9._:/-]{0,95}$/.test(value)) {
-    invalid(`${key} must be null or a stable lowercase identifier`);
-  }
+  if (typeof value !== "boolean") invalid(`${key} must be a boolean`);
   return value;
 }
 
-function requiredIdentifier(source: Record<string, unknown>, key: string): string {
+function hashValue(source: Record<string, unknown>, key: string): string {
   const value = source[key];
-  if (typeof value !== "string" || !/^[a-z0-9][a-z0-9._:/-]{0,95}$/.test(value)) {
-    invalid(`${key} must be a stable lowercase identifier`);
+  if (typeof value !== "string" || !/^[a-f0-9]{64}$/.test(value)) {
+    invalid(`${key} must be a lowercase SHA-256 hex digest`);
   }
-  return value;
+  return value as string;
 }
 
-function stringArray<T extends string>(
-  source: Record<string, unknown>,
-  key: string,
-  allowed: readonly T[],
-): readonly T[] {
-  const value = source[key];
-  if (!Array.isArray(value) || value.length === 0) invalid(`${key} must be a non-empty array`);
-  const parsed = value.map((candidate) => {
-    if (typeof candidate !== "string" || !(allowed as readonly string[]).includes(candidate)) {
-      invalid(`${key} contains an unsupported value`);
-    }
-    return candidate as T;
-  });
-  if (new Set(parsed).size !== parsed.length) invalid(`${key} must not contain duplicates`);
-  return parsed;
-}
-
-function parseConfigJson(value: unknown): string {
-  if (typeof value !== "string") invalid("resolvedConfigJson must be a JSON string");
-  if (new TextEncoder().encode(value).byteLength > 32 * 1024) {
-    invalid("resolvedConfigJson exceeds 32 KiB");
-  }
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      invalid("resolvedConfigJson must contain a JSON object");
-    }
-  } catch (error) {
-    if (error instanceof MultiplayerProfileValidationError) throw error;
-    invalid("resolvedConfigJson must contain valid JSON");
-  }
-  return value;
-}
-
-/** Strictly parse the trusted profile snapshot read from storage. */
-export function parseApprovedMultiplayerProfileV1(value: unknown): ApprovedMultiplayerProfileV1 {
+/** Strictly parse the trusted generic Relay profile snapshot read from storage. */
+export function parseApprovedRelayMultiplayerProfileV1(
+  value: unknown,
+): ApprovedRelayMultiplayerProfileV1 {
   const source = record(value, "profile");
   exactKeys(
     source,
@@ -168,121 +122,96 @@ export function parseApprovedMultiplayerProfileV1(value: unknown): ApprovedMulti
       "profileVersion",
       "gameId",
       "gameVersionId",
+      "contentHash",
       "sourceRequestHash",
       "profileRevision",
+      "transportKind",
+      "runtimeKind",
       "protocolVersion",
-      "resolvedClass",
-      "simulationModel",
-      "runtimeBackend",
-      "rulesetKey",
-      "rulesetRevision",
-      "resolvedConfigJson",
       "lifecycle",
-      "persistence",
-      "latencyProfile",
       "reconnectPolicy",
+      "directMessages",
+      "hostSnapshot",
       "minPlayers",
       "maxPlayers",
       "allowedVisibility",
       "allowedJoinPolicies",
-      "maxActionBytes",
-      "maxStateBytes",
-      "actionRateLimit",
-      "rewardPolicyId",
+      "hostDeparturePolicy",
+      "resultTrust",
+      "maxMessageBytes",
+      "maxSnapshotBytes",
+      "messagesPerSecond",
+      "roomBytesPerSecond",
+      "roomTtlSeconds",
       "enabled",
     ],
     "profile",
   );
-
-  if (source.profileVersion !== MULTIPLAYER_PROFILE_VERSION) {
-    invalid(`profileVersion must be ${MULTIPLAYER_PROFILE_VERSION}`);
+  if (source.profileVersion !== MULTIPLAYER_PROFILE_VERSION) invalid("profileVersion must be 1");
+  if (source.transportKind !== "websocket") invalid("transportKind must be websocket");
+  if (source.runtimeKind !== "relay") invalid("runtimeKind must be relay");
+  if (source.protocolVersion !== MULTIPLAYER_PROTOCOL_VERSION) invalid("protocolVersion must be 1");
+  if (source.lifecycle !== "match") invalid("lifecycle must be match");
+  if (source.reconnectPolicy !== "none" && source.reconnectPolicy !== "resume") {
+    invalid("reconnectPolicy must be none or resume");
   }
-  if (source.protocolVersion !== MULTIPLAYER_PROTOCOL_VERSION) {
-    invalid(`protocolVersion must be ${MULTIPLAYER_PROTOCOL_VERSION}`);
+  if (!(MULTIPLAYER_RECONNECT_POLICIES as readonly string[]).includes(source.reconnectPolicy)) {
+    invalid("reconnectPolicy is unsupported");
   }
-
-  const sourceRequestHash = source.sourceRequestHash;
+  if (source.hostDeparturePolicy !== "close") invalid("hostDeparturePolicy must be close");
+  if (source.resultTrust !== "UNVERIFIED") invalid("resultTrust must be UNVERIFIED");
   if (
-    sourceRequestHash !== null &&
-    (typeof sourceRequestHash !== "string" || !/^[a-f0-9]{64}$/.test(sourceRequestHash))
+    !Array.isArray(source.allowedVisibility) ||
+    source.allowedVisibility.length !== 1 ||
+    source.allowedVisibility[0] !== "PRIVATE"
   ) {
-    invalid("sourceRequestHash must be null or a lowercase SHA-256 hex digest");
+    invalid("allowedVisibility must be [PRIVATE]");
   }
-
-  const resolvedClass = enumValue(source, "resolvedClass", ["M1", "M2"] as const);
-  const simulationModel = enumValue(
-    source,
-    "simulationModel",
-    MULTIPLAYER_SIMULATION_MODELS.filter(
-      (value): value is "turn" | "event" | "realtime" => value !== "rollback",
-    ),
-  );
-  const lifecycle = enumValue(
-    source,
-    "lifecycle",
-    MULTIPLAYER_LIFECYCLES.filter(
-      (value): value is "match" | "continuous" => value !== "persistent",
-    ),
-  );
-  const latencyProfile = enumValue(
-    source,
-    "latencyProfile",
-    MULTIPLAYER_LATENCY_PROFILES.filter(
-      (value): value is "relaxed" | "interactive" => value !== "critical",
-    ),
-  );
+  if (
+    !Array.isArray(source.allowedJoinPolicies) ||
+    source.allowedJoinPolicies.length !== 1 ||
+    source.allowedJoinPolicies[0] !== "OPEN"
+  ) {
+    invalid("allowedJoinPolicies must be [OPEN]");
+  }
 
   const minPlayers = boundedInteger(source, "minPlayers", 2, MULTIPLAYER_V1_MAX_PLAYERS);
   const maxPlayers = boundedInteger(source, "maxPlayers", 2, MULTIPLAYER_V1_MAX_PLAYERS);
   if (minPlayers > maxPlayers) invalid("minPlayers must not exceed maxPlayers");
-
-  if (resolvedClass === "M1" && simulationModel === "realtime") {
-    invalid("M1 profiles cannot use realtime simulation");
+  const hostSnapshot = booleanValue(source, "hostSnapshot");
+  const maxSnapshotBytes = boundedInteger(source, "maxSnapshotBytes", 0, 16 * 1024);
+  if ((!hostSnapshot && maxSnapshotBytes !== 0) || (hostSnapshot && maxSnapshotBytes === 0)) {
+    invalid("maxSnapshotBytes must match hostSnapshot");
   }
-  if (resolvedClass === "M2" && simulationModel === "turn") {
-    invalid("M2 profiles cannot use turn simulation");
-  }
-  if (resolvedClass === "M1" && latencyProfile !== "relaxed") {
-    invalid("M1 profiles require relaxed latency");
-  }
-  if (resolvedClass === "M2" && latencyProfile !== "interactive") {
-    invalid("M2 profiles require interactive latency");
-  }
-  if (resolvedClass === "M1" && lifecycle !== "match") {
-    invalid("M1 V1 profiles require match lifecycle");
-  }
-
-  const persistence = source.persistence;
-  if (persistence !== "match") invalid("persistence must be match in V1");
-
-  const enabled = source.enabled;
-  if (typeof enabled !== "boolean") invalid("enabled must be a boolean");
 
   return {
     profileVersion: MULTIPLAYER_PROFILE_VERSION,
     gameId: positiveInteger(source, "gameId"),
     gameVersionId: positiveInteger(source, "gameVersionId"),
-    sourceRequestHash: sourceRequestHash as string | null,
+    contentHash: hashValue(source, "contentHash"),
+    sourceRequestHash: hashValue(source, "sourceRequestHash"),
     profileRevision: positiveInteger(source, "profileRevision"),
+    transportKind: "websocket",
+    runtimeKind: "relay",
     protocolVersion: MULTIPLAYER_PROTOCOL_VERSION,
-    resolvedClass,
-    simulationModel,
-    runtimeBackend: enumValue(source, "runtimeBackend", MULTIPLAYER_RUNTIME_BACKENDS),
-    rulesetKey: requiredIdentifier(source, "rulesetKey"),
-    rulesetRevision: positiveInteger(source, "rulesetRevision"),
-    resolvedConfigJson: parseConfigJson(source.resolvedConfigJson),
-    lifecycle,
-    persistence: "match",
-    latencyProfile,
-    reconnectPolicy: enumValue(source, "reconnectPolicy", MULTIPLAYER_RECONNECT_POLICIES),
+    lifecycle: "match",
+    reconnectPolicy: source.reconnectPolicy,
+    directMessages: booleanValue(source, "directMessages"),
+    hostSnapshot,
     minPlayers,
     maxPlayers,
-    allowedVisibility: stringArray(source, "allowedVisibility", MULTIPLAYER_VISIBILITIES),
-    allowedJoinPolicies: stringArray(source, "allowedJoinPolicies", MULTIPLAYER_JOIN_POLICIES),
-    maxActionBytes: boundedInteger(source, "maxActionBytes", 1, 4 * 1024),
-    maxStateBytes: boundedInteger(source, "maxStateBytes", 1, 16 * 1024),
-    actionRateLimit: boundedInteger(source, "actionRateLimit", 1, 60),
-    rewardPolicyId: nullableIdentifier(source, "rewardPolicyId"),
-    enabled,
+    allowedVisibility: ["PRIVATE"],
+    allowedJoinPolicies: ["OPEN"],
+    hostDeparturePolicy: "close",
+    resultTrust: "UNVERIFIED",
+    maxMessageBytes: boundedInteger(source, "maxMessageBytes", 1, 4 * 1024),
+    maxSnapshotBytes,
+    messagesPerSecond: boundedInteger(source, "messagesPerSecond", 1, 20),
+    roomBytesPerSecond: boundedInteger(source, "roomBytesPerSecond", 1, 256 * 1024),
+    roomTtlSeconds: boundedInteger(source, "roomTtlSeconds", 1, 2 * 60 * 60),
+    enabled: booleanValue(source, "enabled"),
   };
 }
+
+/** Phase 4 storage writes are Relay-only. */
+export const parseApprovedMultiplayerProfileV1 = parseApprovedRelayMultiplayerProfileV1;
