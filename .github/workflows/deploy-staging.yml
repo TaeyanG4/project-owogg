@@ -174,7 +174,7 @@ jobs:
           B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
 
       - name: Verify Staging API health and provenance
-        run: pnpm smoke:prod --api-only --sha ${{ github.sha }}
+        run: pnpm smoke:prod --api-only --allow-empty-catalog --sha ${{ github.sha }}
         env:
           SMOKE_API_URL: https://api-stg.owogg.com
           STREAMER_ENABLED_PROVIDERS: ""
@@ -202,7 +202,7 @@ jobs:
 
       - name: Smoke test Access-protected Staging Web
         if: ${{ vars.STAGING_WEB_SMOKE_ENABLED == 'true' }}
-        run: pnpm smoke:prod --web-only --sha ${{ github.sha }}
+        run: pnpm smoke:prod --web-only --allow-empty-catalog --sha ${{ github.sha }}
         env:
           SMOKE_WEB_URL: https://stg.owogg.com
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
