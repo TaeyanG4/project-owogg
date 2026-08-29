@@ -32,7 +32,7 @@ export const INDEXED_DOCUMENTS = [
   "docs/STREAMER_SYSTEM.md",
   "docs/I18N.md",
   "docs/i18n-content/README.md",
-  "docs/MULTIPLAYER_GAME_DESIGN.md",
+  "docs/MULTIPLAYER_RELAY_PLAN.md",
   "docs/maintenance/LEGACY_LEDGER.md",
 ] as const;
 

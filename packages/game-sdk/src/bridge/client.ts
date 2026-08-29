@@ -1,9 +1,19 @@
 import {
   isHostInitMessage,
+  isGamePlayMode,
   isJsonSafeValue,
+  isPlayConfigSelection,
   isWithinBridgePayloadLimit,
+  parseHostToGameMessage,
+  type AuthorizedStartContext,
   type GameCompleteMessage,
+  type GamePlayMode,
   type GameEventMessage,
+  type HostPlayModeErrorCode,
+  type HostStartErrorCode,
+  type JsonSafeValue,
+  type PlayConfigSelection,
+  type PublicPlayConfigDescriptor,
 } from "./protocol.js";
 import type { OwoggCompletionPayload } from "../contracts/gameCreatorManifest.js";
 
@@ -23,6 +33,14 @@ export interface GameBridgeClient {
    * mount (a new HOST_INIT), not a change to an already-connected client — see
    * apps/web/app/features/game/GameHost.tsx's own doc comment on why. */
   readonly difficultyId?: string;
+  /** Approved public choices only. Verifier identity, token and attempt identity never cross. */
+  readonly playConfig: PublicPlayConfigDescriptor | null;
+  /** Approved topology choices for a game-owned launcher; empty for games that do not negotiate. */
+  readonly playModes: readonly GamePlayMode[];
+  /** Selects topology before any local lifecycle or PlayConfig start request. */
+  selectPlayMode(playMode: GamePlayMode): Promise<GamePlayMode>;
+  /** Requests the one allowed authorization for this iframe attempt. */
+  requestStart(config: PlayConfigSelection): Promise<AuthorizedStartContext>;
   /** Call once the game's own assets have finished loading and it's ready to be shown. */
   ready(): void;
   /** Call when the player actually starts a round (as opposed to e.g. sitting on a menu). */
@@ -30,7 +48,12 @@ export interface GameBridgeClient {
   event(name: string, data?: unknown): void;
   /** Call exactly once per round, when it ends. A second call is ignored — see the module doc
    * comment on why this alone isn't the security boundary, only host-side convenience. */
-  complete(result: OwoggCompletionPayload & { metadata?: Record<string, unknown> }): void;
+  complete(
+    result: OwoggCompletionPayload & {
+      metadata?: Record<string, unknown>;
+      evidence?: JsonSafeValue;
+    },
+  ): void;
   /** Call if the player backs out without finishing a round. */
   cancel(): void;
   /** Call on an unrecoverable in-game error. `message` is optional and capped at 500 characters
@@ -44,9 +67,29 @@ export interface GameBridgeClient {
   disconnect(): void;
 }
 
+export class GameStartRequestError extends Error {
+  readonly code: HostStartErrorCode;
+
+  constructor(code: HostStartErrorCode) {
+    super(code);
+    this.name = "GameStartRequestError";
+    this.code = code;
+  }
+}
+
+export class GamePlayModeSelectionError extends Error {
+  readonly code: HostPlayModeErrorCode;
+
+  constructor(code: HostPlayModeErrorCode) {
+    super(code);
+    this.name = "GamePlayModeSelectionError";
+    this.code = code;
+  }
+}
+
 /**
  * Runs inside the game's iframe. Waits for the host's `HOST_INIT` bootstrap message, then returns
- * a client whose methods send the five game -> host messages over the `MessagePort` the bootstrap
+ * a client whose methods send the game -> host messages over the `MessagePort` the bootstrap
  * handed over — never `window.postMessage` again after that point.
  *
  * Security properties, each directly answering one of the Game Bridge rules:
@@ -78,46 +121,207 @@ export function connectGameBridge(
 
       settled = true;
       windowLike.removeEventListener("message", onMessage);
-      resolve(createClient(port, event.data.difficultyId));
+      resolve(
+        createClient(port, event.data.difficultyId, event.data.playConfig, event.data.playModes),
+      );
     }
 
     windowLike.addEventListener("message", onMessage);
   });
 }
 
-function createClient(port: MessagePort, difficultyId?: string): GameBridgeClient {
+function freezePlayConfig(
+  playConfig: PublicPlayConfigDescriptor | undefined,
+): PublicPlayConfigDescriptor | null {
+  if (playConfig === undefined) return null;
+  const frozen = {
+    defaultDifficultyId: playConfig.defaultDifficultyId,
+    defaultVariantId: playConfig.defaultVariantId,
+    difficulties: Object.freeze(
+      playConfig.difficulties.map((difficulty) => Object.freeze({ ...difficulty })),
+    ),
+    variants: Object.freeze(playConfig.variants.map((variant) => Object.freeze({ ...variant }))),
+    allowedConfigs: Object.freeze(
+      playConfig.allowedConfigs.map((config) => Object.freeze({ ...config })),
+    ),
+  };
+  return Object.freeze(frozen);
+}
+
+function createClient(
+  port: MessagePort,
+  difficultyId?: string,
+  initPlayConfig?: PublicPlayConfigDescriptor,
+  initPlayModes?: readonly GamePlayMode[],
+): GameBridgeClient {
   let completed = false;
   let disconnected = false;
+  let startRequested = false;
+  let authorized = false;
+  let playModeRequested = false;
+  let selectedPlayMode: GamePlayMode | null =
+    initPlayModes?.length === 1 ? (initPlayModes[0] ?? null) : null;
+  let pendingStart: {
+    readonly requested: PlayConfigSelection;
+    readonly resolve: (context: AuthorizedStartContext) => void;
+    readonly reject: (error: GameStartRequestError) => void;
+  } | null = null;
+  let pendingPlayMode: {
+    readonly requested: GamePlayMode;
+    readonly resolve: (playMode: GamePlayMode) => void;
+    readonly reject: (error: GamePlayModeSelectionError) => void;
+  } | null = null;
+  const playConfig = freezePlayConfig(initPlayConfig);
+  const playModes = Object.freeze([...(initPlayModes ?? [])]);
+
+  function genericPlayModeIsAuthorized(): boolean {
+    if (playModes.length === 0) return true;
+    if (playModes.length === 1) return playModes[0] !== "online-multi";
+    return selectedPlayMode === "single" || selectedPlayMode === "local-multi";
+  }
 
   function send(
     message:
       | GameCompleteMessage
       | GameEventMessage
       | { type: "GAME_READY" | "GAME_STARTED" | "GAME_CANCEL" }
+      | { type: "GAME_REQUEST_START"; playConfig: PlayConfigSelection }
+      | { type: "GAME_SELECT_PLAY_MODE"; playMode: GamePlayMode }
       | { type: "GAME_ERROR"; message?: string },
-  ): void {
-    if (disconnected) return;
+  ): boolean {
+    if (disconnected) return false;
     // Same "reject outright, don't let it be silently reshaped" posture as the host-side
     // validator (protocol.ts) — a game passing a Map/Date/ArrayBuffer in metadata gets a dropped
     // message here rather than one that quietly arrives as something else.
-    if (!isJsonSafeValue(message)) return;
-    if (!isWithinBridgePayloadLimit(message)) return;
-    port.postMessage(message);
+    if (!isJsonSafeValue(message)) return false;
+    if (!isWithinBridgePayloadLimit(message)) return false;
+    try {
+      port.postMessage(message);
+      return true;
+    } catch {
+      return false;
+    }
   }
+
+  port.onmessage = (event: MessageEvent) => {
+    if (disconnected) return;
+    const message = parseHostToGameMessage(event.data);
+    if (!message) return;
+    if (message.type === "HOST_PLAY_MODE_ERROR") {
+      if (pendingPlayMode === null) return;
+      const pending = pendingPlayMode;
+      pendingPlayMode = null;
+      pending.reject(new GamePlayModeSelectionError(message.code));
+      return;
+    }
+    if (message.type === "HOST_PLAY_MODE_SELECTED") {
+      if (pendingPlayMode === null) return;
+      const pending = pendingPlayMode;
+      pendingPlayMode = null;
+      if (message.playMode !== pending.requested) {
+        pending.reject(new GamePlayModeSelectionError("MODE_UNAVAILABLE"));
+        return;
+      }
+      selectedPlayMode = message.playMode;
+      pending.resolve(message.playMode);
+      return;
+    }
+    if (pendingStart === null) return;
+    const pending = pendingStart;
+    pendingStart = null;
+    if (message.type === "HOST_START_ERROR") {
+      pending.reject(new GameStartRequestError(message.code));
+      return;
+    }
+    if (
+      message.context.playConfig.difficultyId !== pending.requested.difficultyId ||
+      message.context.playConfig.variantId !== pending.requested.variantId
+    ) {
+      pending.reject(new GameStartRequestError("GAME_UNAVAILABLE"));
+      return;
+    }
+    authorized = true;
+    pending.resolve(message.context);
+  };
 
   return {
     ...(difficultyId !== undefined ? { difficultyId } : {}),
+    playConfig,
+    playModes,
+    selectPlayMode(playMode) {
+      if (disconnected) {
+        return Promise.reject(new GamePlayModeSelectionError("MODE_UNAVAILABLE"));
+      }
+      if (playModeRequested) {
+        return Promise.reject(new GamePlayModeSelectionError("ALREADY_SELECTED"));
+      }
+      if (!isGamePlayMode(playMode) || !playModes.includes(playMode)) {
+        return Promise.reject(new GamePlayModeSelectionError("INVALID_PLAY_MODE"));
+      }
+      playModeRequested = true;
+      return new Promise<GamePlayMode>((resolve, reject) => {
+        pendingPlayMode = { requested: playMode, resolve, reject };
+        if (!send({ type: "GAME_SELECT_PLAY_MODE", playMode })) {
+          pendingPlayMode = null;
+          reject(new GamePlayModeSelectionError("MODE_UNAVAILABLE"));
+        }
+      });
+    },
+    requestStart(config) {
+      if (disconnected) return Promise.reject(new GameStartRequestError("GAME_UNAVAILABLE"));
+      if (startRequested) return Promise.reject(new GameStartRequestError("ALREADY_REQUESTED"));
+      if (!genericPlayModeIsAuthorized()) {
+        return Promise.reject(new GameStartRequestError("GAME_UNAVAILABLE"));
+      }
+      if (
+        playConfig === null ||
+        !isPlayConfigSelection(config) ||
+        !playConfig.allowedConfigs.some(
+          (allowed) =>
+            allowed.difficultyId === config.difficultyId && allowed.variantId === config.variantId,
+        )
+      ) {
+        return Promise.reject(new GameStartRequestError("INVALID_PLAY_CONFIG"));
+      }
+      startRequested = true;
+      return new Promise<AuthorizedStartContext>((resolve, reject) => {
+        pendingStart = {
+          requested: { ...config },
+          resolve,
+          reject,
+        };
+        if (!send({ type: "GAME_REQUEST_START", playConfig: { ...config } })) {
+          pendingStart = null;
+          reject(new GameStartRequestError("GAME_UNAVAILABLE"));
+        }
+      });
+    },
     ready() {
       send({ type: "GAME_READY" });
     },
     started() {
+      if (!genericPlayModeIsAuthorized()) return;
+      if (playConfig !== null && !authorized) return;
       send({ type: "GAME_STARTED" });
     },
     event(name, data) {
+      if (!genericPlayModeIsAuthorized()) return;
       send({ type: "GAME_EVENT", name, ...(data !== undefined ? { data } : {}) });
     },
     complete(result) {
       if (completed) return;
+      if (!genericPlayModeIsAuthorized()) return;
+      if (
+        playConfig !== null &&
+        (!authorized ||
+          result.evidence === undefined ||
+          result.outcome !== undefined ||
+          result.score !== undefined ||
+          result.progression !== undefined ||
+          result.metrics !== undefined)
+      ) {
+        return;
+      }
       completed = true;
       send({
         type: "GAME_COMPLETE",
@@ -126,6 +330,7 @@ function createClient(port: MessagePort, difficultyId?: string): GameBridgeClien
         ...(result.progression !== undefined ? { progression: result.progression } : {}),
         ...(result.metrics !== undefined ? { metrics: result.metrics } : {}),
         ...(result.metadata !== undefined ? { metadata: result.metadata } : {}),
+        ...(result.evidence !== undefined ? { evidence: result.evidence } : {}),
       });
     },
     cancel() {
@@ -137,6 +342,13 @@ function createClient(port: MessagePort, difficultyId?: string): GameBridgeClien
     disconnect() {
       if (disconnected) return;
       disconnected = true;
+      const pending = pendingStart;
+      pendingStart = null;
+      pending?.reject(new GameStartRequestError("GAME_UNAVAILABLE"));
+      const pendingMode = pendingPlayMode;
+      pendingPlayMode = null;
+      pendingMode?.reject(new GamePlayModeSelectionError("MODE_UNAVAILABLE"));
+      port.onmessage = null;
       port.close();
     },
   };

@@ -52,31 +52,32 @@ function createDb(options: {
           const now = new Date().toISOString();
           return {
             id: 100,
-            source_request_id: null,
-            source_request_hash: null,
+            source_request_id: 99,
+            source_request_hash: "a".repeat(64),
             profile_version: 1,
             game_id: game.id,
             game_version_id: version.id,
+            content_hash: "b".repeat(64),
             profile_revision: 1,
+            profile_kind: "RELAY",
+            transport_kind: "websocket",
+            runtime_kind: "relay",
             protocol_version: 1,
-            resolved_class: "M1",
-            simulation_model: "turn",
-            runtime_backend: "durable-object",
-            ruleset_key: "official:omok",
-            ruleset_revision: 1,
-            resolved_config_json: '{"boardSize":15,"winLength":5}',
             lifecycle: "match",
-            persistence: "match",
-            latency_profile: "relaxed",
             reconnect_policy: "resume",
+            direct_messages: 1,
+            host_snapshot: 1,
             min_players: 2,
             max_players: 2,
-            allowed_visibility_json: '["PUBLIC"]',
+            allowed_visibility_json: '["PRIVATE"]',
             allowed_join_policies_json: '["OPEN"]',
-            max_action_bytes: 1024,
-            max_state_bytes: 8192,
-            action_rate_limit: 5,
-            reward_policy_id: null,
+            host_departure_policy: "close",
+            result_trust: "UNVERIFIED",
+            max_message_bytes: 4096,
+            max_snapshot_bytes: 16384,
+            messages_per_second: 20,
+            room_bytes_per_second: 262144,
+            room_ttl_seconds: 7200,
             enabled: 1,
             created_by_admin_id: 1,
             approved_at: now,
@@ -192,23 +193,79 @@ async function requestSession(
   db: unknown,
   init: RequestInit,
   env: Record<string, unknown> = {},
+  options: {
+    playConfig?: boolean;
+    playModes?: readonly ("single" | "local-multi" | "online-multi")[];
+  } = {},
 ) {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => {
     const gameSlug = (db as { __game?: FakeGame }).__game?.slug ?? "ball-dodge";
+    const playModes = options.playModes ?? ["single"];
+    const creatorManifest = options.playConfig
+      ? {
+          schemaVersion: 1,
+          game: {
+            slug: gameSlug,
+            title: "Test Game",
+            genre: "puzzle",
+            mode: playModes.some((playMode) => playMode !== "single") ? "multi" : "single",
+            playModes,
+          },
+          difficulties: [{ id: "normal", title: "Normal", default: true }],
+          progression: { type: "none" },
+          result: {
+            score: {
+              unit: "points",
+              direction: "desc",
+              range: { min: 0, max: 100, outOfRange: "reject" },
+            },
+          },
+          leaderboard: { enabled: true },
+          playConfig: {
+            version: 1,
+            rulesetRevision: 1,
+            verifierId: "test-session-v1",
+            variants: [{ id: "standard", title: "Standard", default: true }],
+            allowedConfigs: [{ difficultyId: "normal", variantId: "standard", rewardFactor: 1 }],
+          },
+        }
+      : undefined;
     const canonical = {
       schemaVersion: 1,
       slug: gameSlug,
       title: "Test Game",
       shortDescription: "",
       description: "",
+      publisher: { official: false },
       policy: {
-        score: null,
-        leaderboard: false,
+        score: options.playConfig ? { unit: "points", direction: "desc", min: 0, max: 100 } : null,
+        leaderboard: options.playConfig === true,
         xpPerCompletion: 0,
         requiresAuth: true,
       },
-      catalog: { type: "GENRE_MODE", genre: "puzzle", mode: "single" },
+      ...(options.playConfig
+        ? {
+            difficulty: {
+              levels: [{ id: "normal", label: "Normal" }],
+              defaultLevelId: "normal",
+            },
+            playConfig: {
+              version: 1,
+              rulesetRevision: 1,
+              verifierId: "test-session-v1",
+              defaultVariantId: "standard",
+              variants: [{ id: "standard", label: "Standard" }],
+              allowedConfigs: [{ difficultyId: "normal", variantId: "standard", rewardFactor: 1 }],
+            },
+            creatorManifest,
+          }
+        : {}),
+      catalog: {
+        type: "GENRE_MODE",
+        genre: "puzzle",
+        mode: playModes.some((playMode) => playMode !== "single") ? "multi" : "single",
+      },
       supportsReplay: false,
       updatedAt: new Date().toISOString(),
     };
@@ -352,7 +409,7 @@ test("enabled exact-version multiplayer profile blocks generic session issuance"
     {
       method: "POST",
       headers: { ...AUTH_HEADERS, "Content-Type": "application/json" },
-      body: JSON.stringify({ difficulty: 123 }),
+      body: JSON.stringify({ difficulty: "normal" }),
     },
     { GAME_SESSION_SECRET: SESSION_SECRET },
   );
@@ -377,6 +434,122 @@ test("multiplayer profile read failure returns 503 instead of falling back to a 
 
   assert.equal(res.status, 503);
   assert.equal((await res.json()).error.code, "MULTIPLAYER_AUTHORITY_UNAVAILABLE");
+});
+
+test("PlayConfig requires an exact request instead of falling back to a gs1 client-result session", async () => {
+  const { db } = createDb({ userId: 7, game: LIVE_GAME, version: LIVE_VERSION });
+  const res = await requestSession(
+    "/api/games/ball-dodge/session",
+    db,
+    { method: "POST", headers: AUTH_HEADERS },
+    { GAME_SESSION_SECRET: SESSION_SECRET },
+    { playConfig: true },
+  );
+
+  assert.equal(res.status, 400);
+  assert.equal((await res.json()).error.code, "PLAY_CONFIG_REQUIRED");
+});
+
+test("PlayConfig valid request fails closed while its trusted verifier is not registered", async () => {
+  const { db } = createDb({ userId: 7, game: LIVE_GAME, version: LIVE_VERSION });
+  const res = await requestSession(
+    "/api/games/ball-dodge/session",
+    db,
+    {
+      method: "POST",
+      headers: { ...AUTH_HEADERS, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        playMode: "single",
+        playConfig: { difficultyId: "normal", variantId: "standard" },
+      }),
+    },
+    { GAME_SESSION_SECRET: SESSION_SECRET },
+    { playConfig: true },
+  );
+
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).error.code, "GAME_VERIFIER_NOT_REGISTERED");
+});
+
+test("PlayConfig rejects unknown pairs and undeclared generic topology", async () => {
+  const { db } = createDb({ userId: 7, game: LIVE_GAME, version: LIVE_VERSION });
+  for (const [request, code] of [
+    [
+      {
+        playMode: "single",
+        playConfig: { difficultyId: "normal", variantId: "precision" },
+      },
+      "INVALID_PLAY_CONFIG",
+    ],
+    [
+      {
+        playMode: "local-multi",
+        playConfig: { difficultyId: "normal", variantId: "standard" },
+      },
+      "INVALID_PLAY_MODE",
+    ],
+  ] as const) {
+    const res = await requestSession(
+      "/api/games/ball-dodge/session",
+      db,
+      {
+        method: "POST",
+        headers: { ...AUTH_HEADERS, "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+      },
+      { GAME_SESSION_SECRET: SESSION_SECRET },
+      { playConfig: true },
+    );
+    assert.equal(res.status, 400);
+    assert.equal((await res.json()).error.code, code);
+  }
+});
+
+test("hybrid local PlayConfig also fails closed until its trusted verifier is registered", async () => {
+  const { db } = createDb({
+    userId: 7,
+    game: LIVE_GAME,
+    version: LIVE_VERSION,
+    multiplayerProfile: true,
+    multiplayerProfileReadFails: true,
+  });
+  const res = await requestSession(
+    "/api/games/ball-dodge/session",
+    db,
+    {
+      method: "POST",
+      headers: { ...AUTH_HEADERS, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        playMode: "local-multi",
+        playConfig: { difficultyId: "normal", variantId: "standard" },
+      }),
+    },
+    { GAME_SESSION_SECRET: SESSION_SECRET },
+    { playConfig: true, playModes: ["local-multi", "online-multi"] },
+  );
+
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).error.code, "GAME_VERIFIER_NOT_REGISTERED");
+});
+
+test("legacy canonical rejects gs2-shaped requests", async () => {
+  const { db } = createDb({ userId: 7, game: LIVE_GAME, version: LIVE_VERSION });
+  const res = await requestSession(
+    "/api/games/ball-dodge/session",
+    db,
+    {
+      method: "POST",
+      headers: { ...AUTH_HEADERS, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        playMode: "single",
+        playConfig: { difficultyId: "normal", variantId: "standard" },
+      }),
+    },
+    { GAME_SESSION_SECRET: SESSION_SECRET },
+  );
+
+  assert.equal(res.status, 400);
+  assert.equal((await res.json()).error.code, "PLAY_CONFIG_NOT_SUPPORTED");
 });
 
 test("a token issued here is rejected under a different secret — the signature is real, not decorative", async () => {

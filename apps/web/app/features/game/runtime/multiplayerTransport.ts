@@ -41,6 +41,10 @@ export interface MultiplayerParentTransport {
 export interface OpenMultiplayerParentTransportInput {
   readonly instanceId: string;
   readonly expectedConnectionGeneration: number;
+  readonly expectedGameVersionId: number;
+  readonly expectedContentHash: string;
+  readonly expectedProfileRevision: number;
+  readonly expectedGeneration: number;
 }
 
 export interface MultiplayerTransportDependencies {
@@ -117,7 +121,14 @@ export async function openMultiplayerParentTransport(
   if (
     !INSTANCE_ID_PATTERN.test(input.instanceId) ||
     !Number.isSafeInteger(input.expectedConnectionGeneration) ||
-    input.expectedConnectionGeneration < 0
+    input.expectedConnectionGeneration < 0 ||
+    !Number.isSafeInteger(input.expectedGameVersionId) ||
+    input.expectedGameVersionId <= 0 ||
+    !/^[a-f0-9]{64}$/.test(input.expectedContentHash) ||
+    !Number.isSafeInteger(input.expectedProfileRevision) ||
+    input.expectedProfileRevision <= 0 ||
+    !Number.isSafeInteger(input.expectedGeneration) ||
+    input.expectedGeneration <= 0
   ) {
     throw new MultiplayerTransportError("INVALID_INPUT");
   }
@@ -129,6 +140,14 @@ export async function openMultiplayerParentTransport(
   const admission = parsed.data;
   if (admission.connectionGeneration !== input.expectedConnectionGeneration + 1) {
     throw new MultiplayerTransportError("STALE_GENERATION");
+  }
+  if (
+    admission.bootstrap.gameVersionId !== input.expectedGameVersionId ||
+    admission.bootstrap.contentHash !== input.expectedContentHash ||
+    admission.bootstrap.profileRevision !== input.expectedProfileRevision ||
+    admission.bootstrap.generation !== input.expectedGeneration
+  ) {
+    throw new MultiplayerTransportError("CONTRACT_MISMATCH");
   }
   if (Date.parse(admission.expiresAt) <= (dependencies.now ?? Date.now)()) {
     throw new MultiplayerTransportError("TICKET_EXPIRED");

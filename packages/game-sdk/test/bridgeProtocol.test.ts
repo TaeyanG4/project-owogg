@@ -6,7 +6,30 @@ import {
   isJsonSafeValue,
   isWithinBridgePayloadLimit,
   parseGameToHostMessage,
+  parseHostToGameMessage,
 } from "../src/bridge/protocol.js";
+
+const PLAY_CONFIG = {
+  defaultDifficultyId: "normal",
+  defaultVariantId: "standard",
+  difficulties: [
+    { id: "normal", label: "Normal" },
+    { id: "hard", label: "Hard" },
+  ],
+  variants: [{ id: "standard", label: "Standard" }],
+  allowedConfigs: [
+    { difficultyId: "normal", variantId: "standard", rewardFactor: 1 },
+    { difficultyId: "hard", variantId: "standard", rewardFactor: 1.25 },
+  ],
+} as const;
+
+const START_CONTEXT = {
+  ranked: true,
+  playConfig: { difficultyId: "hard", variantId: "standard" },
+  rulesetRevision: 7,
+  challengeSeed: "challenge_seed_0001",
+  rewardFactor: 1.25,
+} as const;
 
 // ── isHostInitMessage ────────────────────────────────────────────────────────
 
@@ -66,11 +89,69 @@ test("isHostInitMessage still rejects an unrelated extra field alongside a valid
   assert.equal(isHostInitMessage({ type: "HOST_INIT", difficultyId: "hard", sneaky: true }), false);
 });
 
+test("HOST_INIT accepts an exact public PlayConfig descriptor and keeps it exclusive with difficultyId", () => {
+  assert.equal(isHostInitMessage({ type: "HOST_INIT", playConfig: PLAY_CONFIG }), true);
+  assert.equal(
+    isHostInitMessage({ type: "HOST_INIT", difficultyId: "hard", playConfig: PLAY_CONFIG }),
+    false,
+  );
+  assert.equal(
+    isHostInitMessage({
+      type: "HOST_INIT",
+      playConfig: { ...PLAY_CONFIG, verifierId: "must-not-cross-the-bridge" },
+    }),
+    false,
+  );
+  assert.equal(
+    isHostInitMessage({
+      type: "HOST_INIT",
+      playConfig: {
+        ...PLAY_CONFIG,
+        allowedConfigs: [
+          ...PLAY_CONFIG.allowedConfigs,
+          { difficultyId: "normal", variantId: "standard", rewardFactor: 2 },
+        ],
+      },
+    }),
+    false,
+    "duplicate allowed pairs are ambiguous and must fail closed",
+  );
+});
+
+test("HOST_INIT accepts exact topology choices while rejecting duplicates and unknown modes", () => {
+  assert.equal(
+    isHostInitMessage({
+      type: "HOST_INIT",
+      playModes: ["local-multi", "online-multi"],
+    }),
+    true,
+  );
+  assert.equal(
+    isHostInitMessage({ type: "HOST_INIT", playModes: ["local-multi", "local-multi"] }),
+    false,
+  );
+  assert.equal(isHostInitMessage({ type: "HOST_INIT", playModes: ["remote-multi"] }), false);
+});
+
 // ── parseGameToHostMessage: the well-formed shapes ───────────────────────────
 
 test("parseGameToHostMessage accepts each game->host message type", () => {
   assert.deepEqual(parseGameToHostMessage({ type: "GAME_READY" }), { type: "GAME_READY" });
   assert.deepEqual(parseGameToHostMessage({ type: "GAME_STARTED" }), { type: "GAME_STARTED" });
+  assert.deepEqual(
+    parseGameToHostMessage({
+      type: "GAME_REQUEST_START",
+      playConfig: { difficultyId: "hard", variantId: "standard" },
+    }),
+    {
+      type: "GAME_REQUEST_START",
+      playConfig: { difficultyId: "hard", variantId: "standard" },
+    },
+  );
+  assert.deepEqual(
+    parseGameToHostMessage({ type: "GAME_SELECT_PLAY_MODE", playMode: "local-multi" }),
+    { type: "GAME_SELECT_PLAY_MODE", playMode: "local-multi" },
+  );
   assert.deepEqual(parseGameToHostMessage({ type: "GAME_CANCEL" }), { type: "GAME_CANCEL" });
   assert.deepEqual(parseGameToHostMessage({ type: "GAME_COMPLETE" }), { type: "GAME_COMPLETE" });
   assert.deepEqual(parseGameToHostMessage({ type: "GAME_EVENT", name: "boss_defeated" }), {
@@ -113,6 +194,85 @@ test("GAME_COMPLETE accepts optional score and metadata, exactly as declared", (
     score: 1234,
     metadata: { wpm: 85, accuracy: 97 },
   });
+});
+
+test("GAME_COMPLETE accepts JSON-safe evidence and rejects unsafe evidence", () => {
+  const evidence = { events: [{ atMs: 15, kind: "hit" }], checksum: "abc" };
+  assert.deepEqual(parseGameToHostMessage({ type: "GAME_COMPLETE", evidence }), {
+    type: "GAME_COMPLETE",
+    evidence,
+  });
+  assert.equal(
+    parseGameToHostMessage({ type: "GAME_COMPLETE", evidence: { recordedAt: new Date() } }),
+    null,
+  );
+});
+
+test("GAME_REQUEST_START rejects malformed selections and every undeclared field", () => {
+  for (const message of [
+    { type: "GAME_REQUEST_START" },
+    { type: "GAME_REQUEST_START", playConfig: { difficultyId: "hard" } },
+    {
+      type: "GAME_REQUEST_START",
+      playConfig: { difficultyId: "hard", variantId: "standard", rewardFactor: 99 },
+    },
+    {
+      type: "GAME_REQUEST_START",
+      playConfig: { difficultyId: "hard", variantId: "standard" },
+      token: "must-not-cross-the-bridge",
+    },
+  ]) {
+    assert.equal(parseGameToHostMessage(message), null, JSON.stringify(message));
+  }
+});
+
+test("parseHostToGameMessage validates HOST_START and HOST_START_ERROR exact shapes", () => {
+  assert.deepEqual(parseHostToGameMessage({ type: "HOST_START", context: START_CONTEXT }), {
+    type: "HOST_START",
+    context: START_CONTEXT,
+  });
+  assert.deepEqual(
+    parseHostToGameMessage({ type: "HOST_START_ERROR", code: "SESSION_UNAVAILABLE" }),
+    { type: "HOST_START_ERROR", code: "SESSION_UNAVAILABLE" },
+  );
+  assert.equal(
+    parseHostToGameMessage({
+      type: "HOST_START",
+      context: { ...START_CONTEXT, attemptToken: "x" },
+    }),
+    null,
+  );
+  assert.equal(parseHostToGameMessage({ type: "HOST_START_ERROR", code: "UNKNOWN_ERROR" }), null);
+  assert.equal(
+    parseHostToGameMessage({
+      type: "HOST_START",
+      context: { ...START_CONTEXT, challengeSeed: "too-short" },
+    }),
+    null,
+  );
+});
+
+test("topology selection messages keep playMode separate from PlayConfig", () => {
+  assert.deepEqual(
+    parseHostToGameMessage({ type: "HOST_PLAY_MODE_SELECTED", playMode: "online-multi" }),
+    { type: "HOST_PLAY_MODE_SELECTED", playMode: "online-multi" },
+  );
+  assert.deepEqual(
+    parseHostToGameMessage({ type: "HOST_PLAY_MODE_ERROR", code: "MODE_UNAVAILABLE" }),
+    { type: "HOST_PLAY_MODE_ERROR", code: "MODE_UNAVAILABLE" },
+  );
+  assert.equal(
+    parseGameToHostMessage({
+      type: "GAME_SELECT_PLAY_MODE",
+      playMode: "local-multi",
+      playConfig: { difficultyId: "hard", variantId: "standard" },
+    }),
+    null,
+  );
+  assert.equal(
+    parseHostToGameMessage({ type: "HOST_PLAY_MODE_SELECTED", playMode: "remote-multi" }),
+    null,
+  );
 });
 
 test("GAME_COMPLETE rejects a non-numeric or non-finite score", () => {

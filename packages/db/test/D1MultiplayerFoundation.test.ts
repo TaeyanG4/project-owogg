@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import {
-  buildApprovedManagedMultiplayerProfileV1,
-  parseManagedMultiplayerProfileRequestV1,
-} from "@owogg/core";
+import { parseMultiplayerRuntimeProfileRequestV1 } from "@owogg/core";
 import {
   D1AccountMergeRepository,
   D1MultiplayerInstanceRepository,
@@ -26,6 +23,7 @@ const REQUEST_HASH = "a".repeat(64);
 const IDEMPOTENCY_HASH = "b".repeat(64);
 const PAYLOAD_HASH = "c".repeat(64);
 const TERMINAL_HASH = "d".repeat(64);
+const CONTENT_HASH = "e".repeat(64);
 const INDEX_INCLUSIVE_D1_WRITE_META = {
   rowsWrittenForChanges: (changes: number) => (changes === 0 ? 0 : changes + 3),
 } as const;
@@ -72,25 +70,19 @@ function seedAdmin(raw: RawDatabase): void {
     .run(NOW, NOW, NOW);
 }
 
-function managedTurnGridRequest(boardWidth = 15) {
-  return parseManagedMultiplayerProfileRequestV1({
-    requestVersion: 1,
-    kind: "managed-template",
-    template: { id: "turn-grid", version: 1 },
-    players: { min: 2, max: 2 },
-    requirements: {
-      simulation: "turn",
-      lifecycle: "match",
-      persistence: "match",
-      latency: "relaxed",
+function relayRequest(maxPlayers = 8) {
+  return parseMultiplayerRuntimeProfileRequestV1({
+    version: 1,
+    transport: { kind: "websocket", protocolVersion: 1 },
+    runtime: { kind: "relay" },
+    players: { min: 2, max: maxPlayers },
+    features: {
       reconnect: "resume",
-      hiddenInformation: false,
-      simultaneousResponse: false,
+      directMessages: true,
+      hostSnapshot: true,
       joinInProgress: false,
       spectators: false,
     },
-    config: { boardWidth, boardHeight: 15, winLength: 5 },
-    client: { protocolVersion: 1 },
   });
 }
 
@@ -126,7 +118,7 @@ function seedGameVersion(
       input.versionId,
       input.gameId,
       "games/" + input.gameId + "/" + input.versionId + ".zip",
-      "content-" + input.versionId,
+      CONTENT_HASH,
       NOW,
       input.moderationStatus ?? null,
     );
@@ -149,6 +141,42 @@ function seedProfile(
     allowedVisibilityJson?: string;
   },
 ): void {
+  const sourceRequestId =
+    "sourceRequestId" in input ? input.sourceRequestId : input.profileId + 10_000;
+  const sourceRequestHash = input.sourceRequestHash ?? REQUEST_HASH;
+  if (!("sourceRequestId" in input)) {
+    raw
+      .prepare(
+        `INSERT OR IGNORE INTO admin_accounts (
+           id, user_id, google_sub, username, password_hash, role, status,
+           must_change_password, created_at, updated_at, password_changed_at
+         ) VALUES (1, 4, 'google-admin-4', 'admin4', 'hash', 'ADMIN', 'ACTIVE', 0, ?, ?, ?)`,
+      )
+      .run(NOW, NOW, NOW);
+    const publisher = raw
+      .prepare("SELECT publisher_type, publisher_user_id FROM games WHERE id = ?")
+      .get(input.gameId) as
+      { publisher_type: string; publisher_user_id: number | null } | undefined;
+    raw
+      .prepare(
+        `INSERT OR IGNORE INTO multiplayer_profile_requests (
+           id, game_id, game_version_id, content_hash, request_schema_version, request_hash,
+           request_json, requested_by_user_id, status, reviewed_by_admin_id, reviewed_at,
+           created_at, updated_at
+         ) VALUES (?, ?, ?, ?, 1, ?, '{}', ?, 'APPROVED', 1, ?, ?, ?)`,
+      )
+      .run(
+        sourceRequestId,
+        input.gameId,
+        input.versionId,
+        CONTENT_HASH,
+        sourceRequestHash,
+        publisher?.publisher_type === "USER" ? publisher.publisher_user_id : null,
+        NOW,
+        NOW,
+        NOW,
+      );
+  }
   raw
     .prepare(
       `INSERT INTO multiplayer_profiles (
@@ -157,27 +185,36 @@ function seedProfile(
          ruleset_key, ruleset_revision, resolved_config_json, lifecycle, persistence,
          latency_profile, reconnect_policy, min_players, max_players, allowed_visibility_json,
          allowed_join_policies_json, max_action_bytes, max_state_bytes, action_rate_limit,
-         reward_policy_id, enabled, approved_at, updated_at
+         reward_policy_id, enabled, approved_at, updated_at, profile_kind, content_hash,
+         transport_kind, runtime_kind, direct_messages, host_snapshot, host_departure_policy,
+         result_trust, max_message_bytes, max_snapshot_bytes, messages_per_second,
+         room_bytes_per_second, room_ttl_seconds
        ) VALUES (
-         ?, ?, ?, 1, ?, ?, ?, 1, 'M1', 'turn', 'durable-object',
-         'official:omok', 1, '{"boardSize":15,"winLength":5}', 'match', 'match',
-         'relaxed', 'resume', 2, 2, ?, '["OPEN","INVITE_ONLY"]',
-         1024, 8192, 5, ?, ?, ?, ?
+         ?, ?, ?, 1, ?, ?, ?, 1, 'M1', 'event', 'durable-object',
+         'legacy:disabled', 1, '{}', 'match', 'match',
+         'relaxed', 'resume', 2, 2, ?, '["OPEN"]',
+         4096, 1, 20, ?, 0, ?, ?, 'RELAY', ?, 'websocket', 'relay', 1, 1,
+         'close', 'UNVERIFIED', 4096, 16384, 20, 262144, 7200
        )`,
     )
     .run(
       input.profileId,
-      input.sourceRequestId ?? null,
-      input.sourceRequestHash ?? null,
+      sourceRequestId ?? null,
+      sourceRequestHash,
       input.gameId,
       input.versionId,
       input.revision ?? 1,
-      input.allowedVisibilityJson ?? '["PRIVATE","UNLISTED"]',
+      input.allowedVisibilityJson ?? '["PRIVATE"]',
       input.rewardPolicyId ?? null,
-      input.enabled === false ? 0 : 1,
       NOW,
       NOW,
+      CONTENT_HASH,
     );
+  if (input.enabled !== false) {
+    raw
+      .prepare("UPDATE multiplayer_profiles SET enabled = 1, updated_at = ? WHERE id = ?")
+      .run(NOW, input.profileId);
+  }
 }
 
 function seedInstance(
@@ -197,10 +234,10 @@ function seedInstance(
     .prepare(
       `INSERT INTO multiplayer_instances (
          id, public_code, created_by_user_id, create_idempotency_hash,
-         game_id, game_version_id, profile_id, profile_revision,
+         game_id, game_version_id, content_hash, profile_id, profile_revision,
          visibility, join_policy, lifecycle, status, generation,
          participant_count, max_players, expires_at, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'PRIVATE', 'INVITE_ONLY', 'match',
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'PRIVATE', 'OPEN', 'match',
                  'CREATED', 1, 0, 2, ?, ?, ?)`,
     )
     .run(
@@ -210,6 +247,7 @@ function seedInstance(
       input.idempotencyHash ?? IDEMPOTENCY_HASH,
       input.gameId ?? 1,
       input.versionId ?? 10,
+      CONTENT_HASH,
       input.profileId ?? 100,
       EXPIRES,
       NOW,
@@ -298,12 +336,12 @@ test("0041 scopes trusted profiles to one exact READY version and keeps semantic
   const raw = createMigratedDatabase();
   seedUsers(raw);
   seedAdmin(raw);
-  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "official-omok" });
+  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "relay-demo" });
   seedGameVersion(raw, { gameId: 2, versionId: 20, slug: "other-game" });
 
   assert.throws(
     () => seedProfile(raw, { profileId: 99, gameId: 1, versionId: 20 }),
-    /exact READY game version/,
+    /exact version content hash/,
   );
 
   seedProfile(raw, { profileId: 100, gameId: 1, versionId: 10 });
@@ -312,7 +350,15 @@ test("0041 scopes trusted profiles to one exact READY version and keeps semantic
     /semantics are immutable/,
   );
   assert.throws(
-    () => seedProfile(raw, { profileId: 101, gameId: 1, versionId: 10, revision: 2 }),
+    () =>
+      seedProfile(raw, {
+        profileId: 101,
+        gameId: 1,
+        versionId: 10,
+        revision: 2,
+        sourceRequestId: 10_100,
+        sourceRequestHash: REQUEST_HASH,
+      }),
     /UNIQUE constraint failed/,
   );
   assert.throws(
@@ -323,7 +369,7 @@ test("0041 scopes trusted profiles to one exact READY version and keeps semantic
         versionId: 20,
         allowedVisibilityJson: '["PRIVATE","PRIVATE"]',
       }),
-    /visibility list contains duplicates/,
+    /Invalid generic Relay profile policy/,
   );
 
   raw
@@ -331,7 +377,9 @@ test("0041 scopes trusted profiles to one exact READY version and keeps semantic
       "UPDATE multiplayer_profiles SET enabled = 0, disabled_at = ?, disabled_reason_code = 'ADMIN_DISABLED', disabled_by_admin_id = 1, updated_at = ? WHERE id = 100",
     )
     .run(LATER, LATER);
-  seedProfile(raw, { profileId: 101, gameId: 1, versionId: 10, revision: 2 });
+  raw
+    .prepare("UPDATE multiplayer_profiles SET enabled = 1, updated_at = ? WHERE id = 101")
+    .run(LATER);
   assert.equal(
     raw
       .prepare(
@@ -345,7 +393,7 @@ test("0041 scopes trusted profiles to one exact READY version and keeps semantic
 test("0041 enforces idempotent instance creation, capacity, access, and rematch generation", () => {
   const raw = createMigratedDatabase();
   seedUsers(raw);
-  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "official-omok" });
+  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "relay-demo" });
   seedProfile(raw, { profileId: 100, gameId: 1, versionId: 10 });
   const instanceId = seedInstance(raw);
 
@@ -439,12 +487,12 @@ test("0041 enforces idempotent instance creation, capacity, access, and rematch 
 test("0041 makes actions, final results, rewards, and identity remaps idempotent", () => {
   const raw = createMigratedDatabase();
   seedUsers(raw);
-  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "official-omok" });
+  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "relay-demo" });
   seedProfile(raw, {
     profileId: 100,
     gameId: 1,
     versionId: 10,
-    rewardPolicyId: "official:omok-match-v1",
+    rewardPolicyId: "relay:historical-match-v1",
   });
   const instanceId = seedInstance(raw);
   seedParticipants(raw, instanceId);
@@ -575,7 +623,7 @@ test("0041 makes actions, final results, rewards, and identity remaps idempotent
            reward_payload_json, status, attempt_count, available_at, created_at, updated_at
          ) VALUES (
            'match_000000000000000000000001:1',
-           'match_000000000000000000000001', 1, 1, 'official:omok-match-v1',
+           'match_000000000000000000000001', 1, 1, 'relay:historical-match-v1',
            '{"xp":10}', 'PENDING', 0, ?, ?, ?
          )`,
       )
@@ -625,7 +673,7 @@ test("0041 makes actions, final results, rewards, and identity remaps idempotent
 test("0041 blocks exact-version deletion until its active instance lease ends", () => {
   const raw = createMigratedDatabase();
   seedUsers(raw);
-  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "official-omok" });
+  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "relay-demo" });
   seedProfile(raw, { profileId: 100, gameId: 1, versionId: 10 });
   const instanceId = seedInstance(raw);
   raw
@@ -670,7 +718,7 @@ test("0041 blocks exact-version deletion until its active instance lease ends", 
 test("0041 admin kill atomically aborts live match state, revokes invites, and kills the lease", () => {
   const raw = createMigratedDatabase();
   seedUsers(raw);
-  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "official-omok" });
+  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "relay-demo" });
   seedProfile(raw, { profileId: 100, gameId: 1, versionId: 10 });
   const instanceId = seedInstance(raw, { id: "admin_kill_instance_00000000001" });
   seedParticipants(raw, instanceId);
@@ -780,7 +828,7 @@ test("0041 admin kill atomically aborts live match state, revokes invites, and k
 test("D1 lease sweep expires an ACTIVE match and performs terminal cleanup exactly once", async () => {
   const { db, raw } = createMigratedD1();
   seedUsers(raw);
-  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "expiring-official-omok" });
+  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "expiring-relay-demo" });
   seedProfile(raw, { profileId: 100, gameId: 1, versionId: 10 });
   const instanceId = seedInstance(raw, { id: "lease_expiry_instance_0000000001" });
   seedParticipants(raw, instanceId);
@@ -882,7 +930,7 @@ test("D1 admin kill CAS is idempotent, audited, and closes the exact-version lea
   const { db, raw } = createMigratedD1();
   seedUsers(raw);
   seedAdmin(raw);
-  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "admin-cas-official-omok" });
+  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "admin-cas-relay-demo" });
   seedProfile(raw, { profileId: 100, gameId: 1, versionId: 10 });
   const instanceId = seedInstance(raw, { id: "admin_cas_instance_0000000000001" });
   seedParticipants(raw, instanceId);
@@ -952,7 +1000,7 @@ test("0041 accepts a USER profile only from its owner-approved exact-version req
   seedGameVersion(raw, {
     gameId: 1,
     versionId: 10,
-    slug: "creator-omok",
+    slug: "creator-relay-board",
     publisherType: "USER",
     publisherUserId: 1,
     moderationStatus: "APPROVED",
@@ -962,14 +1010,14 @@ test("0041 accepts a USER profile only from its owner-approved exact-version req
     raw
       .prepare(
         `INSERT INTO multiplayer_profile_requests (
-           id, game_id, game_version_id, request_schema_version, request_hash,
+           id, game_id, game_version_id, content_hash, request_schema_version, request_hash,
            request_json, requested_by_user_id, status, created_at, updated_at
          ) VALUES (
-           1, 1, 10, 1, ?, '{"template":"turn-grid"}', ?,
+           1, 1, 10, ?, 1, ?, '{"template":"turn-grid"}', ?,
            'PENDING_REVIEW', ?, ?
          )`,
       )
-      .run(REQUEST_HASH, requesterUserId, NOW, NOW);
+      .run(CONTENT_HASH, REQUEST_HASH, requesterUserId, NOW, NOW);
   assert.throws(() => insertRequest(2), /submitted by the game owner/);
   insertRequest(1);
   assert.throws(
@@ -981,7 +1029,7 @@ test("0041 accepts a USER profile only from its owner-approved exact-version req
         sourceRequestId: 1,
         sourceRequestHash: REQUEST_HASH,
       }),
-    /source request does not match/,
+    /approved exact-version request and content hash/,
   );
 
   raw
@@ -1011,7 +1059,7 @@ test("0041 accepts a USER profile only from its owner-approved exact-version req
         sourceRequestId: 1,
         sourceRequestHash: "f".repeat(64),
       }),
-    /source request does not match/,
+    /approved exact-version request and content hash/,
   );
   seedProfile(raw, {
     profileId: 100,
@@ -1035,15 +1083,16 @@ test("D1 multiplayer profile repository maps trusted rows and fails closed", asy
   const { db, raw } = createMigratedD1();
   seedUsers(raw);
   seedAdmin(raw);
-  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "official-omok" });
+  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "relay-demo" });
   seedProfile(raw, { profileId: 100, gameId: 1, versionId: 10 });
   const repository = new D1MultiplayerProfileRepository(db);
 
   const record = await repository.findEnabledForExactVersion(1, 10);
   assert.ok(record);
   assert.equal(record.id, 100);
-  assert.equal(record.profile.rulesetKey, "official:omok");
-  assert.deepEqual(record.profile.allowedVisibility, ["PRIVATE", "UNLISTED"]);
+  assert.equal("runtimeKind" in record.profile ? record.profile.runtimeKind : null, "relay");
+  assert.equal("contentHash" in record.profile ? record.profile.contentHash : null, CONTENT_HASH);
+  assert.deepEqual(record.profile.allowedVisibility, ["PRIVATE"]);
   assert.equal(await repository.findEnabledForExactVersion(2, 10), null);
   assert.equal(await repository.findEnabledForExactVersion(1, 999), null);
 
@@ -1067,11 +1116,11 @@ test("D1 multiplayer profile repository maps trusted rows and fails closed", asy
         ...stored,
         allowed_visibility_json: '["PRIVATE","CREDENTIALS"]',
       }),
-    /allowedVisibility contains an unsupported value/,
+    /allowedVisibility must be \[PRIVATE\]/,
   );
   assert.throws(
     () => mapMultiplayerProfileRow({ ...stored, source_request_hash: undefined }),
-    /Invalid source_request_hash/,
+    /sourceRequestHash must be a lowercase SHA-256/,
   );
 });
 
@@ -1079,7 +1128,7 @@ test("D1 multiplayer profile activation ignores index-inclusive rows_written bil
   const { db, raw } = createMigratedD1(INDEX_INCLUSIVE_D1_WRITE_META);
   seedUsers(raw);
   seedAdmin(raw);
-  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "official-omok" });
+  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "relay-demo" });
   seedProfile(raw, {
     profileId: 100,
     gameId: 1,
@@ -1130,10 +1179,11 @@ test("D1 multiplayer request repository pins owner, canonical hash, review CAS, 
     moderationStatus: "APPROVED",
   });
   const repository = new D1MultiplayerProfileRequestRepository(db);
-  const request = managedTurnGridRequest();
+  const request = relayRequest();
   const input = {
     gameId: 1,
     gameVersionId: 10,
+    contentHash: CONTENT_HASH,
     requestedByUserId: 1,
     request,
     nowIso: NOW,
@@ -1152,28 +1202,23 @@ test("D1 multiplayer request repository pins owner, canonical hash, review CAS, 
   assert.ok(created.status === "CREATED");
   assert.equal(created.record.status, "PENDING_REVIEW");
   assert.equal(created.record.requestedByUserId, 1);
+  assert.equal(created.record.contentHash, CONTENT_HASH);
   assert.match(created.record.requestHash, /^[0-9a-f]{64}$/);
   assert.deepEqual(JSON.parse(created.record.requestJson), {
-    requestVersion: 1,
-    kind: "managed-template",
-    template: { id: "turn-grid", version: 1 },
-    players: { min: 2, max: 2 },
-    requirements: {
-      simulation: "turn",
-      lifecycle: "match",
-      persistence: "match",
-      latency: "relaxed",
+    version: 1,
+    transport: { kind: "websocket", protocolVersion: 1 },
+    runtime: { kind: "relay" },
+    players: { min: 2, max: 8 },
+    features: {
       reconnect: "resume",
-      hiddenInformation: false,
-      simultaneousResponse: false,
+      directMessages: true,
+      hostSnapshot: true,
       joinInProgress: false,
       spectators: false,
     },
-    config: { boardWidth: 15, boardHeight: 15, winLength: 5 },
-    client: { protocolVersion: 1 },
   });
   assert.equal((await repository.submit(input)).status, "REPLAYED");
-  assert.deepEqual(await repository.submit({ ...input, request: managedTurnGridRequest(16) }), {
+  assert.deepEqual(await repository.submit({ ...input, request: relayRequest(7) }), {
     status: "REJECTED",
     code: "REQUEST_CONFLICT",
   });
@@ -1212,179 +1257,55 @@ test("D1 multiplayer request repository pins owner, canonical hash, review CAS, 
   assert.equal((await repository.listPending(10)).length, 0);
 
   const profiles = new D1MultiplayerProfileRepository(db);
-  const managedProfile = {
+  const relayProfile = {
     profileVersion: 1,
     gameId: 1,
     gameVersionId: 10,
+    contentHash: CONTENT_HASH,
     sourceRequestHash: created.record.requestHash,
     profileRevision: 1,
+    transportKind: "websocket",
+    runtimeKind: "relay",
     protocolVersion: 1,
-    resolvedClass: "M1",
-    simulationModel: "turn",
-    runtimeBackend: "durable-object",
-    rulesetKey: "managed:turn-grid:v1",
-    rulesetRevision: 1,
-    resolvedConfigJson: '{"boardWidth":15,"boardHeight":15,"winLength":5}',
     lifecycle: "match",
-    persistence: "match",
-    latencyProfile: "relaxed",
     reconnectPolicy: "resume",
+    directMessages: true,
+    hostSnapshot: true,
     minPlayers: 2,
-    maxPlayers: 2,
+    maxPlayers: 8,
     allowedVisibility: ["PRIVATE"],
     allowedJoinPolicies: ["OPEN"],
-    maxActionBytes: 1024,
-    maxStateBytes: 8192,
-    actionRateLimit: 5,
-    rewardPolicyId: null,
+    hostDeparturePolicy: "close",
+    resultTrust: "UNVERIFIED",
+    maxMessageBytes: 4096,
+    maxSnapshotBytes: 16_384,
+    messagesPerSecond: 20,
+    roomBytesPerSecond: 256 * 1024,
+    roomTtlSeconds: 2 * 60 * 60,
     enabled: false,
   } as const;
-  const profileInput = {
+  const createdProfile = await profiles.createApprovedRevision({
     sourceRequestId: created.record.id,
-    profile: managedProfile,
+    profile: relayProfile,
     createdByAdminId: 1,
     nowIso: LATER,
-  } as const;
-  assert.deepEqual(
-    await profiles.createApprovedRevision({
-      ...profileInput,
-      profile: { ...managedProfile, enabled: true },
-    }),
-    { status: "REJECTED", code: "PROFILE_MUST_START_DISABLED" },
-  );
-  assert.deepEqual(
-    await profiles.createApprovedRevision({
-      ...profileInput,
-      profile: { ...managedProfile, rulesetKey: "official:omok" },
-    }),
-    { status: "REJECTED", code: "MANAGED_PROFILE_MISMATCH" },
-  );
-  assert.deepEqual(
-    await profiles.createApprovedRevision({
-      ...profileInput,
-      profile: { ...managedProfile, actionRateLimit: 60 },
-    }),
-    { status: "REJECTED", code: "MANAGED_PROFILE_MISMATCH" },
-  );
-  const profileCreated = await profiles.createApprovedRevision(profileInput);
-  assert.ok(profileCreated.status === "CREATED");
-  assert.equal((await profiles.createApprovedRevision(profileInput)).status, "REPLAYED");
-  assert.equal((await profiles.findLatestForExactVersion(1, 10))?.profile.profileRevision, 1);
-  assert.equal(await profiles.findEnabledForExactVersion(1, 10), null);
-  assert.equal(
-    (
-      await profiles.setEnabled({
-        profileId: profileCreated.record.id,
-        enabled: true,
-        changedByAdminId: 1,
-        reasonCode: null,
-        nowIso: LATER,
-      })
-    ).status,
-    "UPDATED",
-  );
-
-  const secondProfile = await profiles.createApprovedRevision({
-    ...profileInput,
-    profile: { ...managedProfile, profileRevision: 2 },
   });
-  assert.ok(secondProfile.status === "CREATED");
-  assert.equal((await profiles.findLatestForExactVersion(1, 10))?.profile.profileRevision, 2);
-  assert.equal(
-    (
-      await profiles.setEnabled({
-        profileId: secondProfile.record.id,
-        enabled: true,
-        changedByAdminId: 1,
-        reasonCode: null,
-        nowIso: LATER,
-      })
-    ).status,
-    "CONFLICT",
+  assert.equal(createdProfile.status, "CREATED");
+  assert.ok(createdProfile.status === "CREATED");
+  assert.equal(createdProfile.record.profile.enabled, false);
+  assert.deepEqual(
+    (await profiles.listManaged(10)).map((record) => record.id),
+    [createdProfile.record.id],
   );
-
-  const instances = new D1MultiplayerInstanceRepository(db);
-  const oldProfileInstance = await instances.createWithHostAndLease({
-    instanceId: "creator_profile_drain_instance_001",
-    publicCode: "DRAINCODE001",
-    createdByUserId: 1,
-    createIdempotencyHash: "7".repeat(64),
-    gameId: 1,
-    gameVersionId: 10,
-    profileId: profileCreated.record.id,
-    profileRevision: 1,
-    visibility: "PRIVATE",
-    joinPolicy: "OPEN",
-    lifecycle: "match",
-    maxPlayers: 2,
-    instanceExpiresAt: EXPIRES,
-    hostParticipantId: "creator_profile_drain_host",
-    leaseExpiresAt: EXPIRES,
-    nowIso: NOW,
+  const activatedProfile = await profiles.setEnabled({
+    profileId: createdProfile.record.id,
+    enabled: true,
+    changedByAdminId: 1,
+    reasonCode: null,
+    nowIso: LATER,
   });
-  assert.equal(oldProfileInstance.status, "CREATED");
-  assert.equal(
-    (
-      await profiles.setEnabled({
-        profileId: profileCreated.record.id,
-        enabled: false,
-        changedByAdminId: 1,
-        reasonCode: "SUPERSEDED",
-        nowIso: LATER,
-      })
-    ).status,
-    "UPDATED",
-  );
-  assert.equal(
-    (
-      await profiles.setEnabled({
-        profileId: secondProfile.record.id,
-        enabled: true,
-        changedByAdminId: 1,
-        reasonCode: null,
-        nowIso: LATER,
-      })
-    ).status,
-    "UPDATED",
-  );
-  assert.equal((await profiles.findEnabledForExactVersion(1, 10))?.profile.profileRevision, 2);
-  assert.deepEqual(
-    await instances.join({
-      participantId: "creator_profile_drain_player",
-      instanceId: "creator_profile_drain_instance_001",
-      userId: 2,
-      expectedGeneration: 1,
-      inviteTokenHash: null,
-      nowIso: LATER,
-    }),
-    { status: "REJECTED", code: "PROFILE_DISABLED" },
-  );
-  assert.deepEqual(
-    await instances.createInvite({
-      instanceId: "creator_profile_drain_instance_001",
-      expectedGeneration: 1,
-      tokenHash: "8".repeat(64),
-      createdByUserId: 1,
-      maxUses: 1,
-      expiresAt: EXPIRES,
-      nowIso: LATER,
-    }),
-    { status: "REJECTED", code: "PROFILE_DISABLED" },
-  );
-  assert.equal(
-    (
-      await instances.advanceConnectionGeneration({
-        instanceId: "creator_profile_drain_instance_001",
-        expectedInstanceGeneration: 1,
-        userId: 1,
-        expectedConnectionGeneration: 0,
-        nowIso: LATER,
-      })
-    )?.connectionGeneration,
-    1,
-    "draining blocks new joins but keeps an existing participant's reconnect path",
-  );
-
+  assert.equal(activatedProfile.status, "UPDATED");
+  assert.equal((await profiles.findEnabledForExactVersion(1, 10))?.id, createdProfile.record.id);
   const stored = raw
     .prepare("SELECT * FROM multiplayer_profile_requests WHERE id = ?")
     .get(created.record.id) as Record<string, unknown>;
@@ -1435,22 +1356,19 @@ test("D1 multiplayer request repository pins owner, canonical hash, review CAS, 
   assert.deepEqual(raw.prepare("PRAGMA foreign_key_check").all(), []);
 });
 
-test("OWOGG managed requests use the same exact-version approval boundary without claiming a user", async () => {
+test("OWOGG Relay requests use the same exact-version boundary without claiming a user", async () => {
   const { db, raw } = createMigratedD1(INDEX_INCLUSIVE_D1_WRITE_META);
   seedUsers(raw);
   seedAdmin(raw);
-  seedGameVersion(raw, {
-    gameId: 1,
-    versionId: 10,
-    slug: "official-managed-turn-grid",
-  });
+  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "official-relay-game" });
   const requests = new D1MultiplayerProfileRequestRepository(db);
-  const request = managedTurnGridRequest();
+  const request = relayRequest();
 
   assert.deepEqual(
     await requests.submit({
       gameId: 1,
       gameVersionId: 10,
+      contentHash: CONTENT_HASH,
       requestedByUserId: 1,
       request,
       nowIso: NOW,
@@ -1460,47 +1378,21 @@ test("OWOGG managed requests use the same exact-version approval boundary withou
   const submitted = await requests.submit({
     gameId: 1,
     gameVersionId: 10,
+    contentHash: CONTENT_HASH,
     requestedByUserId: null,
     request,
     nowIso: NOW,
   });
   assert.ok(submitted.status === "CREATED");
   assert.equal(submitted.record.requestedByUserId, null);
-  const reviewed = await requests.review({
-    requestId: submitted.record.id,
-    decision: "APPROVED",
-    reviewedByAdminId: 1,
-    decisionReasonCode: null,
-    nowIso: LATER,
-  });
-  assert.equal(reviewed.status, "UPDATED");
-
-  const profiles = new D1MultiplayerProfileRepository(db);
-  const profile = buildApprovedManagedMultiplayerProfileV1({
-    gameId: 1,
-    gameVersionId: 10,
-    requestHash: submitted.record.requestHash,
-    profileRevision: 1,
-    request,
-  });
-  const created = await profiles.createApprovedRevision({
-    sourceRequestId: submitted.record.id,
-    profile,
-    createdByAdminId: 1,
-    nowIso: LATER,
-  });
-  assert.ok(created.status === "CREATED");
-  assert.equal(created.record.profile.enabled, false);
-  assert.equal(created.record.profile.resolvedClass, "M1");
-  assert.equal(created.record.profile.rewardPolicyId, null);
+  assert.equal(submitted.record.request.runtime.kind, "relay");
   assert.deepEqual(raw.prepare("PRAGMA foreign_key_check").all(), []);
 });
-
 test("D1 multiplayer instance repository atomically creates, replays, conflicts, and CAS-transitions", async () => {
   const { db, raw } = createMigratedD1(INDEX_INCLUSIVE_D1_WRITE_META);
   seedUsers(raw);
   seedAdmin(raw);
-  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "official-omok" });
+  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "relay-demo" });
   seedProfile(raw, { profileId: 100, gameId: 1, versionId: 10 });
   const repository = new D1MultiplayerInstanceRepository(db);
   const input = {
@@ -1510,10 +1402,11 @@ test("D1 multiplayer instance repository atomically creates, replays, conflicts,
     createIdempotencyHash: "e".repeat(64),
     gameId: 1,
     gameVersionId: 10,
+    contentHash: CONTENT_HASH,
     profileId: 100,
     profileRevision: 1,
     visibility: "PRIVATE" as const,
-    joinPolicy: "INVITE_ONLY" as const,
+    joinPolicy: "OPEN" as const,
     lifecycle: "match" as const,
     maxPlayers: 2,
     instanceExpiresAt: EXPIRES,
@@ -1553,7 +1446,7 @@ test("D1 multiplayer instance repository atomically creates, replays, conflicts,
 
   const idempotencyConflict = await repository.createWithHostAndLease({
     ...input,
-    joinPolicy: "OPEN",
+    maxPlayers: 3,
   });
   assert.deepEqual(idempotencyConflict, { status: "IDEMPOTENCY_CONFLICT" });
 
@@ -1637,7 +1530,7 @@ test("D1 multiplayer instance repository atomically creates, replays, conflicts,
 test("D1 multiplayer instance aggregate rolls back when its host identifier collides", async () => {
   const { db, raw } = createMigratedD1();
   seedUsers(raw);
-  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "official-omok" });
+  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "relay-demo" });
   seedProfile(raw, { profileId: 100, gameId: 1, versionId: 10 });
   const repository = new D1MultiplayerInstanceRepository(db);
   const base = {
@@ -1647,10 +1540,11 @@ test("D1 multiplayer instance aggregate rolls back when its host identifier coll
     createIdempotencyHash: "1".repeat(64),
     gameId: 1,
     gameVersionId: 10,
+    contentHash: CONTENT_HASH,
     profileId: 100,
     profileRevision: 1,
     visibility: "PRIVATE" as const,
-    joinPolicy: "INVITE_ONLY" as const,
+    joinPolicy: "OPEN" as const,
     lifecycle: "match" as const,
     maxPlayers: 2,
     instanceExpiresAt: EXPIRES,
@@ -1680,91 +1574,68 @@ test("D1 multiplayer instance aggregate rolls back when its host identifier coll
   );
 });
 
-test("D1 multiplayer joins consume invites exactly once and serialize capacity", async () => {
+test("D1 generic Relay joins replay seats, advance connections, and enforce capacity", async () => {
   const { db, raw } = createMigratedD1();
   seedUsers(raw);
-  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "official-omok" });
+  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "relay-demo" });
   seedProfile(raw, { profileId: 100, gameId: 1, versionId: 10 });
   const repository = new D1MultiplayerInstanceRepository(db);
-  const inviteOnlyInput = {
-    instanceId: "invite_instance_000000000000001",
-    publicCode: "INVITECODE001",
+  const openInput = {
+    instanceId: "open_instance_0000000000000001",
+    publicCode: "OPENCODE00001",
     createdByUserId: 1,
     createIdempotencyHash: "3".repeat(64),
     gameId: 1,
     gameVersionId: 10,
+    contentHash: CONTENT_HASH,
     profileId: 100,
     profileRevision: 1,
     visibility: "PRIVATE" as const,
-    joinPolicy: "INVITE_ONLY" as const,
+    joinPolicy: "OPEN" as const,
     lifecycle: "match" as const,
     maxPlayers: 2,
     instanceExpiresAt: EXPIRES,
-    hostParticipantId: "invite_host_0001",
+    hostParticipantId: "open_host_00001",
     leaseExpiresAt: EXPIRES,
     nowIso: NOW,
   };
-  assert.equal((await repository.createWithHostAndLease(inviteOnlyInput)).status, "CREATED");
-
-  const inviteInput = {
-    instanceId: inviteOnlyInput.instanceId,
-    expectedGeneration: 1,
-    tokenHash: "4".repeat(64),
-    createdByUserId: 1,
-    maxUses: 1,
-    expiresAt: EXPIRES,
-    nowIso: NOW,
-  };
-  const invite = await repository.createInvite(inviteInput);
-  assert.equal(invite.status, "CREATED");
-  const replayedInvite = await repository.createInvite({
-    ...inviteInput,
-    expiresAt: new Date(Date.parse(EXPIRES) + 60_000).toISOString(),
-  });
-  assert.equal(replayedInvite.status, "REPLAYED");
-  assert.equal(
-    replayedInvite.status === "REPLAYED" ? replayedInvite.invite.expiresAt : null,
-    EXPIRES,
-  );
-  assert.ok("invite" in invite);
+  assert.equal((await repository.createWithHostAndLease(openInput)).status, "CREATED");
 
   const joined = await repository.join({
-    participantId: "invite_player_0002",
-    instanceId: inviteOnlyInput.instanceId,
+    participantId: "open_player_0002",
+    instanceId: openInput.instanceId,
     userId: 2,
     expectedGeneration: 1,
-    inviteTokenHash: inviteInput.tokenHash,
+    inviteTokenHash: null,
     nowIso: NOW,
   });
   assert.equal(joined.status, "JOINED");
-  assert.equal((await repository.findInviteByTokenHash(inviteInput.tokenHash))?.usedCount, 1);
-  assert.equal((await repository.findById(inviteOnlyInput.instanceId))?.participantCount, 2);
+  assert.equal((await repository.findById(openInput.instanceId))?.participantCount, 2);
 
   const replayedJoin = await repository.join({
     participantId: "ignored_retry_identifier",
-    instanceId: inviteOnlyInput.instanceId,
+    instanceId: openInput.instanceId,
     userId: 2,
     expectedGeneration: 1,
-    inviteTokenHash: inviteInput.tokenHash,
+    inviteTokenHash: null,
     nowIso: LATER,
   });
   assert.equal(replayedJoin.status, "REPLAYED");
-  assert.equal((await repository.findInviteByTokenHash(inviteInput.tokenHash))?.usedCount, 1);
 
   assert.deepEqual(
     await repository.join({
-      participantId: "invite_player_0003",
-      instanceId: inviteOnlyInput.instanceId,
+      participantId: "open_player_0003",
+      instanceId: openInput.instanceId,
       userId: 3,
       expectedGeneration: 1,
-      inviteTokenHash: inviteInput.tokenHash,
+      inviteTokenHash: null,
       nowIso: LATER,
     }),
-    { status: "REJECTED", code: "INVITE_EXHAUSTED" },
+    { status: "REJECTED", code: "INSTANCE_FULL" },
   );
 
   const readyTooEarly = await repository.transitionParticipant({
-    instanceId: inviteOnlyInput.instanceId,
+    instanceId: openInput.instanceId,
     expectedInstanceGeneration: 1,
     userId: 2,
     expectedStatus: "JOINED",
@@ -1776,7 +1647,7 @@ test("D1 multiplayer joins consume invites exactly once and serialize capacity",
   assert.equal(readyTooEarly, null);
   assert.equal(
     await repository.transition({
-      instanceId: inviteOnlyInput.instanceId,
+      instanceId: openInput.instanceId,
       expectedStatus: "CREATED",
       expectedGeneration: 1,
       nextStatus: "LOBBY",
@@ -1790,7 +1661,7 @@ test("D1 multiplayer joins consume invites exactly once and serialize capacity",
   assert.equal(
     (
       await repository.transitionParticipant({
-        instanceId: inviteOnlyInput.instanceId,
+        instanceId: openInput.instanceId,
         expectedInstanceGeneration: 1,
         userId: 2,
         expectedStatus: "JOINED",
@@ -1805,7 +1676,7 @@ test("D1 multiplayer joins consume invites exactly once and serialize capacity",
   assert.equal(
     (
       await repository.advanceConnectionGeneration({
-        instanceId: inviteOnlyInput.instanceId,
+        instanceId: openInput.instanceId,
         expectedInstanceGeneration: 1,
         userId: 2,
         expectedConnectionGeneration: 0,
@@ -1816,7 +1687,7 @@ test("D1 multiplayer joins consume invites exactly once and serialize capacity",
   );
   assert.equal(
     await repository.advanceConnectionGeneration({
-      instanceId: inviteOnlyInput.instanceId,
+      instanceId: openInput.instanceId,
       expectedInstanceGeneration: 1,
       userId: 2,
       expectedConnectionGeneration: 0,
@@ -1824,56 +1695,18 @@ test("D1 multiplayer joins consume invites exactly once and serialize capacity",
     }),
     null,
   );
-  assert.equal(await repository.revokeInvite(invite.invite.id, 1, LATER), true);
-  assert.equal(await repository.revokeInvite(invite.invite.id, 1, LATER), false);
-
-  const openInput = {
-    ...inviteOnlyInput,
-    instanceId: "open_instance_0000000000000001",
-    publicCode: "OPENCODE00001",
-    createdByUserId: 3,
-    createIdempotencyHash: "5".repeat(64),
-    joinPolicy: "OPEN" as const,
-    hostParticipantId: "open_host_00003",
-  };
-  assert.equal((await repository.createWithHostAndLease(openInput)).status, "CREATED");
-  const capacityResults = await Promise.all([
-    repository.join({
-      participantId: "open_player_0001",
-      instanceId: openInput.instanceId,
-      userId: 1,
-      expectedGeneration: 1,
-      inviteTokenHash: null,
-      nowIso: NOW,
-    }),
-    repository.join({
-      participantId: "open_player_0002",
-      instanceId: openInput.instanceId,
-      userId: 2,
-      expectedGeneration: 1,
-      inviteTokenHash: null,
-      nowIso: NOW,
-    }),
-  ]);
-  assert.deepEqual(
-    capacityResults
-      .map((result) => (result.status === "REJECTED" ? result.code : result.status))
-      .sort(),
-    ["INSTANCE_FULL", "JOINED"],
-  );
-  assert.equal((await repository.findById(openInput.instanceId))?.participantCount, 2);
   assert.deepEqual(raw.prepare("PRAGMA foreign_key_check").all(), []);
 });
 
-test("D1 match repository atomically ledgers actions, finalizes results, and delivers rewards", async () => {
+test("D1 Relay match shell creates the active participant roster without an action ledger", async () => {
   const { db, raw } = createMigratedD1(INDEX_INCLUSIVE_D1_WRITE_META);
   seedUsers(raw);
-  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "official-omok" });
+  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "relay-demo" });
   seedProfile(raw, {
     profileId: 100,
     gameId: 1,
     versionId: 10,
-    rewardPolicyId: "official:omok-match-v1",
+    rewardPolicyId: "relay:historical-match-v1",
   });
   const instances = new D1MultiplayerInstanceRepository(db);
   const matches = new D1MultiplayerMatchRepository(db);
@@ -1884,6 +1717,7 @@ test("D1 match repository atomically ledgers actions, finalizes results, and del
     createIdempotencyHash: "6".repeat(64),
     gameId: 1,
     gameVersionId: 10,
+    contentHash: CONTENT_HASH,
     profileId: 100,
     profileRevision: 1,
     visibility: "PRIVATE" as const,
@@ -1988,174 +1822,23 @@ test("D1 match repository atomically ledgers actions, finalizes results, and del
   );
   assert.equal((await matches.findMatch(matchId))?.status, "ACTIVE");
 
-  const firstAction = {
-    matchId,
-    userId: 1,
-    participantId: "match_repo_host_0001",
-    clientSeq: 1,
-    serverSeq: 1,
-    clientActionId: "repository_action_0001",
-    payloadHash: "7".repeat(64),
-    expectedRevision: 0,
-    resultRevision: 1,
-    resultCode: "ACCEPTED" as const,
-    responseJson: '{"accepted":true,"revision":1}',
-    nowIso: LATER,
-  };
-  assert.equal((await matches.recordAction(firstAction)).status, "RECORDED");
-  assert.equal((await matches.recordAction(firstAction)).status, "REPLAYED");
-  assert.deepEqual(await matches.recordAction({ ...firstAction, payloadHash: "8".repeat(64) }), {
-    status: "REJECTED",
-    code: "ACTION_ID_REUSED",
-    currentRevision: 1,
-  });
-  assert.deepEqual(
-    await matches.recordAction({
-      ...firstAction,
-      userId: 2,
-      participantId: "match_repo_player_02",
-      clientActionId: "repository_action_0002",
-      payloadHash: "9".repeat(64),
-      serverSeq: 2,
-    }),
-    { status: "REJECTED", code: "ACTION_CONFLICT", currentRevision: 1 },
-  );
-
-  const invalidActor = await matches.recordAction({
-    ...firstAction,
-    userId: 2,
-    participantId: "not_the_match_participant",
-    clientActionId: "repository_action_0003",
-    payloadHash: "a".repeat(64),
-    clientSeq: 2,
-    serverSeq: 2,
-    expectedRevision: 1,
-    resultRevision: 2,
-  });
-  assert.deepEqual(invalidActor, {
-    status: "REJECTED",
-    code: "NOT_PARTICIPANT",
-    currentRevision: 1,
-  });
-  assert.equal((await matches.findMatch(matchId))?.stateRevision, 1);
-
-  const secondAction = await matches.recordAction({
-    ...firstAction,
-    userId: 2,
-    participantId: "match_repo_player_02",
-    clientActionId: "repository_action_0004",
-    payloadHash: "b".repeat(64),
-    clientSeq: 2,
-    serverSeq: 2,
-    expectedRevision: 1,
-    resultRevision: 2,
-    responseJson: '{"accepted":true,"revision":2}',
-  });
-  assert.equal(secondAction.status, "RECORDED");
-  assert.equal((await matches.listActionsAfterRevision(matchId, 0, 10)).length, 2);
-  assert.equal((await matches.findLatestAction(matchId))?.clientActionId, "repository_action_0004");
-  assert.equal(await matches.findLatestAction("match_missing_0000000001"), null);
-
-  const finalization = {
-    matchId,
-    expectedStateRevision: 2,
-    terminalResultJson: '{"winnerUserId":1}',
-    terminalResultHash: "c".repeat(64),
-    players: [
-      {
-        userId: 1,
-        participantId: "match_repo_host_0001",
-        outcome: "WIN" as const,
-        placement: 1,
-        resultJson: '{"outcome":"WIN","placement":1}',
-        rewardEligible: true,
-        reward: {
-          sourceId: `${matchId}:1`,
-          rewardPolicyId: "official:omok-match-v1",
-          payloadJson: '{"xp":10}',
-        },
-      },
-      {
-        userId: 2,
-        participantId: "match_repo_player_02",
-        outcome: "LOSS" as const,
-        placement: 2,
-        resultJson: '{"outcome":"LOSS","placement":2}',
-        rewardEligible: false,
-        reward: null,
-      },
-    ],
-    nowIso: LATER,
-  };
-  const committed = await matches.finalize(finalization);
-  assert.equal(committed.status, "COMMITTED");
-  assert.equal("rewards" in committed ? committed.rewards.length : 0, 1);
-  assert.equal((await matches.finalize(finalization)).status, "REPLAYED");
-  assert.deepEqual(
-    await matches.finalize({ ...finalization, terminalResultHash: "d".repeat(64) }),
-    { status: "REJECTED", code: "TERMINAL_CONFLICT" },
-  );
-
-  const firstLock = "e".repeat(64);
-  const claimed = await matches.claimNextReward({ lockTokenHash: firstLock, nowIso: LATER });
-  assert.ok(claimed);
-  assert.equal(claimed.status, "PROCESSING");
-  assert.equal(claimed.attemptCount, 1);
-  assert.equal(await matches.markRewardApplied(claimed.id, "f".repeat(64), EXPIRES), false);
-  assert.equal(await matches.requeueStaleRewards(EXPIRES, EXPIRES), 1);
-  const secondLock = "f".repeat(64);
-  const reclaimed = await matches.claimNextReward({
-    lockTokenHash: secondLock,
-    nowIso: EXPIRES,
-  });
-  assert.ok(reclaimed);
-  assert.equal(reclaimed.attemptCount, 2);
-  assert.equal(await matches.markRewardApplied(reclaimed.id, secondLock, EXPIRES), true);
-  assert.equal(await matches.markRewardApplied(reclaimed.id, secondLock, EXPIRES), false);
-  assert.throws(
-    () => raw.prepare("DELETE FROM multiplayer_reward_outbox WHERE id = ?").run(reclaimed.id),
-    /reward history is immutable/,
-  );
-
+  const persisted = await matches.findMatch(matchId);
+  assert.equal(persisted?.terminalResultJson, null);
+  assert.equal(persisted?.terminalResultHash, null);
   assert.equal(
-    await instances.transition({
-      instanceId: instanceInput.instanceId,
-      expectedStatus: "ACTIVE",
-      expectedGeneration: 1,
-      nextStatus: "CLOSING",
-      nextGeneration: 1,
-      closedAt: null,
-      abortCode: null,
-      nowIso: EXPIRES,
-    }),
-    true,
+    (
+      await raw
+        .prepare("SELECT COUNT(*) AS count FROM multiplayer_match_actions WHERE match_id = ?")
+        .get(matchId)
+    ).count,
+    0,
   );
-  assert.equal(
-    await instances.transition({
-      instanceId: instanceInput.instanceId,
-      expectedStatus: "CLOSING",
-      expectedGeneration: 1,
-      nextStatus: "CLOSED",
-      nextGeneration: 1,
-      closedAt: EXPIRES,
-      abortCode: null,
-      nowIso: EXPIRES,
-    }),
-    true,
-  );
-  assert.equal((await instances.findLease(instanceInput.instanceId))?.status, "RELEASED");
-  raw.prepare("UPDATE games SET live_version_id = NULL, updated_at = ? WHERE id = 1").run(EXPIRES);
-  assert.throws(
-    () => raw.prepare("DELETE FROM game_versions WHERE id = 10").run(),
-    /multiplayer match history/,
-  );
-  assert.deepEqual(raw.prepare("PRAGMA foreign_key_check").all(), []);
 });
 
 test("account merge blocks active multiplayer participation and same-instance identity collapse", async () => {
   const { db, raw } = createMigratedD1();
   seedUsers(raw);
-  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "official-omok" });
+  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "relay-demo" });
   seedProfile(raw, { profileId: 100, gameId: 1, versionId: 10 });
   const instanceId = seedInstance(raw, { creatorUserId: 2 });
   raw
@@ -2205,7 +1888,7 @@ test("account merge blocks active multiplayer participation and same-instance id
 test("account merge remaps terminal multiplayer ownership before deleting the secondary user", async () => {
   const { db, raw } = createMigratedD1();
   seedUsers(raw);
-  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "official-omok" });
+  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "relay-demo" });
   seedProfile(raw, { profileId: 100, gameId: 1, versionId: 10 });
   const instanceId = seedInstance(raw, { creatorUserId: 2 });
   raw
@@ -2327,22 +2010,22 @@ test("account merge preserves Creator access, USER game ownership, and multiplay
       `INSERT INTO sandbox_game_versions (
          id, game_id, object_key, content_hash, bundle_bytes, status,
          uploaded_at, publish_status
-       ) VALUES (10, 1, 'games/1/10.zip', 'creator-content-10', 100,
+       ) VALUES (10, 1, 'games/1/10.zip', ?, 100,
                  'APPROVED', ?, 'READY')`,
     )
-    .run(NOW);
+    .run(CONTENT_HASH, NOW);
   raw
     .prepare("UPDATE sandbox_games SET live_version_id = 10, updated_at = ? WHERE id = 1")
     .run(NOW);
   raw
     .prepare(
       `INSERT INTO multiplayer_profile_requests (
-         game_id, game_version_id, request_schema_version, request_hash, request_json,
+         game_id, game_version_id, content_hash, request_schema_version, request_hash, request_json,
          requested_by_user_id, status, created_at, updated_at
-       ) VALUES (1, 10, 1, ?, '{"template":"turn-grid"}', 2,
+       ) VALUES (1, 10, ?, 1, ?, '{"template":"turn-grid"}', 2,
                  'PENDING_REVIEW', ?, ?)`,
     )
-    .run(REQUEST_HASH, NOW, NOW);
+    .run(CONTENT_HASH, REQUEST_HASH, NOW, NOW);
   raw
     .prepare(
       `INSERT INTO account_merge_challenges (

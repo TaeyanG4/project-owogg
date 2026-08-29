@@ -25,6 +25,8 @@ function scoreAcceptErrorStatus(error: GameScoreAcceptError): 400 | 401 | 404 | 
       return 409;
     case "MULTIPLAYER_AUTHORITY_UNAVAILABLE":
       return 503;
+    case "PLAY_CONFIG_AUTHORITY_UNAVAILABLE":
+      return 503;
     default:
       return 400;
   }
@@ -40,6 +42,8 @@ function scoreAcceptErrorMessage(error: GameScoreAcceptError, reason?: string): 
       return "이 게임 버전의 점수는 서버가 확정한 멀티플레이 결과로만 기록됩니다.";
     case "MULTIPLAYER_AUTHORITY_UNAVAILABLE":
       return "멀티플레이 권한 상태를 확인할 수 없습니다. 잠시 후 다시 시도해주세요.";
+    case "PLAY_CONFIG_AUTHORITY_UNAVAILABLE":
+      return "이 게임의 서버 검증 점수 경로가 아직 준비되지 않았습니다.";
     case "INVALID_TOKEN":
       return "게임 세션이 유효하지 않거나 만료되었습니다.";
     case "CONTEXT_MISMATCH":
@@ -269,6 +273,8 @@ function formatLeaderboardEntry(
     game_id: string;
     score: number;
     difficulty: string;
+    variant_id: string;
+    ruleset_revision: number;
     created_at: string;
   },
   gameTitle: string,
@@ -286,6 +292,8 @@ function formatLeaderboardEntry(
     score: item.score,
     formattedScore,
     difficulty: item.difficulty,
+    variantId: item.variant_id,
+    rulesetRevision: item.ruleset_revision,
     createdAt: item.created_at?.split("T")[0] ?? item.created_at,
     created_at: item.created_at,
   };
@@ -320,12 +328,12 @@ scoresRouter.get("/:gameId", edgeCache({ ttlSeconds: 30 }), async (c) => {
 
     // Managed multiplayer has canonical match history, not a score ranking. This exact-version
     // authority gate also hides any stale pre-multiplayer scores if a game is converted later;
-    // profile lookup failure fails closed to an empty board instead of reopening legacy reads.
-    const legacyFlow = await container.multiplayerLegacyFlowGate.evaluate(
+    // profile lookup failure fails closed to an empty board instead of reopening generic reads.
+    const authoritySelection = await container.selectedTopologyAuthorityGate.evaluate(
       runtime.identity.id,
       runtime.liveVersion.id,
     );
-    if (!legacyFlow.allowed) {
+    if (!authoritySelection.allowed) {
       return c.json({ game_id: gameId, leaderboard: [] });
     }
 
@@ -357,6 +365,7 @@ scoresRouter.get("/:gameId", edgeCache({ ttlSeconds: 30 }), async (c) => {
       20,
       runtime.canonical.policy.score.direction,
       difficulty.normalizedDifficultyId,
+      runtime.canonical.playConfig?.rulesetRevision ?? 1,
     );
     return c.json({
       game_id: gameId,

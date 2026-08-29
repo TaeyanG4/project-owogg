@@ -9,7 +9,9 @@ import {
   type StreamerPlatformType,
   type StreamerStatusType,
   type FeaturedStatusType,
+  type PublicGameCatalog,
 } from "../src/index.js";
+import { runtimeGameFixture } from "./runtimeGameFixture.js";
 
 class MockStreamerRepo implements StreamerRepository {
   public profiles: Map<number, StreamerProfile> = new Map();
@@ -20,6 +22,17 @@ class MockStreamerRepo implements StreamerRepository {
   > = new Map();
   public scores: { userId: number; gameId: string; score: number; createdAt: string }[] = [];
   public userProgress: Map<number, number> = new Map(); // userId -> totalXp
+  public lastRankingOptions:
+    | {
+        mode: "score" | "xp";
+        gameId?: string;
+        direction?: "asc" | "desc";
+        rulesetRevision?: number;
+        platform?: StreamerPlatformType;
+        limit?: number;
+        offset?: number;
+      }
+    | undefined;
 
   private nextProfileId = 1;
   private nextAccId = 1;
@@ -148,10 +161,13 @@ class MockStreamerRepo implements StreamerRepository {
   async getStreamerRankings(options: {
     mode: "score" | "xp";
     gameId?: string;
+    direction?: "asc" | "desc";
+    rulesetRevision?: number;
     platform?: StreamerPlatformType;
     limit?: number;
     offset?: number;
   }): Promise<{ entries: StreamerRankEntry[]; total: number }> {
+    this.lastRankingOptions = options;
     const verifiedStreamers = Array.from(this.profiles.values()).filter(
       (p) => p.status === "VERIFIED",
     );
@@ -434,5 +450,42 @@ test("Phase D Streamer Domain & Ranking Invariants", async (t) => {
     const res = await useCases.getStreamerRankings({ mode: "score" });
     assert.equal(res.total, 0);
     assert.equal(res.entries.length, 0);
+  });
+
+  await t.test("7. A selected game forwards its canonical ruleset revision", async () => {
+    const runtime = runtimeGameFixture("aim-test");
+    const catalog: PublicGameCatalog = {
+      async findBySlug(slug) {
+        return slug === runtime.identity.slug ? runtime : null;
+      },
+      async list() {
+        return [
+          {
+            ...runtime,
+            canonical: {
+              ...runtime.canonical,
+              playConfig: {
+                version: 1,
+                rulesetRevision: 7,
+                verifierId: "verified-aim-test-v1",
+                defaultVariantId: "standard",
+                variants: [{ id: "standard", label: "Standard" }],
+                allowedConfigs: [
+                  { difficultyId: "normal", variantId: "standard", rewardFactor: 1 },
+                ],
+              },
+            },
+          },
+        ];
+      },
+    };
+
+    await new StreamerUseCases(repo, undefined, catalog).getStreamerRankings({
+      mode: "score",
+      gameId: "aim-test",
+    });
+
+    assert.equal(repo.lastRankingOptions?.rulesetRevision, 7);
+    assert.equal(repo.lastRankingOptions?.direction, "asc");
   });
 });

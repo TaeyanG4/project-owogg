@@ -61,6 +61,7 @@ function runtime(
       title: slug,
       shortDescription: "",
       description: "",
+      publisher: { official: publisher.type === "OWOGG" },
       policy: {
         score: { unit: "pt", direction, min: 0, max: 100, displaySuffix: " pt" },
         leaderboard: true,
@@ -85,9 +86,9 @@ test("generic score reads select canonical asc/desc bests for both publishers", 
   };
   const useCases = new GenericScoreReadUseCases(
     new FakeScoreRepository([
-      { game_id: "owogg-asc", min_score: 120, max_score: 300 },
-      { game_id: "user-desc", min_score: 4, max_score: 9 },
-      { game_id: "historical-missing", min_score: 1, max_score: 99 },
+      { game_id: "owogg-asc", ruleset_revision: 1, min_score: 120, max_score: 300 },
+      { game_id: "user-desc", ruleset_revision: 1, min_score: 4, max_score: 9 },
+      { game_id: "historical-missing", ruleset_revision: 1, min_score: 1, max_score: 99 },
     ]),
     registry,
   );

@@ -11,6 +11,7 @@ function baseGame(overrides: Partial<PublicGame> = {}): PublicGame {
     title: "반응속도 테스트",
     shortDescription: "빠르게 눌러보세요",
     description: "반응속도를 측정합니다.",
+    playModes: ["single"],
     catalog: {
       type: "TAXONOMY",
       categories: ["skill"],

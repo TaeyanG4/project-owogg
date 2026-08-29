@@ -67,6 +67,7 @@ export class StreamerUseCases {
       mode: "score" | "xp";
       gameId?: string;
       direction?: "asc" | "desc";
+      rulesetRevision?: number;
       platform?: StreamerPlatformType;
       limit?: number;
       offset?: number;
@@ -77,6 +78,9 @@ export class StreamerUseCases {
       offset,
     };
     if (selectedGameId !== undefined) queryOpts.gameId = selectedGameId;
+    if (selectedGame !== undefined) {
+      queryOpts.rulesetRevision = selectedGame.canonical.playConfig?.rulesetRevision ?? 1;
+    }
     if (options.platform !== undefined) queryOpts.platform = options.platform;
 
     const res = await this.streamerRepo.getStreamerRankings(queryOpts);

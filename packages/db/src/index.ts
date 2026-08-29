@@ -18,6 +18,8 @@ export * from "./d1/D1GameCreatorRepository.js";
 export * from "./d1/D1SandboxGameRepository.js";
 export * from "./d1/D1GameScoreAcceptanceRepository.js";
 export * from "./d1/D1GameResultAcceptanceRepository.js";
+export * from "./d1/D1GameResultVerificationClaimRepository.js";
+export * from "./d1/D1GameVerifiedResultPersistenceRepository.js";
 export * from "./d1/D1GameAchievementRepository.js";
 export * from "./d1/D1GameIdentityRepository.js";
 export * from "./d1/D1GameVersionRepository.js";

@@ -2,7 +2,7 @@
 
 상태: 가이드
 
-마지막 검증: 2026-08-24
+마지막 검증: 2026-08-30
 
 이 인덱스는 문서를 독자의 목적과 문서 역할에 따라 안내합니다. 구현 사실은 현재 코드,
 마이그레이션, 워크플로 순으로 확인하며 문서와 구현이 다르면 구현이 우선합니다.
@@ -33,10 +33,11 @@
 - [게임 제작 가이드](GAME_CREATION_GUIDE.md) — **가이드**, OWOGG source와 USER bundle 흐름
 - [게임 업로드 가이드](GAME_UPLOAD_GUIDE.md) — **가이드**, Game Creator Center 업로드 절차
 - [Ball Dodge 예제](../examples/ball-dodge/README.md) — **가이드**, 예제 상태는 문서 내부의 주의사항 확인
+- [Relay Protocol Probe 예제](../examples/relay-protocol-probe/README.md) — **가이드**, 게임별 서버
+  driver 없이 2~8인 Relay SDK를 사용하는 업로드 fixture
 - [게임 라인업](GAME_LINEUP.md) — **제안**, 후보 게임 기획
-- [멀티플레이 플랫폼 구현 계획](MULTIPLAYER_PLATFORM.md) — **구현 중인 기준 계획**, 공통 멀티
-  authority, M0~M6 Gate, Creator template, 보안·비용·검증 절차
-- [초기 Reaction Duel 설계](MULTIPLAYER_GAME_DESIGN.md) — **기록**, 현재 구현 기준으로 사용하지 않는 역사적 제안
+- [Generic Multiplayer Relay 전환 계획](MULTIPLAYER_RELAY_PLAN.md) — **구현 중인 기준 계획**,
+  공용 WebSocket Relay, 보안 기준선, driver/template 제거와 단계별 Gate
 
 ## Discord
 

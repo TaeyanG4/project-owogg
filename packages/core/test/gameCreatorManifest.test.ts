@@ -9,19 +9,25 @@ import {
 function minimal() {
   return {
     schemaVersion: 1,
-    game: { slug: "test-game", title: "Test", genre: "arcade", mode: "single" },
+    game: {
+      slug: "test-game",
+      title: "Test",
+      genre: "arcade",
+      mode: "single",
+      playModes: ["single"],
+    },
     progression: { type: "none" },
     result: { score: null },
   };
 }
 
-function multiplayerV2() {
+function relayMultiplayerV1() {
   return {
-    $schema: "https://owogg.com/schemas/manifest/v2.json",
-    schemaVersion: 2,
+    $schema: "https://owogg.com/schemas/manifest/v1.json",
+    schemaVersion: 1,
     game: {
-      slug: "creator-omok",
-      title: "Creator Omok",
+      slug: "creator-relay-board",
+      title: "Creator Relay Board",
       genre: "board",
       mode: "multi",
       playModes: ["online-multi"],
@@ -30,24 +36,60 @@ function multiplayerV2() {
     result: { outcome: { values: ["win", "loss", "draw"] }, score: null },
     leaderboard: { enabled: false },
     multiplayer: {
-      requestVersion: 1,
-      kind: "managed-template",
-      template: { id: "turn-grid", version: 1 },
-      players: { min: 2, max: 2 },
-      requirements: {
-        simulation: "turn",
-        lifecycle: "match",
-        persistence: "match",
-        latency: "relaxed",
+      version: 1,
+      transport: { kind: "websocket", protocolVersion: 1 },
+      runtime: { kind: "relay" },
+      players: { min: 2, max: 8 },
+      features: {
         reconnect: "resume",
-        hiddenInformation: false,
-        simultaneousResponse: false,
+        directMessages: true,
+        hostSnapshot: true,
         joinInProgress: false,
         spectators: false,
       },
-      config: { boardWidth: 15, boardHeight: 15, winLength: 5 },
-      client: { protocolVersion: 1 },
     },
+  };
+}
+
+function playConfigV1() {
+  return {
+    $schema: "https://owogg.com/schemas/manifest/v1.json",
+    schemaVersion: 1,
+    game: {
+      slug: "verified-game",
+      title: "Verified Game",
+      genre: "skill",
+      mode: "single",
+      playModes: ["single"],
+    },
+    difficulties: [
+      { id: "normal", title: "Normal", default: true },
+      { id: "hard", title: "Hard" },
+    ],
+    playConfig: {
+      version: 1,
+      rulesetRevision: 1,
+      verifierId: "verified-game-v1",
+      variants: [
+        { id: "standard", title: "Standard" },
+        { id: "precision", title: "Precision" },
+      ],
+      allowedConfigs: [
+        { difficultyId: "normal", variantId: "standard", rewardFactor: 1 },
+        { difficultyId: "normal", variantId: "precision", rewardFactor: 1.1 },
+        { difficultyId: "hard", variantId: "standard", rewardFactor: 1.2 },
+        { difficultyId: "hard", variantId: "precision", rewardFactor: 1.3 },
+      ],
+    },
+    progression: { type: "none" },
+    result: {
+      score: {
+        unit: "points",
+        direction: "desc",
+        range: { min: 0, max: 1000, outOfRange: "reject" },
+      },
+    },
+    leaderboard: { enabled: true },
   };
 }
 
@@ -55,6 +97,40 @@ test("Creator Manifest v1 accepts the minimum unscored game", () => {
   const manifest = parseGameCreatorManifest(minimal());
   assert.equal(manifest.game.slug, "test-game");
   assert.equal(manifest.result.score, null);
+  assert.deepEqual(manifest.game.playModes, ["single"]);
+});
+
+test("Creator Manifest requires the unified v1 shape and rejects other schema versions", () => {
+  assert.throws(
+    () =>
+      parseGameCreatorManifest({
+        ...minimal(),
+        game: { ...minimal().game, playModes: undefined },
+      }),
+    /game\.playModes must be an array/,
+  );
+  assert.throws(
+    () => parseGameCreatorManifest({ ...minimal(), schemaVersion: 99 }),
+    /schemaVersion must be 1/,
+  );
+});
+
+test("Creator Manifest v1 accepts single, local, and Relay online topology", () => {
+  const single = parseGameCreatorManifest(minimal());
+  assert.deepEqual(single.game.playModes, ["single"]);
+
+  const local = parseGameCreatorManifest({
+    ...minimal(),
+    game: { ...minimal().game, mode: "multi", playModes: ["local-multi"] },
+  });
+  assert.deepEqual(resolveGameCreatorManifestMultiplayerPlanV1(local), {
+    local: { topology: "local-multi" },
+    online: null,
+  });
+
+  const online = parseGameCreatorManifest(relayMultiplayerV1());
+  assert.equal(online.multiplayer?.runtime.kind, "relay");
+  assert.equal(resolveGameCreatorManifestMultiplayerPlanV1(online).online?.status, "SUPPORTED_V1");
 });
 
 test("Creator Manifest v1 accepts and normalizes the full public contract", () => {
@@ -66,6 +142,7 @@ test("Creator Manifest v1 accepts and normalizes the full public contract", () =
       title: "Full Game",
       genre: "arcade",
       mode: "single",
+      playModes: ["single"],
       shortDescription: "Short",
       description: "Long",
       tags: ["action", "score"],
@@ -115,10 +192,6 @@ test("Creator Manifest rejects missing/unsupported versions, invalid slugs, and 
     GameCreatorManifestValidationError,
   );
   assert.throws(
-    () => parseGameCreatorManifest({ ...minimal(), schemaVersion: 3 }),
-    GameCreatorManifestValidationError,
-  );
-  assert.throws(
     () => parseGameCreatorManifest({ ...minimal(), game: { ...minimal().game, slug: "Bad Slug" } }),
     GameCreatorManifestValidationError,
   );
@@ -128,46 +201,235 @@ test("Creator Manifest rejects missing/unsupported versions, invalid slugs, and 
   );
 });
 
-test("Creator Manifest v2 accepts a strict managed multiplayer request", () => {
-  const manifest = parseGameCreatorManifest(multiplayerV2());
-  assert.equal(manifest.schemaVersion, 2);
-  if (manifest.schemaVersion !== 2) assert.fail("expected manifest v2");
+test("Creator Manifest v1 accepts a strict Relay multiplayer request", () => {
+  const manifest = parseGameCreatorManifest(relayMultiplayerV1());
+  assert.equal(manifest.schemaVersion, 1);
   assert.deepEqual(manifest.game.playModes, ["online-multi"]);
-  assert.equal(manifest.multiplayer?.template.id, "turn-grid");
-  assert.equal(manifest.multiplayer?.requirements.simulation, "turn");
+  assert.equal(manifest.multiplayer?.runtime.kind, "relay");
+  assert.equal(manifest.multiplayer?.features.hostSnapshot, true);
   const plan = resolveGameCreatorManifestMultiplayerPlanV1(manifest);
   assert.equal(plan.local, null);
   assert.equal(plan.online?.status, "SUPPORTED_V1");
-  assert.equal(plan.online?.status === "SUPPORTED_V1" ? plan.online.resolvedClass : null, "M1");
+  assert.equal(
+    plan.online?.status === "SUPPORTED_V1" ? plan.online.resultTrust : null,
+    "UNVERIFIED",
+  );
 });
 
-test("manifest class planning resolves local M0 independently from an online class", () => {
+test("unified v1 PlayConfig parses references and normalizes its first variant as default", () => {
+  const manifest = parseGameCreatorManifest(playConfigV1());
+  assert.equal(manifest.playConfig?.version, 1);
+  assert.equal(manifest.playConfig?.variants[0]?.default, true);
+  assert.equal(manifest.playConfig?.variants[1]?.default, undefined);
+  assert.equal(manifest.playConfig?.allowedConfigs[3]?.rewardFactor, 1.3);
+});
+
+test("PlayConfig rejects malformed declarations and unknown nested fields", () => {
+  const valid = playConfigV1();
+  const invalidPlayConfigs = [
+    { ...valid.playConfig, version: 2 },
+    { ...valid.playConfig, rulesetRevision: 0 },
+    { ...valid.playConfig, verifierId: "Invalid Verifier" },
+    { ...valid.playConfig, variants: [] },
+    {
+      ...valid.playConfig,
+      variants: [
+        { id: "standard", title: "Standard" },
+        { id: "standard", title: "Duplicate" },
+      ],
+    },
+    {
+      ...valid.playConfig,
+      variants: [
+        { id: "standard", title: "Standard", default: true },
+        { id: "precision", title: "Precision", default: true },
+      ],
+    },
+    {
+      ...valid.playConfig,
+      variants: [{ id: "standard", title: "Standard", mystery: true }],
+    },
+    { ...valid.playConfig, allowedConfigs: [] },
+    {
+      ...valid.playConfig,
+      allowedConfigs: [...valid.playConfig.allowedConfigs, valid.playConfig.allowedConfigs[0]],
+    },
+    {
+      ...valid.playConfig,
+      allowedConfigs: valid.playConfig.allowedConfigs.map((config, index) =>
+        index === 0 ? { ...config, difficultyId: "unknown" } : config,
+      ),
+    },
+    {
+      ...valid.playConfig,
+      allowedConfigs: valid.playConfig.allowedConfigs.map((config, index) =>
+        index === 0 ? { ...config, variantId: "unknown" } : config,
+      ),
+    },
+    {
+      ...valid.playConfig,
+      allowedConfigs: valid.playConfig.allowedConfigs.map((config, index) =>
+        index === 0 ? { ...config, rewardFactor: 0 } : config,
+      ),
+    },
+    {
+      ...valid.playConfig,
+      allowedConfigs: valid.playConfig.allowedConfigs.map((config, index) =>
+        index === 0 ? { ...config, rewardFactor: Number.POSITIVE_INFINITY } : config,
+      ),
+    },
+    {
+      ...valid.playConfig,
+      allowedConfigs: valid.playConfig.allowedConfigs.map((config, index) =>
+        index === 0 ? { ...config, mystery: true } : config,
+      ),
+    },
+  ];
+  for (const playConfig of invalidPlayConfigs) {
+    assert.throws(
+      () => parseGameCreatorManifest({ ...valid, playConfig }),
+      GameCreatorManifestValidationError,
+    );
+  }
+});
+
+test("PlayConfig requires complete coverage including its default pair", () => {
+  const valid = playConfigV1();
+  assert.throws(
+    () =>
+      parseGameCreatorManifest({
+        ...valid,
+        playConfig: {
+          ...valid.playConfig,
+          allowedConfigs: valid.playConfig.allowedConfigs.filter(
+            (config) => config.difficultyId !== "hard",
+          ),
+        },
+      }),
+    /must include difficulty "hard"/,
+  );
+  assert.throws(
+    () =>
+      parseGameCreatorManifest({
+        ...valid,
+        playConfig: {
+          ...valid.playConfig,
+          allowedConfigs: valid.playConfig.allowedConfigs.filter(
+            (config) => config.variantId !== "precision",
+          ),
+        },
+      }),
+    /must include variant "precision"/,
+  );
+  assert.throws(
+    () =>
+      parseGameCreatorManifest({
+        ...valid,
+        playConfig: {
+          ...valid.playConfig,
+          variants: [
+            { id: "standard", title: "Standard" },
+            { id: "precision", title: "Precision", default: true },
+          ],
+          allowedConfigs: valid.playConfig.allowedConfigs.filter(
+            (config) => !(config.difficultyId === "normal" && config.variantId === "precision"),
+          ),
+        },
+      }),
+    /default difficulty\/variant pair/,
+  );
+});
+
+test("PlayConfig uses implicit normal difficulty and requires competitive score policy", () => {
+  const valid = playConfigV1();
+  const withoutDifficulties = {
+    ...valid,
+    difficulties: undefined,
+    playConfig: {
+      ...valid.playConfig,
+      variants: [{ id: "standard", title: "Standard" }],
+      allowedConfigs: [{ difficultyId: "normal", variantId: "standard", rewardFactor: 1 }],
+    },
+  };
+  assert.equal(
+    parseGameCreatorManifest(withoutDifficulties).playConfig?.allowedConfigs[0]?.difficultyId,
+    "normal",
+  );
+  assert.throws(
+    () =>
+      parseGameCreatorManifest({
+        ...withoutDifficulties,
+        playConfig: {
+          ...withoutDifficulties.playConfig,
+          allowedConfigs: [{ difficultyId: "easy", variantId: "standard", rewardFactor: 1 }],
+        },
+      }),
+    /difficultyId "easy" is not declared/,
+  );
+  assert.throws(
+    () => parseGameCreatorManifest({ ...valid, result: { score: null } }),
+    GameCreatorManifestValidationError,
+  );
+  assert.throws(
+    () => parseGameCreatorManifest({ ...valid, leaderboard: { enabled: false } }),
+    /requires leaderboard.enabled to be true/,
+  );
+});
+
+test("PlayConfig coexists with Relay online only when a generic hybrid topology is explicit", () => {
+  const online = relayMultiplayerV1();
+  const config = playConfigV1();
+  assert.throws(
+    () =>
+      parseGameCreatorManifest({
+        ...online,
+        difficulties: config.difficulties,
+        result: config.result,
+        leaderboard: config.leaderboard,
+        playConfig: config.playConfig,
+      }),
+    /requires single or local-multi/,
+  );
+
+  const hybrid = parseGameCreatorManifest({
+    ...online,
+    game: { ...online.game, playModes: ["local-multi", "online-multi"] },
+    difficulties: config.difficulties,
+    result: config.result,
+    leaderboard: config.leaderboard,
+    playConfig: config.playConfig,
+  });
+  assert.deepEqual(hybrid.game.playModes, ["local-multi", "online-multi"]);
+  assert.equal(hybrid.playConfig?.verifierId, config.playConfig.verifierId);
+  assert.equal(hybrid.multiplayer?.runtime.kind, online.multiplayer?.runtime.kind);
+});
+
+test("manifest topology planning resolves local play independently from the online runtime", () => {
   const localV1 = parseGameCreatorManifest({
     ...minimal(),
-    game: { ...minimal().game, mode: "multi" },
+    game: { ...minimal().game, mode: "multi", playModes: ["local-multi"] },
   });
   assert.deepEqual(resolveGameCreatorManifestMultiplayerPlanV1(localV1), {
-    local: { resolvedClass: "M0" },
+    local: { topology: "local-multi" },
     online: null,
   });
 
-  const hybrid = multiplayerV2();
+  const hybrid = relayMultiplayerV1();
   const manifest = parseGameCreatorManifest({
     ...hybrid,
     game: { ...hybrid.game, playModes: ["local-multi", "online-multi"] },
   });
   const plan = resolveGameCreatorManifestMultiplayerPlanV1(manifest);
-  assert.deepEqual(plan.local, { resolvedClass: "M0" });
+  assert.deepEqual(plan.local, { topology: "local-multi" });
   assert.equal(plan.online?.status, "SUPPORTED_V1");
-  assert.equal(plan.online?.status === "SUPPORTED_V1" ? plan.online.resolvedClass : null, "M1");
+  assert.equal(plan.online?.status === "SUPPORTED_V1" ? plan.online.runtimeKind : null, "relay");
 });
 
-test("Creator Manifest v2 keeps online mode, request, schema URL, and leaderboard consistent", () => {
-  const online = multiplayerV2();
-  assert.throws(
-    () => parseGameCreatorManifest({ ...online, multiplayer: undefined }),
-    /online-multi requires multiplayer/,
-  );
+test("Creator Manifest v1 keeps Relay request, schema URL, and leaderboard consistent", () => {
+  const online = relayMultiplayerV1();
+  const externallyProfiled = parseGameCreatorManifest({ ...online, multiplayer: undefined });
+  assert.deepEqual(externallyProfiled.game.playModes, ["online-multi"]);
+  assert.equal(resolveGameCreatorManifestMultiplayerPlanV1(externallyProfiled).online, null);
   assert.throws(
     () =>
       parseGameCreatorManifest({
@@ -190,16 +452,16 @@ test("Creator Manifest v2 keeps online mode, request, schema URL, and leaderboar
         },
         leaderboard: { enabled: true },
       }),
-    /cannot enable leaderboard/,
+    /only for a hybrid PlayConfig path/,
   );
   assert.throws(
-    () => parseGameCreatorManifest({ ...online, $schema: "https://example.invalid/v2.json" }),
+    () => parseGameCreatorManifest({ ...online, $schema: "https://example.invalid/v1.json" }),
     /manifest\.\$schema/,
   );
 });
 
-test("Creator Manifest v2 rejects server authority fields and non-managed runtime selection", () => {
-  const online = multiplayerV2();
+test("Creator Manifest v1 rejects game-specific server authority fields", () => {
+  const online = relayMultiplayerV1();
   for (const forbidden of [
     { resolvedClass: "M2" },
     { runtimeBackend: "durable-object" },

@@ -30,7 +30,7 @@ const BASE64_URL_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 export type MultiplayerTicketParticipantRole = "HOST" | "PLAYER";
 
-export interface MultiplayerJoinTicketClaims {
+interface MultiplayerJoinTicketCommonClaims {
   readonly iss: typeof MULTIPLAYER_TICKET_ISSUER;
   readonly aud: typeof MULTIPLAYER_TICKET_AUDIENCE;
   readonly kid: string;
@@ -45,13 +45,35 @@ export interface MultiplayerJoinTicketClaims {
   readonly gameVersionId: number;
   readonly profileId: number;
   readonly profileRevision: number;
-  readonly rulesetKey: string;
-  readonly rulesetRevision: number;
   readonly generation: number;
   readonly connectionGeneration: number;
   readonly seatIndex: number;
   readonly role: MultiplayerTicketParticipantRole;
 }
+
+/** Exact server-owned Relay limits copied from the approved runtime profile into a short ticket. */
+export interface MultiplayerRelayTicketRuntimeV1 {
+  readonly kind: "relay";
+  readonly protocolVersion: 1;
+  readonly reconnect: "none" | "resume";
+  readonly directMessages: boolean;
+  readonly hostSnapshot: boolean;
+  readonly maxMessageBytes: number;
+  readonly maxSnapshotBytes: number;
+  readonly messagesPerSecond: number;
+  readonly roomBytesPerSecond: number;
+  readonly roomTtlSeconds: number;
+  readonly hostDeparturePolicy: "close";
+  readonly resultTrust: "UNVERIFIED";
+}
+
+export interface MultiplayerRelayJoinTicketClaims extends MultiplayerJoinTicketCommonClaims {
+  /** Exact immutable ZIP/version identity authorized by profile, room, and admission. */
+  readonly contentHash: string;
+  readonly runtime: MultiplayerRelayTicketRuntimeV1;
+}
+
+export type MultiplayerJoinTicketClaims = MultiplayerRelayJoinTicketClaims;
 
 export interface MultiplayerTicketSigningKey {
   readonly kid: string;
@@ -76,10 +98,45 @@ export interface MultiplayerJoinTicketExpectedContext {
   readonly participantId?: string;
   readonly userId?: number;
   readonly profileId?: number;
+  readonly contentHash?: string;
   readonly generation?: number;
   readonly connectionGeneration?: number;
   readonly seatIndex?: number;
 }
+
+const COMMON_CLAIM_KEYS = [
+  "iss",
+  "aud",
+  "kid",
+  "iat",
+  "exp",
+  "jti",
+  "instanceId",
+  "participantId",
+  "userId",
+  "gameVersionId",
+  "profileId",
+  "profileRevision",
+  "generation",
+  "connectionGeneration",
+  "seatIndex",
+  "role",
+] as const;
+
+const RELAY_RUNTIME_KEYS = [
+  "kind",
+  "protocolVersion",
+  "reconnect",
+  "directMessages",
+  "hostSnapshot",
+  "maxMessageBytes",
+  "maxSnapshotBytes",
+  "messagesPerSecond",
+  "roomBytesPerSecond",
+  "roomTtlSeconds",
+  "hostDeparturePolicy",
+  "resultTrust",
+] as const;
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -104,35 +161,55 @@ function isOpaqueId(value: unknown): value is string {
   return typeof value === "string" && OPAQUE_ID_PATTERN.test(value);
 }
 
+export function parseMultiplayerRelayTicketRuntimeV1(
+  value: unknown,
+): MultiplayerRelayTicketRuntimeV1 | null {
+  if (!isPlainRecord(value) || !hasExactKeys(value, RELAY_RUNTIME_KEYS)) return null;
+  if (
+    value.kind !== "relay" ||
+    value.protocolVersion !== 1 ||
+    (value.reconnect !== "none" && value.reconnect !== "resume") ||
+    typeof value.directMessages !== "boolean" ||
+    typeof value.hostSnapshot !== "boolean" ||
+    !isPositiveSafeInteger(value.maxMessageBytes) ||
+    value.maxMessageBytes > 4 * 1024 ||
+    !isNonNegativeSafeInteger(value.maxSnapshotBytes) ||
+    value.maxSnapshotBytes > 16 * 1024 ||
+    (!value.hostSnapshot && value.maxSnapshotBytes !== 0) ||
+    (value.hostSnapshot && value.maxSnapshotBytes === 0) ||
+    !isPositiveSafeInteger(value.messagesPerSecond) ||
+    value.messagesPerSecond > 20 ||
+    !isPositiveSafeInteger(value.roomBytesPerSecond) ||
+    value.roomBytesPerSecond > 256 * 1024 ||
+    !isPositiveSafeInteger(value.roomTtlSeconds) ||
+    value.roomTtlSeconds > 2 * 60 * 60 ||
+    value.hostDeparturePolicy !== "close" ||
+    value.resultTrust !== "UNVERIFIED"
+  ) {
+    return null;
+  }
+  return {
+    kind: "relay",
+    protocolVersion: 1,
+    reconnect: value.reconnect,
+    directMessages: value.directMessages,
+    hostSnapshot: value.hostSnapshot,
+    maxMessageBytes: value.maxMessageBytes,
+    maxSnapshotBytes: value.maxSnapshotBytes,
+    messagesPerSecond: value.messagesPerSecond,
+    roomBytesPerSecond: value.roomBytesPerSecond,
+    roomTtlSeconds: value.roomTtlSeconds,
+    hostDeparturePolicy: "close",
+    resultTrust: "UNVERIFIED",
+  };
+}
+
 /** Strict parser used for both locally-created and untrusted decoded claims. */
 export function parseMultiplayerJoinTicketClaims(
   value: unknown,
 ): MultiplayerJoinTicketClaims | null {
   if (!isPlainRecord(value)) return null;
-  if (
-    !hasExactKeys(value, [
-      "iss",
-      "aud",
-      "kid",
-      "iat",
-      "exp",
-      "jti",
-      "instanceId",
-      "participantId",
-      "userId",
-      "gameVersionId",
-      "profileId",
-      "profileRevision",
-      "rulesetKey",
-      "rulesetRevision",
-      "generation",
-      "connectionGeneration",
-      "seatIndex",
-      "role",
-    ])
-  ) {
-    return null;
-  }
+  if (!hasExactKeys(value, [...COMMON_CLAIM_KEYS, "contentHash", "runtime"])) return null;
 
   if (value.iss !== MULTIPLAYER_TICKET_ISSUER) return null;
   if (value.aud !== MULTIPLAYER_TICKET_AUDIENCE) return null;
@@ -146,13 +223,6 @@ export function parseMultiplayerJoinTicketClaims(
   if (!isPositiveSafeInteger(value.gameVersionId)) return null;
   if (!isPositiveSafeInteger(value.profileId)) return null;
   if (!isPositiveSafeInteger(value.profileRevision)) return null;
-  if (
-    typeof value.rulesetKey !== "string" ||
-    !/^[a-z0-9][a-z0-9._:/-]{0,95}$/.test(value.rulesetKey)
-  ) {
-    return null;
-  }
-  if (!isPositiveSafeInteger(value.rulesetRevision)) return null;
   if (!isPositiveSafeInteger(value.generation)) return null;
   if (!isPositiveSafeInteger(value.connectionGeneration)) return null;
   if (!isNonNegativeSafeInteger(value.seatIndex) || value.seatIndex > 7) return null;
@@ -160,7 +230,7 @@ export function parseMultiplayerJoinTicketClaims(
 
   // Return a freshly-shaped object so signing has a deterministic field order and no unknown
   // prototype/properties can survive the trust boundary.
-  return {
+  const common: MultiplayerJoinTicketCommonClaims = {
     iss: MULTIPLAYER_TICKET_ISSUER,
     aud: MULTIPLAYER_TICKET_AUDIENCE,
     kid: value.kid,
@@ -173,13 +243,17 @@ export function parseMultiplayerJoinTicketClaims(
     gameVersionId: value.gameVersionId,
     profileId: value.profileId,
     profileRevision: value.profileRevision,
-    rulesetKey: value.rulesetKey,
-    rulesetRevision: value.rulesetRevision,
     generation: value.generation,
     connectionGeneration: value.connectionGeneration,
     seatIndex: value.seatIndex,
     role: value.role,
   };
+  const runtime = parseMultiplayerRelayTicketRuntimeV1(value.runtime);
+  return runtime &&
+    typeof value.contentHash === "string" &&
+    /^[a-f0-9]{64}$/.test(value.contentHash)
+    ? { ...common, contentHash: value.contentHash, runtime }
+    : null;
 }
 
 function validateSigningKey(key: MultiplayerTicketSigningKey): void {
@@ -277,6 +351,7 @@ function contextMatches(
     (expected.participantId === undefined || claims.participantId === expected.participantId) &&
     (expected.userId === undefined || claims.userId === expected.userId) &&
     (expected.profileId === undefined || claims.profileId === expected.profileId) &&
+    (expected.contentHash === undefined || claims.contentHash === expected.contentHash) &&
     (expected.generation === undefined || claims.generation === expected.generation) &&
     (expected.connectionGeneration === undefined ||
       claims.connectionGeneration === expected.connectionGeneration) &&

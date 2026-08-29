@@ -24,6 +24,7 @@ import { usePublicGames } from "../features/publicGamesApi";
 import { publicGameToCard } from "../features/catalog/publicGameAdapter";
 import { useI18n } from "../features/i18n/I18nContext";
 import { getLocalizedGameContent } from "../features/catalog/localizedGameContent";
+import { leaderboardVariantLabel } from "../features/scores/variantLabel";
 
 export function meta() {
   return [
@@ -369,7 +370,7 @@ export default function Ranking() {
                           <>
                             <th className="py-4 px-6">{dict.ranking.categoryHeader}</th>
                             <th className="py-4 px-6">{dict.ranking.recordHeader}</th>
-                            <th className="py-4 px-6">{dict.ranking.dateHeader}</th>
+                            <th className="py-4 px-6">{dict.ranking.modeHeader}</th>
                           </>
                         )}
                         {mainTab === "xp" && (
@@ -510,7 +511,10 @@ export default function Ranking() {
                                   </td>
 
                                   <td className="py-4 px-6 text-text-muted text-xs whitespace-nowrap">
-                                    {record.createdAt}
+                                    {leaderboardVariantLabel(
+                                      publicGames.find((game) => game.slug === record.gameId),
+                                      record.variantId,
+                                    )}
                                   </td>
                                 </tr>
                               );

@@ -1,12 +1,11 @@
 import {
   MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
-  parseGameToHostMultiplayerMessage,
+  parseGameToHostRelayMessage,
   parseHostToGameMultiplayerMessage,
-  type GameToHostMultiplayerMessage,
+  type GameToHostRelayMessage,
   type HostToGameMultiplayerMessage,
   type MultiInitMessage,
 } from "./multiplayerProtocol.js";
-import type { OwoggMultiplayerActionRequest } from "../contracts/gameCreatorManifest.js";
 
 export interface MultiplayerBridgeWindowLike {
   readonly parent: unknown;
@@ -14,45 +13,38 @@ export interface MultiplayerBridgeWindowLike {
   removeEventListener(type: "message", listener: (event: MessageEvent) => void): void;
 }
 
-export type MultiplayerActionRequest = OwoggMultiplayerActionRequest;
+export type MultiplayerRelaySendRequest =
+  | { readonly delivery: "broadcast"; readonly payload: unknown }
+  | {
+      readonly delivery: "direct";
+      readonly targetParticipantId: string;
+      readonly payload: unknown;
+    };
 
-export type MultiplayerMessageListener = (message: HostToGameMultiplayerMessage) => void;
+export type MultiplayerMessageListener = (
+  message: Exclude<HostToGameMultiplayerMessage, MultiInitMessage>,
+) => void;
 
 export interface MultiplayerBridgeClient {
   /** Sanitized iframe-visible bootstrap. It never includes a user id, ticket, URL, or cookie. */
   readonly bootstrap: MultiInitMessage;
   ready(): boolean;
-  /** Returns the idempotency id when sent, or `null` when the request is invalid/closed. */
-  action(request: MultiplayerActionRequest): string | null;
-  input(payload: unknown): boolean;
+  send(request: MultiplayerRelaySendRequest): boolean;
+  broadcast(payload: unknown): boolean;
+  direct(targetParticipantId: string, payload: unknown): boolean;
+  /** Replaces the host-owned opaque reconnect snapshot. Only the host may call it. */
+  snapshot(payload: unknown): boolean;
   leave(): void;
   subscribe(listener: MultiplayerMessageListener): () => void;
   disconnect(): void;
 }
 
-export interface MultiplayerBridgeClientOptions {
-  /** Test seam and deterministic-game seam. Production defaults to `crypto.randomUUID()`. */
-  readonly createActionId?: () => string;
-}
-
-function defaultActionId(): string {
-  return crypto.randomUUID();
-}
-
-function hasServerSequence(
-  message: HostToGameMultiplayerMessage,
-): message is HostToGameMultiplayerMessage & { readonly serverSeq: number } {
-  return "serverSeq" in message;
-}
-
 /**
- * Game-side multiplayer bridge. The one-time `MULTI_INIT` window message transfers a private
- * MessagePort; every later intent/state message uses that port. Only the actual parent window may
- * complete the handshake, and a second bootstrap is ignored after the listener is removed.
+ * Game-side Relay bridge. A one-time `MULTI_INIT` transfers a private MessagePort; every later
+ * intent and delivery uses that port, never the global window channel.
  */
 export function connectMultiplayerBridge(
   windowLike: MultiplayerBridgeWindowLike = window as unknown as MultiplayerBridgeWindowLike,
-  options: MultiplayerBridgeClientOptions = {},
 ): Promise<MultiplayerBridgeClient> {
   return new Promise((resolve) => {
     let settled = false;
@@ -66,7 +58,7 @@ export function connectMultiplayerBridge(
 
       settled = true;
       windowLike.removeEventListener("message", onMessage);
-      resolve(createMultiplayerClient(port, bootstrap, options.createActionId ?? defaultActionId));
+      resolve(createMultiplayerClient(port, bootstrap));
     }
 
     windowLike.addEventListener("message", onMessage);
@@ -76,7 +68,6 @@ export function connectMultiplayerBridge(
 function createMultiplayerClient(
   port: MessagePort,
   bootstrap: MultiInitMessage,
-  createActionId: () => string,
 ): MultiplayerBridgeClient {
   const listeners = new Set<MultiplayerMessageListener>();
   let clientSeq = 0;
@@ -85,9 +76,9 @@ function createMultiplayerClient(
   let left = false;
   let disconnected = false;
 
-  function send(message: GameToHostMultiplayerMessage): boolean {
+  function post(message: GameToHostRelayMessage): boolean {
     if (disconnected || left) return false;
-    const parsed = parseGameToHostMultiplayerMessage(message);
+    const parsed = parseGameToHostRelayMessage(message);
     if (!parsed || parsed.generation !== bootstrap.generation) return false;
     try {
       port.postMessage(parsed);
@@ -103,7 +94,7 @@ function createMultiplayerClient(
     if (!message || message.type === "MULTI_INIT" || message.generation !== bootstrap.generation) {
       return;
     }
-    if (hasServerSequence(message)) {
+    if ("serverSeq" in message) {
       if (message.serverSeq <= lastServerSeq) return;
       lastServerSeq = message.serverSeq;
     }
@@ -111,11 +102,63 @@ function createMultiplayerClient(
   };
   port.start();
 
+  function nextSequence(): number | null {
+    const next = clientSeq + 1;
+    return Number.isSafeInteger(next) ? next : null;
+  }
+
+  function broadcast(payload: unknown): boolean {
+    const nextSeq = nextSequence();
+    if (nextSeq === null) return false;
+    const sent = post({
+      type: "RELAY_SEND",
+      v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
+      generation: bootstrap.generation,
+      clientSeq: nextSeq,
+      delivery: "broadcast",
+      payload,
+    });
+    if (sent) clientSeq = nextSeq;
+    return sent;
+  }
+
+  function direct(targetParticipantId: string, payload: unknown): boolean {
+    if (!bootstrap.capabilities.directMessages) return false;
+    const nextSeq = nextSequence();
+    if (nextSeq === null) return false;
+    const sent = post({
+      type: "RELAY_SEND",
+      v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
+      generation: bootstrap.generation,
+      clientSeq: nextSeq,
+      delivery: "direct",
+      targetParticipantId,
+      payload,
+    });
+    if (sent) clientSeq = nextSeq;
+    return sent;
+  }
+
+  function snapshot(payload: unknown): boolean {
+    if (!bootstrap.capabilities.hostSnapshot || bootstrap.self.role !== "HOST") return false;
+    const nextSeq = nextSequence();
+    if (nextSeq === null) return false;
+    const sent = post({
+      type: "RELAY_SNAPSHOT_SET",
+      v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
+      generation: bootstrap.generation,
+      clientSeq: nextSeq,
+      payload,
+    });
+    if (sent) clientSeq = nextSeq;
+    return sent;
+  }
+
   return {
     bootstrap,
     ready() {
       if (readySent) return false;
-      const sent = send({
+      const sent = post({
         type: "MULTI_READY",
         v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
         generation: bootstrap.generation,
@@ -123,45 +166,38 @@ function createMultiplayerClient(
       if (sent) readySent = true;
       return sent;
     },
-    action(request) {
-      if (disconnected || left) return null;
-      if (typeof request !== "object" || request === null || Array.isArray(request)) return null;
-      let clientActionId: string;
+    send(request) {
       try {
-        clientActionId = request.clientActionId ?? createActionId();
+        if (typeof request !== "object" || request === null || Array.isArray(request)) return false;
+        const keys = Object.keys(request);
+        if (
+          request.delivery === "broadcast" &&
+          keys.length === 2 &&
+          keys.every((key) => key === "delivery" || key === "payload")
+        ) {
+          return broadcast(request.payload);
+        }
+        if (
+          request.delivery === "direct" &&
+          keys.length === 3 &&
+          keys.every(
+            (key) => key === "delivery" || key === "targetParticipantId" || key === "payload",
+          )
+        ) {
+          return direct(request.targetParticipantId, request.payload);
+        }
       } catch {
-        return null;
+        return false;
       }
-      const nextSeq = clientSeq + 1;
-      const sent = send({
-        type: "MULTI_ACTION",
-        v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
-        generation: bootstrap.generation,
-        clientSeq: nextSeq,
-        clientActionId,
-        expectedRevision: request.expectedRevision,
-        payload: request.payload,
-      });
-      if (!sent) return null;
-      clientSeq = nextSeq;
-      return clientActionId;
+      return false;
     },
-    input(payload) {
-      const nextSeq = clientSeq + 1;
-      const sent = send({
-        type: "MULTI_INPUT",
-        v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
-        generation: bootstrap.generation,
-        clientSeq: nextSeq,
-        payload,
-      });
-      if (sent) clientSeq = nextSeq;
-      return sent;
-    },
+    broadcast,
+    direct,
+    snapshot,
     leave() {
       if (disconnected || left) return;
       if (
-        send({
+        post({
           type: "MULTI_LEAVE",
           v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
           generation: bootstrap.generation,

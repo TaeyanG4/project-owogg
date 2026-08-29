@@ -18,6 +18,12 @@ function createFakeClient(difficultyId?: string): {
   const completed: unknown[] = [];
   const client: GameBridgeClient = {
     ...(difficultyId !== undefined ? { difficultyId } : {}),
+    playModes: [],
+    selectPlayMode: async (playMode) => playMode,
+    playConfig: null,
+    requestStart: async () => {
+      throw new Error("not configured");
+    },
     ready: () => calls.push("ready"),
     started: () => calls.push("started"),
     event: () => calls.push("event"),

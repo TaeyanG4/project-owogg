@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Verified Aim Test</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <p class="eyebrow">OWOGG SERVER-VERIFIED REFERENCE</p>
+        <h1>Verified Aim Test</h1>
+        <p id="status" role="status">서버가 승인한 설정을 불러오는 중입니다.</p>
+      </header>
+
+      <section id="setup" class="panel" aria-label="게임 설정">
+        <label>
+          난이도
+          <select id="difficulty"></select>
+        </label>
+        <label>
+          모드
+          <select id="variant"></select>
+        </label>
+        <button id="start" type="button" disabled>서버 승인 후 시작</button>
+        <p class="note">점수는 게임이 아니라 OWOGG 서버 verifier가 계산합니다.</p>
+      </section>
+
+      <section id="play" class="panel hidden" aria-label="에임 테스트 플레이 영역">
+        <div class="progress-row">
+          <span id="progress">0 / 0</span>
+          <span id="elapsed">0 ms</span>
+        </div>
+        <div id="arena" aria-label="표적 영역">
+          <button id="target" type="button" aria-label="표적"></button>
+        </div>
+      </section>
+
+      <section id="finished" class="panel hidden">
+        <h2>증거 제출 완료</h2>
+        <p id="localTime"></p>
+        <p class="note">표시된 시간은 참고값입니다. OWOGG 결과 카드의 서버 확정값이 권위입니다.</p>
+      </section>
+    </main>
+    <script type="module" src="main.js"></script>
+  </body>
+</html>

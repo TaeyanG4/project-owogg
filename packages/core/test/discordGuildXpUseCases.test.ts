@@ -53,8 +53,11 @@ class MockDiscordGuildRepo implements DiscordGuildRepository {
     userId: number;
     gameId: string;
     score: number;
+    variantId?: string;
+    rulesetRevision?: number;
     createdAt: string;
   }[] = [];
+  public lastLeaderboardRulesetRevision: number | undefined;
   private nextXpEventId = 1;
 
   async createPlayContext(input: {
@@ -289,13 +292,18 @@ class MockDiscordGuildRepo implements DiscordGuildRepository {
     gameId: string,
     direction: "asc" | "desc" = "desc",
     limit = 20,
+    rulesetRevision = 1,
   ): Promise<ServerGameLeaderboardEntry[]> {
+    this.lastLeaderboardRulesetRevision = rulesetRevision;
     const guildUserIds = new Set(
       this.guildXpEvents.filter((e) => e.guildId === guildId).map((e) => e.userId),
     );
 
     let matchingScores = this.scores.filter(
-      (s) => s.gameId === gameId && guildUserIds.has(s.userId),
+      (s) =>
+        s.gameId === gameId &&
+        (s.rulesetRevision ?? 1) === rulesetRevision &&
+        guildUserIds.has(s.userId),
     );
 
     matchingScores.sort((a, b) => {
@@ -317,6 +325,8 @@ class MockDiscordGuildRepo implements DiscordGuildRepository {
         avatarUrl: null,
         gameId: s.gameId,
         score: s.score,
+        variantId: s.variantId ?? "standard",
+        rulesetRevision: s.rulesetRevision ?? 1,
         formattedScore: String(s.score),
         createdAt: s.createdAt,
       });
@@ -787,6 +797,14 @@ test("Phase H2 Leaderboard, Time Boundary & Command Tests", async (t) => {
         score: 150,
         createdAt: new Date().toISOString(),
       },
+      {
+        id: 12,
+        userId: 1,
+        gameId: "reaction-time",
+        score: 100,
+        rulesetRevision: 2,
+        createdAt: new Date().toISOString(),
+      },
     );
 
     const gameLb = await guildXpUseCases.getGuildGameLeaderboard("guild_A", "reaction-time", 10);
@@ -794,6 +812,9 @@ test("Phase H2 Leaderboard, Time Boundary & Command Tests", async (t) => {
     assert.equal(gameLb.length, 1);
     assert.equal(gameLb[0].userId, 1);
     assert.equal(gameLb[0].score, 220);
+    assert.equal(gameLb[0].variantId, "standard");
+    assert.equal(gameLb[0].rulesetRevision, 1);
+    assert.equal(guildRepo.lastLeaderboardRulesetRevision, 1);
   });
 
   await t.test("getUserGuildRankSummary for linked vs unlinked user", async () => {

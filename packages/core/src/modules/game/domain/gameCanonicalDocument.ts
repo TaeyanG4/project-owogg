@@ -51,18 +51,21 @@
  * is meant to be read identically regardless of which environment/host resolves it.
  */
 
-import type {
-  DifficultyConfig,
-  GameMode,
-  GamePresentation,
-  InputMethod,
-  OwoggGameCreatorManifest,
-  ScoreConfig,
+import {
+  OWOGG_PLAY_CONFIG_VERSION,
+  type DifficultyConfig,
+  type GameMode,
+  type GamePresentation,
+  type InputMethod,
+  type OwoggGameCreatorManifest,
+  type ScoreConfig,
 } from "@owogg/game-sdk/contracts";
 import type { SandboxGameMode } from "../../../domain/sandboxGames.js";
 import { parseGameCreatorManifest } from "../../../domain/gameCreatorManifest.js";
 
-export const GAME_CANONICAL_SCHEMA_VERSION = 3 as const;
+/** OWOGG is pre-release, so the current canonical contract is intentionally rebased to v1.
+ * There are no compatibility readers for earlier experimental canonical shapes. */
+export const GAME_CANONICAL_SCHEMA_VERSION = 1 as const;
 
 /** Public publisher presentation metadata. This is deliberately not an authorization fact:
  * ownership and write permission remain server-controlled relational state in D1. */
@@ -83,6 +86,28 @@ export interface GameCanonicalPolicy {
   readonly leaderboard: boolean;
   readonly xpPerCompletion: number;
   readonly requiresAuth: boolean;
+}
+
+export interface GameCanonicalPlayConfigVariant {
+  readonly id: string;
+  readonly label: string;
+}
+
+export interface GameCanonicalAllowedPlayConfig {
+  readonly difficultyId: string;
+  readonly variantId: string;
+  readonly rewardFactor: number;
+}
+
+/** Server-approved competitive configuration. Unlike `creatorManifest.playConfig`, this
+ * normalized projection is runtime authority after review, publication, and canonicalization. */
+export interface GameCanonicalPlayConfig {
+  readonly version: typeof OWOGG_PLAY_CONFIG_VERSION;
+  readonly rulesetRevision: number;
+  readonly verifierId: string;
+  readonly defaultVariantId: string;
+  readonly variants: readonly GameCanonicalPlayConfigVariant[];
+  readonly allowedConfigs: readonly GameCanonicalAllowedPlayConfig[];
 }
 
 /**
@@ -138,12 +163,11 @@ export interface GameCanonicalDocument {
   readonly policy: GameCanonicalPolicy;
   readonly presentation?: GamePresentation | undefined;
   readonly difficulty?: DifficultyConfig | undefined;
+  readonly playConfig?: GameCanonicalPlayConfig | undefined;
   readonly supportsReplay: boolean;
   readonly catalog: GameCanonicalCatalog;
-  /** The normalized public Game Creator v1 contract that produced this game/version. The persisted
-   * key remains `creatorManifest` for canonical schema v3 compatibility; new TypeScript symbols
-   * use `GameCreator` so it cannot be confused with the Streamer domain. Publisher and
-   * authorization facts are deliberately outside it and remain server-controlled. */
+  /** The normalized public Game Creator v1 contract that produced this game/version. Publisher
+   * and authorization facts are deliberately outside it and remain server-controlled. */
   readonly creatorManifest?: OwoggGameCreatorManifest | undefined;
   /** When this exact document was last written — provenance for debugging/audit, never a review
    * or publish timestamp (those stay in D1, on the identity row they actually describe). */
@@ -297,6 +321,7 @@ const TOP_LEVEL_KEYS = [
   "policy",
   "presentation",
   "difficulty",
+  "playConfig",
   "supportsReplay",
   "catalog",
   "creatorManifest",
@@ -588,6 +613,152 @@ function parseDifficulty(value: unknown): DifficultyConfig {
   return { levels, defaultLevelId };
 }
 
+// ── PlayConfig ──────────────────────────────────────────────────────────────
+
+const PLAY_CONFIG_KEYS = [
+  "version",
+  "rulesetRevision",
+  "verifierId",
+  "defaultVariantId",
+  "variants",
+  "allowedConfigs",
+] as const;
+const PLAY_CONFIG_VARIANT_KEYS = ["id", "label"] as const;
+const PLAY_CONFIG_ALLOWED_KEYS = ["difficultyId", "variantId", "rewardFactor"] as const;
+const STABLE_VERIFIER_ID = /^[a-z0-9][a-z0-9._:/-]{0,95}$/;
+
+function requireBoundedString(
+  raw: Record<string, unknown>,
+  field: string,
+  context: string,
+  maxLength: number,
+  pattern?: RegExp,
+): string {
+  const value = requireString(raw, field);
+  if (value.trim().length === 0 || value.length > maxLength || (pattern && !pattern.test(value))) {
+    fail("INVALID_DOCUMENT", `${context}.${field} has an invalid format`);
+  }
+  return value;
+}
+
+/** Projects a strictly parsed manifest declaration into its server-owned canonical shape. */
+export function projectManifestPlayConfigToCanonical(
+  manifest: OwoggGameCreatorManifest,
+): GameCanonicalPlayConfig | undefined {
+  const declared = manifest.playConfig;
+  if (declared === undefined) return undefined;
+  const defaultVariantId =
+    declared.variants.find((variant) => variant.default === true)?.id ?? declared.variants[0]?.id;
+  if (defaultVariantId === undefined) {
+    fail("INVALID_DOCUMENT", "creatorManifest.playConfig has no variant");
+  }
+  return {
+    version: OWOGG_PLAY_CONFIG_VERSION,
+    rulesetRevision: declared.rulesetRevision,
+    verifierId: declared.verifierId,
+    defaultVariantId,
+    variants: declared.variants.map((variant) => ({ id: variant.id, label: variant.title })),
+    allowedConfigs: declared.allowedConfigs.map((config) => ({ ...config })),
+  };
+}
+
+function parsePlayConfig(
+  value: unknown,
+  difficulty: DifficultyConfig | undefined,
+  policy: GameCanonicalPolicy,
+): GameCanonicalPlayConfig {
+  const raw = asRecord(value, "playConfig");
+  rejectUnknownKeys(raw, PLAY_CONFIG_KEYS, "playConfig");
+  if (raw.version !== OWOGG_PLAY_CONFIG_VERSION) {
+    fail("INVALID_DOCUMENT", `playConfig.version must be ${OWOGG_PLAY_CONFIG_VERSION}`);
+  }
+
+  const rulesetRevision = requireNumber(raw, "rulesetRevision");
+  if (!Number.isSafeInteger(rulesetRevision) || rulesetRevision <= 0) {
+    fail("INVALID_DOCUMENT", "playConfig.rulesetRevision must be a positive safe integer");
+  }
+  const verifierId = requireBoundedString(raw, "verifierId", "playConfig", 96, STABLE_VERIFIER_ID);
+
+  if (!Array.isArray(raw.variants) || raw.variants.length === 0) {
+    fail("INVALID_DOCUMENT", "playConfig.variants must be a non-empty array");
+  }
+  const variants = raw.variants.map((entry, index) => {
+    const context = `playConfig.variants[${index}]`;
+    const variant = asRecord(entry, context);
+    rejectUnknownKeys(variant, PLAY_CONFIG_VARIANT_KEYS, context);
+    return {
+      id: requireBoundedString(variant, "id", context, 100),
+      label: requireBoundedString(variant, "label", context, 60),
+    };
+  });
+  const variantIds = variants.map((variant) => variant.id);
+  if (new Set(variantIds).size !== variantIds.length) {
+    fail("INVALID_DOCUMENT", "playConfig.variants ids must be unique");
+  }
+  const defaultVariantId = requireBoundedString(raw, "defaultVariantId", "playConfig", 100);
+  if (!variantIds.includes(defaultVariantId)) {
+    fail("INVALID_DOCUMENT", "playConfig.defaultVariantId must reference a declared variant");
+  }
+
+  if (!Array.isArray(raw.allowedConfigs) || raw.allowedConfigs.length === 0) {
+    fail("INVALID_DOCUMENT", "playConfig.allowedConfigs must be a non-empty array");
+  }
+  const difficultyIds = difficulty?.levels.map((level) => level.id) ?? ["normal"];
+  const difficultyIdSet = new Set(difficultyIds);
+  const variantIdSet = new Set(variantIds);
+  const pairs = new Set<string>();
+  const allowedConfigs = raw.allowedConfigs.map((entry, index) => {
+    const context = `playConfig.allowedConfigs[${index}]`;
+    const config = asRecord(entry, context);
+    rejectUnknownKeys(config, PLAY_CONFIG_ALLOWED_KEYS, context);
+    const difficultyId = requireBoundedString(config, "difficultyId", context, 100);
+    const variantId = requireBoundedString(config, "variantId", context, 100);
+    const rewardFactor = requireNumber(config, "rewardFactor");
+    if (rewardFactor <= 0) {
+      fail("INVALID_DOCUMENT", `${context}.rewardFactor must be greater than zero`);
+    }
+    if (!difficultyIdSet.has(difficultyId)) {
+      fail("INVALID_DOCUMENT", `${context}.difficultyId is not declared`);
+    }
+    if (!variantIdSet.has(variantId)) {
+      fail("INVALID_DOCUMENT", `${context}.variantId is not declared`);
+    }
+    const pair = `${difficultyId}\u0000${variantId}`;
+    if (pairs.has(pair)) {
+      fail("INVALID_DOCUMENT", "playConfig.allowedConfigs contains a duplicate pair");
+    }
+    pairs.add(pair);
+    return { difficultyId, variantId, rewardFactor };
+  });
+
+  for (const difficultyId of difficultyIds) {
+    if (!allowedConfigs.some((config) => config.difficultyId === difficultyId)) {
+      fail("INVALID_DOCUMENT", `playConfig.allowedConfigs does not cover ${difficultyId}`);
+    }
+  }
+  for (const variantId of variantIds) {
+    if (!allowedConfigs.some((config) => config.variantId === variantId)) {
+      fail("INVALID_DOCUMENT", `playConfig.allowedConfigs does not cover ${variantId}`);
+    }
+  }
+  const defaultDifficultyId = difficulty?.defaultLevelId ?? "normal";
+  if (!pairs.has(`${defaultDifficultyId}\u0000${defaultVariantId}`)) {
+    fail("INVALID_DOCUMENT", "playConfig.allowedConfigs is missing the default pair");
+  }
+  if (policy.score === null || !policy.leaderboard) {
+    fail("INVALID_DOCUMENT", "playConfig requires a scored leaderboard policy");
+  }
+
+  return {
+    version: OWOGG_PLAY_CONFIG_VERSION,
+    rulesetRevision,
+    verifierId,
+    defaultVariantId,
+    variants,
+    allowedConfigs,
+  };
+}
+
 // ── catalog ──────────────────────────────────────────────────────────────────
 
 const CATALOG_TYPES = ["GENRE_MODE", "TAXONOMY"] as const;
@@ -684,27 +855,15 @@ export function parseGameCanonicalDocument(
   rejectUnknownKeys(obj, TOP_LEVEL_KEYS, "document");
 
   const schemaVersion = obj.schemaVersion;
-  if (
-    schemaVersion !== 1 &&
-    schemaVersion !== 2 &&
-    schemaVersion !== GAME_CANONICAL_SCHEMA_VERSION
-  ) {
+  if (schemaVersion !== GAME_CANONICAL_SCHEMA_VERSION) {
     fail("UNSUPPORTED_SCHEMA_VERSION", `got ${JSON.stringify(schemaVersion)}`);
   }
 
-  let publisher: GameCanonicalPublisher;
-  if (schemaVersion === 1) {
-    // Legacy documents predate publisher presentation metadata. They are normalized fail-safe as
-    // non-official; a trusted server writer upgrades OWOGG documents to the current schema.
-    if (obj.publisher !== undefined) {
-      fail("INVALID_DOCUMENT", "schemaVersion 1 must not contain publisher");
-    }
-    publisher = { official: false };
-  } else {
-    const rawPublisher = asRecord(obj.publisher, "publisher");
-    rejectUnknownKeys(rawPublisher, PUBLISHER_KEYS, "publisher");
-    publisher = { official: requireBoolean(rawPublisher, "official") };
-  }
+  const rawPublisher = asRecord(obj.publisher, "publisher");
+  rejectUnknownKeys(rawPublisher, PUBLISHER_KEYS, "publisher");
+  const publisher: GameCanonicalPublisher = {
+    official: requireBoolean(rawPublisher, "official"),
+  };
 
   const slug = requireString(obj, "slug");
   if (slug !== expectedSlug) {
@@ -720,11 +879,10 @@ export function parseGameCanonicalDocument(
   const presentation =
     obj.presentation !== undefined ? parsePresentation(obj.presentation) : undefined;
   const difficulty = obj.difficulty !== undefined ? parseDifficulty(obj.difficulty) : undefined;
+  const playConfig =
+    obj.playConfig !== undefined ? parsePlayConfig(obj.playConfig, difficulty, policy) : undefined;
   let creatorManifest: OwoggGameCreatorManifest | undefined;
   if (obj.creatorManifest !== undefined) {
-    if (schemaVersion !== GAME_CANONICAL_SCHEMA_VERSION) {
-      fail("INVALID_DOCUMENT", "creatorManifest requires the current canonical schema");
-    }
     try {
       creatorManifest = parseGameCreatorManifest(obj.creatorManifest);
     } catch (error) {
@@ -737,6 +895,16 @@ export function parseGameCanonicalDocument(
       fail("INVALID_DOCUMENT", "creatorManifest.game.slug must match document.slug");
     }
   }
+  const manifestPlayConfig =
+    creatorManifest !== undefined
+      ? projectManifestPlayConfigToCanonical(creatorManifest)
+      : undefined;
+  if (JSON.stringify(playConfig) !== JSON.stringify(manifestPlayConfig)) {
+    fail(
+      "INVALID_DOCUMENT",
+      "playConfig must exactly match the normalized creatorManifest.playConfig declaration",
+    );
+  }
 
   return {
     schemaVersion: GAME_CANONICAL_SCHEMA_VERSION,
@@ -748,6 +916,7 @@ export function parseGameCanonicalDocument(
     policy,
     ...(presentation !== undefined ? { presentation } : {}),
     ...(difficulty !== undefined ? { difficulty } : {}),
+    ...(playConfig !== undefined ? { playConfig } : {}),
     supportsReplay: requireBoolean(obj, "supportsReplay"),
     catalog,
     ...(creatorManifest !== undefined ? { creatorManifest } : {}),

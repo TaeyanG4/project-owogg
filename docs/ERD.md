@@ -2,11 +2,11 @@
 
 상태: 기준 문서
 
-마지막 검증: 2026-08-27
+마지막 검증: 2026-08-30
 
-최신 마이그레이션: `0042_multiplayer_rematch.sql`
+최신 마이그레이션: `0045_generic_multiplayer_relay_profiles.sql`
 
-스키마 요약: 물리 테이블 `56`, 롤링 배포 호환 뷰 `4`
+스키마 요약: 물리 테이블 `57`, 롤링 배포 호환 뷰 `4`
 
 기준 소스:
 
@@ -15,7 +15,7 @@
 - `apps/api/src/container.ts`
 - [데이터베이스 기준 문서](DATABASE.md)
 
-이 문서는 `0000_initial_schema.sql`부터 `0042_multiplayer_rematch.sql`까지를 빈 SQLite에
+이 문서는 `0000_initial_schema.sql`부터 `0045_generic_multiplayer_relay_profiles.sql`까지를 빈 SQLite에
 순서대로 적용한 **최종 D1 schema**를 기준으로 합니다. migration SQL이 유일한 schema 권한
 원천이며, 이 문서는 관계 탐색과 운영 이해를 위한 투영입니다.
 
@@ -183,6 +183,23 @@ erDiagram
     INTEGER user_id FK
     INTEGER game_id FK
     INTEGER version_id FK
+    REAL raw_score
+    REAL normalized_score
+    REAL competitive_score
+    TEXT variant_id
+    INTEGER ruleset_revision
+    TEXT verifier_id
+    TEXT evidence_hash
+  }
+  game_result_verification_claims {
+    TEXT attempt_id PK
+    INTEGER user_id FK
+    INTEGER game_id FK
+    INTEGER version_id FK
+    TEXT evidence_hash
+    TEXT status
+    INTEGER result_id FK, UK
+    INTEGER score_id FK, UK
   }
   scores {
     INTEGER id PK
@@ -190,6 +207,9 @@ erDiagram
     TEXT game_id
     INTEGER result_id FK, UK
     INTEGER leaderboard_generation
+    TEXT difficulty
+    TEXT variant_id
+    INTEGER ruleset_revision
   }
   user_game_achievements {
     INTEGER user_id PK, FK
@@ -222,6 +242,11 @@ erDiagram
   users ||--o{ game_results : completes
   games ||--o{ game_results : records
   game_versions ||--o{ game_results : validates_against
+  users ||--o{ game_result_verification_claims : submits_evidence
+  games ||--o{ game_result_verification_claims : scopes
+  game_versions ||--o{ game_result_verification_claims : pins
+  game_results o|--o| game_result_verification_claims : finalizes
+  scores o|--o| game_result_verification_claims : projects
   users o|--o{ scores : submits
   games ||..o{ scores : slug_game_id
   game_results o|--o| scores : projects
@@ -237,6 +262,13 @@ erDiagram
 같은 game의 version인지 강제합니다. `scores.game_id`, `game_settings.game_id`는 역사적으로 생성된
 TEXT slug이며 현재 `games.slug`와 논리적으로 연결됩니다. `scores.result_id`는 partial unique index로
 하나의 검증된 결과에서 최대 하나의 랭킹 projection만 만들 수 있습니다.
+
+`game_result_verification_claims`는 raw evidence가 아니라 canonical SHA-256 hash만 저장합니다. 동일
+attempt의 첫 evidence/context를 고정하고 `PROCESSING`에서 `VERIFIED` 또는 `REJECTED`로 한 번만
+전환합니다. gs2 성공은 attempt 소비, raw/normalized/competitive score와 verifier provenance를 가진
+result, 선택적 competitive score projection, claim의 result/score ID 연결을 한 D1 batch로 commit합니다.
+trigger는 같은 attempt/user/game/version/result projection인지 다시 확인합니다. 랭킹은 현재
+generation+difficulty+ruleset revision으로 범위를 나누며 `variant_id`는 Mode provenance로 유지합니다.
 
 공식 게임 완전 삭제 감사 원장은 부모 `games` row가 사라진 뒤에도 남아야 하므로 FK를 두지
 않습니다. `game_slug_reservations`도 USER 호환 identity 수렴 기간의 slug 불변식을 유지하는 논리
@@ -265,6 +297,7 @@ erDiagram
     INTEGER game_id FK
     INTEGER game_version_id FK
     INTEGER requested_by_user_id FK
+    TEXT content_hash
     TEXT request_hash
     TEXT status
   }
@@ -274,7 +307,10 @@ erDiagram
     INTEGER game_id FK
     INTEGER game_version_id FK
     INTEGER profile_revision
-    TEXT resolved_class
+    TEXT profile_kind
+    TEXT content_hash
+    TEXT transport_kind
+    TEXT runtime_kind
     INTEGER enabled
   }
   multiplayer_instance_admin_actions {
@@ -290,6 +326,7 @@ erDiagram
     INTEGER created_by_user_id FK
     INTEGER game_version_id FK
     INTEGER profile_id FK
+    TEXT content_hash
     TEXT status
     INTEGER generation
   }
@@ -361,8 +398,8 @@ erDiagram
   multiplayer_participants ||--o{ multiplayer_match_players : projects
   multiplayer_matches ||--o{ multiplayer_match_actions : deduplicates
   multiplayer_participants ||--o{ multiplayer_match_actions : acts
-  multiplayer_instances ||--o{ multiplayer_rematch_requests : rematches
-  multiplayer_participants ||--o{ multiplayer_rematch_requests : consents
+  multiplayer_instances ||--o{ multiplayer_rematch_requests : historical_rows
+  multiplayer_participants ||--o{ multiplayer_rematch_requests : historical_rows
   multiplayer_match_players ||--o{ multiplayer_reward_outbox : rewards
   game_versions ||--o{ game_version_leases : retains
   multiplayer_instances ||--o| game_version_leases : owns
@@ -380,9 +417,8 @@ policy에 묶입니다. active `game_version_leases`가 있으면 해당 bundle 
 `multiplayer_instance_admin_actions`는 operation ID로 강제 종료 replay를 식별하며 update/delete가
 금지된 감사 원장입니다.
 
-`multiplayer_rematch_requests`는 committed exact generation의 참가자 동의를 append-only로 저장합니다.
-두 active participant의 동의가 모두 존재하는 guarded write만 instance와 exact-version lease의
-generation을 정확히 1 증가시킵니다.
+`multiplayer_rematch_requests`는 초기 server-ruleset 재대결 설계에서 생성된 historical physical
+table입니다. 현재 Relay repository, API, DO와 Web runtime은 이 테이블을 읽거나 쓰지 않습니다.
 
 계정 병합은 충돌 preflight 뒤 participant의 `user_id`를 변경하며 match player/action/outbox가
 `ON UPDATE CASCADE`로 함께 이동합니다. terminal result/action payload/source semantics는 trigger가
@@ -642,7 +678,8 @@ D1 콘솔에서 직접 수정하면 감사 로그와 두 저장소의 일관성�
 | `game_creator_access`                    | Game Creator    | 사용자별 게임 업로드 자격의 현재 상태                      |
 | `game_creator_access_audit_log`          | Game Creator    | 자격 부여·회수·복원 감사 원장                              |
 | `game_creator_applications`              | Game Creator    | 자격 신청과 관리자 심사 결과                               |
-| `game_results`                           | Result          | `owogg.json` 계약으로 검증된 완료 사실 원장                |
+| `game_result_verification_claims`        | Result          | gs2 first-evidence hash와 단일 terminal 검증 상태          |
+| `game_results`                           | Result          | 완료 facts와 gs2 세 점수·verifier provenance 원장          |
 | `game_settings`                          | Operations      | TEXT slug 기반 게임 enable/disable override                |
 | `game_slug_reservations`                 | Game Platform   | USER 호환 identity의 slug 선점 불변식                      |
 | `game_version_leases`                    | Multiplayer     | active instance의 exact bundle version 보존 lease          |
@@ -655,7 +692,7 @@ D1 콘솔에서 직접 수정하면 감사 로그와 두 저장소의 일관성�
 | `multiplayer_match_players`              | Multiplayer     | match별 canonical 참가자 결과와 reward eligibility         |
 | `multiplayer_matches`                    | Multiplayer     | generation별 authoritative finalization 상태               |
 | `multiplayer_participants`               | Multiplayer     | instance membership, seat, role와 connection generation    |
-| `multiplayer_rematch_requests`           | Multiplayer     | committed generation의 참가자별 재대결 동의                |
+| `multiplayer_rematch_requests`           | Multiplayer     | historical server-ruleset 재대결 row, 현재 consumer 없음   |
 | `multiplayer_profile_requests`           | Multiplayer     | Creator exact-version 요청과 관리자 심사 결정              |
 | `multiplayer_profiles`                   | Multiplayer     | 서버 승인 immutable runtime profile revision               |
 | `multiplayer_reward_outbox`              | Multiplayer     | committed 결과 기반 exactly-once reward 전달 원장          |
@@ -664,7 +701,7 @@ D1 콘솔에서 직접 수정하면 감사 로그와 두 저장소의 일관성�
 | `sandbox_game_review_audit_log`          | Compatibility   | 직전 USER 게임 심사 계약의 append-only 호환 감사           |
 | `sandbox_game_versions`                  | Compatibility   | 직전 Worker용 USER version 호환 미러                       |
 | `sandbox_games`                          | Compatibility   | 직전 Worker용 USER game identity/metadata 호환 미러        |
-| `scores`                                 | Ranking         | 검증된 결과의 랭킹 projection과 역사적 snapshot            |
+| `scores`                                 | Ranking         | 경쟁 점수의 generation·difficulty·revision별 projection    |
 | `sessions`                               | Auth            | 일반 OwOGG 로그인 session                                  |
 | `streamer_platform_accounts`             | Streamer        | 플랫폼 채널 identity, 소유권 검증, metrics                 |
 | `streamer_profiles`                      | Streamer        | 사용자별 Streamer 및 Featured 상태                         |

@@ -128,6 +128,8 @@ CREATE TABLE scores (
   game_id TEXT NOT NULL,
   score INTEGER NOT NULL,
   difficulty TEXT NOT NULL DEFAULT 'normal',
+  variant_id TEXT NOT NULL DEFAULT 'standard',
+  ruleset_revision INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   deleted_at TEXT,
   deleted_by_admin_id INTEGER,

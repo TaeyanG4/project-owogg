@@ -1,4 +1,4 @@
-import type { ManagedMultiplayerProfileRequestV1 } from "../domain/multiplayerProfileRequest.js";
+import type { MultiplayerRuntimeProfileRequestV1 } from "../domain/multiplayerProfileRequest.js";
 
 export const MULTIPLAYER_PROFILE_REQUEST_STATUSES = [
   "PENDING_REVIEW",
@@ -13,10 +13,12 @@ export interface MultiplayerProfileRequestRecord {
   readonly id: number;
   readonly gameId: number;
   readonly gameVersionId: number;
+  /** Immutable SHA-256 identity of the exact uploaded ZIP/version under review. */
+  readonly contentHash: string;
   readonly requestSchemaVersion: 1;
   readonly requestHash: string;
   readonly requestJson: string;
-  readonly request: ManagedMultiplayerProfileRequestV1;
+  readonly request: MultiplayerRuntimeProfileRequestV1;
   readonly requestedByUserId: number | null;
   readonly status: MultiplayerProfileRequestStatus;
   readonly reviewedByAdminId: number | null;
@@ -29,9 +31,10 @@ export interface MultiplayerProfileRequestRecord {
 export interface SubmitMultiplayerProfileRequestInput {
   readonly gameId: number;
   readonly gameVersionId: number;
+  readonly contentHash: string;
   /** Null is required for an OWOGG-owned game; USER games require their current owner id. */
   readonly requestedByUserId: number | null;
-  readonly request: ManagedMultiplayerProfileRequestV1;
+  readonly request: MultiplayerRuntimeProfileRequestV1;
   readonly nowIso: string;
 }
 

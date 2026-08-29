@@ -16,14 +16,14 @@ test("every stable multiplayer error code has one valid HTTP status", () => {
 });
 
 test("rejects arbitrary error strings and marks only recoverable failures retryable", () => {
-  assert.equal(isMultiplayerErrorCode("ACTION_CONFLICT"), true);
+  assert.equal(isMultiplayerErrorCode("STALE_GENERATION"), true);
   assert.equal(isMultiplayerErrorCode("database exploded: secret=abc"), false);
-  assert.deepEqual(multiplayerFailure("ACTION_CONFLICT"), {
+  assert.deepEqual(multiplayerFailure("STALE_GENERATION"), {
     ok: false,
-    error: { code: "ACTION_CONFLICT", retryable: true },
+    error: { code: "STALE_GENERATION", retryable: true },
   });
-  assert.deepEqual(multiplayerFailure("ACTION_ID_REUSED"), {
+  assert.deepEqual(multiplayerFailure("NOT_PARTICIPANT"), {
     ok: false,
-    error: { code: "ACTION_ID_REUSED", retryable: false },
+    error: { code: "NOT_PARTICIPANT", retryable: false },
   });
 });

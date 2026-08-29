@@ -21,10 +21,6 @@ export const MULTIPLAYER_MATCH_STATUSES = [
 
 export type MultiplayerMatchStatus = (typeof MULTIPLAYER_MATCH_STATUSES)[number];
 
-/** A committed match keeps its exact room authority briefly so both participants can explicitly
- * consent to one next generation. After this window the instance closes and releases its lease. */
-export const MULTIPLAYER_REMATCH_WINDOW_MS = 2 * 60 * 1_000;
-
 const INSTANCE_TRANSITIONS: Readonly<
   Record<MultiplayerInstanceStatus, readonly MultiplayerInstanceStatus[]>
 > = {
@@ -32,7 +28,7 @@ const INSTANCE_TRANSITIONS: Readonly<
   LOBBY: ["STARTING", "ABORTED", "EXPIRED"],
   STARTING: ["ACTIVE", "ABORTED", "EXPIRED"],
   ACTIVE: ["CLOSING", "ABORTED", "EXPIRED"],
-  CLOSING: ["LOBBY", "CLOSED", "ABORTED", "EXPIRED"],
+  CLOSING: ["CLOSED", "ABORTED", "EXPIRED"],
   CLOSED: [],
   ABORTED: [],
   EXPIRED: [],

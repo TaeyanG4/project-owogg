@@ -16,6 +16,35 @@ const DifficultyConfigSchema = z.object({
   defaultLevelId: z.string(),
 });
 
+const PublicGamePlayConfigSchema = z
+  .object({
+    version: z.literal(1),
+    rulesetRevision: z.number().int().positive(),
+    defaultVariantId: z.string().min(1).max(100),
+    variants: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1).max(100),
+            label: z.string().min(1).max(60),
+          })
+          .strict(),
+      )
+      .min(1),
+    allowedConfigs: z
+      .array(
+        z
+          .object({
+            difficultyId: z.string().min(1).max(100),
+            variantId: z.string().min(1).max(100),
+            rewardFactor: z.number().finite().positive(),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict();
+
 const GamePolicySchema = z.object({
   score: ScoreConfigSchema.nullable(),
   leaderboard: z.boolean(),
@@ -80,10 +109,12 @@ const PublicGameSchemaBase = {
   title: z.string(),
   shortDescription: z.string(),
   description: z.string(),
+  playModes: z.array(z.enum(["single", "local-multi", "online-multi"])).min(1),
   catalog: z.union([TaxonomyCatalogSchema, GenreModeCatalogSchema]),
   policy: GamePolicySchema,
   presentation: GamePresentationSchema.optional(),
   difficulty: DifficultyConfigSchema.optional(),
+  playConfig: PublicGamePlayConfigSchema.optional(),
   supportsReplay: z.boolean(),
   publishedAt: z.string().min(1),
   stats: z.object({
@@ -136,12 +167,79 @@ export const AdminOfficialGameDeleteResponseSchema = z.object({
 });
 export type AdminOfficialGameDeleteResponse = z.infer<typeof AdminOfficialGameDeleteResponseSchema>;
 
-/** POST /api/games/:slug/session — short-lived parent-side Game Session token. */
-export const GameSessionResponseSchema = z.object({
-  token: z.string(),
-  expiresAt: z.string(),
-});
+const GameSessionCanonicalIdSchema = z
+  .string()
+  .min(1)
+  .max(100)
+  .refine((value) => value === value.trim(), "ID must not have surrounding whitespace");
+
+export const GameSessionPlayConfigSelectionSchema = z
+  .object({
+    difficultyId: GameSessionCanonicalIdSchema,
+    variantId: GameSessionCanonicalIdSchema,
+  })
+  .strict();
+
+export const LegacyGameSessionRequestSchema = z
+  .object({ difficulty: GameSessionCanonicalIdSchema.optional() })
+  .strict();
+
+/** `online-multi` is intentionally absent: managed online uses profile/ticket/DO authority. */
+export const PlayConfigGameSessionRequestSchema = z
+  .object({
+    playMode: z.enum(["single", "local-multi"]),
+    playConfig: GameSessionPlayConfigSelectionSchema,
+  })
+  .strict();
+
+/** Strict request union for the existing session endpoint. */
+export const GameSessionRequestSchema = z.union([
+  PlayConfigGameSessionRequestSchema,
+  LegacyGameSessionRequestSchema,
+]);
+export type GameSessionRequest = z.infer<typeof GameSessionRequestSchema>;
+export type PlayConfigGameSessionRequest = z.infer<typeof PlayConfigGameSessionRequestSchema>;
+
+export const AuthorizedGameStartContextSchema = z
+  .object({
+    ranked: z.boolean(),
+    playConfig: GameSessionPlayConfigSelectionSchema,
+    rulesetRevision: z.number().int().positive(),
+    challengeSeed: z
+      .string()
+      .min(16)
+      .max(128)
+      .regex(/^[A-Za-z0-9_-]+$/),
+    rewardFactor: z.number().finite().positive(),
+  })
+  .strict();
+export type AuthorizedGameStartContext = z.infer<typeof AuthorizedGameStartContextSchema>;
+
+const SignedGameSessionTokenSchema = (version: "gs1" | "gs2") =>
+  z.string().regex(new RegExp(`^${version}\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$`));
+
+export const LegacyGameSessionResponseSchema = z
+  .object({
+    token: SignedGameSessionTokenSchema("gs1"),
+    expiresAt: z.string().datetime(),
+  })
+  .strict();
+
+export const PlayConfigGameSessionResponseSchema = z
+  .object({
+    token: SignedGameSessionTokenSchema("gs2"),
+    expiresAt: z.string().datetime(),
+    startContext: AuthorizedGameStartContextSchema,
+  })
+  .strict();
+
+/** POST /api/games/:slug/session — parent-only token plus optional public start context. */
+export const GameSessionResponseSchema = z.union([
+  PlayConfigGameSessionResponseSchema,
+  LegacyGameSessionResponseSchema,
+]);
 export type GameSessionResponse = z.infer<typeof GameSessionResponseSchema>;
+export type PlayConfigGameSessionResponse = z.infer<typeof PlayConfigGameSessionResponseSchema>;
 
 export const GameScoreAcceptRequestSchema = z.object({
   token: z.string(),
@@ -166,9 +264,9 @@ export type GameScoreAcceptResponse = z.infer<typeof GameScoreAcceptResponseSche
 
 const GameCreatorFactKeySchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/);
 
-export const GameResultAcceptRequestSchema = z
+export const LegacyGameResultAcceptRequestSchema = z
   .object({
-    token: z.string(),
+    token: SignedGameSessionTokenSchema("gs1"),
     outcome: z.enum(["neutral", "success", "failure", "win", "loss", "draw"]).optional(),
     score: z.number().finite().optional(),
     progression: z.object({ value: z.number().finite() }).strict().optional(),
@@ -178,6 +276,27 @@ export const GameResultAcceptRequestSchema = z
     playToken: z.string().optional(),
   })
   .strict();
+
+export const VerifiedGameResultAcceptRequestSchema = z
+  .object({
+    token: SignedGameSessionTokenSchema("gs2"),
+    evidence: z.union([
+      z.null(),
+      z.boolean(),
+      z.number(),
+      z.string(),
+      z.array(z.unknown()),
+      z.record(z.unknown()),
+    ]),
+    playToken: z.string().optional(),
+  })
+  .strict();
+
+/** Token version selects one mutually exclusive result-authority path. */
+export const GameResultAcceptRequestSchema = z.union([
+  VerifiedGameResultAcceptRequestSchema,
+  LegacyGameResultAcceptRequestSchema,
+]);
 export type GameResultAcceptRequest = z.infer<typeof GameResultAcceptRequestSchema>;
 
 export const GameResultAcceptResponseSchema = z.object({
@@ -185,7 +304,15 @@ export const GameResultAcceptResponseSchema = z.object({
   result_id: z.number().int().positive(),
   score_id: z.number().int().positive().nullable(),
   game_id: z.string(),
+  /** Authoritative leaderboard value: normalizedScore for gs1, competitiveScore for gs2. */
   score: z.number().nullable(),
+  rawScore: z.number().nullable(),
+  normalizedScore: z.number().nullable(),
+  competitiveScore: z.number().nullable(),
+  difficultyId: GameSessionCanonicalIdSchema,
+  variantId: z.string().min(1).max(100),
+  rulesetRevision: z.number().int().positive(),
+  verified: z.boolean(),
   adjusted: z.boolean(),
   rewardEligible: z.boolean(),
   xpAwarded: z.number().int().min(0),

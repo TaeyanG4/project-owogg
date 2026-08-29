@@ -1,15 +1,16 @@
-import type {
-  GameCanonicalDocument,
-  GameIdentity,
-  GameVersion,
-  RuntimeGame,
+import {
+  GAME_CANONICAL_SCHEMA_VERSION,
+  type GameCanonicalDocument,
+  type GameIdentity,
+  type GameVersion,
+  type RuntimeGame,
 } from "../src/index.js";
 
 export const TEST_GAME_SLUGS = ["reaction-time", "memory-test", "aim-test", "typing-test"] as const;
 
 export function canonicalFixture(slug = "reaction-time", title = slug): GameCanonicalDocument {
   return {
-    schemaVersion: 2,
+    schemaVersion: GAME_CANONICAL_SCHEMA_VERSION,
     slug,
     title,
     shortDescription: `${title} short description`,

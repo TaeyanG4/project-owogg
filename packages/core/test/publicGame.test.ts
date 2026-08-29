@@ -57,6 +57,7 @@ test("toPublicGame exposes the provider-neutral canonical projection only", () =
   assert.equal(publicGame.publisherName, "OWOGG");
   assert.equal(publicGame.slug, "reaction-time");
   assert.equal(publicGame.title, definition.title);
+  assert.deepEqual(publicGame.playModes, ["single"]);
   assert.deepEqual(publicGame.policy, runtime.canonical.policy);
   assert.deepEqual(publicGame.catalog, runtime.canonical.catalog);
   assert.equal(publicGame.mediaUrl, "https://api.example.test/logo");
@@ -73,6 +74,23 @@ test("toPublicGame exposes the provider-neutral canonical projection only", () =
   }
 });
 
+test("public playModes preserve hybrid canonical topology without granting runtime authority", () => {
+  const hybridRuntime: RuntimeGame = {
+    ...runtime,
+    canonical: {
+      ...runtime.canonical,
+      catalog: {
+        ...runtime.canonical.catalog,
+        type: "TAXONOMY",
+        modes: ["local-multi", "online-multi"],
+        minPlayers: 2,
+        maxPlayers: 2,
+      },
+    },
+  };
+  assert.deepEqual(toPublicGame(hybridRuntime, null).playModes, ["local-multi", "online-multi"]);
+});
+
 test("the public official badge follows canonical metadata, never the D1 owner discriminant", () => {
   const userOwnedOfficialMetadata: RuntimeGame = {
     ...runtime,
@@ -85,6 +103,39 @@ test("the public official badge follows canonical metadata, never the D1 owner d
     canonical: { ...runtime.canonical, publisher: { official: false } },
   };
   assert.equal(toPublicGame(systemOwnedNonOfficialMetadata, null).publisherType, "USER");
+});
+
+test("public PlayConfig exposes approved choices but never the server verifier id", () => {
+  const verifiedRuntime: RuntimeGame = {
+    ...runtime,
+    canonical: {
+      ...runtime.canonical,
+      playConfig: {
+        version: 1,
+        rulesetRevision: 7,
+        verifierId: "reaction-time/score-v1",
+        defaultVariantId: "standard",
+        variants: [{ id: "standard", label: "Standard" }],
+        allowedConfigs: [{ difficultyId: "normal", variantId: "standard", rewardFactor: 1 }],
+      },
+    },
+  };
+
+  const publicGame = toPublicGame(verifiedRuntime, null);
+  assert.deepEqual(publicGame.playConfig, {
+    version: 1,
+    rulesetRevision: 7,
+    defaultVariantId: "standard",
+    variants: [{ id: "standard", label: "Standard" }],
+    allowedConfigs: [{ difficultyId: "normal", variantId: "standard", rewardFactor: 1 }],
+  });
+  assert.equal("verifierId" in (publicGame.playConfig ?? {}), false);
+  assert.equal(verifiedRuntime.canonical.playConfig?.verifierId, "reaction-time/score-v1");
+  assert.notEqual(
+    publicGame.playConfig?.variants,
+    verifiedRuntime.canonical.playConfig?.variants,
+    "the public projection must copy nested arrays instead of sharing canonical references",
+  );
 });
 
 test("a D1/B2 logo asset is the only public artwork source for every publisher", () => {

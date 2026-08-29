@@ -1,8 +1,8 @@
 import {
   OWOGG_GAME_CREATOR_MANIFEST_FILENAME,
-  OWOGG_GAME_CREATOR_MANIFEST_V2_SCHEMA_URL,
-  OWOGG_GAME_CREATOR_MANIFEST_V2_VERSION,
+  OWOGG_GAME_CREATOR_MANIFEST_SCHEMA_URL,
   OWOGG_GAME_CREATOR_MANIFEST_VERSION,
+  OWOGG_PLAY_CONFIG_VERSION,
   type OwoggAchievementAggregate,
   type OwoggAchievementCondition,
   type OwoggAchievementDefinition,
@@ -10,19 +10,19 @@ import {
   type OwoggAchievementSource,
   type OwoggComparisonOperator,
   type OwoggGameCreatorManifest,
-  type OwoggGameCreatorManifestV1,
-  type OwoggGameCreatorManifestV2,
   type OwoggDifficultyDefinition,
   type OwoggEventDefinition,
   type OwoggInputMethod,
   type OwoggManifestGame,
-  type OwoggManifestGameV2,
+  type OwoggManifestPlayConfig,
   type OwoggManifestPresentation,
   type OwoggMetricDefinition,
   type OwoggMetricType,
   type OwoggOrientation,
   type OwoggOutcome,
   type OwoggPlayMode,
+  type OwoggPlayConfigAllowedConfig,
+  type OwoggPlayConfigVariantDefinition,
   type OwoggProgressionDefinition,
   type OwoggProgressionType,
   type OwoggRangeDefinition,
@@ -32,10 +32,10 @@ import {
 } from "@owogg/game-sdk/contracts";
 import {
   MultiplayerProfileRequestValidationError,
-  parseManagedMultiplayerProfileRequestV1,
-  resolveManagedMultiplayerProfileRequestV1,
-  toOwoggManagedMultiplayerRequestV1,
-  type ManagedMultiplayerRequestResolutionV1,
+  parseMultiplayerRuntimeProfileRequestV1,
+  resolveMultiplayerRuntimeProfileRequestV1,
+  toOwoggMultiplayerRuntimeRequestV1,
+  type MultiplayerRuntimeRequestResolutionV1,
 } from "../modules/multiplayer/domain/multiplayerProfileRequest.js";
 import { SANDBOX_GAME_POLICY } from "./sandboxGames.js";
 import type { PreparedBundleFile } from "./sandboxGameBundle.js";
@@ -104,6 +104,18 @@ function requiredNumber(value: Record<string, unknown>, key: string, path: strin
   return candidate;
 }
 
+function requiredPositiveInteger(
+  value: Record<string, unknown>,
+  key: string,
+  path: string,
+): number {
+  const candidate = value[key];
+  if (typeof candidate !== "number" || !Number.isSafeInteger(candidate) || candidate <= 0) {
+    invalid(`${path}.${key} must be a positive integer`);
+  }
+  return candidate;
+}
+
 function enumValue<T extends string>(
   value: Record<string, unknown>,
   key: string,
@@ -162,25 +174,11 @@ function parseRange(value: unknown, path: string): OwoggRangeDefinition {
   return { min, max, outOfRange };
 }
 
-function parseGame(value: unknown, manifestVersion: 1): OwoggManifestGame;
-function parseGame(value: unknown, manifestVersion: 2): OwoggManifestGameV2;
-function parseGame(
-  value: unknown,
-  manifestVersion: 1 | 2,
-): OwoggManifestGame | OwoggManifestGameV2 {
+function parseGame(value: unknown): OwoggManifestGame {
   const source = record(value, "game");
   exactKeys(
     source,
-    [
-      "slug",
-      "title",
-      "genre",
-      "mode",
-      "shortDescription",
-      "description",
-      "tags",
-      ...(manifestVersion === 2 ? ["playModes"] : []),
-    ],
+    ["slug", "title", "genre", "mode", "shortDescription", "description", "tags", "playModes"],
     "game",
   );
   const shortDescription = optionalString(source, "shortDescription", "game", {
@@ -191,7 +189,7 @@ function parseGame(
   });
   const tags = source.tags === undefined ? undefined : uniqueStrings(source.tags, "game.tags");
   const mode = enumValue(source, "mode", "game", ["single", "multi"] as const);
-  const common: OwoggManifestGame = {
+  const common: Omit<OwoggManifestGame, "playModes"> = {
     slug: requiredString(source, "slug", "game", {
       min: SANDBOX_GAME_POLICY.MIN_SLUG_LENGTH,
       max: SANDBOX_GAME_POLICY.MAX_SLUG_LENGTH,
@@ -207,8 +205,6 @@ function parseGame(
     ...(description !== undefined ? { description } : {}),
     ...(tags !== undefined ? { tags } : {}),
   };
-  if (manifestVersion === 1) return common;
-
   const playModes = uniqueStrings(source.playModes, "game.playModes", [
     "single",
     "local-multi",
@@ -266,6 +262,139 @@ function parseDifficulties(value: unknown): readonly OwoggDifficultyDefinition[]
     invalid("difficulties may contain at most one default");
   }
   return difficulties;
+}
+
+const STABLE_IDENTIFIER_PATTERN = /^[a-z0-9][a-z0-9._:/-]{0,95}$/;
+
+function parsePlayConfigVariants(value: unknown): readonly OwoggPlayConfigVariantDefinition[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    invalid("playConfig.variants must be a non-empty array");
+  }
+  const variants = value.map((entry, index) => {
+    const path = `playConfig.variants[${index}]`;
+    const source = record(entry, path);
+    exactKeys(source, ["id", "title", "default"], path);
+    const isDefault = optionalBoolean(source, "default", path);
+    return {
+      id: requiredString(source, "id", path, { min: 1, max: 100 }),
+      title: requiredString(source, "title", path, { min: 1, max: 60 }),
+      ...(isDefault !== undefined ? { default: isDefault } : {}),
+    };
+  });
+  const ids = variants.map((variant) => variant.id);
+  if (new Set(ids).size !== ids.length) invalid("playConfig.variants ids must be unique");
+  if (variants.filter((variant) => variant.default === true).length > 1) {
+    invalid("playConfig.variants may contain at most one default");
+  }
+  if (variants.some((variant) => variant.default === true)) return variants;
+  return variants.map((variant, index) => (index === 0 ? { ...variant, default: true } : variant));
+}
+
+function parsePlayConfigAllowedConfigs(value: unknown): readonly OwoggPlayConfigAllowedConfig[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    invalid("playConfig.allowedConfigs must be a non-empty array");
+  }
+  return value.map((entry, index) => {
+    const path = `playConfig.allowedConfigs[${index}]`;
+    const source = record(entry, path);
+    exactKeys(source, ["difficultyId", "variantId", "rewardFactor"], path);
+    const rewardFactor = requiredNumber(source, "rewardFactor", path);
+    if (rewardFactor <= 0) invalid(`${path}.rewardFactor must be greater than zero`);
+    return {
+      difficultyId: requiredString(source, "difficultyId", path, { min: 1, max: 100 }),
+      variantId: requiredString(source, "variantId", path, { min: 1, max: 100 }),
+      rewardFactor,
+    };
+  });
+}
+
+function parsePlayConfig(
+  value: unknown,
+  input: {
+    readonly difficulties: readonly OwoggDifficultyDefinition[] | undefined;
+    readonly result: OwoggResultDefinition;
+    readonly leaderboard: { readonly enabled: boolean } | undefined;
+    readonly genericPlayModeAvailable: boolean;
+  },
+): OwoggManifestPlayConfig {
+  const source = record(value, "playConfig");
+  exactKeys(
+    source,
+    ["version", "rulesetRevision", "verifierId", "variants", "allowedConfigs"],
+    "playConfig",
+  );
+  if (source.version !== OWOGG_PLAY_CONFIG_VERSION) {
+    invalid(`playConfig.version must be ${OWOGG_PLAY_CONFIG_VERSION}`);
+  }
+  const rulesetRevision = requiredPositiveInteger(source, "rulesetRevision", "playConfig");
+  const verifierId = requiredString(source, "verifierId", "playConfig", {
+    min: 1,
+    max: 96,
+    pattern: STABLE_IDENTIFIER_PATTERN,
+  });
+  const variants = parsePlayConfigVariants(source.variants);
+  const allowedConfigs = parsePlayConfigAllowedConfigs(source.allowedConfigs);
+
+  const difficultyIds = input.difficulties?.map((difficulty) => difficulty.id) ?? ["normal"];
+  const difficultyIdSet = new Set(difficultyIds);
+  const variantIds = variants.map((variant) => variant.id);
+  const variantIdSet = new Set(variantIds);
+  const pairs = new Set<string>();
+  for (const allowedConfig of allowedConfigs) {
+    if (!difficultyIdSet.has(allowedConfig.difficultyId)) {
+      invalid(
+        `playConfig.allowedConfigs difficultyId ${JSON.stringify(allowedConfig.difficultyId)} is not declared`,
+      );
+    }
+    if (!variantIdSet.has(allowedConfig.variantId)) {
+      invalid(
+        `playConfig.allowedConfigs variantId ${JSON.stringify(allowedConfig.variantId)} is not declared`,
+      );
+    }
+    const pair = `${allowedConfig.difficultyId}\u0000${allowedConfig.variantId}`;
+    if (pairs.has(pair)) {
+      invalid("playConfig.allowedConfigs must not contain duplicate difficulty/variant pairs");
+    }
+    pairs.add(pair);
+  }
+
+  for (const difficultyId of difficultyIds) {
+    if (!allowedConfigs.some((allowedConfig) => allowedConfig.difficultyId === difficultyId)) {
+      invalid(`playConfig.allowedConfigs must include difficulty ${JSON.stringify(difficultyId)}`);
+    }
+  }
+  for (const variantId of variantIds) {
+    if (!allowedConfigs.some((allowedConfig) => allowedConfig.variantId === variantId)) {
+      invalid(`playConfig.allowedConfigs must include variant ${JSON.stringify(variantId)}`);
+    }
+  }
+
+  const defaultDifficultyId =
+    input.difficulties?.find((difficulty) => difficulty.default === true)?.id ??
+    input.difficulties?.[0]?.id ??
+    "normal";
+  const defaultVariantId = variants.find((variant) => variant.default === true)?.id;
+  if (
+    defaultVariantId === undefined ||
+    !pairs.has(`${defaultDifficultyId}\u0000${defaultVariantId}`)
+  ) {
+    invalid("playConfig.allowedConfigs must include the default difficulty/variant pair");
+  }
+  if (input.result.score === null) invalid("playConfig requires result.score");
+  if (input.leaderboard?.enabled !== true) {
+    invalid("playConfig requires leaderboard.enabled to be true");
+  }
+  if (!input.genericPlayModeAvailable) {
+    invalid("playConfig requires single or local-multi in game.playModes");
+  }
+
+  return {
+    version: OWOGG_PLAY_CONFIG_VERSION,
+    rulesetRevision,
+    verifierId,
+    variants,
+    allowedConfigs,
+  };
 }
 
 const PROGRESSION_TYPES = [
@@ -529,17 +658,12 @@ function parseAchievements(
   return achievements;
 }
 
-/** Parses and semantically validates an OWOGG Game Creator Manifest v1 or v2 value. */
+/** Parses the single supported OWOGG Game Creator Manifest v1 contract. */
 export function parseGameCreatorManifest(value: unknown): OwoggGameCreatorManifest {
   const source = record(value, "manifest");
   const schemaVersion = source.schemaVersion;
-  if (
-    schemaVersion !== OWOGG_GAME_CREATOR_MANIFEST_VERSION &&
-    schemaVersion !== OWOGG_GAME_CREATOR_MANIFEST_V2_VERSION
-  ) {
-    invalid(
-      `schemaVersion must be ${OWOGG_GAME_CREATOR_MANIFEST_VERSION} or ${OWOGG_GAME_CREATOR_MANIFEST_V2_VERSION}`,
-    );
+  if (schemaVersion !== OWOGG_GAME_CREATOR_MANIFEST_VERSION) {
+    invalid(`schemaVersion must be ${OWOGG_GAME_CREATOR_MANIFEST_VERSION}`);
   }
   exactKeys(
     source,
@@ -555,7 +679,8 @@ export function parseGameCreatorManifest(value: unknown): OwoggGameCreatorManife
       "leaderboard",
       "events",
       "achievements",
-      ...(schemaVersion === OWOGG_GAME_CREATOR_MANIFEST_V2_VERSION ? ["multiplayer"] : []),
+      "multiplayer",
+      "playConfig",
     ],
     "manifest",
   );
@@ -563,17 +688,10 @@ export function parseGameCreatorManifest(value: unknown): OwoggGameCreatorManife
   if (source.progression === undefined) invalid("progression is required");
   if (source.result === undefined) invalid("result is required");
   const schema = optionalString(source, "$schema", "manifest");
-  if (
-    schemaVersion === OWOGG_GAME_CREATOR_MANIFEST_V2_VERSION &&
-    schema !== undefined &&
-    schema !== OWOGG_GAME_CREATOR_MANIFEST_V2_SCHEMA_URL
-  ) {
-    invalid(`manifest.$schema must be ${OWOGG_GAME_CREATOR_MANIFEST_V2_SCHEMA_URL} for v2`);
+  if (schema !== undefined && schema !== OWOGG_GAME_CREATOR_MANIFEST_SCHEMA_URL) {
+    invalid(`manifest.$schema must be ${OWOGG_GAME_CREATOR_MANIFEST_SCHEMA_URL} for v1`);
   }
-  const game =
-    schemaVersion === OWOGG_GAME_CREATOR_MANIFEST_VERSION
-      ? parseGame(source.game, OWOGG_GAME_CREATOR_MANIFEST_VERSION)
-      : parseGame(source.game, OWOGG_GAME_CREATOR_MANIFEST_V2_VERSION);
+  const game = parseGame(source.game);
   const input =
     source.input === undefined
       ? undefined
@@ -621,19 +739,11 @@ export function parseGameCreatorManifest(value: unknown): OwoggGameCreatorManife
     ...(achievements !== undefined ? { achievements } : {}),
   };
 
-  if (schemaVersion === OWOGG_GAME_CREATOR_MANIFEST_VERSION) {
-    return {
-      ...common,
-      schemaVersion: OWOGG_GAME_CREATOR_MANIFEST_VERSION,
-      game,
-    } as OwoggGameCreatorManifestV1;
-  }
-
-  let multiplayer: OwoggGameCreatorManifestV2["multiplayer"];
+  let multiplayer: OwoggGameCreatorManifest["multiplayer"];
   if (source.multiplayer !== undefined) {
     try {
-      multiplayer = toOwoggManagedMultiplayerRequestV1(
-        parseManagedMultiplayerProfileRequestV1(source.multiplayer),
+      multiplayer = toOwoggMultiplayerRuntimeRequestV1(
+        parseMultiplayerRuntimeProfileRequestV1(source.multiplayer),
       );
     } catch (error) {
       if (error instanceof MultiplayerProfileRequestValidationError) {
@@ -642,67 +752,72 @@ export function parseGameCreatorManifest(value: unknown): OwoggGameCreatorManife
       throw error;
     }
   }
-  const v2Game = game as OwoggManifestGameV2;
-  const requestsOnline = v2Game.playModes.includes("online-multi");
-  if (requestsOnline !== (multiplayer !== undefined)) {
-    invalid(
-      requestsOnline
-        ? "game.playModes online-multi requires multiplayer"
-        : "multiplayer requires online-multi in game.playModes",
-    );
+  if (multiplayer !== undefined && !game.playModes.includes("online-multi")) {
+    invalid("multiplayer requires online-multi in game.playModes");
   }
-  if (multiplayer !== undefined && v2Game.mode !== "multi") {
+  if (multiplayer !== undefined && game.mode !== "multi") {
     invalid('multiplayer requires game.mode "multi"');
   }
-  if (multiplayer !== undefined && leaderboard?.enabled === true) {
-    invalid("online multiplayer manifests cannot enable leaderboard");
+  const genericPlayModeAvailable = game.playModes.some(
+    (playMode) => playMode === "single" || playMode === "local-multi",
+  );
+  if (
+    multiplayer !== undefined &&
+    leaderboard?.enabled === true &&
+    source.playConfig === undefined
+  ) {
+    invalid("online manifests can enable leaderboard only for a hybrid PlayConfig path");
   }
+
+  const playConfig =
+    source.playConfig === undefined
+      ? undefined
+      : parsePlayConfig(source.playConfig, {
+          difficulties,
+          result,
+          leaderboard,
+          genericPlayModeAvailable,
+        });
 
   return {
     ...common,
-    schemaVersion: OWOGG_GAME_CREATOR_MANIFEST_V2_VERSION,
-    game: v2Game,
+    schemaVersion: OWOGG_GAME_CREATOR_MANIFEST_VERSION,
+    game,
     ...(multiplayer !== undefined ? { multiplayer } : {}),
+    ...(playConfig !== undefined ? { playConfig } : {}),
   };
 }
 
 /**
- * Returns the normalized untrusted managed request declared by a validated v2 manifest. This is
+ * Returns the normalized untrusted runtime request declared by a validated manifest. This is
  * still only review input; callers must never treat its presence as an approved online profile.
  */
-export function getManagedMultiplayerProfileRequestV1(
+export function getMultiplayerRuntimeProfileRequestV1(
   manifest: OwoggGameCreatorManifest,
-): ReturnType<typeof parseManagedMultiplayerProfileRequestV1> | null {
-  return manifest.schemaVersion === OWOGG_GAME_CREATOR_MANIFEST_V2_VERSION &&
-    manifest.multiplayer !== undefined
-    ? parseManagedMultiplayerProfileRequestV1(manifest.multiplayer)
+): ReturnType<typeof parseMultiplayerRuntimeProfileRequestV1> | null {
+  return manifest.multiplayer !== undefined
+    ? parseMultiplayerRuntimeProfileRequestV1(manifest.multiplayer)
     : null;
 }
 
 export interface GameCreatorManifestMultiplayerPlanV1 {
-  /** M0 is local-only and needs no online profile or platform runtime. */
-  readonly local: { readonly resolvedClass: "M0" } | null;
-  /** Online class/backend is resolved from the normalized request, never supplied by the ZIP. */
-  readonly online: ManagedMultiplayerRequestResolutionV1 | null;
+  /** Local multiplayer stays entirely inside the game and needs no online runtime profile. */
+  readonly local: { readonly topology: "local-multi" } | null;
+  /** Online availability is resolved from the normalized request; presence is not approval. */
+  readonly online: MultiplayerRuntimeRequestResolutionV1 | null;
 }
 
 /**
  * Resolves the two independent multiplayer surfaces declared by a validated manifest. A game may
- * expose both local M0 and a separately reviewed M1/M2 online mode.
+ * expose both same-device local play and a separately reviewed online runtime.
  */
 export function resolveGameCreatorManifestMultiplayerPlanV1(
   manifest: OwoggGameCreatorManifest,
 ): GameCreatorManifestMultiplayerPlanV1 {
-  if (manifest.schemaVersion === OWOGG_GAME_CREATOR_MANIFEST_VERSION) {
-    return {
-      local: manifest.game.mode === "multi" ? { resolvedClass: "M0" } : null,
-      online: null,
-    };
-  }
-  const request = getManagedMultiplayerProfileRequestV1(manifest);
+  const request = getMultiplayerRuntimeProfileRequestV1(manifest);
   return {
-    local: manifest.game.playModes.includes("local-multi") ? { resolvedClass: "M0" } : null,
-    online: request ? resolveManagedMultiplayerProfileRequestV1(request) : null,
+    local: manifest.game.playModes.includes("local-multi") ? { topology: "local-multi" } : null,
+    online: request ? resolveMultiplayerRuntimeProfileRequestV1(request) : null,
   };
 }
 
@@ -715,15 +830,18 @@ export function extractGameCreatorManifest(
   return parseGameCreatorManifestBytes(file.bytes);
 }
 
-/** Parses the standalone `owogg.json` upload used by partial game updates. */
-export function parseGameCreatorManifestBytes(
-  bytes: ArrayBuffer | Uint8Array,
-): OwoggGameCreatorManifest {
+function parseGameCreatorManifestJsonBytes(bytes: ArrayBuffer | Uint8Array): unknown {
   let parsed: unknown;
   try {
     parsed = JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     invalid(`${OWOGG_GAME_CREATOR_MANIFEST_FILENAME} is not valid JSON`);
   }
-  return parseGameCreatorManifest(parsed);
+  return parsed;
+}
+
+export function parseGameCreatorManifestBytes(
+  bytes: ArrayBuffer | Uint8Array,
+): OwoggGameCreatorManifest {
+  return parseGameCreatorManifest(parseGameCreatorManifestJsonBytes(bytes));
 }

@@ -6,6 +6,7 @@ import {
   GameScoreAcceptResponseSchema,
   GameResultAcceptRequestSchema,
   GameResultAcceptResponseSchema,
+  GameSessionRequestSchema,
   GameSessionResponseSchema,
   PublicGameAvailabilityResponseSchema,
   PublicGameListResponseSchema,
@@ -13,22 +14,31 @@ import {
 } from "@owogg/contracts";
 import {
   GAME_SESSION_POLICY,
+  canonicalizeGameEvidence,
   emptyPublicGameStats,
+  evaluateClientAuthoredResultFlow,
+  publicGamePlayModes,
   publicGameMediaUrl,
   resolveBundleContentType,
   toPublicGame,
   validateDifficultyAgainstDefinition,
   signGameSession,
+  signVerifiedGameSession,
   type GameScoreAcceptError,
   type GameResultAcceptError,
+  type GameVerifiedResultAcceptError,
+  type NormalizedGameCreatorResult,
   type GameSessionPayload,
+  type VerifiedGameSessionPayload,
   type RuntimeGame,
   type PublicGameStats,
 } from "@owogg/core";
+import type { OwoggAchievementDefinition } from "@owogg/game-sdk/contracts";
 import { createContainer, evaluateAchievementsForUser, type AppContainer } from "../container.js";
 import { edgeCache } from "../middleware/edgeCache.js";
 import { rateLimit } from "../middleware/rateLimit.js";
 import { readB2Config } from "./devGames.js";
+import { MAX_GAME_RESULT_REQUEST_BYTES, readBoundedJsonBody } from "./boundedJsonBody.js";
 import type { ApiEnv } from "./auth.js";
 
 // Same local requireAuth as streamers.ts/discordGuilds.ts — not shared from auth.ts, matching this
@@ -219,8 +229,9 @@ gamesRouter.get("/:slug", edgeCache({ ttlSeconds: 60, browserTtlSeconds: 0 }), a
 
 // ── Generic Game Session ─────────────────────────────────────────────────────
 //
-// The session is issued only for the exact generic D1 identity/live READY version and its
-// canonical difficulty. The token is held by the parent Web host and is never sent to the iframe.
+// Both token formats resolve the exact generic D1 identity/live READY version. gs1 preserves the
+// legacy client-result path unchanged; gs2 additionally binds one generic topology and canonical
+// PlayConfig pair. Tokens remain in the parent Web host and never cross the iframe Bridge.
 
 gamesRouter.post("/:slug/session", rateLimit({ name: "game-session" }), async (c) => {
   if (!c.env?.DB) return c.text("Not Found", 404);
@@ -261,16 +272,125 @@ gamesRouter.post("/:slug/session", rateLimit({ name: "game-session" }), async (c
     );
   }
 
-  const legacyFlow = await container.multiplayerLegacyFlowGate.evaluate(
-    runtime.identity.id,
-    runtime.liveVersion.id,
-  );
-  if (!legacyFlow.allowed) {
-    const unavailable = legacyFlow.error === "MULTIPLAYER_AUTHORITY_UNAVAILABLE";
+  const rawBody = await c.req.json().catch(() => ({}));
+  const request = GameSessionRequestSchema.safeParse(rawBody);
+  if (!request.success) {
+    return c.json(
+      { error: { code: "INVALID_PAYLOAD", message: "요청 형식이 올바르지 않습니다." } },
+      400,
+    );
+  }
+
+  const canonicalPlayConfig = runtime.canonical.playConfig;
+  if (canonicalPlayConfig !== undefined) {
+    if (!("playConfig" in request.data)) {
+      return c.json(
+        {
+          error: {
+            code: "PLAY_CONFIG_REQUIRED",
+            message: "서버가 승인한 난이도와 모드를 선택해야 합니다.",
+          },
+        },
+        400,
+      );
+    }
+    const playConfigRequest = request.data;
+
+    const declaredPlayModes = publicGamePlayModes(runtime);
+    if (!declaredPlayModes.includes(playConfigRequest.playMode)) {
+      return c.json(
+        { error: { code: "INVALID_PLAY_MODE", message: "허용되지 않은 실행 모드입니다." } },
+        400,
+      );
+    }
+    const allowedConfig = canonicalPlayConfig.allowedConfigs.find(
+      (candidate) =>
+        candidate.difficultyId === playConfigRequest.playConfig.difficultyId &&
+        candidate.variantId === playConfigRequest.playConfig.variantId,
+    );
+    if (!allowedConfig) {
+      return c.json(
+        {
+          error: {
+            code: "INVALID_PLAY_CONFIG",
+            message: "허용되지 않은 난이도와 모드 조합입니다.",
+          },
+        },
+        400,
+      );
+    }
+    if (!container.gameVerifierRegistry.has(canonicalPlayConfig.verifierId)) {
+      return c.json(
+        {
+          error: {
+            code: "GAME_VERIFIER_NOT_REGISTERED",
+            message: "이 게임의 서버 검증기가 아직 등록되지 않았습니다.",
+          },
+        },
+        503,
+      );
+    }
+
+    const issuedAtMs = Date.now();
+    const nowSeconds = Math.floor(issuedAtMs / 1000);
+    const challengeSeed = crypto.randomUUID();
+    const payload: VerifiedGameSessionPayload = {
+      userId: auth.userId,
+      gameId: runtime.identity.id,
+      versionId: runtime.liveVersion.id,
+      attemptId: crypto.randomUUID(),
+      playMode: playConfigRequest.playMode,
+      difficultyId: allowedConfig.difficultyId,
+      variantId: allowedConfig.variantId,
+      rewardFactor: allowedConfig.rewardFactor,
+      rulesetRevision: canonicalPlayConfig.rulesetRevision,
+      verifierId: canonicalPlayConfig.verifierId,
+      challengeSeed,
+      issuedAtMs,
+      exp: nowSeconds + GAME_SESSION_POLICY.EXPIRY_SECONDS,
+    };
+    const token = await signVerifiedGameSession(payload, secret);
+    return c.json(
+      GameSessionResponseSchema.parse({
+        token,
+        expiresAt: new Date(payload.exp * 1000).toISOString(),
+        startContext: {
+          ranked: true,
+          playConfig: {
+            difficultyId: payload.difficultyId,
+            variantId: payload.variantId,
+          },
+          rulesetRevision: payload.rulesetRevision,
+          challengeSeed: payload.challengeSeed,
+          rewardFactor: payload.rewardFactor,
+        },
+      }),
+      200,
+    );
+  }
+
+  if ("playConfig" in request.data) {
     return c.json(
       {
         error: {
-          code: legacyFlow.error,
+          code: "PLAY_CONFIG_NOT_SUPPORTED",
+          message: "이 게임 버전은 PlayConfig 세션을 지원하지 않습니다.",
+        },
+      },
+      400,
+    );
+  }
+
+  const authoritySelection = await container.selectedTopologyAuthorityGate.evaluate(
+    runtime.identity.id,
+    runtime.liveVersion.id,
+  );
+  if (!authoritySelection.allowed) {
+    const unavailable = authoritySelection.error === "MULTIPLAYER_AUTHORITY_UNAVAILABLE";
+    return c.json(
+      {
+        error: {
+          code: authoritySelection.error,
           message: unavailable
             ? "멀티플레이 권한 상태를 확인할 수 없습니다. 잠시 후 다시 시도해주세요."
             : "이 게임 버전은 서버 관리형 멀티플레이 세션만 지원합니다.",
@@ -280,10 +400,22 @@ gamesRouter.post("/:slug/session", rateLimit({ name: "game-session" }), async (c
     );
   }
 
-  const rawBody = await c.req.json().catch(() => ({}));
+  const clientAuthoredFlow = evaluateClientAuthoredResultFlow(runtime.canonical);
+  if (!clientAuthoredFlow.allowed) {
+    return c.json(
+      {
+        error: {
+          code: clientAuthoredFlow.error,
+          message: "이 게임의 서버 검증 플레이 경로가 아직 준비되지 않았습니다.",
+        },
+      },
+      503,
+    );
+  }
+
   const difficulty = validateDifficultyAgainstDefinition(
     runtime.canonical.difficulty,
-    typeof rawBody?.difficulty === "string" ? rawBody.difficulty : undefined,
+    request.data.difficulty,
   );
   if (!difficulty.valid) {
     return c.json(
@@ -329,6 +461,8 @@ function gameScoreAcceptErrorStatus(error: GameScoreAcceptError): 400 | 401 | 40
       return 409;
     case "MULTIPLAYER_AUTHORITY_UNAVAILABLE":
       return 503;
+    case "PLAY_CONFIG_AUTHORITY_UNAVAILABLE":
+      return 503;
     case "INVALID_TOKEN":
     case "CONTEXT_MISMATCH":
       return 401;
@@ -357,6 +491,8 @@ function gameScoreAcceptErrorMessage(error: GameScoreAcceptError, reason?: strin
       return "이 게임 버전의 점수는 서버가 확정한 멀티플레이 결과로만 기록됩니다.";
     case "MULTIPLAYER_AUTHORITY_UNAVAILABLE":
       return "멀티플레이 권한 상태를 확인할 수 없습니다. 잠시 후 다시 시도해주세요.";
+    case "PLAY_CONFIG_AUTHORITY_UNAVAILABLE":
+      return "이 게임의 서버 검증 점수 경로가 아직 준비되지 않았습니다.";
     case "INVALID_DIFFICULTY":
       return reason || "유효하지 않은 난이도입니다.";
     case "INVALID_SCORE":
@@ -505,6 +641,8 @@ function gameResultAcceptErrorStatus(error: GameResultAcceptError): 400 | 401 | 
       return 409;
     case "MULTIPLAYER_AUTHORITY_UNAVAILABLE":
       return 503;
+    case "PLAY_CONFIG_AUTHORITY_UNAVAILABLE":
+      return 503;
     case "GAME_DISABLED":
     case "MANIFEST_NOT_CONFIGURED":
     case "INVALID_DIFFICULTY":
@@ -523,6 +661,8 @@ function gameResultAcceptErrorMessage(error: GameResultAcceptError, reason?: str
       return "이 게임 버전의 결과는 서버가 확정한 멀티플레이 결과로만 기록됩니다.";
     case "MULTIPLAYER_AUTHORITY_UNAVAILABLE":
       return "멀티플레이 권한 상태를 확인할 수 없습니다. 잠시 후 다시 시도해주세요.";
+    case "PLAY_CONFIG_AUTHORITY_UNAVAILABLE":
+      return "이 게임의 서버 검증 결과 경로가 아직 준비되지 않았습니다.";
     case "INVALID_TOKEN":
       return "게임 세션이 유효하지 않거나 만료되었습니다.";
     case "CONTEXT_MISMATCH":
@@ -538,8 +678,140 @@ function gameResultAcceptErrorMessage(error: GameResultAcceptError, reason?: str
   }
 }
 
-// Game Creator Manifest v1 result acceptance. Tokens stay in the parent host; the iframe reports only
-// declared facts over MessageChannel, and this endpoint revalidates every fact against B2 canonical.
+function verifiedResultAcceptErrorStatus(
+  error: GameVerifiedResultAcceptError,
+): 400 | 401 | 404 | 409 | 503 {
+  switch (error) {
+    case "GAME_NOT_AVAILABLE":
+      return 404;
+    case "INVALID_TOKEN":
+    case "CONTEXT_MISMATCH":
+      return 401;
+    case "CLAIM_CONFLICT":
+    case "VERIFICATION_IN_PROGRESS":
+      return 409;
+    case "PLAY_CONFIG_NOT_CONFIGURED":
+    case "VERIFIER_NOT_REGISTERED":
+    case "CLAIM_AUTHORITY_UNAVAILABLE":
+    case "VERIFIER_EXECUTION_FAILED":
+    case "VERIFIER_INVALID_OUTPUT":
+    case "CLAIM_STATE_ERROR":
+    case "RESULT_PERSISTENCE_UNAVAILABLE":
+      return 503;
+    default:
+      return 400;
+  }
+}
+
+function verifiedResultAcceptErrorMessage(
+  error: GameVerifiedResultAcceptError,
+  reason?: string,
+): string {
+  switch (error) {
+    case "GAME_NOT_AVAILABLE":
+      return "게임을 찾을 수 없습니다.";
+    case "GAME_DISABLED":
+      return "현재 비활성화된 게임입니다.";
+    case "INVALID_TOKEN":
+      return "게임 세션이 유효하지 않거나 만료되었습니다.";
+    case "CONTEXT_MISMATCH":
+      return "게임 세션이 이 요청과 일치하지 않습니다. 다시 시작해 주세요.";
+    case "CLAIM_CONFLICT":
+      return "이미 다른 플레이 증거가 제출된 세션입니다.";
+    case "VERIFICATION_IN_PROGRESS":
+      return "이 플레이 증거를 이미 검증하고 있습니다.";
+    case "VERIFIER_REJECTED":
+      return reason ? `플레이 증거가 거절되었습니다: ${reason}` : "플레이 증거가 거절되었습니다.";
+    case "PLAY_CONFIG_NOT_CONFIGURED":
+    case "VERIFIER_NOT_REGISTERED":
+      return "이 게임의 서버 검증기가 아직 준비되지 않았습니다.";
+    case "CLAIM_AUTHORITY_UNAVAILABLE":
+    case "RESULT_PERSISTENCE_UNAVAILABLE":
+    case "CLAIM_STATE_ERROR":
+      return "서버 검증 결과를 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.";
+    case "VERIFIER_EXECUTION_FAILED":
+    case "VERIFIER_INVALID_OUTPUT":
+      return "서버 검증기가 유효한 결과를 만들지 못했습니다.";
+    default:
+      return "플레이 증거가 허용된 형식이나 크기 제한을 충족하지 않습니다.";
+  }
+}
+
+async function recordAcceptedResultRewards(
+  container: AppContainer,
+  input: {
+    readonly userId: number;
+    readonly gameId: number;
+    readonly slug: string;
+    readonly resultId: number;
+    readonly normalized: NormalizedGameCreatorResult;
+    readonly xpPerCompletion: number;
+    readonly achievements: readonly OwoggAchievementDefinition[];
+    readonly playToken?: string | undefined;
+  },
+): Promise<{
+  xpAwarded: number;
+  guildXpAwarded: number;
+  guildId?: string | undefined;
+  newlyUnlockedAchievements: string[];
+}> {
+  let xpAwarded = 0;
+  let guildXpAwarded = 0;
+  let guildId: string | undefined;
+  let newlyUnlockedAchievements: string[] = [];
+  if (!input.normalized.rewardEligible) {
+    return { xpAwarded, guildXpAwarded, newlyUnlockedAchievements };
+  }
+
+  try {
+    const completion = await container.progressionUseCases.recordAcceptedGameCompletion({
+      userId: input.userId,
+      gameId: input.slug,
+      sourceType: "result",
+      sourceId: String(input.resultId),
+      xpPerCompletion: input.xpPerCompletion,
+    });
+    xpAwarded = completion.xpAwarded;
+    newlyUnlockedAchievements = await container.gameAchievementUseCases.evaluate({
+      userId: input.userId,
+      gameId: input.gameId,
+      resultId: input.resultId,
+      result: input.normalized,
+      achievements: input.achievements,
+    });
+
+    if (input.playToken && completion.xpEventId) {
+      const guild = await container.discordGuildXpUseCases.attributeCompletionToGuild({
+        userId: input.userId,
+        gameId: input.slug,
+        sourceXpEventId: completion.xpEventId,
+        xpAmount: xpAwarded,
+        playToken: input.playToken,
+      });
+      if (guild.attributed) {
+        guildXpAwarded = guild.amount ?? 0;
+        guildId = guild.guildId;
+      }
+    }
+
+    const platformAchievements = await evaluateAchievementsForUser(container, input.userId);
+    newlyUnlockedAchievements = Array.from(
+      new Set([...newlyUnlockedAchievements, ...platformAchievements]),
+    );
+  } catch (error) {
+    console.error("Game Creator result progression error:", error);
+  }
+
+  return {
+    xpAwarded,
+    guildXpAwarded,
+    ...(guildId ? { guildId } : {}),
+    newlyUnlockedAchievements,
+  };
+}
+
+// Unified Manifest v1 result acceptance. gs1 carries declared client facts; gs2 carries only bounded
+// evidence for a trusted verifier. Both tokens stay in the parent host and never cross the iframe.
 gamesRouter.post("/:slug/result", rateLimit({ name: "game-result-accept" }), async (c) => {
   if (!c.env?.DB) return c.text("Not Found", 404);
   const secret = c.env.GAME_SESSION_SECRET;
@@ -573,11 +845,98 @@ gamesRouter.post("/:slug/result", rateLimit({ name: "game-result-accept" }), asy
     );
   }
 
-  const parsed = GameResultAcceptRequestSchema.safeParse(await c.req.json().catch(() => ({})));
+  const body = await readBoundedJsonBody(c.req.raw, MAX_GAME_RESULT_REQUEST_BYTES);
+  if (!body.ok) {
+    return c.json(
+      {
+        error: {
+          code: body.error,
+          message:
+            body.error === "REQUEST_TOO_LARGE"
+              ? "결과 제출 본문이 허용 크기를 초과했습니다."
+              : "요청 형식이 올바르지 않습니다.",
+        },
+      },
+      body.error === "REQUEST_TOO_LARGE" ? 413 : 400,
+    );
+  }
+
+  const parsed = GameResultAcceptRequestSchema.safeParse(body.value);
   if (!parsed.success) {
     return c.json(
       { error: { code: "INVALID_PAYLOAD", message: "요청 형식이 올바르지 않습니다." } },
       400,
+    );
+  }
+
+  if ("evidence" in parsed.data) {
+    const evidence = await canonicalizeGameEvidence(parsed.data.evidence);
+    if (!evidence.ok) {
+      return c.json(
+        {
+          error: {
+            code: evidence.code,
+            message: "플레이 증거가 허용된 형식이나 크기 제한을 충족하지 않습니다.",
+          },
+        },
+        400,
+      );
+    }
+
+    const accepted = await container.gameVerifiedResultAcceptanceUseCases.accept({
+      slug: c.req.param("slug"),
+      userId: authData.user.id,
+      nickname: authData.user.nickname,
+      avatarUrl: authData.user.avatar_url,
+      token: parsed.data.token,
+      secret,
+      evidence: evidence.value,
+    });
+    if (!accepted.ok) {
+      return c.json(
+        {
+          error: {
+            code: accepted.error,
+            message: verifiedResultAcceptErrorMessage(accepted.error, accepted.reason),
+          },
+        },
+        verifiedResultAcceptErrorStatus(accepted.error),
+      );
+    }
+
+    const rewards = await recordAcceptedResultRewards(container, {
+      userId: authData.user.id,
+      gameId: accepted.gameId,
+      slug: accepted.slug,
+      resultId: accepted.resultId,
+      normalized: accepted.normalized,
+      xpPerCompletion: accepted.xpPerCompletion,
+      achievements: accepted.achievements,
+      ...(parsed.data.playToken ? { playToken: parsed.data.playToken } : {}),
+    });
+    return c.json(
+      GameResultAcceptResponseSchema.parse({
+        success: true,
+        result_id: accepted.resultId,
+        score_id: accepted.scoreId,
+        game_id: accepted.slug,
+        score: accepted.competitiveScore,
+        rawScore: accepted.normalized.rawScore,
+        normalizedScore: accepted.normalized.normalizedScore,
+        competitiveScore: accepted.competitiveScore,
+        difficultyId: accepted.difficultyId,
+        variantId: accepted.variantId,
+        rulesetRevision: accepted.rulesetRevision,
+        verified: true,
+        adjusted: false,
+        rewardEligible: accepted.normalized.rewardEligible,
+        xpAwarded: rewards.xpAwarded,
+        ...(rewards.guildXpAwarded > 0 || rewards.guildId
+          ? { guildXpAwarded: rewards.guildXpAwarded, guildId: rewards.guildId }
+          : {}),
+        newlyUnlockedAchievements: rewards.newlyUnlockedAchievements,
+      }),
+      200,
     );
   }
 
@@ -609,50 +968,16 @@ gamesRouter.post("/:slug/result", rateLimit({ name: "game-result-accept" }), asy
     );
   }
 
-  let xpAwarded = 0;
-  let guildXpAwarded = 0;
-  let guildId: string | undefined;
-  let newlyUnlockedAchievements: string[] = [];
-  if (accepted.normalized.rewardEligible) {
-    try {
-      const completion = await container.progressionUseCases.recordAcceptedGameCompletion({
-        userId: authData.user.id,
-        gameId: accepted.slug,
-        sourceType: "result",
-        sourceId: String(accepted.resultId),
-        xpPerCompletion: accepted.xpPerCompletion,
-      });
-      xpAwarded = completion.xpAwarded;
-      newlyUnlockedAchievements = await container.gameAchievementUseCases.evaluate({
-        userId: authData.user.id,
-        gameId: accepted.gameId,
-        resultId: accepted.resultId,
-        result: accepted.normalized,
-        achievements: accepted.achievements,
-      });
-
-      if (parsed.data.playToken && completion.xpEventId) {
-        const guild = await container.discordGuildXpUseCases.attributeCompletionToGuild({
-          userId: authData.user.id,
-          gameId: accepted.slug,
-          sourceXpEventId: completion.xpEventId,
-          xpAmount: xpAwarded,
-          playToken: parsed.data.playToken,
-        });
-        if (guild.attributed) {
-          guildXpAwarded = guild.amount ?? 0;
-          guildId = guild.guildId;
-        }
-      }
-
-      const platformAchievements = await evaluateAchievementsForUser(container, authData.user.id);
-      newlyUnlockedAchievements = Array.from(
-        new Set([...newlyUnlockedAchievements, ...platformAchievements]),
-      );
-    } catch (error) {
-      console.error("Game Creator result progression error:", error);
-    }
-  }
+  const rewards = await recordAcceptedResultRewards(container, {
+    userId: authData.user.id,
+    gameId: accepted.gameId,
+    slug: accepted.slug,
+    resultId: accepted.resultId,
+    normalized: accepted.normalized,
+    xpPerCompletion: accepted.xpPerCompletion,
+    achievements: accepted.achievements,
+    ...(parsed.data.playToken ? { playToken: parsed.data.playToken } : {}),
+  });
 
   return c.json(
     GameResultAcceptResponseSchema.parse({
@@ -661,11 +986,20 @@ gamesRouter.post("/:slug/result", rateLimit({ name: "game-result-accept" }), asy
       score_id: accepted.scoreId,
       game_id: accepted.slug,
       score: accepted.normalized.normalizedScore,
+      rawScore: accepted.normalized.rawScore,
+      normalizedScore: accepted.normalized.normalizedScore,
+      competitiveScore: accepted.normalized.normalizedScore,
+      difficultyId: accepted.difficultyId,
+      variantId: "standard",
+      rulesetRevision: 1,
+      verified: false,
       adjusted: accepted.normalized.adjusted,
       rewardEligible: accepted.normalized.rewardEligible,
-      xpAwarded,
-      ...(guildXpAwarded > 0 || guildId ? { guildXpAwarded, guildId } : {}),
-      newlyUnlockedAchievements,
+      xpAwarded: rewards.xpAwarded,
+      ...(rewards.guildXpAwarded > 0 || rewards.guildId
+        ? { guildXpAwarded: rewards.guildXpAwarded, guildId: rewards.guildId }
+        : {}),
+      newlyUnlockedAchievements: rewards.newlyUnlockedAchievements,
     }),
     200,
   );

@@ -11,7 +11,6 @@ export const MULTIPLAYER_HEARTBEAT_RESPONSE = "owogg.multiplayer.heartbeat-ack.v
 export const MULTIPLAYER_LOBBY_SIGNAL_PROTOCOL = "owogg.multiplayer.lobby-signal.v1";
 
 const OpaqueIdSchema = z.string().regex(/^[A-Za-z0-9_-]{8,128}$/);
-const StableIdentifierSchema = z.string().regex(/^[a-z0-9][a-z0-9._:/-]{0,95}$/);
 const GameSlugSchema = z
   .string()
   .min(1)
@@ -92,16 +91,19 @@ export type MultiplayerRuntimeStatusResponse = z.infer<
 
 const MultiplayerPublicProfileSchema = z
   .object({
+    gameVersionId: z.number().int().positive(),
+    contentHash: z.string().regex(/^[a-f0-9]{64}$/),
     profileRevision: z.number().int().positive(),
-    resolvedClass: z.enum(["M1", "M2"]),
-    simulationModel: z.enum(["turn", "event", "realtime"]),
-    rulesetKey: StableIdentifierSchema,
-    rulesetRevision: z.number().int().positive(),
-    reconnectPolicy: z.enum(["none", "rejoin", "resume"]),
+    transportKind: z.literal("websocket"),
+    runtimeKind: z.literal("relay"),
+    reconnectPolicy: z.enum(["none", "resume"]),
+    directMessages: z.boolean(),
+    hostSnapshot: z.boolean(),
     minPlayers: z.number().int().min(2).max(8),
     maxPlayers: z.number().int().min(2).max(8),
     allowedVisibility: z.array(z.enum(["PUBLIC", "UNLISTED", "PRIVATE"])).min(1),
     allowedJoinPolicies: z.array(z.enum(["OPEN", "INVITE_ONLY"])).min(1),
+    resultTrust: z.literal("UNVERIFIED"),
   })
   .strict();
 
@@ -129,120 +131,24 @@ export type MultiplayerGameAvailabilityResponse = z.infer<
   typeof MultiplayerGameAvailabilityResponseSchema
 >;
 
-export const AdminOfficialMultiplayerProfileUpdateRequestSchema = z
+const MultiplayerRuntimeManifestRequestSchema = z
   .object({
-    preset: z.literal("OMOK_V1"),
-    enabled: z.boolean(),
-    reasonCode: z
-      .string()
-      .trim()
-      .regex(/^[A-Z][A-Z0-9_]{0,63}$/)
-      .nullable()
-      .optional(),
-  })
-  .strict()
-  .superRefine((value, context) => {
-    if (value.enabled && value.reasonCode != null) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["reasonCode"],
-        message: "reasonCode is forbidden when enabling",
-      });
-    }
-  });
-export type AdminOfficialMultiplayerProfileUpdateRequest = z.infer<
-  typeof AdminOfficialMultiplayerProfileUpdateRequestSchema
->;
-
-const AdminOfficialMultiplayerProfileSchema = z
-  .object({
-    id: z.number().int().positive(),
-    profileRevision: z.number().int().positive(),
-    enabled: z.boolean(),
-    rulesetKey: z.literal("official:omok"),
-    // Revision 1 remains readable for immutable in-flight matches and audited upgrades; all new
-    // official Omok profiles are emitted as revision 2 by the server-owned preset.
-    rulesetRevision: z.union([z.literal(1), z.literal(2)]),
-    resolvedClass: z.literal("M1"),
-    simulationModel: z.literal("turn"),
-    reconnectPolicy: z.literal("resume"),
-    minPlayers: z.literal(2),
-    maxPlayers: z.literal(2),
-    allowedVisibility: z.tuple([z.literal("PRIVATE")]),
-    // Legacy Staging profiles used one-use invite credentials. Keep that exact historical
-    // shape readable so an administrator can perform the audited preset upgrade; newly created
-    // OMOK_V1 revisions use the single room-code access policy.
-    allowedJoinPolicies: z.union([
-      z.tuple([z.literal("OPEN")]),
-      z.tuple([z.literal("INVITE_ONLY")]),
-    ]),
-    rewardPolicyId: z.null(),
-    leaderboardEnabled: z.literal(false),
-    updatedAt: z.string().datetime(),
-  })
-  .strict();
-
-const AdminOfficialMultiplayerProfileResponseBase = {
-  gameSlug: GameSlugSchema,
-  gameVersionId: z.number().int().positive(),
-  preset: z.literal("OMOK_V1"),
-} as const;
-
-export const AdminOfficialMultiplayerProfileResponseSchema = z.discriminatedUnion("status", [
-  z
-    .object({
-      ...AdminOfficialMultiplayerProfileResponseBase,
-      status: z.literal("NONE"),
-      profile: z.null(),
-    })
-    .strict(),
-  z
-    .object({
-      ...AdminOfficialMultiplayerProfileResponseBase,
-      status: z.literal("ENABLED"),
-      profile: AdminOfficialMultiplayerProfileSchema.extend({ enabled: z.literal(true) }).strict(),
-    })
-    .strict(),
-  z
-    .object({
-      ...AdminOfficialMultiplayerProfileResponseBase,
-      status: z.literal("DISABLED"),
-      profile: AdminOfficialMultiplayerProfileSchema.extend({ enabled: z.literal(false) }).strict(),
-    })
-    .strict(),
-]);
-export type AdminOfficialMultiplayerProfileResponse = z.infer<
-  typeof AdminOfficialMultiplayerProfileResponseSchema
->;
-
-const ManagedMultiplayerManifestRequestSchema = z
-  .object({
-    requestVersion: z.literal(1),
-    kind: z.literal("managed-template"),
-    template: z
-      .object({
-        id: z.enum(["turn-grid", "reaction-arena", "realtime-paddle"]),
-        version: z.literal(1),
-      })
-      .strict(),
+    version: z.literal(1),
+    transport: z.object({ kind: z.literal("websocket"), protocolVersion: z.literal(1) }).strict(),
+    runtime: z.object({ kind: z.enum(["relay", "worker", "container"]) }).strict(),
     players: z
-      .object({ min: z.number().int().min(2).max(64), max: z.number().int().min(2).max(64) })
-      .strict(),
-    requirements: z
+      .object({ min: z.number().int().min(2).max(8), max: z.number().int().min(2).max(8) })
+      .strict()
+      .refine((value) => value.min <= value.max, { message: "min cannot exceed max" }),
+    features: z
       .object({
-        simulation: z.enum(["turn", "event", "continuous", "rollback"]),
-        lifecycle: z.enum(["match", "continuous", "persistent"]),
-        persistence: z.enum(["none", "match", "player", "world"]),
-        latency: z.enum(["relaxed", "interactive", "critical"]),
-        reconnect: z.enum(["none", "rejoin", "resume"]),
-        hiddenInformation: z.boolean(),
-        simultaneousResponse: z.boolean(),
+        reconnect: z.enum(["none", "resume"]),
+        directMessages: z.boolean(),
+        hostSnapshot: z.boolean(),
         joinInProgress: z.boolean(),
         spectators: z.boolean(),
       })
       .strict(),
-    config: z.record(z.number().int()).refine((value) => Object.keys(value).length <= 8),
-    client: z.object({ protocolVersion: z.literal(1) }).strict(),
   })
   .strict();
 
@@ -251,9 +157,10 @@ const AdminManagedMultiplayerProfileRequestSchema = z
     id: z.number().int().positive(),
     gameId: z.number().int().positive(),
     gameVersionId: z.number().int().positive(),
+    contentHash: z.string().regex(/^[a-f0-9]{64}$/),
     requestSchemaVersion: z.literal(1),
     requestHash: z.string().regex(/^[a-f0-9]{64}$/),
-    request: ManagedMultiplayerManifestRequestSchema,
+    request: MultiplayerRuntimeManifestRequestSchema,
     requestedByUserId: z.number().int().positive().nullable(),
     status: z.enum(["PENDING_REVIEW", "APPROVED", "REJECTED", "WITHDRAWN"]),
     reviewedByAdminId: z.number().int().positive().nullable(),
@@ -264,31 +171,65 @@ const AdminManagedMultiplayerProfileRequestSchema = z
       .nullable(),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
-    resolution: z
-      .object({
-        status: z.literal("SUPPORTED_V1"),
-        resolvedClass: z.enum(["M1", "M2"]),
-        runtimeBackend: z.literal("durable-object"),
-      })
-      .strict(),
+    resolution: z.discriminatedUnion("status", [
+      z
+        .object({
+          status: z.literal("SUPPORTED_V1"),
+          transportKind: z.literal("websocket"),
+          runtimeKind: z.literal("relay"),
+          protocolVersion: z.literal(1),
+          resultTrust: z.literal("UNVERIFIED"),
+        })
+        .strict(),
+      z
+        .object({
+          status: z.literal("RUNTIME_NOT_AVAILABLE"),
+          runtimeKind: z.enum(["worker", "container"]),
+          reason: z.literal("MULTIPLAYER_RUNTIME_NOT_AVAILABLE"),
+        })
+        .strict(),
+      z
+        .object({
+          status: z.literal("CAPABILITY_NOT_AVAILABLE"),
+          runtimeKind: z.literal("relay"),
+          unsupportedCapabilities: z
+            .array(z.enum(["joinInProgress", "spectators"]))
+            .min(1)
+            .max(2),
+          reason: z.literal("MULTIPLAYER_CAPABILITY_NOT_AVAILABLE"),
+        })
+        .strict(),
+    ]),
   })
   .strict();
 
-const AdminManagedMultiplayerProfileSchema = z
+export const AdminManagedMultiplayerProfileSchema = z
   .object({
     id: z.number().int().positive(),
+    gameVersionId: z.number().int().positive(),
+    contentHash: z.string().regex(/^[a-f0-9]{64}$/),
     profileRevision: z.number().int().positive(),
     enabled: z.boolean(),
-    resolvedClass: z.enum(["M1", "M2"]),
-    simulationModel: z.enum(["turn", "event", "realtime"]),
-    rulesetKey: StableIdentifierSchema,
-    rulesetRevision: z.number().int().positive(),
+    transportKind: z.literal("websocket"),
+    runtimeKind: z.literal("relay"),
+    protocolVersion: z.literal(1),
+    reconnect: z.enum(["none", "resume"]),
+    directMessages: z.boolean(),
+    hostSnapshot: z.boolean(),
     minPlayers: z.number().int().min(2).max(8),
     maxPlayers: z.number().int().min(2).max(8),
-    rewardPolicyId: z.null(),
+    resultTrust: z.literal("UNVERIFIED"),
     updatedAt: z.string().datetime(),
   })
   .strict();
+export type AdminManagedMultiplayerProfile = z.infer<typeof AdminManagedMultiplayerProfileSchema>;
+
+export const AdminManagedMultiplayerProfileListResponseSchema = z
+  .object({ profiles: z.array(AdminManagedMultiplayerProfileSchema).max(100) })
+  .strict();
+export type AdminManagedMultiplayerProfileListResponse = z.infer<
+  typeof AdminManagedMultiplayerProfileListResponseSchema
+>;
 
 export const AdminManagedMultiplayerProfileRequestListResponseSchema = z
   .object({ requests: z.array(AdminManagedMultiplayerProfileRequestSchema).max(100) })
@@ -338,6 +279,46 @@ export type AdminManagedMultiplayerProfileReviewResponse = z.infer<
   typeof AdminManagedMultiplayerProfileReviewResponseSchema
 >;
 
+export const AdminManagedMultiplayerProfileActivationRequestSchema = z
+  .object({
+    enabled: z.boolean(),
+    reasonCode: z
+      .string()
+      .trim()
+      .regex(/^[A-Z][A-Z0-9_]{0,63}$/)
+      .nullable(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.enabled && value.reasonCode !== null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["reasonCode"],
+        message: "reasonCode is forbidden when enabling",
+      });
+    }
+    if (!value.enabled && value.reasonCode === null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["reasonCode"],
+        message: "reasonCode is required when disabling",
+      });
+    }
+  });
+export type AdminManagedMultiplayerProfileActivationRequest = z.infer<
+  typeof AdminManagedMultiplayerProfileActivationRequestSchema
+>;
+
+export const AdminManagedMultiplayerProfileActivationResponseSchema = z
+  .object({
+    request: AdminManagedMultiplayerProfileRequestSchema,
+    profile: AdminManagedMultiplayerProfileSchema,
+  })
+  .strict();
+export type AdminManagedMultiplayerProfileActivationResponse = z.infer<
+  typeof AdminManagedMultiplayerProfileActivationResponseSchema
+>;
+
 export const MultiplayerJoinTicketRequestSchema = z
   .object({
     expectedConnectionGeneration: z.number().int().nonnegative(),
@@ -345,18 +326,96 @@ export const MultiplayerJoinTicketRequestSchema = z
   .strict();
 export type MultiplayerJoinTicketRequest = z.infer<typeof MultiplayerJoinTicketRequestSchema>;
 
+export const MultiplayerBootstrapParticipantSchema = z
+  .object({
+    participantId: OpaqueIdSchema,
+    seatIndex: z.number().int().min(0).max(7),
+    role: z.enum(["HOST", "PLAYER"]),
+  })
+  .strict();
+
+export const MultiplayerBootstrapRuntimeSchema = z
+  .object({
+    kind: z.literal("relay"),
+    protocolVersion: z.literal(1),
+    resultTrust: z.literal("UNVERIFIED"),
+  })
+  .strict();
+
+export const MultiplayerBootstrapCapabilitiesSchema = z
+  .object({
+    reconnect: z.enum(["none", "resume"]),
+    broadcast: z.literal(true),
+    directMessages: z.boolean(),
+    hostSnapshot: z.boolean(),
+  })
+  .strict();
+
 export const MultiplayerBootstrapSchema = z
   .object({
     type: z.literal("MULTI_INIT"),
     v: z.literal(1),
-    participantId: OpaqueIdSchema,
     gameVersionId: z.number().int().positive(),
+    contentHash: z.string().regex(/^[a-f0-9]{64}$/),
     profileRevision: z.number().int().positive(),
-    rulesetKey: StableIdentifierSchema,
-    rulesetRevision: z.number().int().positive(),
     generation: z.number().int().positive(),
+    runtime: MultiplayerBootstrapRuntimeSchema,
+    self: MultiplayerBootstrapParticipantSchema,
+    roster: z.array(MultiplayerBootstrapParticipantSchema).min(2).max(8),
+    capabilities: MultiplayerBootstrapCapabilitiesSchema,
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    const participantIds = new Set(value.roster.map((participant) => participant.participantId));
+    const seatIndexes = new Set(value.roster.map((participant) => participant.seatIndex));
+    if (participantIds.size !== value.roster.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["roster"],
+        message: "participant ids must be unique",
+      });
+    }
+    if (seatIndexes.size !== value.roster.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["roster"],
+        message: "seat indexes must be unique",
+      });
+    }
+    if (value.roster.filter((participant) => participant.role === "HOST").length !== 1) {
+      context.addIssue({
+        code: "custom",
+        path: ["roster"],
+        message: "roster must contain one host",
+      });
+    }
+    if (
+      value.roster.some((participant, index) => {
+        if (index === 0) return false;
+        const previousParticipant = value.roster[index - 1];
+        return (
+          previousParticipant !== undefined &&
+          participant.seatIndex <= previousParticipant.seatIndex
+        );
+      })
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["roster"],
+        message: "roster must be seat ordered",
+      });
+    }
+    if (
+      !value.roster.some(
+        (participant) =>
+          participant.participantId === value.self.participantId &&
+          participant.seatIndex === value.self.seatIndex &&
+          participant.role === value.self.role,
+      )
+    ) {
+      context.addIssue({ code: "custom", path: ["self"], message: "self must match roster" });
+    }
+  });
 export type MultiplayerBootstrap = z.infer<typeof MultiplayerBootstrapSchema>;
 
 /**
@@ -432,6 +491,7 @@ export const MultiplayerRoomInstanceSchema = z
     publicCode: PublicRoomCodeSchema,
     gameId: z.number().int().positive(),
     gameVersionId: z.number().int().positive(),
+    contentHash: z.string().regex(/^[a-f0-9]{64}$/),
     profileRevision: z.number().int().positive(),
     visibility: z.enum(["PUBLIC", "UNLISTED", "PRIVATE"]),
     joinPolicy: z.enum(["OPEN", "INVITE_ONLY"]),
@@ -495,34 +555,6 @@ export const MultiplayerRoomRosterResponseSchema = z
   })
   .strict();
 export type MultiplayerRoomRosterResponse = z.infer<typeof MultiplayerRoomRosterResponseSchema>;
-
-export const MultiplayerRematchRequestSchema = z
-  .object({ expectedGeneration: z.number().int().positive() })
-  .strict();
-export type MultiplayerRematchRequest = z.infer<typeof MultiplayerRematchRequestSchema>;
-
-const MultiplayerRematchResponseBase = {
-  requestedBySelf: z.boolean(),
-  requestedByOpponent: z.boolean(),
-} as const;
-
-export const MultiplayerRematchResponseSchema = z.discriminatedUnion("state", [
-  z
-    .object({
-      ...MultiplayerRematchResponseBase,
-      state: z.enum(["AVAILABLE", "WAITING", "OPPONENT_REQUESTED"]),
-      room: z.null(),
-    })
-    .strict(),
-  z
-    .object({
-      ...MultiplayerRematchResponseBase,
-      state: z.literal("STARTED"),
-      room: MultiplayerRoomResponseSchema,
-    })
-    .strict(),
-]);
-export type MultiplayerRematchResponse = z.infer<typeof MultiplayerRematchResponseSchema>;
 
 export const MultiplayerCreateInviteResponseSchema = z
   .object({

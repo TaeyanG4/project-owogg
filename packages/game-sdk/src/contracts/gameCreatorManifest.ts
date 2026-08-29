@@ -2,6 +2,12 @@ import type {
   HostToGameMultiplayerMessage,
   MultiInitMessage,
 } from "../bridge/multiplayerProtocol.js";
+import type {
+  AuthorizedStartContext,
+  JsonSafeValue,
+  PlayConfigSelection,
+  PublicPlayConfigDescriptor,
+} from "../bridge/protocol.js";
 import type { OwoggMultiplayerRequest } from "./multiplayerManifest.js";
 
 /** Public, engine-neutral OWOGG Game Creator Manifest contracts. */
@@ -9,11 +15,8 @@ import type { OwoggMultiplayerRequest } from "./multiplayerManifest.js";
 export const OWOGG_GAME_CREATOR_MANIFEST_SCHEMA_URL =
   "https://owogg.com/schemas/manifest/v1.json" as const;
 export const OWOGG_GAME_CREATOR_MANIFEST_VERSION = 1 as const;
-export const OWOGG_GAME_CREATOR_MANIFEST_V2_SCHEMA_URL =
-  "https://owogg.com/schemas/manifest/v2.json" as const;
-export const OWOGG_GAME_CREATOR_MANIFEST_V2_VERSION = 2 as const;
-export const OWOGG_GAME_CREATOR_MANIFEST_SUPPORTED_VERSIONS = [1, 2] as const;
 export const OWOGG_GAME_CREATOR_MANIFEST_FILENAME = "owogg.json" as const;
+export const OWOGG_PLAY_CONFIG_VERSION = 1 as const;
 
 export type OwoggInputMethod = "keyboard" | "mouse" | "touch" | "gamepad";
 export type OwoggOrientation = "any" | "landscape" | "portrait";
@@ -40,14 +43,11 @@ export interface OwoggManifestGame {
   readonly title: string;
   readonly genre: string;
   readonly mode: "single" | "multi";
+  /** Explicit runtime topology. This is required for every manifest v1 game. */
+  readonly playModes: readonly OwoggPlayMode[];
   readonly shortDescription?: string | undefined;
   readonly description?: string | undefined;
   readonly tags?: readonly string[] | undefined;
-}
-
-export interface OwoggManifestGameV2 extends OwoggManifestGame {
-  /** Explicit launch modes. `mode` remains the coarse catalog value for v1 UI compatibility. */
-  readonly playModes: readonly OwoggPlayMode[];
 }
 
 export interface OwoggManifestPresentation {
@@ -105,6 +105,28 @@ export interface OwoggAchievementDefinition {
   readonly condition: OwoggAchievementCondition;
 }
 
+export interface OwoggPlayConfigVariantDefinition {
+  readonly id: string;
+  readonly title: string;
+  /** Omitted for every variant is normalized by the parser to `true` on the first variant. */
+  readonly default?: boolean | undefined;
+}
+
+export interface OwoggPlayConfigAllowedConfig {
+  readonly difficultyId: string;
+  readonly variantId: string;
+  readonly rewardFactor: number;
+}
+
+/** Untrusted author declaration. It becomes runtime authority only after review and canonicalization. */
+export interface OwoggManifestPlayConfig {
+  readonly version: typeof OWOGG_PLAY_CONFIG_VERSION;
+  readonly rulesetRevision: number;
+  readonly verifierId: string;
+  readonly variants: readonly OwoggPlayConfigVariantDefinition[];
+  readonly allowedConfigs: readonly OwoggPlayConfigAllowedConfig[];
+}
+
 interface OwoggGameCreatorManifestCommon {
   readonly $schema?: string | undefined;
   readonly game: OwoggManifestGame;
@@ -118,22 +140,12 @@ interface OwoggGameCreatorManifestCommon {
   readonly achievements?: readonly OwoggAchievementDefinition[] | undefined;
 }
 
-/** Immutable legacy manifest. `game.mode: "multi"` is coarse/local metadata only. */
-export interface OwoggGameCreatorManifestV1 extends OwoggGameCreatorManifestCommon {
+/** The expanded v1 contract and OWOGG's only manifest shape. */
+export interface OwoggGameCreatorManifest extends OwoggGameCreatorManifestCommon {
   readonly schemaVersion: typeof OWOGG_GAME_CREATOR_MANIFEST_VERSION;
-}
-
-/**
- * Manifest v2 adds an untrusted managed multiplayer request. Online service remains disabled until
- * OWOGG creates and enables a matching exact-version approved profile.
- */
-export interface OwoggGameCreatorManifestV2 extends Omit<OwoggGameCreatorManifestCommon, "game"> {
-  readonly schemaVersion: typeof OWOGG_GAME_CREATOR_MANIFEST_V2_VERSION;
-  readonly game: OwoggManifestGameV2;
   readonly multiplayer?: OwoggMultiplayerRequest | undefined;
+  readonly playConfig?: OwoggManifestPlayConfig | undefined;
 }
-
-export type OwoggGameCreatorManifest = OwoggGameCreatorManifestV1 | OwoggGameCreatorManifestV2;
 
 /** Canonical subset needed by the host/result validator after registration metadata is projected. */
 export interface OwoggRuntimeContract {
@@ -153,12 +165,13 @@ export interface OwoggCompletionPayload {
   readonly metrics?: Readonly<Record<string, number>> | undefined;
 }
 
-export interface OwoggMultiplayerActionRequest {
-  readonly expectedRevision: number;
-  readonly payload: unknown;
-  /** Optional retry-stable id. The browser API creates a cryptographic UUID when omitted. */
-  readonly clientActionId?: string | undefined;
-}
+export type OwoggMultiplayerSendRequest =
+  | { readonly delivery: "broadcast"; readonly payload: unknown }
+  | {
+      readonly delivery: "direct";
+      readonly targetParticipantId: string;
+      readonly payload: unknown;
+    };
 
 export type OwoggMultiplayerMessage = Exclude<HostToGameMultiplayerMessage, MultiInitMessage>;
 
@@ -166,17 +179,25 @@ export interface OwoggMultiplayerBrowserApi {
   /** Sanitized parent bootstrap; `null` until an online multiplayer host connects. */
   readonly bootstrap: MultiInitMessage | null;
   ready(): boolean;
-  /** Returns the idempotency id when accepted, or `null` when invalid/closed. */
-  action(request: OwoggMultiplayerActionRequest): string | null;
-  input(payload: unknown): boolean;
+  send(request: OwoggMultiplayerSendRequest): boolean;
+  broadcast(payload: unknown): boolean;
+  direct(targetParticipantId: string, payload: unknown): boolean;
+  /** Host-only opaque reconnect snapshot for Relay profiles that enable it. */
+  snapshot(payload: unknown): boolean;
   leave(): void;
   subscribe(listener: (message: OwoggMultiplayerMessage) => void): () => void;
 }
 
 export interface OwoggBrowserApi {
+  /** Approved topology choices for a game-owned launcher; empty when no negotiation is required. */
+  readonly playModes: readonly OwoggPlayMode[];
+  selectPlayMode(playMode: OwoggPlayMode): Promise<OwoggPlayMode>;
+  /** Approved public choices for a verifier-backed generic attempt; null for legacy/online. */
+  readonly playConfig: PublicPlayConfigDescriptor | null;
+  requestStart(config: PlayConfigSelection): Promise<AuthorizedStartContext>;
   start(): void;
   event(name: string, data?: unknown): void;
-  complete(result?: OwoggCompletionPayload): void;
+  complete(result?: OwoggCompletionPayload & { readonly evidence?: JsonSafeValue }): void;
   cancel(): void;
   /** Stable managed-online API. It remains inert for single/local game sessions. */
   readonly multiplayer: OwoggMultiplayerBrowserApi;

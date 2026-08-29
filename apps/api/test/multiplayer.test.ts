@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import {
+  GAME_CANONICAL_SCHEMA_VERSION,
   MULTIPLAYER_TICKET_AUDIENCE,
   MULTIPLAYER_TICKET_ISSUER,
   MULTIPLAYER_TICKET_PROTOCOL_PREFIX,
@@ -12,7 +13,6 @@ import {
 } from "@owogg/core";
 import {
   MULTIPLAYER_LOBBY_SIGNAL_PROTOCOL,
-  MultiplayerCreateInviteResponseSchema,
   MultiplayerGameAvailabilityResponseSchema,
   MultiplayerJoinTicketResponseSchema,
   MultiplayerRoomAdmissionResponseSchema,
@@ -37,6 +37,7 @@ import {
 const SECRET = "api-multiplayer-ticket-secret-32-bytes-minimum";
 const KEY_ID = "api_test_key";
 const INSTANCE_ID = "instance_api_ticket_000000001";
+const CONTENT_HASH = "a".repeat(64);
 const B2_ENV = {
   B2_ENDPOINT: "https://s3.us-west-004.backblazeb2.com",
   B2_REGION: "us-west-004",
@@ -102,12 +103,25 @@ async function websocketTicket(
       gameVersionId: 12,
       profileId: 13,
       profileRevision: 2,
-      rulesetKey: "official:omok",
-      rulesetRevision: 1,
       generation: 3,
       connectionGeneration: 4,
       seatIndex: 1,
       role: "PLAYER",
+      contentHash: CONTENT_HASH,
+      runtime: {
+        kind: "relay",
+        protocolVersion: 1,
+        reconnect: "resume",
+        directMessages: true,
+        hostSnapshot: true,
+        maxMessageBytes: 4 * 1024,
+        maxSnapshotBytes: 16 * 1024,
+        messagesPerSecond: 20,
+        roomBytesPerSecond: 256 * 1024,
+        roomTtlSeconds: 2 * 60 * 60,
+        hostDeparturePolicy: "close",
+        resultTrust: "UNVERIFIED",
+      },
       ...overrides,
     },
     createMultiplayerTicketKeyring({ kid: KEY_ID, secret: SECRET }),
@@ -262,6 +276,7 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
 
   raw.prepare("INSERT INTO users (id, nickname) VALUES (7, 'Host')").run();
   raw.prepare("INSERT INTO users (id, nickname) VALUES (8, 'Player')").run();
+  raw.prepare("INSERT INTO users (id, nickname) VALUES (9, 'Admin')").run();
   raw
     .prepare("INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, 7, ?, ?)")
     .run(sessionToken, nowIso, expiresAt);
@@ -273,7 +288,7 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
       `INSERT INTO games (
          id, slug, publisher_type, publisher_user_id, visibility, live_version_id,
          deleted_at, created_at, updated_at
-       ) VALUES (11, 'api-omok', 'OWOGG', NULL, 'PRIVATE', NULL, NULL, ?, ?)`,
+       ) VALUES (11, 'api-relay-demo', 'OWOGG', NULL, 'PRIVATE', NULL, NULL, ?, ?)`,
     )
     .run(nowIso, nowIso);
   raw
@@ -281,10 +296,27 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
       `INSERT INTO game_versions (
          id, game_id, object_key, content_hash, bundle_bytes, publish_status,
          uploaded_at, moderation_status
-       ) VALUES (12, 11, 'games/11/12.zip', 'api-content-12', 100, 'READY', ?, NULL)`,
+       ) VALUES (12, 11, 'games/11/12.zip', ?, 100, 'READY', ?, NULL)`,
     )
-    .run(nowIso);
+    .run(CONTENT_HASH, nowIso);
   raw.prepare("UPDATE games SET visibility = 'PUBLIC', live_version_id = 12 WHERE id = 11").run();
+  raw
+    .prepare(
+      `INSERT INTO admin_accounts (
+         id, user_id, google_sub, username, password_hash, role, status,
+         must_change_password, created_at, updated_at, password_changed_at
+       ) VALUES (9, 9, 'api-admin', 'apiadmin', 'hash', 'ADMIN', 'ACTIVE', 0, ?, ?, ?)`,
+    )
+    .run(nowIso, nowIso, nowIso);
+  raw
+    .prepare(
+      `INSERT INTO multiplayer_profile_requests (
+         id, game_id, game_version_id, content_hash, request_schema_version, request_hash,
+         request_json, requested_by_user_id, status, reviewed_by_admin_id, reviewed_at,
+         created_at, updated_at
+       ) VALUES (14, 11, 12, ?, 1, ?, '{}', NULL, 'APPROVED', 9, ?, ?, ?)`,
+    )
+    .run(CONTENT_HASH, "b".repeat(64), nowIso, nowIso, nowIso);
   raw
     .prepare(
       `INSERT INTO multiplayer_profiles (
@@ -293,15 +325,22 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
          ruleset_key, ruleset_revision, resolved_config_json, lifecycle, persistence,
          latency_profile, reconnect_policy, min_players, max_players, allowed_visibility_json,
          allowed_join_policies_json, max_action_bytes, max_state_bytes, action_rate_limit,
-         reward_policy_id, enabled, approved_at, updated_at
+         reward_policy_id, enabled, created_by_admin_id, approved_at, updated_at,
+         profile_kind, content_hash, transport_kind, runtime_kind, direct_messages,
+         host_snapshot, host_departure_policy, result_trust, max_message_bytes,
+         max_snapshot_bytes, messages_per_second, room_bytes_per_second, room_ttl_seconds
        ) VALUES (
-         13, NULL, NULL, 1, 11, 12, 2, 1, 'M1', 'turn', 'durable-object',
-         'official:omok', 1, '{"boardSize":15,"winLength":5}', 'match', 'match',
-         'relaxed', 'resume', 2, 2, '["PRIVATE"]', '["INVITE_ONLY"]',
-         1024, 8192, 5, NULL, 1, ?, ?
+         13, 14, ?, 1, 11, 12, 2, 1, 'M1', 'event', 'durable-object',
+         'legacy:disabled', 1, '{}', 'match', 'match',
+         'relaxed', 'resume', 2, 2, '["PRIVATE"]', '["OPEN"]',
+         4096, 1, 20, NULL, 0, 9, ?, ?, 'RELAY', ?, 'websocket', 'relay', 1, 1,
+         'close', 'UNVERIFIED', 4096, 16384, 20, 262144, 7200
        )`,
     )
-    .run(nowIso, nowIso);
+    .run("b".repeat(64), nowIso, nowIso, CONTENT_HASH);
+  raw
+    .prepare("UPDATE multiplayer_profiles SET enabled = 1, updated_at = ? WHERE id = 13")
+    .run(nowIso);
 
   const instances = new D1MultiplayerInstanceRepository(db);
   const created = await instances.createWithHostAndLease({
@@ -311,10 +350,11 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
     createIdempotencyHash: "f".repeat(64),
     gameId: 11,
     gameVersionId: 12,
+    contentHash: CONTENT_HASH,
     profileId: 13,
     profileRevision: 2,
     visibility: "PRIVATE",
-    joinPolicy: "INVITE_ONLY",
+    joinPolicy: "OPEN",
     lifecycle: "match",
     maxPlayers: 2,
     instanceExpiresAt: expiresAt,
@@ -431,11 +471,11 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
   globalThis.fetch = (async () =>
     new Response(
       JSON.stringify({
-        schemaVersion: 2,
-        slug: "api-omok",
-        title: "온라인 오목",
-        shortDescription: "서버 권위형 2인 오목",
-        description: "OWOGG 공식 온라인 오목입니다.",
+        schemaVersion: GAME_CANONICAL_SCHEMA_VERSION,
+        slug: "api-relay-demo",
+        title: "Online Relay Demo",
+        shortDescription: "2인 generic Relay API fixture",
+        description: "게임 규칙을 해석하지 않는 온라인 Relay fixture입니다.",
         publisher: { official: true },
         policy: {
           score: null,
@@ -447,12 +487,12 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
         catalog: {
           type: "TAXONOMY",
           categories: ["board"],
-          tags: ["omok"],
+          tags: ["relay"],
           modes: ["online-multi"],
           inputMethods: ["mouse", "touch"],
           minPlayers: 2,
           maxPlayers: 2,
-          thumbnail: "/omok.svg",
+          thumbnail: "/relay-demo.svg",
         },
         updatedAt: nowIso,
       }),
@@ -460,7 +500,7 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
     )) as typeof fetch;
   try {
     const availabilityResponse = await app.request(
-      "http://localhost/api/multiplayer/games/api-omok",
+      "http://localhost/api/multiplayer/games/api-relay-demo",
       {},
       env as any,
     );
@@ -471,16 +511,17 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
     );
     assert.equal(availability.status, "AVAILABLE");
     if (availability.status === "AVAILABLE") {
-      assert.equal(availability.gameSlug, "api-omok");
-      assert.equal(availability.profile.resolvedClass, "M1");
-      assert.equal(availability.profile.rulesetKey, "official:omok");
+      assert.equal(availability.gameSlug, "api-relay-demo");
+      assert.equal(availability.profile.contentHash, CONTENT_HASH);
+      assert.equal(availability.profile.runtimeKind, "relay");
+      assert.equal(availability.profile.resultTrust, "UNVERIFIED");
       assert.deepEqual(availability.profile.allowedVisibility, ["PRIVATE"]);
-      assert.deepEqual(availability.profile.allowedJoinPolicies, ["INVITE_ONLY"]);
+      assert.deepEqual(availability.profile.allowedJoinPolicies, ["OPEN"]);
     }
     const publicAvailability = JSON.stringify(availability);
     assert.equal(publicAvailability.includes("profileId"), false);
     assert.equal(publicAvailability.includes("ticket"), false);
-    assert.equal(publicAvailability.includes("socket"), false);
+    assert.equal(publicAvailability.includes("socketPath"), false);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -502,10 +543,11 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
     createIdempotencyHash: "e".repeat(64),
     gameId: 11,
     gameVersionId: 12,
+    contentHash: CONTENT_HASH,
     profileId: 13,
     profileRevision: 2,
     visibility: "PRIVATE",
-    joinPolicy: "INVITE_ONLY",
+    joinPolicy: "OPEN",
     lifecycle: "match",
     maxPlayers: 2,
     instanceExpiresAt: expiresAt,
@@ -562,38 +604,6 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
     },
   );
 
-  const inviteRequest = {
-    ...request,
-    body: JSON.stringify({
-      expectedGeneration: 1,
-      idempotencyKey: "api-invite-idempotency-0001",
-    }),
-  };
-  const inviteResponse = await app.request(
-    `http://localhost/api/multiplayer/instances/${INSTANCE_ID}/invites`,
-    inviteRequest,
-    env as any,
-  );
-  assert.equal(inviteResponse.status, 201);
-  assert.equal(inviteResponse.headers.get("Cache-Control"), "no-store");
-  const inviteJson = await inviteResponse.json();
-  assert.equal(Object.hasOwn(inviteJson, "ok"), false);
-  const invite = MultiplayerCreateInviteResponseSchema.parse(inviteJson);
-  assert.equal(invite.replayed, false);
-  assert.equal(invite.maxUses, 1);
-
-  const inviteReplayResponse = await app.request(
-    `http://localhost/api/multiplayer/instances/${INSTANCE_ID}/invites`,
-    inviteRequest,
-    env as any,
-  );
-  assert.equal(inviteReplayResponse.status, 200);
-  const inviteReplay = MultiplayerCreateInviteResponseSchema.parse(
-    await inviteReplayResponse.json(),
-  );
-  assert.equal(inviteReplay.replayed, true);
-  assert.equal(inviteReplay.inviteToken, invite.inviteToken);
-
   holdNextLobbyNotification = true;
   const notificationStarted = new Promise<void>((resolve) => {
     lobbyNotificationStarted = resolve;
@@ -608,7 +618,7 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
           ...request.headers,
           Cookie: `owogg_session=${playerSessionToken}`,
         },
-        body: JSON.stringify({ publicCode: "APITICKET001", inviteToken: invite.inviteToken }),
+        body: JSON.stringify({ publicCode: "APITICKET001", inviteToken: null }),
       },
       env as any,
     )
@@ -658,7 +668,7 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
         ...request.headers,
         Cookie: `owogg_session=${playerSessionToken}`,
       },
-      body: JSON.stringify({ publicCode: "APITICKET001", inviteToken: invite.inviteToken }),
+      body: JSON.stringify({ publicCode: "APITICKET001", inviteToken: null }),
     },
     env as any,
   );
@@ -886,8 +896,14 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
   assert.equal(response.headers.get("Cache-Control"), "no-store");
   const body = MultiplayerJoinTicketResponseSchema.parse(await response.json());
   assert.equal(body.connectionGeneration, 1);
-  assert.equal(body.bootstrap.participantId, "participant_api_host_0001");
-  assert.equal(body.bootstrap.rulesetKey, "official:omok");
+  assert.equal(body.bootstrap.self.participantId, "participant_api_host_0001");
+  assert.equal(body.bootstrap.contentHash, CONTENT_HASH);
+  assert.equal(body.bootstrap.runtime.kind, "relay");
+  assert.deepEqual(
+    body.bootstrap.roster.map((participant) => participant.participantId),
+    ["participant_api_host_0001", joined.participant.id],
+  );
+  assert.equal(JSON.stringify(body.bootstrap).includes("rulesetKey"), false);
   assert.equal(body.socketPath.includes("?"), false);
   assert.equal(body.socketPath.includes("ticket"), true); // route name only, never bearer value
   assert.equal(
@@ -906,6 +922,8 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
     { instanceId: INSTANCE_ID, userId: 7, connectionGeneration: 1 },
   );
   assert.equal(verified.ok, true);
+  assert.equal(verified.ok ? verified.claims.contentHash : null, CONTENT_HASH);
+  assert.equal(verified.ok ? verified.claims.runtime.kind : null, "relay");
 
   const replay = await app.request(
     `http://localhost/api/multiplayer/instances/${INSTANCE_ID}/ticket`,

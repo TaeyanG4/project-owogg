@@ -16,6 +16,7 @@ export const E2E_PUBLIC_GAMES: readonly PublicGame[] = [
     publishedAt: "2026-01-01T00:00:00.000Z",
     stats: { playerCount: 12, bookmarkCount: 3, popularityScore: 21 },
     catalog: { type: "GENRE_MODE", genre: "platform-e2e", mode: "single" },
+    playModes: ["single"],
     policy: { requiresAuth: false, leaderboard: false, score: null, xpPerCompletion: 0 },
     presentation: {
       viewport: { mode: "responsive", preferredWidth: 800, minWidth: 600 },
@@ -35,6 +36,7 @@ export const E2E_PUBLIC_GAMES: readonly PublicGame[] = [
     publishedAt: "2026-01-02T00:00:00.000Z",
     stats: { playerCount: 8, bookmarkCount: 5, popularityScore: 23 },
     catalog: { type: "GENRE_MODE", genre: "platform-e2e", mode: "single" },
+    playModes: ["single"],
     policy: { requiresAuth: false, leaderboard: false, score: null, xpPerCompletion: 0 },
     presentation: {
       viewport: { mode: "fixed", preferredWidth: 1280, preferredHeight: 720 },
@@ -54,6 +56,7 @@ export const E2E_PUBLIC_GAMES: readonly PublicGame[] = [
     publishedAt: "2026-01-03T00:00:00.000Z",
     stats: { playerCount: 4, bookmarkCount: 1, popularityScore: 7 },
     catalog: { type: "GENRE_MODE", genre: "platform-e2e", mode: "single" },
+    playModes: ["single"],
     policy: { requiresAuth: false, leaderboard: false, score: null, xpPerCompletion: 0 },
     presentation: {
       viewport: { mode: "responsive" },

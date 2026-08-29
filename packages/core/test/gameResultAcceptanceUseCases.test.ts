@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   GAME_SESSION_POLICY,
   GameResultAcceptanceUseCases,
-  MultiplayerLegacyFlowGate,
+  SelectedTopologyAuthorityGate,
   parseGameCreatorManifest,
   signGameSession,
   type GameResultAcceptanceRepository,
@@ -25,7 +25,13 @@ function runtime(): RuntimeGame {
       ...base.canonical,
       creatorManifest: parseGameCreatorManifest({
         schemaVersion: 1,
-        game: { slug: "result-game", title: "Result", genre: "test", mode: "single" },
+        game: {
+          slug: "result-game",
+          title: "Result",
+          genre: "test",
+          mode: "single",
+          playModes: ["single"],
+        },
         progression: { type: "none" },
         result: {
           score: {
@@ -36,6 +42,23 @@ function runtime(): RuntimeGame {
         },
         leaderboard: { enabled: true },
       }),
+    },
+  };
+}
+
+function withPlayConfig(game: RuntimeGame): RuntimeGame {
+  return {
+    ...game,
+    canonical: {
+      ...game.canonical,
+      playConfig: {
+        version: 1,
+        rulesetRevision: 1,
+        verifierId: "test-result-v1",
+        defaultVariantId: "standard",
+        variants: [{ id: "standard", label: "Standard" }],
+        allowedConfigs: [{ difficultyId: "normal", variantId: "standard", rewardFactor: 1 }],
+      },
     },
   };
 }
@@ -79,7 +102,7 @@ function setup(
   const availability = {
     isVersionServable: async () => true,
   } as unknown as RuntimeGameAvailability;
-  const gate = new MultiplayerLegacyFlowGate({
+  const gate = new SelectedTopologyAuthorityGate({
     findEnabledForExactVersion: findProfile,
   } as unknown as MultiplayerProfileRepository);
   return new GameResultAcceptanceUseCases(
@@ -107,6 +130,7 @@ test("result acceptance validates canonical facts and consumes the signed attemp
   };
   const accepted = await useCases.accept(input);
   assert.equal(accepted.ok, true);
+  if (accepted.ok) assert.equal(accepted.difficultyId, "normal");
   const replay = await useCases.accept(input);
   assert.deepEqual(replay, { ok: false, error: "ALREADY_CONSUMED" });
 });
@@ -171,4 +195,19 @@ test("result flow fails closed when multiplayer profile authority cannot be read
     result: { score: 50 },
   });
   assert.deepEqual(result, { ok: false, error: "MULTIPLAYER_AUTHORITY_UNAVAILABLE" });
+});
+
+test("PlayConfig blocks iframe-authored results before gs1 token and manifest parsing", async () => {
+  const game = withPlayConfig(runtime());
+  const result = await setup(game).accept({
+    slug: game.identity.slug,
+    userId: 7,
+    nickname: "player",
+    avatarUrl: null,
+    token: "deliberately-invalid",
+    secret: SECRET,
+    result: { score: 100 },
+  });
+
+  assert.deepEqual(result, { ok: false, error: "PLAY_CONFIG_AUTHORITY_UNAVAILABLE" });
 });

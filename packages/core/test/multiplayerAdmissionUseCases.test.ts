@@ -5,6 +5,7 @@ import {
   createMultiplayerTicketKeyring,
   verifyMultiplayerJoinTicket,
   type GameVersionLeaseRecord,
+  type GameVersionRepository,
   type MultiplayerInstanceRecord,
   type MultiplayerInstanceRepository,
   type MultiplayerParticipantRecord,
@@ -25,10 +26,11 @@ const instance: MultiplayerInstanceRecord = {
   createIdempotencyHash: "a".repeat(64),
   gameId: 11,
   gameVersionId: 12,
+  contentHash: "b".repeat(64),
   profileId: 13,
   profileRevision: 2,
   visibility: "PRIVATE",
-  joinPolicy: "INVITE_ONLY",
+  joinPolicy: "OPEN",
   lifecycle: "match",
   status: "ACTIVE",
   generation: 3,
@@ -55,6 +57,14 @@ const participant: MultiplayerParticipantRecord = {
   updatedAt: "2026-08-25T23:30:00.000Z",
 };
 
+const peer: MultiplayerParticipantRecord = {
+  ...participant,
+  id: "participant_87654321",
+  userId: 8,
+  role: "PLAYER",
+  seatIndex: 1,
+};
+
 const lease: GameVersionLeaseRecord = {
   id: 9,
   gameVersionId: instance.gameVersionId,
@@ -70,32 +80,32 @@ const lease: GameVersionLeaseRecord = {
 
 const profile: MultiplayerProfileRecord = {
   id: instance.profileId,
-  sourceRequestId: null,
+  sourceRequestId: 1,
   profile: {
     profileVersion: 1,
     gameId: instance.gameId,
     gameVersionId: instance.gameVersionId,
-    sourceRequestHash: null,
+    contentHash: instance.contentHash,
+    sourceRequestHash: "a".repeat(64),
     profileRevision: instance.profileRevision,
+    transportKind: "websocket",
+    runtimeKind: "relay",
     protocolVersion: 1,
-    resolvedClass: "M1",
-    simulationModel: "turn",
-    runtimeBackend: "durable-object",
-    rulesetKey: "official:omok",
-    rulesetRevision: 1,
-    resolvedConfigJson: '{"boardSize":15,"winLength":5}',
     lifecycle: "match",
-    persistence: "match",
-    latencyProfile: "relaxed",
     reconnectPolicy: "resume",
+    directMessages: true,
+    hostSnapshot: true,
     minPlayers: 2,
     maxPlayers: 2,
     allowedVisibility: ["PRIVATE"],
-    allowedJoinPolicies: ["INVITE_ONLY"],
-    maxActionBytes: 4096,
-    maxStateBytes: 16384,
-    actionRateLimit: 10,
-    rewardPolicyId: null,
+    allowedJoinPolicies: ["OPEN"],
+    hostDeparturePolicy: "close",
+    resultTrust: "UNVERIFIED",
+    maxMessageBytes: 4096,
+    maxSnapshotBytes: 16384,
+    messagesPerSecond: 20,
+    roomBytesPerSecond: 262144,
+    roomTtlSeconds: 7200,
     // Existing participants may reconnect while an operator drains new admission.
     enabled: false,
   },
@@ -112,10 +122,12 @@ function repositories(overrides?: {
   participant?: MultiplayerParticipantRecord | null;
   lease?: GameVersionLeaseRecord | null;
   profile?: MultiplayerProfileRecord | null;
+  participants?: readonly MultiplayerParticipantRecord[];
   advanceSucceeds?: boolean;
 }): {
   instances: MultiplayerInstanceRepository;
   profiles: MultiplayerProfileRepository;
+  gameVersions: GameVersionRepository;
   advances: Array<number>;
 } {
   const advances: number[] = [];
@@ -136,6 +148,11 @@ function repositories(overrides?: {
       async findLease() {
         return selectedLease ?? null;
       },
+      async listParticipants() {
+        return (
+          overrides?.participants ?? (selectedParticipant ? [selectedParticipant, peer] : [peer])
+        );
+      },
       async advanceConnectionGeneration(input) {
         advances.push(input.expectedConnectionGeneration);
         if (overrides?.advanceSucceeds === false || !selectedParticipant) return null;
@@ -151,6 +168,32 @@ function repositories(overrides?: {
         return selectedProfile ?? null;
       },
     } as MultiplayerProfileRepository,
+    gameVersions: {
+      async findForGame(gameId, versionId) {
+        return gameId === instance.gameId && versionId === instance.gameVersionId
+          ? {
+              id: instance.gameVersionId,
+              gameId: instance.gameId,
+              objectKey: "uploads/test.zip",
+              contentHash: instance.contentHash,
+              bundleBytes: 1,
+              publishStatus: "READY",
+              publishError: null,
+              publishedAt: NOW.toISOString(),
+              manifestKey: "games/test/owogg.json",
+              publishedSizeBytes: 1,
+              fileCount: 1,
+              uploadedAt: NOW.toISOString(),
+            }
+          : null;
+      },
+      async findById() {
+        return null;
+      },
+      async listByGameId() {
+        return [];
+      },
+    },
   };
 }
 
@@ -159,6 +202,7 @@ test("admission issues a 30-second ticket after atomically advancing connection 
   const useCases = new MultiplayerAdmissionUseCases({
     instances: repos.instances,
     profiles: repos.profiles,
+    gameVersions: repos.gameVersions,
     now: () => NOW,
     createJti: () => "ticket_nonce_123456789",
   });
@@ -176,12 +220,22 @@ test("admission issues a 30-second ticket after atomically advancing connection 
   assert.deepEqual(result.bootstrap, {
     type: "MULTI_INIT",
     v: 1,
-    participantId: participant.id,
     gameVersionId: instance.gameVersionId,
+    contentHash: instance.contentHash,
     profileRevision: instance.profileRevision,
-    rulesetKey: "official:omok",
-    rulesetRevision: 1,
     generation: instance.generation,
+    runtime: { kind: "relay", protocolVersion: 1, resultTrust: "UNVERIFIED" },
+    self: { participantId: participant.id, seatIndex: 0, role: "HOST" },
+    roster: [
+      { participantId: participant.id, seatIndex: 0, role: "HOST" },
+      { participantId: peer.id, seatIndex: 1, role: "PLAYER" },
+    ],
+    capabilities: {
+      reconnect: "resume",
+      broadcast: true,
+      directMessages: true,
+      hostSnapshot: true,
+    },
   });
   const verified = await verifyMultiplayerJoinTicket(
     result.ticket,
@@ -197,6 +251,7 @@ test("admission allows an existing participant to reconnect while profile is dis
   const result = await new MultiplayerAdmissionUseCases({
     instances: repos.instances,
     profiles: repos.profiles,
+    gameVersions: repos.gameVersions,
     now: () => NOW,
     createJti: () => "ticket_nonce_123456789",
   }).issueJoinTicket({
@@ -218,6 +273,7 @@ test("admission fails before advancing for missing participant, stale generation
     const result = await new MultiplayerAdmissionUseCases({
       instances: repos.instances,
       profiles: repos.profiles,
+      gameVersions: repos.gameVersions,
       now: () => NOW,
     }).issueJoinTicket({
       userId: 7,
@@ -235,6 +291,7 @@ test("admission returns a typed conflict when the connection-generation CAS lose
   const result = await new MultiplayerAdmissionUseCases({
     instances: repos.instances,
     profiles: repos.profiles,
+    gameVersions: repos.gameVersions,
     now: () => NOW,
   }).issueJoinTicket({
     userId: 7,
@@ -253,6 +310,7 @@ test("admission bounds ticket expiry by the instance/lease authority", async () 
   const result = await new MultiplayerAdmissionUseCases({
     instances: repos.instances,
     profiles: repos.profiles,
+    gameVersions: repos.gameVersions,
     now: () => NOW,
     createJti: () => "ticket_nonce_123456789",
   }).issueJoinTicket({

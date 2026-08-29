@@ -1,9 +1,5 @@
-import {
-  MultiplayerProfileRequestValidationError,
-  assertManagedMultiplayerProfileMatchesRequestV1,
-  buildApprovedManagedMultiplayerProfileV1,
-  resolveManagedMultiplayerProfileRequestV1,
-} from "../domain/multiplayerProfileRequest.js";
+import { resolveMultiplayerRuntimeProfileRequestV1 } from "../domain/multiplayerProfileRequest.js";
+import type { ApprovedRelayMultiplayerProfileV1 } from "../domain/multiplayerProfile.js";
 import type {
   MultiplayerProfileRecord,
   MultiplayerProfileRepository,
@@ -16,18 +12,17 @@ import type {
 export type ManagedMultiplayerProfileReviewFailureCode =
   | "REQUEST_NOT_FOUND"
   | "REQUEST_NOT_PENDING"
-  | "REQUEST_NOT_SUPPORTED"
-  | "VERSION_NOT_ELIGIBLE"
-  | "PROFILE_CONFLICT";
+  | "MULTIPLAYER_RUNTIME_NOT_AVAILABLE"
+  | "MULTIPLAYER_CAPABILITY_NOT_AVAILABLE"
+  | "PROFILE_CREATE_FAILED";
 
 export type ManagedMultiplayerProfileActivationFailureCode =
-  "PROFILE_NOT_FOUND" | "PROFILE_NOT_MANAGED" | "REQUEST_NOT_APPROVED" | "PROFILE_CONFLICT";
+  "PROFILE_NOT_FOUND" | "PROFILE_NOT_MANAGED" | "PROFILE_ACTIVATION_CONFLICT";
 
 export type ManagedMultiplayerProfileReviewResult =
   | {
       readonly ok: true;
       readonly request: MultiplayerProfileRequestRecord;
-      /** Approval creates a disabled profile; rejection deliberately has no profile. */
       readonly profile: MultiplayerProfileRecord | null;
     }
   | {
@@ -53,29 +48,9 @@ interface ManagedMultiplayerProfileReviewDependencies {
   readonly now?: () => Date;
 }
 
-function matchesApprovedRequest(
-  profile: MultiplayerProfileRecord,
-  request: MultiplayerProfileRequestRecord,
-): boolean {
-  if (
-    profile.sourceRequestId !== request.id ||
-    profile.profile.sourceRequestHash !== request.requestHash
-  ) {
-    return false;
-  }
-  try {
-    assertManagedMultiplayerProfileMatchesRequestV1(request.request, profile.profile);
-    return true;
-  } catch (error) {
-    if (error instanceof MultiplayerProfileRequestValidationError) return false;
-    throw error;
-  }
-}
-
 /**
- * Audited server boundary that turns one immutable exact-version Creator request into one disabled
- * trusted profile. It never enables gameplay, grants rewards, or accepts a Creator-selected class,
- * backend, ruleset, access policy, or resource limit.
+ * Exact-version Relay review boundary. Approval creates one disabled immutable profile revision;
+ * activation is a separate admin CAS so review never makes a runtime immediately public.
  */
 export class ManagedMultiplayerProfileReviewUseCases {
   private readonly now: () => Date;
@@ -86,6 +61,10 @@ export class ManagedMultiplayerProfileReviewUseCases {
 
   listPending(limit = 50): Promise<readonly MultiplayerProfileRequestRecord[]> {
     return this.dependencies.requests.listPending(limit);
+  }
+
+  listManagedProfiles(limit = 50): Promise<readonly MultiplayerProfileRecord[]> {
+    return this.dependencies.profiles.listManaged(limit);
   }
 
   get(requestId: number): Promise<MultiplayerProfileRequestRecord | null> {
@@ -117,68 +96,83 @@ export class ManagedMultiplayerProfileReviewUseCases {
     readonly requestId: number;
     readonly reviewedByAdminId: number;
   }): Promise<ManagedMultiplayerProfileReviewResult> {
-    let request = await this.dependencies.requests.findById(input.requestId);
+    const request = await this.dependencies.requests.findById(input.requestId);
     if (!request) return { ok: false, code: "REQUEST_NOT_FOUND", request: null };
-
-    const resolution = resolveManagedMultiplayerProfileRequestV1(request.request);
-    if (resolution.status !== "SUPPORTED_V1") {
-      return { ok: false, code: "REQUEST_NOT_SUPPORTED", request };
+    if (request.status !== "PENDING_REVIEW" && request.status !== "APPROVED") {
+      return { ok: false, code: "REQUEST_NOT_PENDING", request };
     }
 
+    const resolution = resolveMultiplayerRuntimeProfileRequestV1(request.request);
+    if (resolution.status === "RUNTIME_NOT_AVAILABLE") {
+      return { ok: false, code: "MULTIPLAYER_RUNTIME_NOT_AVAILABLE", request };
+    }
+    if (resolution.status === "CAPABILITY_NOT_AVAILABLE") {
+      return { ok: false, code: "MULTIPLAYER_CAPABILITY_NOT_AVAILABLE", request };
+    }
+
+    const nowIso = this.now().toISOString();
+    let approvedRequest = request;
     if (request.status === "PENDING_REVIEW") {
       const reviewed = await this.dependencies.requests.review({
         requestId: request.id,
         decision: "APPROVED",
         reviewedByAdminId: input.reviewedByAdminId,
         decisionReasonCode: null,
-        nowIso: this.now().toISOString(),
+        nowIso,
       });
       if (reviewed.status === "NOT_FOUND") {
         return { ok: false, code: "REQUEST_NOT_FOUND", request: null };
       }
-      if (reviewed.status === "CONFLICT" && reviewed.record.status !== "APPROVED") {
+      if (reviewed.status === "CONFLICT" || reviewed.record.status !== "APPROVED") {
         return { ok: false, code: "REQUEST_NOT_PENDING", request: reviewed.record };
       }
-      request = reviewed.record;
-    } else if (request.status !== "APPROVED") {
-      return { ok: false, code: "REQUEST_NOT_PENDING", request };
+      approvedRequest = reviewed.record;
     }
 
-    // A request review and profile insert cross repository ports, so retries are an intentional
-    // part of the contract. If moderation or storage blocked the first insert, replaying approval
-    // safely heals the already-APPROVED request without changing its immutable source.
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const latest = await this.dependencies.profiles.findLatestForExactVersion(
-        request.gameId,
-        request.gameVersionId,
-      );
-      if (latest && matchesApprovedRequest(latest, request)) {
-        return { ok: true, request, profile: latest };
-      }
-
-      const profile = buildApprovedManagedMultiplayerProfileV1({
-        gameId: request.gameId,
-        gameVersionId: request.gameVersionId,
-        requestHash: request.requestHash,
-        profileRevision: (latest?.profile.profileRevision ?? 0) + 1,
-        request: request.request,
-      });
-      const created = await this.dependencies.profiles.createApprovedRevision({
-        sourceRequestId: request.id,
-        profile,
-        createdByAdminId: input.reviewedByAdminId,
-        nowIso: this.now().toISOString(),
-      });
-      if (created.status !== "REJECTED") {
-        return { ok: true, request, profile: created.record };
-      }
-      if (created.code === "REVISION_CONFLICT") continue;
-      if (created.code === "GAME_VERSION_NOT_FOUND" || created.code === "SOURCE_REQUEST_INVALID") {
-        return { ok: false, code: "VERSION_NOT_ELIGIBLE", request };
-      }
-      return { ok: false, code: "PROFILE_CONFLICT", request };
+    const latest = await this.dependencies.profiles.findLatestForExactVersion(
+      approvedRequest.gameId,
+      approvedRequest.gameVersionId,
+    );
+    if (latest?.sourceRequestId === approvedRequest.id) {
+      return { ok: true, request: approvedRequest, profile: latest };
     }
-    return { ok: false, code: "PROFILE_CONFLICT", request };
+    const policy = resolution.policy;
+    const profile: ApprovedRelayMultiplayerProfileV1 = {
+      profileVersion: 1,
+      gameId: approvedRequest.gameId,
+      gameVersionId: approvedRequest.gameVersionId,
+      contentHash: approvedRequest.contentHash,
+      sourceRequestHash: approvedRequest.requestHash,
+      profileRevision: (latest?.profile.profileRevision ?? 0) + 1,
+      transportKind: policy.transportKind,
+      runtimeKind: policy.runtimeKind,
+      protocolVersion: policy.protocolVersion,
+      lifecycle: "match",
+      reconnectPolicy: policy.reconnectPolicy,
+      directMessages: policy.directMessages,
+      hostSnapshot: policy.hostSnapshot,
+      minPlayers: policy.minPlayers,
+      maxPlayers: policy.maxPlayers,
+      allowedVisibility: policy.allowedVisibility,
+      allowedJoinPolicies: policy.allowedJoinPolicies,
+      hostDeparturePolicy: policy.hostDeparturePolicy,
+      resultTrust: policy.resultTrust,
+      maxMessageBytes: policy.maxMessageBytes,
+      maxSnapshotBytes: policy.maxSnapshotBytes,
+      messagesPerSecond: policy.messagesPerSecond,
+      roomBytesPerSecond: policy.roomBytesPerSecond,
+      roomTtlSeconds: policy.roomTtlSeconds,
+      enabled: false,
+    };
+    const created = await this.dependencies.profiles.createApprovedRevision({
+      sourceRequestId: approvedRequest.id,
+      profile,
+      createdByAdminId: input.reviewedByAdminId,
+      nowIso,
+    });
+    return created.status === "REJECTED"
+      ? { ok: false, code: "PROFILE_CREATE_FAILED", request: approvedRequest }
+      : { ok: true, request: approvedRequest, profile: created.record };
   }
 
   async setProfileEnabled(input: {
@@ -189,25 +183,22 @@ export class ManagedMultiplayerProfileReviewUseCases {
   }): Promise<ManagedMultiplayerProfileActivationResult> {
     const profile = await this.dependencies.profiles.findById(input.profileId);
     if (!profile) return { ok: false, code: "PROFILE_NOT_FOUND" };
-    if (profile.sourceRequestId === null) {
-      return { ok: false, code: "PROFILE_NOT_MANAGED" };
-    }
+    if (profile.sourceRequestId === null) return { ok: false, code: "PROFILE_NOT_MANAGED" };
     const request = await this.dependencies.requests.findById(profile.sourceRequestId);
     if (!request || request.status !== "APPROVED") {
-      return { ok: false, code: "REQUEST_NOT_APPROVED" };
-    }
-    if (!matchesApprovedRequest(profile, request)) {
-      return { ok: false, code: "PROFILE_CONFLICT" };
+      return { ok: false, code: "PROFILE_NOT_MANAGED" };
     }
     const changed = await this.dependencies.profiles.setEnabled({
-      profileId: profile.id,
+      profileId: input.profileId,
       enabled: input.enabled,
       changedByAdminId: input.changedByAdminId,
       reasonCode: input.reasonCode,
       nowIso: this.now().toISOString(),
     });
     if (changed.status === "NOT_FOUND") return { ok: false, code: "PROFILE_NOT_FOUND" };
-    if (changed.status === "CONFLICT") return { ok: false, code: "PROFILE_CONFLICT" };
+    if (changed.status === "CONFLICT") {
+      return { ok: false, code: "PROFILE_ACTIVATION_CONFLICT" };
+    }
     return { ok: true, request, profile: changed.record };
   }
 }

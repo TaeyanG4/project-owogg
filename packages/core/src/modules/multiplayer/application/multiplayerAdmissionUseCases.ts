@@ -6,10 +6,11 @@ import {
   signMultiplayerJoinTicket,
   type MultiplayerTicketKeyring,
 } from "../domain/multiplayerJoinTicket.js";
+import type { GameVersionRepository } from "../../game/ports/gameVersionRepository.js";
+import { isApprovedRelayMultiplayerProfileV1 } from "../domain/multiplayerProfile.js";
 import type { MultiplayerErrorCode } from "../domain/multiplayerErrors.js";
 import type { MultiplayerInstanceRepository } from "../ports/multiplayerInstanceRepository.js";
 import type { MultiplayerProfileRepository } from "../ports/multiplayerProfileRepository.js";
-import { isSupportedMultiplayerRuntimeProfile } from "../rules/supportedRulesets.js";
 
 const TERMINAL_INSTANCE_STATUSES = new Set(["CLOSED", "ABORTED", "EXPIRED"]);
 
@@ -23,12 +24,29 @@ export interface IssueMultiplayerJoinTicketInput {
 export interface MultiplayerJoinBootstrap {
   readonly type: "MULTI_INIT";
   readonly v: 1;
-  readonly participantId: string;
   readonly gameVersionId: number;
+  readonly contentHash: string;
   readonly profileRevision: number;
-  readonly rulesetKey: string;
-  readonly rulesetRevision: number;
   readonly generation: number;
+  readonly runtime: {
+    readonly kind: "relay";
+    readonly protocolVersion: 1;
+    readonly resultTrust: "UNVERIFIED";
+  };
+  readonly self: MultiplayerJoinBootstrapParticipant;
+  readonly roster: readonly MultiplayerJoinBootstrapParticipant[];
+  readonly capabilities: {
+    readonly reconnect: "none" | "resume";
+    readonly broadcast: true;
+    readonly directMessages: boolean;
+    readonly hostSnapshot: boolean;
+  };
+}
+
+export interface MultiplayerJoinBootstrapParticipant {
+  readonly participantId: string;
+  readonly seatIndex: number;
+  readonly role: "HOST" | "PLAYER";
 }
 
 export type IssueMultiplayerJoinTicketResult =
@@ -58,6 +76,7 @@ export type IssueMultiplayerJoinTicketResult =
 export interface MultiplayerAdmissionUseCaseDependencies {
   readonly instances: MultiplayerInstanceRepository;
   readonly profiles: MultiplayerProfileRepository;
+  readonly gameVersions: GameVersionRepository;
   readonly now?: () => Date;
   readonly createJti?: () => string;
 }
@@ -114,21 +133,26 @@ export class MultiplayerAdmissionUseCases {
       return { ok: false, code: "STALE_GENERATION" };
     }
 
-    const [profileRecord, lease] = await Promise.all([
+    const [profileRecord, version, lease, participants] = await Promise.all([
       this.dependencies.profiles.findById(instance.profileId),
+      this.dependencies.gameVersions.findForGame(instance.gameId, instance.gameVersionId),
       this.dependencies.instances.findLease(instance.id),
+      this.dependencies.instances.listParticipants(instance.id),
     ]);
-    if (!profileRecord) return { ok: false, code: "PROFILE_DISABLED" };
+    if (!profileRecord || !isApprovedRelayMultiplayerProfileV1(profileRecord.profile)) {
+      return { ok: false, code: "PROFILE_DISABLED" };
+    }
     const profile = profileRecord.profile;
     if (
       profile.gameId !== instance.gameId ||
       profile.gameVersionId !== instance.gameVersionId ||
-      profile.profileRevision !== instance.profileRevision
+      profile.profileRevision !== instance.profileRevision ||
+      profile.contentHash !== instance.contentHash ||
+      !version ||
+      version.publishStatus !== "READY" ||
+      version.contentHash !== instance.contentHash
     ) {
       return { ok: false, code: "VERSION_MISMATCH" };
-    }
-    if (!isSupportedMultiplayerRuntimeProfile(profile)) {
-      return { ok: false, code: "PROFILE_DISABLED" };
     }
     if (
       !lease ||
@@ -139,6 +163,26 @@ export class MultiplayerAdmissionUseCases {
       lease.expiresAt <= nowIso
     ) {
       return { ok: false, code: "VERSION_MISMATCH" };
+    }
+
+    const roster = participants
+      .filter((candidate) => candidate.status === "JOINED" || candidate.status === "READY")
+      .sort((left, right) => left.seatIndex - right.seatIndex)
+      .map((candidate) => ({
+        participantId: candidate.id,
+        seatIndex: candidate.seatIndex,
+        role: candidate.role,
+      }));
+    if (
+      roster.length < 2 ||
+      roster.length > 8 ||
+      roster.length !== instance.participantCount ||
+      new Set(roster.map((candidate) => candidate.participantId)).size !== roster.length ||
+      new Set(roster.map((candidate) => candidate.seatIndex)).size !== roster.length ||
+      roster.filter((candidate) => candidate.role === "HOST").length !== 1 ||
+      !roster.some((candidate) => candidate.participantId === participant.id)
+    ) {
+      return { ok: false, code: "INTERNAL_RETRYABLE" };
     }
 
     const expiresSeconds = Math.min(
@@ -170,10 +214,23 @@ export class MultiplayerAdmissionUseCases {
           participantId: advanced.id,
           userId: input.userId,
           gameVersionId: instance.gameVersionId,
+          contentHash: instance.contentHash,
           profileId: instance.profileId,
           profileRevision: instance.profileRevision,
-          rulesetKey: profile.rulesetKey,
-          rulesetRevision: profile.rulesetRevision,
+          runtime: {
+            kind: "relay",
+            protocolVersion: profile.protocolVersion,
+            reconnect: profile.reconnectPolicy,
+            directMessages: profile.directMessages,
+            hostSnapshot: profile.hostSnapshot,
+            maxMessageBytes: profile.maxMessageBytes,
+            maxSnapshotBytes: profile.maxSnapshotBytes,
+            messagesPerSecond: profile.messagesPerSecond,
+            roomBytesPerSecond: profile.roomBytesPerSecond,
+            roomTtlSeconds: profile.roomTtlSeconds,
+            hostDeparturePolicy: profile.hostDeparturePolicy,
+            resultTrust: profile.resultTrust,
+          },
           generation: instance.generation,
           connectionGeneration: advanced.connectionGeneration,
           seatIndex: advanced.seatIndex,
@@ -190,12 +247,27 @@ export class MultiplayerAdmissionUseCases {
         bootstrap: {
           type: "MULTI_INIT",
           v: 1,
-          participantId: advanced.id,
           gameVersionId: instance.gameVersionId,
+          contentHash: instance.contentHash,
           profileRevision: instance.profileRevision,
-          rulesetKey: profile.rulesetKey,
-          rulesetRevision: profile.rulesetRevision,
           generation: instance.generation,
+          runtime: {
+            kind: "relay",
+            protocolVersion: 1,
+            resultTrust: "UNVERIFIED",
+          },
+          self: {
+            participantId: advanced.id,
+            seatIndex: advanced.seatIndex,
+            role: advanced.role,
+          },
+          roster,
+          capabilities: {
+            reconnect: profile.reconnectPolicy === "resume" ? "resume" : "none",
+            broadcast: true,
+            directMessages: profile.directMessages,
+            hostSnapshot: profile.hostSnapshot,
+          },
         },
       };
     } catch {

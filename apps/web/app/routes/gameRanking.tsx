@@ -6,6 +6,7 @@ import { getLocalizedGameContent } from "../features/catalog/localizedGameConten
 import { publicGameToCard } from "../features/catalog/publicGameAdapter";
 import { fetchPublicGame } from "../features/publicGamesApi";
 import { localizedDifficultyLabel } from "../features/catalog/difficultyLabels";
+import { leaderboardVariantLabel } from "../features/scores/variantLabel";
 import { useI18n } from "../features/i18n/I18nContext";
 import { GameThumbnail } from "../components/ui/GameThumbnail";
 import type { LeaderRecord, PublicGame } from "@owogg/contracts";
@@ -211,7 +212,7 @@ export default function GameRankingRoute() {
                 <th className="px-6 py-4">{dict.ranking.rankHeader}</th>
                 <th className="px-6 py-4">{dict.ranking.playerHeader}</th>
                 <th className="px-6 py-4">{dict.ranking.recordHeader}</th>
-                <th className="px-6 py-4">{dict.ranking.dateHeader}</th>
+                <th className="px-6 py-4">{dict.ranking.modeHeader}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50 text-sm font-medium text-text-primary">
@@ -278,8 +279,8 @@ export default function GameRankingRoute() {
                         <td className="whitespace-nowrap px-6 py-4 text-base font-black text-brand-light">
                           {record.formattedScore}
                         </td>
-                        <td className="whitespace-nowrap px-6 py-4 text-xs text-text-muted">
-                          {record.createdAt}
+                        <td className="whitespace-nowrap px-6 py-4 text-xs font-bold text-text-secondary">
+                          {leaderboardVariantLabel(game, record.variantId)}
                         </td>
                       </tr>
                     );

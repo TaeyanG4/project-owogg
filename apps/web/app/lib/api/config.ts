@@ -53,3 +53,17 @@ export const GAME_ORIGIN = getGameOrigin();
 export function gamePlayUrl(slug: string): string {
   return `${GAME_ORIGIN.replace(/\/+$/, "")}/play/${encodeURIComponent(slug)}`;
 }
+
+/** Immutable runtime URL for a multiplayer room's exact D1-pinned bundle. Unlike `/play/:slug`,
+ * this path never follows a later live-version switch while the room lease is active. */
+export function gameVersionPlayUrl(gameId: number, versionId: number): string {
+  if (
+    !Number.isSafeInteger(gameId) ||
+    gameId <= 0 ||
+    !Number.isSafeInteger(versionId) ||
+    versionId <= 0
+  ) {
+    throw new RangeError("gameId and versionId must be positive safe integers");
+  }
+  return `${GAME_ORIGIN.replace(/\/+$/, "")}/games/${gameId}/${versionId}/index.html`;
+}

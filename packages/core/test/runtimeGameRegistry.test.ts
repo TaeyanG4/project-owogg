@@ -253,17 +253,23 @@ test("public catalog resolves independent live versions and canonicals concurren
   );
 });
 
-test("exact-version availability is D1-only and denies non-live, wrong-owner, non-READY, and disabled versions", async () => {
+test("exact-version availability serves a non-live READY version only while its room lease is active", async () => {
   const official = identity(1, "official", { type: "OWOGG" });
   const user = identity(2, "user", { type: "USER", userId: 7 });
   const versionRows = [version(official.id), version(user.id)];
   const disabled = new Set<string>();
+  const leasedVersions = new Set<number>();
   const availability = new RuntimeGameAvailability(
     new IdentityRepo([official, user]),
     new VersionRepo(versionRows),
     {
       async getDisabledGameIds() {
         return [...disabled];
+      },
+    },
+    {
+      async hasActiveVersionLease(gameVersionId) {
+        return leasedVersions.has(gameVersionId);
       },
     },
   );
@@ -273,6 +279,14 @@ test("exact-version availability is D1-only and denies non-live, wrong-owner, no
   assert.equal(await availability.isVersionServable(official.id, officialVersionId), true);
   assert.equal(await availability.isVersionServable(user.id, userVersionId), true);
   assert.equal(await availability.isVersionServable(official.id, 999), false);
+
+  const previousVersionId = 501;
+  versionRows.push(version(official.id, { id: previousVersionId }));
+  assert.equal(await availability.isVersionServable(official.id, previousVersionId), false);
+  leasedVersions.add(previousVersionId);
+  assert.equal(await availability.isVersionServable(official.id, previousVersionId), true);
+  leasedVersions.delete(previousVersionId);
+  assert.equal(await availability.isVersionServable(official.id, previousVersionId), false);
 
   versionRows[0] = version(99, { id: officialVersionId });
   assert.equal(await availability.isVersionServable(official.id, officialVersionId), false);

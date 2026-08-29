@@ -3,6 +3,13 @@ import type { ReactNode } from "react";
 import { GameFrame } from "../GameFrame";
 import { createGameBridgeHost, type GameBridgeHost } from "./gameBridgeHost";
 import type { OwoggCompletionPayload } from "@owogg/game-sdk/contracts";
+import type {
+  GamePlayMode,
+  JsonSafeValue,
+  PlayConfigSelection,
+  PublicPlayConfigDescriptor,
+} from "@owogg/game-sdk/bridge";
+import type { GameBridgePlayModeDecision, GameBridgeStartDecision } from "./gameBridgeHost";
 
 export interface IframeRuntimeProps {
   src: string;
@@ -24,10 +31,24 @@ export interface IframeRuntimeProps {
    * message, so a difficulty change reaching a game already mid-session requires a fresh mount
    * (a new `attemptKey`) — see GameHost.tsx's own doc comment for how that's enforced. */
   difficultyId?: string;
+  playConfig?: PublicPlayConfigDescriptor;
+  playModes?: readonly GamePlayMode[];
   onReady?: () => void;
   onStarted?: () => void;
   onEvent?: (name: string, data?: unknown) => void;
-  onComplete?: (result: OwoggCompletionPayload & { metadata?: Record<string, unknown> }) => void;
+  onComplete?: (
+    result: OwoggCompletionPayload & {
+      metadata?: Record<string, unknown>;
+      evidence?: JsonSafeValue;
+    },
+  ) => void;
+  onRequestStart?: (
+    playConfig: PlayConfigSelection,
+  ) => Promise<GameBridgeStartDecision> | GameBridgeStartDecision;
+  onSelectPlayMode?: (
+    playMode: GamePlayMode,
+  ) => Promise<GameBridgePlayModeDecision> | GameBridgePlayModeDecision;
+  onPlayModeSelected?: (playMode: GamePlayMode) => void;
   onCancel?: () => void;
   onError?: (message?: string) => void;
 }
@@ -48,10 +69,15 @@ export function IframeRuntime({
   iframeStyle,
   attemptKey,
   difficultyId,
+  playConfig,
+  playModes,
   onReady,
   onStarted,
   onEvent,
   onComplete,
+  onRequestStart,
+  onSelectPlayMode,
+  onPlayModeSelected,
   onCancel,
   onError,
 }: IframeRuntimeProps) {
@@ -86,13 +112,36 @@ export function IframeRuntime({
           ...(onStarted ? { onStarted } : {}),
           ...(onEvent ? { onEvent } : {}),
           ...(onComplete ? { onComplete } : {}),
+          ...(onRequestStart ? { onRequestStart } : {}),
+          ...(onSelectPlayMode ? { onSelectPlayMode } : {}),
+          ...(onPlayModeSelected ? { onPlayModeSelected } : {}),
           ...(onCancel ? { onCancel } : {}),
           ...(onError ? { onError } : {}),
         },
-        difficultyId ? { difficultyId } : undefined,
+        difficultyId || playConfig || playModes
+          ? {
+              ...(difficultyId && !playConfig ? { difficultyId } : {}),
+              ...(playConfig ? { playConfig } : {}),
+              ...(playModes ? { playModes } : {}),
+            }
+          : undefined,
       );
     },
-    [closeBridge, onReady, onStarted, onEvent, onComplete, onCancel, onError, difficultyId],
+    [
+      closeBridge,
+      onReady,
+      onStarted,
+      onEvent,
+      onComplete,
+      onRequestStart,
+      onSelectPlayMode,
+      onPlayModeSelected,
+      onCancel,
+      onError,
+      difficultyId,
+      playConfig,
+      playModes,
+    ],
   );
 
   return (

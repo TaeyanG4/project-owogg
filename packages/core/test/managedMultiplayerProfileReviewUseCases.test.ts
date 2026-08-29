@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   ManagedMultiplayerProfileReviewUseCases,
-  parseManagedMultiplayerProfileRequestV1,
+  parseMultiplayerRuntimeProfileRequestV1,
   type CreateApprovedMultiplayerProfileInput,
   type CreateApprovedMultiplayerProfileResult,
   type MultiplayerProfileRecord,
@@ -11,54 +11,49 @@ import {
   type MultiplayerProfileRequestRepository,
   type ReviewMultiplayerProfileRequestInput,
   type ReviewMultiplayerProfileRequestResult,
-  type SubmitMultiplayerProfileRequestInput,
-  type SubmitMultiplayerProfileRequestResult,
   type SetMultiplayerProfileEnabledInput,
   type SetMultiplayerProfileEnabledResult,
+  type SubmitMultiplayerProfileRequestInput,
+  type SubmitMultiplayerProfileRequestResult,
   type WithdrawMultiplayerProfileRequestResult,
 } from "../src/index.js";
 
-const NOW = new Date("2026-08-27T00:00:00.000Z");
+const NOW = new Date("2026-08-29T00:00:00.000Z");
 
-function managedTurnGridRequest() {
-  return parseManagedMultiplayerProfileRequestV1({
-    requestVersion: 1,
-    kind: "managed-template",
-    template: { id: "turn-grid", version: 1 },
-    players: { min: 2, max: 2 },
-    requirements: {
-      simulation: "turn",
-      lifecycle: "match",
-      persistence: "match",
-      latency: "relaxed",
+function relayRequest(runtimeKind: "relay" | "worker" | "container" = "relay") {
+  return parseMultiplayerRuntimeProfileRequestV1({
+    version: 1,
+    transport: { kind: "websocket", protocolVersion: 1 },
+    runtime: { kind: runtimeKind },
+    players: { min: 2, max: 8 },
+    features: {
       reconnect: "resume",
-      hiddenInformation: false,
-      simultaneousResponse: false,
+      directMessages: true,
+      hostSnapshot: true,
       joinInProgress: false,
       spectators: false,
     },
-    config: { boardWidth: 15, boardHeight: 15, winLength: 5 },
-    client: { protocolVersion: 1 },
   });
 }
 
 function requestRecord(
   status: MultiplayerProfileRequestRecord["status"] = "PENDING_REVIEW",
+  runtimeKind: "relay" | "worker" | "container" = "relay",
 ): MultiplayerProfileRequestRecord {
-  const request = managedTurnGridRequest();
   return {
     id: 1,
     gameId: 10,
     gameVersionId: 20,
+    contentHash: "b".repeat(64),
     requestSchemaVersion: 1,
     requestHash: "a".repeat(64),
     requestJson: "{}",
-    request,
+    request: relayRequest(runtimeKind),
     requestedByUserId: 30,
     status,
     reviewedByAdminId: status === "APPROVED" || status === "REJECTED" ? 40 : null,
     reviewedAt: status === "APPROVED" || status === "REJECTED" ? NOW.toISOString() : null,
-    decisionReasonCode: status === "REJECTED" ? "UNSUPPORTED_TEMPLATE" : null,
+    decisionReasonCode: status === "REJECTED" ? "RUNTIME_REJECTED" : null,
     createdAt: NOW.toISOString(),
     updatedAt: NOW.toISOString(),
   };
@@ -108,27 +103,16 @@ class FakeRequests implements MultiplayerProfileRequestRepository {
   }
 }
 
-class FakeProfiles implements MultiplayerProfileRepository {
-  records: MultiplayerProfileRecord[] = [];
-  rejectNext:
-    Extract<CreateApprovedMultiplayerProfileResult, { status: "REJECTED" }>["code"] | null = null;
+class NoProfileWrites implements MultiplayerProfileRepository {
+  createCalls = 0;
+  record: MultiplayerProfileRecord | null = null;
 
   async createApprovedRevision(
     input: CreateApprovedMultiplayerProfileInput,
   ): Promise<CreateApprovedMultiplayerProfileResult> {
-    if (this.rejectNext) {
-      const code = this.rejectNext;
-      this.rejectNext = null;
-      return { status: "REJECTED", code };
-    }
-    const existing = this.records.find(
-      (candidate) =>
-        candidate.profile.gameVersionId === input.profile.gameVersionId &&
-        candidate.profile.profileRevision === input.profile.profileRevision,
-    );
-    if (existing) return { status: "REPLAYED", record: existing };
-    const record: MultiplayerProfileRecord = {
-      id: this.records.length + 1,
+    this.createCalls += 1;
+    this.record = {
+      id: 50,
       sourceRequestId: input.sourceRequestId,
       profile: input.profile,
       createdByAdminId: input.createdByAdminId,
@@ -138,58 +122,69 @@ class FakeProfiles implements MultiplayerProfileRepository {
       disabledByAdminId: null,
       updatedAt: input.nowIso,
     };
-    this.records.push(record);
-    return { status: "CREATED", record };
+    return { status: "CREATED", record: this.record };
   }
 
   async setEnabled(
     input: SetMultiplayerProfileEnabledInput,
   ): Promise<SetMultiplayerProfileEnabledResult> {
-    const index = this.records.findIndex((record) => record.id === input.profileId);
-    if (index < 0) return { status: "NOT_FOUND" };
-    const current = this.records[index]!;
-    if (current.profile.enabled === input.enabled) {
-      return { status: "REPLAYED", record: current };
-    }
-    const record: MultiplayerProfileRecord = {
-      ...current,
-      profile: { ...current.profile, enabled: input.enabled },
+    if (!this.record || this.record.id !== input.profileId) return { status: "NOT_FOUND" };
+    this.record = {
+      ...this.record,
+      profile: { ...this.record.profile, enabled: input.enabled },
       disabledAt: input.enabled ? null : input.nowIso,
-      disabledReasonCode: input.enabled ? null : input.reasonCode,
+      disabledReasonCode: input.reasonCode,
       disabledByAdminId: input.enabled ? null : input.changedByAdminId,
       updatedAt: input.nowIso,
     };
-    this.records[index] = record;
-    return { status: "UPDATED", record };
+    return { status: "UPDATED", record: this.record };
   }
 
-  async findById(profileId: number): Promise<MultiplayerProfileRecord | null> {
-    return this.records.find((record) => record.id === profileId) ?? null;
+  async findById(_profileId: number): Promise<MultiplayerProfileRecord | null> {
+    return this.record?.id === _profileId ? this.record : null;
+  }
+
+  async listManaged(): Promise<readonly MultiplayerProfileRecord[]> {
+    return this.record ? [this.record] : [];
   }
 
   async findLatestForExactVersion(
-    gameId: number,
-    gameVersionId: number,
+    _gameId: number,
+    _gameVersionId: number,
   ): Promise<MultiplayerProfileRecord | null> {
-    return (
-      this.records
-        .filter(
-          (record) =>
-            record.profile.gameId === gameId && record.profile.gameVersionId === gameVersionId,
-        )
-        .sort((left, right) => right.profile.profileRevision - left.profile.profileRevision)[0] ??
-      null
-    );
+    return this.record;
   }
 
-  async findEnabledForExactVersion(): Promise<MultiplayerProfileRecord | null> {
-    return null;
+  async findEnabledForExactVersion(
+    _gameId: number,
+    _gameVersionId: number,
+  ): Promise<MultiplayerProfileRecord | null> {
+    return this.record?.profile.enabled ? this.record : null;
   }
 }
 
-test("approval resolves a Creator request into one disabled server-owned profile", async () => {
+test("Relay approval creates one disabled exact-version generic profile", async () => {
   const requests = new FakeRequests();
-  const profiles = new FakeProfiles();
+  const profiles = new NoProfileWrites();
+  const useCases = new ManagedMultiplayerProfileReviewUseCases({
+    requests,
+    profiles,
+    now: () => NOW,
+  });
+
+  const result = await useCases.approve({ requestId: 1, reviewedByAdminId: 40 });
+  assert.equal(result.ok, true);
+  assert.equal(requests.record?.status, "APPROVED");
+  assert.equal(profiles.createCalls, 1);
+  if (!result.ok || !result.profile) return;
+  assert.equal(result.profile.profile.contentHash, "b".repeat(64));
+  assert.equal("rulesetKey" in result.profile.profile, false);
+  assert.equal(result.profile.profile.enabled, false);
+});
+
+test("approved profiles remain discoverable for a later independent activation", async () => {
+  const requests = new FakeRequests();
+  const profiles = new NoProfileWrites();
   const useCases = new ManagedMultiplayerProfileReviewUseCases({
     requests,
     profiles,
@@ -197,66 +192,27 @@ test("approval resolves a Creator request into one disabled server-owned profile
   });
 
   const approved = await useCases.approve({ requestId: 1, reviewedByAdminId: 40 });
-  assert.ok(approved.ok);
-  assert.equal(approved.request.status, "APPROVED");
-  assert.equal(approved.profile?.profile.resolvedClass, "M1");
-  assert.equal(approved.profile?.profile.runtimeBackend, "durable-object");
-  assert.equal(approved.profile?.profile.rulesetKey, "managed:turn-grid:v1");
-  assert.equal(approved.profile?.profile.enabled, false);
-  assert.equal(approved.profile?.profile.rewardPolicyId, null);
-  assert.deepEqual(approved.profile?.profile.allowedVisibility, ["PRIVATE"]);
-  assert.deepEqual(approved.profile?.profile.allowedJoinPolicies, ["OPEN"]);
-
-  const replayed = await useCases.approve({ requestId: 1, reviewedByAdminId: 41 });
-  assert.ok(replayed.ok);
-  assert.equal(replayed.profile?.id, approved.profile?.id);
-  assert.equal(profiles.records.length, 1);
-
-  const activated = await useCases.setProfileEnabled({
-    profileId: approved.profile!.id,
-    enabled: true,
-    changedByAdminId: 40,
-    reasonCode: null,
-  });
-  assert.ok(activated.ok);
-  assert.equal(activated.profile.profile.enabled, true);
-  const disabled = await useCases.setProfileEnabled({
-    profileId: approved.profile!.id,
-    enabled: false,
-    changedByAdminId: 40,
-    reasonCode: "STAGING_TEST_COMPLETE",
-  });
-  assert.ok(disabled.ok);
-  assert.equal(disabled.profile.profile.enabled, false);
-  assert.equal(disabled.profile.disabledReasonCode, "STAGING_TEST_COMPLETE");
+  assert.equal(approved.ok, true);
+  assert.deepEqual(await useCases.listManagedProfiles(), approved.ok ? [approved.profile] : []);
 });
 
-test("approval can heal after exact-version moderation temporarily blocks profile creation", async () => {
-  const requests = new FakeRequests();
-  const profiles = new FakeProfiles();
-  profiles.rejectNext = "SOURCE_REQUEST_INVALID";
-  const useCases = new ManagedMultiplayerProfileReviewUseCases({
-    requests,
-    profiles,
-    now: () => NOW,
-  });
+test("future worker and container requests are never approved by the Relay control plane", async () => {
+  for (const runtimeKind of ["worker", "container"] as const) {
+    const requests = new FakeRequests(requestRecord("PENDING_REVIEW", runtimeKind));
+    const profiles = new NoProfileWrites();
+    const useCases = new ManagedMultiplayerProfileReviewUseCases({ requests, profiles });
 
-  const blocked = await useCases.approve({ requestId: 1, reviewedByAdminId: 40 });
-  assert.deepEqual(blocked, {
-    ok: false,
-    code: "VERSION_NOT_ELIGIBLE",
-    request: requests.record,
-  });
-  assert.equal(requests.record?.status, "APPROVED");
-
-  const healed = await useCases.approve({ requestId: 1, reviewedByAdminId: 40 });
-  assert.ok(healed.ok);
-  assert.equal(healed.profile?.profile.enabled, false);
+    const result = await useCases.approve({ requestId: 1, reviewedByAdminId: 40 });
+    assert.equal(result.ok, false);
+    assert.equal(result.ok ? null : result.code, "MULTIPLAYER_RUNTIME_NOT_AVAILABLE");
+    assert.equal(requests.record?.status, "PENDING_REVIEW");
+    assert.equal(profiles.createCalls, 0);
+  }
 });
 
-test("rejection is final and never creates a trusted profile", async () => {
+test("rejection is final and never creates a runtime profile", async () => {
   const requests = new FakeRequests();
-  const profiles = new FakeProfiles();
+  const profiles = new NoProfileWrites();
   const useCases = new ManagedMultiplayerProfileReviewUseCases({
     requests,
     profiles,
@@ -266,14 +222,50 @@ test("rejection is final and never creates a trusted profile", async () => {
   const rejected = await useCases.reject({
     requestId: 1,
     reviewedByAdminId: 40,
-    reasonCode: "UNSUPPORTED_TEMPLATE",
+    reasonCode: "RUNTIME_REJECTED",
   });
   assert.ok(rejected.ok);
   assert.equal(rejected.request.status, "REJECTED");
   assert.equal(rejected.profile, null);
-  assert.equal(profiles.records.length, 0);
+  assert.equal(profiles.createCalls, 0);
 
   const cannotApprove = await useCases.approve({ requestId: 1, reviewedByAdminId: 40 });
   assert.equal(cannotApprove.ok, false);
   assert.equal(cannotApprove.ok ? null : cannotApprove.code, "REQUEST_NOT_PENDING");
+});
+
+test("managed activation cannot revive a missing historical profile", async () => {
+  const useCases = new ManagedMultiplayerProfileReviewUseCases({
+    requests: new FakeRequests(),
+    profiles: new NoProfileWrites(),
+  });
+  assert.deepEqual(
+    await useCases.setProfileEnabled({
+      profileId: 999,
+      enabled: true,
+      changedByAdminId: 40,
+      reasonCode: null,
+    }),
+    { ok: false, code: "PROFILE_NOT_FOUND" },
+  );
+});
+
+test("managed activation enables only the profile connected to its approved request", async () => {
+  const requests = new FakeRequests();
+  const profiles = new NoProfileWrites();
+  const useCases = new ManagedMultiplayerProfileReviewUseCases({
+    requests,
+    profiles,
+    now: () => NOW,
+  });
+  const approved = await useCases.approve({ requestId: 1, reviewedByAdminId: 40 });
+  assert.equal(approved.ok, true);
+  const activated = await useCases.setProfileEnabled({
+    profileId: 50,
+    enabled: true,
+    changedByAdminId: 40,
+    reasonCode: null,
+  });
+  assert.equal(activated.ok, true);
+  if (activated.ok) assert.equal(activated.profile.profile.enabled, true);
 });

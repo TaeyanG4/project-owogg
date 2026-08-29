@@ -1,9 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildPublicPlayConfigDescriptor,
   resolveGameRuntimeUrl,
   buildGameResultFromBridgeComplete,
   isPotentialOnlineMultiplayerGame,
+  resolvedGamePlayMode,
+  resolvedGenericGamePlayMode,
+  shouldRenderManagedMultiplayer,
   shouldStartGenericGameSession,
   shouldRemountIframeOnDifficultyChange,
 } from "../features/game/GameHost";
@@ -25,50 +29,46 @@ test("every publisher uses the generic /play resolver", () => {
   }
 });
 
-test("only explicit online taxonomy or legacy coarse multi mode probes the server profile", () => {
-  const withCatalog = (catalog: PublicGame["catalog"]) => ({ catalog }) as PublicGame;
-  assert.equal(
-    isPotentialOnlineMultiplayerGame(
-      withCatalog({
-        type: "TAXONOMY",
-        categories: [],
-        tags: [],
-        modes: ["online-multi"],
-        inputMethods: [],
-        minPlayers: 2,
-        maxPlayers: 2,
-        thumbnail: "/omok.svg",
-      }),
-    ),
-    true,
-  );
-  assert.equal(
-    isPotentialOnlineMultiplayerGame(
-      withCatalog({
-        type: "TAXONOMY",
-        categories: [],
-        tags: [],
-        modes: ["local-multi"],
-        inputMethods: [],
-        minPlayers: 2,
-        maxPlayers: 2,
-        thumbnail: "/local.svg",
-      }),
-    ),
-    false,
-  );
-  assert.equal(
-    isPotentialOnlineMultiplayerGame(
-      withCatalog({ type: "GENRE_MODE", genre: "board", mode: "multi" }),
-    ),
-    true,
-  );
+test("only the exact public online-multi capability probes the server profile", () => {
+  const withModes = (playModes: PublicGame["playModes"]) => ({ playModes }) as PublicGame;
+  assert.equal(isPotentialOnlineMultiplayerGame(withModes(["online-multi"])), true);
+  assert.equal(isPotentialOnlineMultiplayerGame(withModes(["local-multi"])), false);
+  assert.equal(isPotentialOnlineMultiplayerGame(withModes(["local-multi", "online-multi"])), true);
+  assert.equal(isPotentialOnlineMultiplayerGame(withModes(["single"])), false);
   assert.equal(isPotentialOnlineMultiplayerGame(null), false);
+});
+
+test("hybrid runtime stays in the game iframe until an approved topology is selected", () => {
+  const hybrid = {
+    slug: "relay-board",
+    playModes: ["local-multi", "online-multi"],
+  } as unknown as PublicGame;
+
+  assert.equal(resolvedGamePlayMode(hybrid, null), null);
+  assert.equal(resolvedGenericGamePlayMode(hybrid, null), null);
+  assert.equal(shouldRenderManagedMultiplayer(hybrid, null), false);
+  assert.equal(resolvedGamePlayMode(hybrid, "local-multi"), "local-multi");
+  assert.equal(resolvedGenericGamePlayMode(hybrid, "local-multi"), "local-multi");
+  assert.equal(shouldRenderManagedMultiplayer(hybrid, "local-multi"), false);
+  assert.equal(resolvedGamePlayMode(hybrid, "online-multi"), "online-multi");
+  assert.equal(resolvedGenericGamePlayMode(hybrid, "online-multi"), null);
+  assert.equal(shouldRenderManagedMultiplayer(hybrid, "online-multi"), true);
+});
+
+test("singleton topology resolves without a redundant in-game selection request", () => {
+  const local = { playModes: ["local-multi"] } as unknown as PublicGame;
+  const online = { playModes: ["online-multi"] } as unknown as PublicGame;
+  assert.equal(resolvedGamePlayMode(local, null), "local-multi");
+  assert.equal(resolvedGenericGamePlayMode(local, null), "local-multi");
+  assert.equal(shouldRenderManagedMultiplayer(local, null), false);
+  assert.equal(resolvedGamePlayMode(online, null), "online-multi");
+  assert.equal(shouldRenderManagedMultiplayer(online, null), true);
 });
 
 test("generic score sessions wait for multiplayer discovery and stay disabled for online authority", () => {
   const onlineGame = {
-    slug: "official-omok",
+    slug: "relay-board",
+    playModes: ["online-multi"],
     catalog: {
       type: "TAXONOMY",
       categories: [],
@@ -77,7 +77,7 @@ test("generic score sessions wait for multiplayer discovery and stay disabled fo
       inputMethods: [],
       minPlayers: 2,
       maxPlayers: 2,
-      thumbnail: "/omok.svg",
+      thumbnail: "/relay-board.svg",
     },
   } as unknown as PublicGame;
 
@@ -85,7 +85,7 @@ test("generic score sessions wait for multiplayer discovery and stay disabled fo
   assert.equal(shouldStartGenericGameSession(onlineGame, null), false);
   assert.equal(
     shouldStartGenericGameSession(onlineGame, {
-      gameSlug: "official-omok",
+      gameSlug: "relay-board",
       mode: "ONLINE",
     }),
     false,
@@ -93,14 +93,14 @@ test("generic score sessions wait for multiplayer discovery and stay disabled fo
   assert.equal(
     shouldStartGenericGameSession(onlineGame, {
       gameSlug: "different-game",
-      mode: "LEGACY",
+      mode: "GENERIC",
     }),
     false,
   );
   assert.equal(
     shouldStartGenericGameSession(onlineGame, {
-      gameSlug: "official-omok",
-      mode: "LEGACY",
+      gameSlug: "relay-board",
+      mode: "GENERIC",
     }),
     true,
   );
@@ -109,6 +109,7 @@ test("generic score sessions wait for multiplayer discovery and stay disabled fo
 test("non-multiplayer games start the generic score session without discovery", () => {
   const soloGame = {
     slug: "reaction-time",
+    playModes: ["single"],
     catalog: {
       type: "GENRE_MODE",
       genre: "casual",
@@ -116,6 +117,58 @@ test("non-multiplayer games start the generic score session without discovery", 
     },
   } as unknown as PublicGame;
   assert.equal(shouldStartGenericGameSession(soloGame, null), true);
+});
+
+test("PlayConfig games never prefetch a client-facts generic session", () => {
+  const playConfigGame = {
+    slug: "verified-aim-test",
+    playModes: ["single"],
+    playConfig: {
+      version: 1,
+      rulesetRevision: 7,
+      defaultVariantId: "standard",
+      variants: [{ id: "standard", label: "Standard" }],
+      allowedConfigs: [{ difficultyId: "normal", variantId: "standard", rewardFactor: 1 }],
+    },
+  } as unknown as PublicGame;
+  assert.equal(shouldStartGenericGameSession(playConfigGame, null), false);
+});
+
+test("buildPublicPlayConfigDescriptor supplies approved difficulty/variant pairs without verifier identity", () => {
+  const game = {
+    difficulty: {
+      levels: [
+        { id: "normal", label: "Normal" },
+        { id: "hard", label: "Hard" },
+      ],
+      defaultLevelId: "normal",
+    },
+    playConfig: {
+      version: 1,
+      rulesetRevision: 7,
+      defaultVariantId: "standard",
+      variants: [{ id: "standard", label: "Standard" }],
+      allowedConfigs: [
+        { difficultyId: "normal", variantId: "standard", rewardFactor: 1 },
+        { difficultyId: "hard", variantId: "standard", rewardFactor: 1.25 },
+      ],
+    },
+  } as unknown as PublicGame;
+  const descriptor = buildPublicPlayConfigDescriptor(game);
+  assert.deepEqual(descriptor, {
+    defaultDifficultyId: "normal",
+    defaultVariantId: "standard",
+    difficulties: [
+      { id: "normal", label: "Normal" },
+      { id: "hard", label: "Hard" },
+    ],
+    variants: [{ id: "standard", label: "Standard" }],
+    allowedConfigs: [
+      { difficultyId: "normal", variantId: "standard", rewardFactor: 1 },
+      { difficultyId: "hard", variantId: "standard", rewardFactor: 1.25 },
+    ],
+  });
+  assert.equal("verifierId" in (descriptor ?? {}), false);
 });
 
 // ── shouldRemountIframeOnDifficultyChange ────────────────────────────────────

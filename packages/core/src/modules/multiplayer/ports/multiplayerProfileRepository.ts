@@ -63,6 +63,8 @@ export interface MultiplayerProfileRepository {
   ): Promise<CreateApprovedMultiplayerProfileResult>;
   setEnabled(input: SetMultiplayerProfileEnabledInput): Promise<SetMultiplayerProfileEnabledResult>;
   findById(profileId: number): Promise<MultiplayerProfileRecord | null>;
+  /** Recently reviewed generic Relay profiles, including disabled revisions (admin only). */
+  listManaged(limit: number): Promise<readonly MultiplayerProfileRecord[]>;
   /** Latest reviewed revision for an exact version, including disabled profiles (admin only). */
   findLatestForExactVersion(
     gameId: number,

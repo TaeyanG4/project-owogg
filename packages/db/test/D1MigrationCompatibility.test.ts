@@ -17,13 +17,15 @@ test("generic production migrations avoid Cloudflare-incompatible TEMP table DDL
     "0040_public_game_engagement.sql",
     "0041_multiplayer_foundation.sql",
     "0042_multiplayer_rematch.sql",
+    "0043_game_result_verification_claims.sql",
+    "0044_verified_result_score_semantics.sql",
   ]) {
     const sql = fs.readFileSync(new URL(`../migrations/${filename}`, import.meta.url), "utf8");
     assert.doesNotMatch(sql, /\bCREATE\s+TEMP(?:ORARY)?\s+TABLE\b/i, filename);
   }
 });
 
-test("full production migration chain applies through 0042 with multiplayer and Streamer compatibility schema", () => {
+test("full production migration chain applies through 0045 with Relay profile semantics", () => {
   const { raw } = createSqliteD1("");
   const migrationUrl = new URL("../migrations/", import.meta.url);
   const filenames = fs
@@ -36,12 +38,37 @@ test("full production migration chain applies through 0042 with multiplayer and 
 
   const gameColumns = raw.prepare("PRAGMA table_info(games)").all() as Array<{ name: string }>;
   const scoreColumns = raw.prepare("PRAGMA table_info(scores)").all() as Array<{ name: string }>;
+  const resultColumns = raw.prepare("PRAGMA table_info(game_results)").all() as Array<{
+    name: string;
+  }>;
   const userColumns = raw.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>;
   const oauthColumns = raw.prepare("PRAGMA table_info(oauth_accounts)").all() as Array<{
     name: string;
   }>;
   assert.ok(gameColumns.some((column) => column.name === "leaderboard_generation"));
   assert.ok(scoreColumns.some((column) => column.name === "leaderboard_generation"));
+  assert.ok(scoreColumns.some((column) => column.name === "variant_id"));
+  assert.ok(scoreColumns.some((column) => column.name === "ruleset_revision"));
+  assert.ok(
+    raw
+      .prepare(
+        `SELECT 1 FROM sqlite_master
+         WHERE type = 'index' AND name = 'idx_scores_game_generation_difficulty_revision_score'`,
+      )
+      .get(),
+  );
+  for (const name of [
+    "competitive_score",
+    "variant_id",
+    "ruleset_revision",
+    "verifier_id",
+    "evidence_hash",
+  ]) {
+    assert.ok(
+      resultColumns.some((column) => column.name === name),
+      name,
+    );
+  }
   assert.ok(userColumns.some((column) => column.name === "avatar_provider"));
   assert.ok(oauthColumns.some((column) => column.name === "avatar_url"));
   const rolePermissions = raw
@@ -111,9 +138,15 @@ test("full production migration chain applies through 0042 with multiplayer and 
     )
     .run();
   const rollingScore = raw
-    .prepare("SELECT leaderboard_generation FROM scores WHERE game_id = 'rolling-official'")
-    .get() as { leaderboard_generation: number };
-  assert.equal(rollingScore.leaderboard_generation, 4);
+    .prepare(
+      `SELECT leaderboard_generation, variant_id, ruleset_revision
+       FROM scores WHERE game_id = 'rolling-official'`,
+    )
+    .get() as { leaderboard_generation: number; variant_id: string; ruleset_revision: number };
+  assert.deepEqual(
+    { ...rollingScore },
+    { leaderboard_generation: 4, variant_id: "standard", ruleset_revision: 1 },
+  );
 });
 
 test("0037 preserves the current avatar while backfilling provider-specific choices", () => {

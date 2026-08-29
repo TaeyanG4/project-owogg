@@ -1,4 +1,15 @@
-import { parseGameToHostMessage } from "@owogg/game-sdk/bridge";
+import {
+  isWithinBridgePayloadLimit,
+  parseGameToHostMessage,
+  parseHostToGameMessage,
+  type AuthorizedStartContext,
+  type GamePlayMode,
+  type HostPlayModeErrorCode,
+  type HostStartErrorCode,
+  type JsonSafeValue,
+  type PlayConfigSelection,
+  type PublicPlayConfigDescriptor,
+} from "@owogg/game-sdk/bridge";
 import type { OwoggCompletionPayload } from "@owogg/game-sdk/contracts";
 
 /** The minimal subset of the iframe's `contentWindow` this file touches — lets a test supply a
@@ -15,7 +26,21 @@ export interface GameBridgeHostCallbacks {
    * again. See createGameBridgeHost's doc comment for why that has to be enforced here, not just
    * trusted from the game side. */
   onEvent?: (name: string, data?: unknown) => void;
-  onComplete?: (result: OwoggCompletionPayload & { metadata?: Record<string, unknown> }) => void;
+  onComplete?: (
+    result: OwoggCompletionPayload & {
+      metadata?: Record<string, unknown>;
+      evidence?: JsonSafeValue;
+    },
+  ) => void;
+  onRequestStart?: (
+    playConfig: PlayConfigSelection,
+  ) => Promise<GameBridgeStartDecision> | GameBridgeStartDecision;
+  onSelectPlayMode?: (
+    playMode: GamePlayMode,
+  ) => Promise<GameBridgePlayModeDecision> | GameBridgePlayModeDecision;
+  /** Runs only after HOST_PLAY_MODE_SELECTED was successfully queued on the private port. This
+   * lets GameHost replace the launcher iframe without racing the acknowledgement itself. */
+  onPlayModeSelected?: (playMode: GamePlayMode) => void;
   onCancel?: () => void;
   onError?: (message?: string) => void;
 }
@@ -28,7 +53,7 @@ export interface GameBridgeHost {
 
 /**
  * Host-side half of the Game Bridge: creates the MessageChannel, sends the one-time bootstrap to
- * the iframe, and listens on `port1` for the five game -> host messages, dispatching each to its
+ * the iframe, and listens on `port1` for game -> host messages, dispatching each to its
  * callback.
  *
  * `iframeWindow.postMessage(..., "*", [port2])` is the ONLY place this controller (or anything
@@ -54,7 +79,19 @@ export interface GameBridgeHostOptions {
    * caller omits this and the bootstrap stays exactly the bare `{type:"HOST_INIT"}` it always was.
    * Never auth/token/API address — see this file's own doc comment on what HOST_INIT carries. */
   difficultyId?: string;
+  /** Public canonical choices only. Its presence switches this bridge to verifier-backed mode. */
+  playConfig?: PublicPlayConfigDescriptor;
+  /** Approved launcher choices only; online authority still requires the parent profile flow. */
+  playModes?: readonly GamePlayMode[];
 }
+
+export type GameBridgeStartDecision =
+  | { readonly ok: true; readonly context: AuthorizedStartContext }
+  | { readonly ok: false; readonly code: HostStartErrorCode };
+
+export type GameBridgePlayModeDecision =
+  | { readonly ok: true; readonly playMode: GamePlayMode }
+  | { readonly ok: false; readonly code: HostPlayModeErrorCode };
 
 export function createGameBridgeHost(
   iframeWindow: GameBridgeIframeWindowLike,
@@ -64,6 +101,117 @@ export function createGameBridgeHost(
   const channel = new MessageChannel();
   let completed = false;
   let closed = false;
+  let startRequested = false;
+  let startAuthorized = false;
+  let playModeRequested = false;
+  let selectedPlayMode: GamePlayMode | null =
+    options?.playModes?.length === 1 ? (options.playModes[0] ?? null) : null;
+
+  function sendToGame(message: unknown): boolean {
+    if (closed || !isWithinBridgePayloadLimit(message) || !parseHostToGameMessage(message)) {
+      return false;
+    }
+    try {
+      channel.port1.postMessage(message);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function sendStartError(code: HostStartErrorCode): void {
+    sendToGame({ type: "HOST_START_ERROR", code });
+  }
+
+  function sendPlayModeError(code: HostPlayModeErrorCode): void {
+    sendToGame({ type: "HOST_PLAY_MODE_ERROR", code });
+  }
+
+  async function selectPlayMode(playMode: GamePlayMode): Promise<void> {
+    if (playModeRequested) {
+      sendPlayModeError("ALREADY_SELECTED");
+      return;
+    }
+    playModeRequested = true;
+    if (!options?.playModes?.includes(playMode) || !callbacks.onSelectPlayMode) {
+      sendPlayModeError("INVALID_PLAY_MODE");
+      return;
+    }
+
+    let decision: GameBridgePlayModeDecision;
+    try {
+      decision = await callbacks.onSelectPlayMode(playMode);
+    } catch {
+      decision = { ok: false, code: "MODE_UNAVAILABLE" };
+    }
+    if (closed || completed) return;
+    if (!decision.ok) {
+      sendPlayModeError(decision.code);
+      return;
+    }
+    if (decision.playMode !== playMode || !options.playModes.includes(decision.playMode)) {
+      sendPlayModeError("MODE_UNAVAILABLE");
+      return;
+    }
+    if (sendToGame({ type: "HOST_PLAY_MODE_SELECTED", playMode: decision.playMode })) {
+      selectedPlayMode = decision.playMode;
+      callbacks.onPlayModeSelected?.(decision.playMode);
+    }
+  }
+
+  function allowedConfig(selection: PlayConfigSelection) {
+    return options?.playConfig?.allowedConfigs.find(
+      (candidate) =>
+        candidate.difficultyId === selection.difficultyId &&
+        candidate.variantId === selection.variantId,
+    );
+  }
+
+  function genericPlayModeIsAuthorized(): boolean {
+    if (!options?.playModes) return true;
+    if (options.playModes.length === 1) return options.playModes[0] !== "online-multi";
+    return selectedPlayMode === "single" || selectedPlayMode === "local-multi";
+  }
+
+  async function authorizeStart(selection: PlayConfigSelection): Promise<void> {
+    if (startRequested) {
+      sendStartError("ALREADY_REQUESTED");
+      return;
+    }
+    startRequested = true;
+    if (!genericPlayModeIsAuthorized()) {
+      sendStartError("GAME_UNAVAILABLE");
+      return;
+    }
+    const allowed = allowedConfig(selection);
+    if (!options?.playConfig || !allowed || !callbacks.onRequestStart) {
+      sendStartError("INVALID_PLAY_CONFIG");
+      return;
+    }
+
+    let decision: GameBridgeStartDecision;
+    try {
+      decision = await callbacks.onRequestStart({ ...selection });
+    } catch {
+      decision = { ok: false, code: "SESSION_UNAVAILABLE" };
+    }
+    if (closed || completed) return;
+    if (!decision.ok) {
+      sendStartError(decision.code);
+      return;
+    }
+    const message = parseHostToGameMessage({ type: "HOST_START", context: decision.context });
+    if (
+      message?.type !== "HOST_START" ||
+      message.context.playConfig.difficultyId !== selection.difficultyId ||
+      message.context.playConfig.variantId !== selection.variantId ||
+      message.context.rewardFactor !== allowed.rewardFactor
+    ) {
+      sendStartError("GAME_UNAVAILABLE");
+      return;
+    }
+    startAuthorized = sendToGame(message);
+  }
 
   channel.port1.onmessage = (event: MessageEvent) => {
     if (closed) return;
@@ -75,13 +223,34 @@ export function createGameBridgeHost(
         callbacks.onReady?.();
         return;
       case "GAME_STARTED":
+        if (!genericPlayModeIsAuthorized()) return;
+        if (options?.playConfig && !startAuthorized) return;
         callbacks.onStarted?.();
         return;
+      case "GAME_REQUEST_START":
+        void authorizeStart(message.playConfig);
+        return;
+      case "GAME_SELECT_PLAY_MODE":
+        void selectPlayMode(message.playMode);
+        return;
       case "GAME_EVENT":
+        if (!genericPlayModeIsAuthorized()) return;
         callbacks.onEvent?.(message.name, message.data);
         return;
       case "GAME_COMPLETE":
         if (completed) return;
+        if (!genericPlayModeIsAuthorized()) return;
+        if (
+          options?.playConfig &&
+          (!startAuthorized ||
+            message.evidence === undefined ||
+            message.outcome !== undefined ||
+            message.score !== undefined ||
+            message.progression !== undefined ||
+            message.metrics !== undefined)
+        ) {
+          return;
+        }
         completed = true;
         callbacks.onComplete?.({
           ...(message.outcome !== undefined ? { outcome: message.outcome } : {}),
@@ -89,6 +258,7 @@ export function createGameBridgeHost(
           ...(message.progression !== undefined ? { progression: message.progression } : {}),
           ...(message.metrics !== undefined ? { metrics: message.metrics } : {}),
           ...(message.metadata !== undefined ? { metadata: message.metadata } : {}),
+          ...(message.evidence !== undefined ? { evidence: message.evidence } : {}),
         });
         return;
       case "GAME_CANCEL":
@@ -104,7 +274,14 @@ export function createGameBridgeHost(
   // which this deliberately doesn't use).
 
   iframeWindow.postMessage(
-    { type: "HOST_INIT", ...(options?.difficultyId ? { difficultyId: options.difficultyId } : {}) },
+    {
+      type: "HOST_INIT",
+      ...(options?.difficultyId && !options.playConfig
+        ? { difficultyId: options.difficultyId }
+        : {}),
+      ...(options?.playConfig ? { playConfig: options.playConfig } : {}),
+      ...(options?.playModes ? { playModes: options.playModes } : {}),
+    },
     "*",
     [channel.port2],
   );

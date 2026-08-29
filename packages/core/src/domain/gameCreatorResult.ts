@@ -28,6 +28,14 @@ export type GameCreatorResultNormalization =
   | { readonly valid: true; readonly result: NormalizedGameCreatorResult }
   | { readonly valid: false; readonly reason: string };
 
+export type VerifiedGameCreatorResultNormalization =
+  | {
+      readonly valid: true;
+      readonly result: NormalizedGameCreatorResult;
+      readonly competitiveScore: number;
+    }
+  | { readonly valid: false; readonly reason: string };
+
 function finite(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
@@ -36,13 +44,16 @@ function applyRange(
   value: number,
   range: OwoggRangeDefinition | undefined,
   path: string,
+  forceReject = false,
 ):
   | { valid: true; value: number; adjusted: boolean; reason: string | null }
   | { valid: false; reason: string } {
   if (!range || (value >= range.min && value <= range.max)) {
     return { valid: true, value, adjusted: false, reason: null };
   }
-  if (range.outOfRange === "reject") return { valid: false, reason: `${path} is out of range` };
+  if (forceReject || range.outOfRange === "reject") {
+    return { valid: false, reason: `${path} is out of range` };
+  }
   return {
     valid: true,
     value: Math.min(range.max, Math.max(range.min, value)),
@@ -56,9 +67,10 @@ function validateMetricType(value: number, definition: OwoggMetricDefinition): b
 }
 
 /** Validates untrusted completion facts against the exact normalized manifest stored in B2. */
-export function normalizeGameCreatorResult(
+function normalizeGameCreatorResultInternal(
   manifest: OwoggGameCreatorManifest,
   input: GameCreatorReportedResult,
+  strictVerifierFacts: boolean,
 ): GameCreatorResultNormalization {
   const reasons: string[] = [];
   let adjusted = false;
@@ -78,13 +90,11 @@ export function normalizeGameCreatorResult(
       return { valid: false, reason: "score is not declared by owogg.json" };
     }
     if (!finite(input.score)) return { valid: false, reason: "score must be finite" };
-    rawScore = input.score;
+    rawScore = Object.is(input.score, -0) ? 0 : input.score;
     const precision = manifest.result.score.precision;
     const rounded =
-      precision === undefined
-        ? input.score
-        : Math.round(input.score * 10 ** precision) / 10 ** precision;
-    const ranged = applyRange(rounded, manifest.result.score.range, "score");
+      precision === undefined ? rawScore : Math.round(rawScore * 10 ** precision) / 10 ** precision;
+    const ranged = applyRange(rounded, manifest.result.score.range, "score", strictVerifierFacts);
     if (!ranged.valid) return ranged;
     normalizedScore = ranged.value;
     if (ranged.adjusted) {
@@ -105,6 +115,7 @@ export function normalizeGameCreatorResult(
       input.progression.value,
       manifest.progression.range,
       "progression.value",
+      strictVerifierFacts,
     );
     if (!ranged.valid) return ranged;
     progressionValue = ranged.value;
@@ -121,7 +132,7 @@ export function normalizeGameCreatorResult(
     if (!finite(value) || !validateMetricType(value, definition)) {
       return { valid: false, reason: `metric ${key} has an invalid numeric type` };
     }
-    const ranged = applyRange(value, definition.range, `metrics.${key}`);
+    const ranged = applyRange(value, definition.range, `metrics.${key}`, strictVerifierFacts);
     if (!ranged.valid) return ranged;
     normalizedMetrics[key] = ranged.value;
     if (ranged.adjusted) {
@@ -138,6 +149,9 @@ export function normalizeGameCreatorResult(
       return { valid: false, reason: `event ${key} count must be a positive integer` };
     }
     if (definition.maxPerAttempt !== undefined && count > definition.maxPerAttempt) {
+      if (strictVerifierFacts) {
+        return { valid: false, reason: `events.${key} exceeds maxPerAttempt` };
+      }
       normalizedEvents[key] = definition.maxPerAttempt;
       adjusted = true;
       reasons.push(`events.${key} was clamped to maxPerAttempt`);
@@ -159,5 +173,58 @@ export function normalizeGameCreatorResult(
       adjustmentReason: reasons.length > 0 ? reasons.join("; ") : null,
       rewardEligible: !adjusted,
     },
+  };
+}
+
+/** Validates client-authored gs1 completion facts against the declared manifest contract. */
+export function normalizeGameCreatorResult(
+  manifest: OwoggGameCreatorManifest,
+  input: GameCreatorReportedResult,
+): GameCreatorResultNormalization {
+  return normalizeGameCreatorResultInternal(manifest, input, false);
+}
+
+/**
+ * Validates server-verifier facts without ever repairing a verifier bug, then derives the score
+ * used for competition. The exact verifier score remains `rawScore`; manifest precision/range
+ * produce `normalizedScore`; only the final leaderboard projection receives `rewardFactor`.
+ */
+export function normalizeVerifiedGameCreatorResult(
+  manifest: OwoggGameCreatorManifest,
+  input: GameCreatorReportedResult,
+  rewardFactor: number,
+): VerifiedGameCreatorResultNormalization {
+  if (!finite(rewardFactor) || rewardFactor <= 0) {
+    return { valid: false, reason: "rewardFactor must be finite and positive" };
+  }
+
+  const normalized = normalizeGameCreatorResultInternal(manifest, input, true);
+  if (!normalized.valid) return normalized;
+  if (normalized.result.rawScore === null || normalized.result.normalizedScore === null) {
+    return { valid: false, reason: "verified result must include a declared score" };
+  }
+  if (normalized.result.adjusted || !normalized.result.rewardEligible) {
+    return { valid: false, reason: "verified facts must not require adjustment" };
+  }
+
+  const scoreDefinition = manifest.result.score;
+  if (scoreDefinition === null) {
+    return { valid: false, reason: "score is not declared by owogg.json" };
+  }
+  const factored =
+    scoreDefinition.direction === "asc"
+      ? normalized.result.normalizedScore / rewardFactor
+      : normalized.result.normalizedScore * rewardFactor;
+  if (!Number.isFinite(factored)) {
+    return { valid: false, reason: "competitive score must be finite" };
+  }
+  const precision = scoreDefinition.precision;
+  const competitiveScore =
+    precision === undefined ? factored : Math.round(factored * 10 ** precision) / 10 ** precision;
+
+  return {
+    valid: true,
+    result: normalized.result,
+    competitiveScore: Object.is(competitiveScore, -0) ? 0 : competitiveScore,
   };
 }

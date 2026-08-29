@@ -3,91 +3,78 @@ import test from "node:test";
 import {
   MultiplayerProfileValidationError,
   parseApprovedMultiplayerProfileV1,
-  type ApprovedMultiplayerProfileV1,
+  type ApprovedRelayMultiplayerProfileV1,
 } from "../src/modules/multiplayer/domain/multiplayerProfile.js";
 
-const validProfile: ApprovedMultiplayerProfileV1 = {
+const validProfile: ApprovedRelayMultiplayerProfileV1 = {
   profileVersion: 1,
   gameId: 1,
   gameVersionId: 2,
-  sourceRequestHash: null,
+  contentHash: "b".repeat(64),
+  sourceRequestHash: "a".repeat(64),
   profileRevision: 1,
+  transportKind: "websocket",
+  runtimeKind: "relay",
   protocolVersion: 1,
-  resolvedClass: "M1",
-  simulationModel: "turn",
-  runtimeBackend: "durable-object",
-  rulesetKey: "official:omok",
-  rulesetRevision: 1,
-  resolvedConfigJson: '{"boardSize":15,"winLength":5}',
   lifecycle: "match",
-  persistence: "match",
-  latencyProfile: "relaxed",
   reconnectPolicy: "resume",
+  directMessages: true,
+  hostSnapshot: true,
   minPlayers: 2,
-  maxPlayers: 2,
-  allowedVisibility: ["PRIVATE", "UNLISTED"],
-  allowedJoinPolicies: ["INVITE_ONLY"],
-  maxActionBytes: 1024,
-  maxStateBytes: 8192,
-  actionRateLimit: 5,
-  rewardPolicyId: null,
+  maxPlayers: 8,
+  allowedVisibility: ["PRIVATE"],
+  allowedJoinPolicies: ["OPEN"],
+  hostDeparturePolicy: "close",
+  resultTrust: "UNVERIFIED",
+  maxMessageBytes: 4096,
+  maxSnapshotBytes: 16384,
+  messagesPerSecond: 20,
+  roomBytesPerSecond: 262144,
+  roomTtlSeconds: 7200,
   enabled: false,
 };
 
-test("parses an exact version-scoped trusted profile", () => {
+test("parses an exact content-hash-pinned Relay profile", () => {
   assert.deepEqual(parseApprovedMultiplayerProfileV1(validProfile), validProfile);
 });
 
-test("rejects creator-controlled backend/reward extensions and unknown keys", () => {
+test("rejects game-specific authority and unknown profile keys", () => {
   assert.throws(
-    () =>
-      parseApprovedMultiplayerProfileV1({
-        ...validProfile,
-        externalWebSocketUrl: "wss://example.invalid",
-      }),
+    () => parseApprovedMultiplayerProfileV1({ ...validProfile, serverRules: "creator-defined" }),
     MultiplayerProfileValidationError,
   );
   assert.throws(
-    () => parseApprovedMultiplayerProfileV1({ ...validProfile, runtimeBackend: "creator" }),
-    /runtimeBackend must be one of durable-object/,
+    () => parseApprovedMultiplayerProfileV1({ ...validProfile, runtimeKind: "worker" }),
+    /runtimeKind must be relay/,
   );
 });
 
-test("enforces class/simulation/latency consistency and V1 limits", () => {
+test("requires exact request and bundle hashes with bounded Relay policy", () => {
   assert.throws(
-    () =>
-      parseApprovedMultiplayerProfileV1({
-        ...validProfile,
-        resolvedClass: "M1",
-        simulationModel: "realtime",
-      }),
-    /M1 profiles cannot use realtime simulation/,
+    () => parseApprovedMultiplayerProfileV1({ ...validProfile, contentHash: "latest" }),
+    /contentHash must be a lowercase SHA-256/,
+  );
+  assert.throws(
+    () => parseApprovedMultiplayerProfileV1({ ...validProfile, sourceRequestHash: "latest" }),
+    /sourceRequestHash must be a lowercase SHA-256/,
   );
   assert.throws(
     () => parseApprovedMultiplayerProfileV1({ ...validProfile, maxPlayers: 9 }),
     /maxPlayers must be an integer between 2 and 8/,
   );
   assert.throws(
-    () => parseApprovedMultiplayerProfileV1({ ...validProfile, maxActionBytes: 4097 }),
-    /maxActionBytes must be an integer between 1 and 4096/,
+    () => parseApprovedMultiplayerProfileV1({ ...validProfile, maxMessageBytes: 4097 }),
+    /maxMessageBytes must be an integer between 1 and 4096/,
   );
 });
 
-test("requires immutable identifiers and bounded object configuration", () => {
+test("snapshot bytes and access policy cannot contradict the approved Relay capability", () => {
   assert.throws(
-    () => parseApprovedMultiplayerProfileV1({ ...validProfile, sourceRequestHash: "latest" }),
-    /sourceRequestHash must be null or a lowercase SHA-256/,
+    () => parseApprovedMultiplayerProfileV1({ ...validProfile, hostSnapshot: false }),
+    /maxSnapshotBytes must match hostSnapshot/,
   );
   assert.throws(
-    () => parseApprovedMultiplayerProfileV1({ ...validProfile, rulesetKey: "" }),
-    /rulesetKey must be a stable lowercase identifier/,
-  );
-  assert.throws(
-    () => parseApprovedMultiplayerProfileV1({ ...validProfile, rulesetKey: null }),
-    /rulesetKey must be a stable lowercase identifier/,
-  );
-  assert.throws(
-    () => parseApprovedMultiplayerProfileV1({ ...validProfile, resolvedConfigJson: "[]" }),
-    /resolvedConfigJson must contain a JSON object/,
+    () => parseApprovedMultiplayerProfileV1({ ...validProfile, allowedVisibility: ["PUBLIC"] }),
+    /allowedVisibility must be \[PRIVATE\]/,
   );
 });

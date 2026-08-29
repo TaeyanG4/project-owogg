@@ -36,6 +36,9 @@ export const SANDBOX_GAME_FAILURE_STATUS: Record<
   NOTHING_TO_WITHDRAW: 409,
   MANIFEST_MISSING: 422,
   MANIFEST_INVALID: 422,
+  VERIFIER_NOT_REGISTERED: 422,
+  MULTIPLAYER_RUNTIME_NOT_AVAILABLE: 422,
+  MULTIPLAYER_CAPABILITY_NOT_AVAILABLE: 422,
   INVALID_GENRE: 400,
   ALREADY_DELETED: 409,
   CANNOT_DELETE_APPROVED_GAME: 409,
@@ -84,6 +87,12 @@ export const SANDBOX_GAME_FAILURE_MESSAGE: Record<SandboxGameUseCaseFailure["cod
     "ZIP 최상위에 owogg.json이 없습니다. 모든 등록 및 버전 업로드에 Game Creator Manifest v1 파일을 포함하세요.",
   MANIFEST_INVALID:
     "owogg.json이 Game Creator Manifest v1 규격에 맞지 않거나 기존 게임의 slug와 일치하지 않습니다.",
+  VERIFIER_NOT_REGISTERED:
+    "owogg.json의 playConfig.verifierId에 대응하는 검토 완료 서버 검증기가 등록되지 않았습니다.",
+  MULTIPLAYER_RUNTIME_NOT_AVAILABLE:
+    "요청한 온라인 멀티플레이 runtime은 아직 활성화할 수 없습니다. 현재는 websocket + relay만 지원합니다.",
+  MULTIPLAYER_CAPABILITY_NOT_AVAILABLE:
+    "요청한 Relay 기능은 아직 지원되지 않습니다. 현재 join-in-progress와 spectator는 사용할 수 없습니다.",
   INVALID_GENRE: "genre는 비어 있지 않은 문자열이어야 합니다.",
   ALREADY_DELETED: "이미 삭제된 게임입니다.",
   CANNOT_DELETE_APPROVED_GAME:

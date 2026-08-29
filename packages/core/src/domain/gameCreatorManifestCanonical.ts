@@ -5,6 +5,7 @@ import type {
 } from "@owogg/game-sdk/contracts";
 import {
   GAME_CANONICAL_SCHEMA_VERSION,
+  projectManifestPlayConfigToCanonical,
   type GameCanonicalDocument,
 } from "../modules/game/domain/gameCanonicalDocument.js";
 
@@ -65,6 +66,7 @@ export function mapGameCreatorManifestToCanonical(input: {
         defaultLevelId: defaultDifficulty ?? firstDifficulty.id,
       }
     : undefined;
+  const playConfig = projectManifestPlayConfigToCanonical(manifest);
 
   return {
     schemaVersion: GAME_CANONICAL_SCHEMA_VERSION,
@@ -81,6 +83,7 @@ export function mapGameCreatorManifestToCanonical(input: {
     },
     ...(declaredPresentation !== undefined ? { presentation: declaredPresentation } : {}),
     ...(difficulty !== undefined ? { difficulty } : {}),
+    ...(playConfig !== undefined ? { playConfig } : {}),
     supportsReplay: previous?.supportsReplay ?? false,
     catalog: {
       type: "GENRE_MODE",

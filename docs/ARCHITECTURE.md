@@ -130,7 +130,7 @@ READY != APPROVED
 
 관리자 센터 `POST /api/admin/games/upload`가 standalone ZIP을 받아 `{ type: "OWOGG" }` identity,
 SHA-256 version, B2 canonical/bundle, logo asset과 live pointer를 generic control plane에 기록합니다.
-공식 표시는 canonical v2 `publisher.official: true`, 공개 제작자명은 `OWOGG`입니다. Archive 내용은
+공식 표시는 canonical v1 `publisher.official: true`, 공개 제작자명은 `OWOGG`입니다. Archive 내용은
 publisher authority를 선택할 수 없으며 USER/sandbox/review row를 만들지 않습니다. 배포 workflow는
 게임을 Git에서 빌드하거나 live version을 다시 활성화하지 않습니다.
 

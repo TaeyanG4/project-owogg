@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { LeaderboardResponseSchema, LeaderRecordSchema } from "@owogg/contracts";
+import {
+  GameResultAcceptResponseSchema,
+  LeaderboardResponseSchema,
+  LeaderRecordSchema,
+} from "@owogg/contracts";
 import type { PublicGameCard } from "../features/catalog/publicGameAdapter.js";
 
 describe("Product Integrity & Web API Contracts", () => {
@@ -54,6 +58,30 @@ describe("Product Integrity & Web API Contracts", () => {
       assert.equal(parsedRecords.data.leaderboard.length, 1);
       assert.equal(parsedRecords.data.leaderboard[0]?.playerName, "BrainMaster");
     }
+  });
+
+  it("verified result responses carry the authoritative difficulty and mode", () => {
+    const parsed = GameResultAcceptResponseSchema.parse({
+      success: true,
+      result_id: 10,
+      score_id: 11,
+      game_id: "aim-test",
+      score: 125,
+      rawScore: 100,
+      normalizedScore: 100,
+      competitiveScore: 125,
+      difficultyId: "hard",
+      variantId: "precision",
+      rulesetRevision: 3,
+      verified: true,
+      adjusted: false,
+      rewardEligible: true,
+      xpAwarded: 10,
+      newlyUnlockedAchievements: [],
+    });
+
+    assert.equal(parsed.difficultyId, "hard");
+    assert.equal(parsed.variantId, "precision");
   });
 
   it("Catalog category filtering uses public API card categories", () => {

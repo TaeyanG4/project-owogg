@@ -1,5 +1,7 @@
 import type { GameAsset } from "./gameAsset.js";
+import type { GameCanonicalPlayConfig } from "./gameCanonicalDocument.js";
 import type { RuntimeGame } from "./runtimeGame.js";
+import type { OwoggPlayMode } from "@owogg/game-sdk/contracts";
 
 /** A bookmark is a stronger, deliberate signal than opening a game once. The weight is public
  * product policy so every catalog surface ranks games identically. */
@@ -32,6 +34,25 @@ export function emptyPublicGameStats(): PublicGameStats {
   return toPublicGameStats({ playerCount: 0, bookmarkCount: 0 });
 }
 
+/** Safe client-facing configuration choices. The server verifier id is intentionally excluded. */
+export interface PublicGamePlayConfig {
+  readonly version: GameCanonicalPlayConfig["version"];
+  readonly rulesetRevision: number;
+  readonly defaultVariantId: string;
+  readonly variants: GameCanonicalPlayConfig["variants"];
+  readonly allowedConfigs: GameCanonicalPlayConfig["allowedConfigs"];
+}
+
+function toPublicGamePlayConfig(playConfig: GameCanonicalPlayConfig): PublicGamePlayConfig {
+  return {
+    version: playConfig.version,
+    rulesetRevision: playConfig.rulesetRevision,
+    defaultVariantId: playConfig.defaultVariantId,
+    variants: playConfig.variants.map((variant) => ({ ...variant })),
+    allowedConfigs: playConfig.allowedConfigs.map((config) => ({ ...config })),
+  };
+}
+
 /** Provider-neutral public projection. Publisher authority is reduced to a safe discriminant;
  * user ids, review state, storage keys, and live numeric ids never cross this boundary. */
 export interface PublicGame {
@@ -41,10 +62,13 @@ export interface PublicGame {
   readonly title: string;
   readonly shortDescription: string;
   readonly description: string;
+  /** Exact author-declared topology for current v1 games; never grants online authority. */
+  readonly playModes: readonly OwoggPlayMode[];
   readonly catalog: RuntimeGame["canonical"]["catalog"];
   readonly policy: RuntimeGame["canonical"]["policy"];
   readonly presentation?: RuntimeGame["canonical"]["presentation"];
   readonly difficulty?: RuntimeGame["canonical"]["difficulty"];
+  readonly playConfig?: PublicGamePlayConfig;
   readonly supportsReplay: boolean;
   /** Server-side game registration time. Version updates do not make an existing title a new
    * game again, so newest sorting uses identity.createdAt rather than the live version upload. */
@@ -52,6 +76,17 @@ export interface PublicGame {
   readonly stats: PublicGameStats;
   /** Public URL/path only; the D1 object key is intentionally never exposed. */
   readonly mediaUrl: string | null;
+}
+
+export function publicGamePlayModes(runtime: RuntimeGame): readonly OwoggPlayMode[] {
+  const declared = runtime.canonical.creatorManifest?.game.playModes;
+  if (declared !== undefined) return [...declared];
+  if (runtime.canonical.catalog.type === "TAXONOMY") {
+    return [...runtime.canonical.catalog.modes];
+  }
+  // A canonical without a creator manifest predates exact topology. Preserve the safest local
+  // interpretation; online discovery still requires an approved exact-version profile.
+  return runtime.canonical.catalog.mode === "single" ? ["single"] : ["local-multi"];
 }
 
 export function toPublicGame(
@@ -69,6 +104,7 @@ export function toPublicGame(
     title: runtime.canonical.title,
     shortDescription: runtime.canonical.shortDescription,
     description: runtime.canonical.description,
+    playModes: publicGamePlayModes(runtime),
     catalog: runtime.canonical.catalog,
     policy: runtime.canonical.policy,
     ...(runtime.canonical.presentation !== undefined
@@ -76,6 +112,9 @@ export function toPublicGame(
       : {}),
     ...(runtime.canonical.difficulty !== undefined
       ? { difficulty: runtime.canonical.difficulty }
+      : {}),
+    ...(runtime.canonical.playConfig !== undefined
+      ? { playConfig: toPublicGamePlayConfig(runtime.canonical.playConfig) }
       : {}),
     supportsReplay: runtime.canonical.supportsReplay,
     publishedAt: runtime.identity.createdAt,

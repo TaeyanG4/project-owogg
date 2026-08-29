@@ -1,29 +1,12 @@
 import { isJsonSafeValue } from "./protocol.js";
 
-/**
- * The multiplayer MessagePort protocol. It is deliberately separate from the legacy completion
- * bridge so an online match can never smuggle GAME_COMPLETE/GAME_EVENT facts into progression.
- */
-
+/** Relay-only MessagePort protocol shared by the sandboxed game and OWOGG parent. */
 export const MULTIPLAYER_BRIDGE_PROTOCOL_VERSION = 1 as const;
 export const MULTIPLAYER_CLIENT_MAX_PAYLOAD_BYTES = 4 * 1024;
-export const MULTIPLAYER_HOST_MAX_PAYLOAD_BYTES = 16 * 1024;
-/** Parent-owned control hint. The host consumes it and never forwards it into the game iframe. */
-export const MULTIPLAYER_REMATCH_CHANGED_EVENT = "OWOGG_REMATCH_CHANGED" as const;
-/** Server-authoritative participant connectivity notice consumed by the parent room chrome. */
-export const MULTIPLAYER_PLAYER_CONNECTION_CHANGED_EVENT =
-  "OWOGG_PLAYER_CONNECTION_CHANGED" as const;
+export const MULTIPLAYER_RELAY_MAX_SNAPSHOT_BYTES = 16 * 1024;
+export const MULTIPLAYER_RELAY_MAX_CLIENT_ENVELOPE_BYTES = 20 * 1024;
+export const MULTIPLAYER_HOST_MAX_PAYLOAD_BYTES = 20 * 1024;
 
-export const MULTIPLAYER_ACTION_REJECTION_CODES = [
-  "MATCH_NOT_ACTIVE",
-  "NOT_PARTICIPANT",
-  "NOT_YOUR_TURN",
-  "ACTION_INVALID",
-  "ACTION_CONFLICT",
-  "ACTION_ID_REUSED",
-  "STALE_GENERATION",
-  "RATE_LIMITED",
-] as const;
 export const MULTIPLAYER_DISCONNECT_CODES = [
   "NETWORK_LOST",
   "SERVER_UNAVAILABLE",
@@ -32,43 +15,50 @@ export const MULTIPLAYER_DISCONNECT_CODES = [
   "SLOW_CONSUMER",
   "LEFT",
 ] as const;
-export const MULTIPLAYER_ABORT_CODES = [
-  "INSUFFICIENT_PLAYERS",
+export const MULTIPLAYER_RELAY_REJECTION_CODES = [
+  "MATCH_NOT_ACTIVE",
+  "DIRECT_MESSAGES_DISABLED",
+  "TARGET_UNAVAILABLE",
+  "SNAPSHOT_DISABLED",
+  "HOST_REQUIRED",
+] as const;
+export const MULTIPLAYER_RELAY_CLOSE_CODES = [
+  "HOST_LEFT",
   "PARTICIPANT_LEFT",
-  "RULE_VIOLATION",
-  "INFRA_FAILURE",
+  "ROOM_EXPIRED",
   "ADMIN_KILLED",
-  "VERSION_UNAVAILABLE",
+  "SERVER_UNAVAILABLE",
 ] as const;
 
-export type MultiplayerActionRejectionCode = (typeof MULTIPLAYER_ACTION_REJECTION_CODES)[number];
 export type MultiplayerDisconnectCode = (typeof MULTIPLAYER_DISCONNECT_CODES)[number];
-export type MultiplayerAbortCode = (typeof MULTIPLAYER_ABORT_CODES)[number];
+export type MultiplayerRelayRejectionCode = (typeof MULTIPLAYER_RELAY_REJECTION_CODES)[number];
+export type MultiplayerRelayCloseCode = (typeof MULTIPLAYER_RELAY_CLOSE_CODES)[number];
 
 type ProtocolVersion = typeof MULTIPLAYER_BRIDGE_PROTOCOL_VERSION;
+
+export interface MultiplayerBootstrapRuntime {
+  readonly kind: "relay";
+  readonly protocolVersion: ProtocolVersion;
+  readonly resultTrust: "UNVERIFIED";
+}
+
+export interface MultiplayerBootstrapParticipant {
+  readonly participantId: string;
+  readonly seatIndex: number;
+  readonly role: "HOST" | "PLAYER";
+}
+
+export interface MultiplayerBootstrapCapabilities {
+  readonly reconnect: "none" | "resume";
+  readonly broadcast: true;
+  readonly directMessages: boolean;
+  readonly hostSnapshot: boolean;
+}
 
 export interface MultiReadyMessage {
   readonly type: "MULTI_READY";
   readonly v: ProtocolVersion;
   readonly generation: number;
-}
-
-export interface MultiActionMessage {
-  readonly type: "MULTI_ACTION";
-  readonly v: ProtocolVersion;
-  readonly generation: number;
-  readonly clientSeq: number;
-  readonly clientActionId: string;
-  readonly expectedRevision: number;
-  readonly payload: unknown;
-}
-
-export interface MultiInputMessage {
-  readonly type: "MULTI_INPUT";
-  readonly v: ProtocolVersion;
-  readonly generation: number;
-  readonly clientSeq: number;
-  readonly payload: unknown;
 }
 
 export interface MultiLeaveMessage {
@@ -77,18 +67,47 @@ export interface MultiLeaveMessage {
   readonly generation: number;
 }
 
-export type GameToHostMultiplayerMessage =
-  MultiReadyMessage | MultiActionMessage | MultiInputMessage | MultiLeaveMessage;
+export type RelaySendMessage =
+  | {
+      readonly type: "RELAY_SEND";
+      readonly v: ProtocolVersion;
+      readonly generation: number;
+      readonly clientSeq: number;
+      readonly delivery: "broadcast";
+      readonly payload: unknown;
+    }
+  | {
+      readonly type: "RELAY_SEND";
+      readonly v: ProtocolVersion;
+      readonly generation: number;
+      readonly clientSeq: number;
+      readonly delivery: "direct";
+      readonly targetParticipantId: string;
+      readonly payload: unknown;
+    };
+
+export interface RelaySnapshotSetMessage {
+  readonly type: "RELAY_SNAPSHOT_SET";
+  readonly v: ProtocolVersion;
+  readonly generation: number;
+  readonly clientSeq: number;
+  readonly payload: unknown;
+}
+
+export type GameToHostRelayMessage =
+  MultiReadyMessage | MultiLeaveMessage | RelaySendMessage | RelaySnapshotSetMessage;
 
 export interface MultiInitMessage {
   readonly type: "MULTI_INIT";
   readonly v: ProtocolVersion;
-  readonly participantId: string;
   readonly gameVersionId: number;
+  readonly contentHash: string;
   readonly profileRevision: number;
-  readonly rulesetKey: string;
-  readonly rulesetRevision: number;
   readonly generation: number;
+  readonly runtime: MultiplayerBootstrapRuntime;
+  readonly self: MultiplayerBootstrapParticipant;
+  readonly roster: readonly MultiplayerBootstrapParticipant[];
+  readonly capabilities: MultiplayerBootstrapCapabilities;
 }
 
 export interface MultiConnectedMessage {
@@ -98,57 +117,7 @@ export interface MultiConnectedMessage {
   readonly connectionGeneration: number;
 }
 
-export interface MultiParticipantMessage {
-  readonly type: "MULTI_PLAYER_JOINED" | "MULTI_PLAYER_LEFT";
-  readonly v: ProtocolVersion;
-  readonly generation: number;
-  readonly serverSeq: number;
-  readonly participantId: string;
-}
-
-export interface MultiStateMessage {
-  readonly type: "MULTI_SYNC" | "MULTI_STATE";
-  readonly v: ProtocolVersion;
-  readonly generation: number;
-  readonly serverSeq: number;
-  readonly revision: number;
-  readonly payload: unknown;
-}
-
-export interface MultiEventMessage {
-  readonly type: "MULTI_EVENT";
-  readonly v: ProtocolVersion;
-  readonly generation: number;
-  readonly serverSeq: number;
-  readonly name: string;
-  readonly payload?: unknown;
-}
-
-export interface MultiTerminalPendingMessage {
-  readonly type: "MULTI_TERMINAL_PENDING";
-  readonly v: ProtocolVersion;
-  readonly generation: number;
-  readonly serverSeq: number;
-}
-
-export interface MultiTerminalCommittedMessage {
-  readonly type: "MULTI_TERMINAL_COMMITTED";
-  readonly v: ProtocolVersion;
-  readonly generation: number;
-  readonly serverSeq: number;
-  readonly result: unknown;
-}
-
-export interface MultiActionRejectedMessage {
-  readonly type: "MULTI_ACTION_REJECTED";
-  readonly v: ProtocolVersion;
-  readonly generation: number;
-  readonly serverSeq: number;
-  readonly clientActionId: string;
-  readonly code: MultiplayerActionRejectionCode;
-  readonly currentRevision: number;
-}
-
+/** Parent-synthesized transport loss notice. It is never accepted from a game client. */
 export interface MultiDisconnectedMessage {
   readonly type: "MULTI_DISCONNECTED";
   readonly v: ProtocolVersion;
@@ -156,30 +125,74 @@ export interface MultiDisconnectedMessage {
   readonly code: MultiplayerDisconnectCode;
 }
 
-export interface MultiAbortedMessage {
-  readonly type: "MULTI_ABORTED";
+export interface RelaySender {
+  readonly participantId: string;
+  readonly seatIndex: number;
+  readonly role: "HOST" | "PLAYER";
+}
+
+export type RelayMessage =
+  | {
+      readonly type: "RELAY_MESSAGE";
+      readonly v: ProtocolVersion;
+      readonly generation: number;
+      readonly serverSeq: number;
+      readonly sender: RelaySender;
+      readonly delivery: "broadcast";
+      readonly payload: unknown;
+    }
+  | {
+      readonly type: "RELAY_MESSAGE";
+      readonly v: ProtocolVersion;
+      readonly generation: number;
+      readonly serverSeq: number;
+      readonly sender: RelaySender;
+      readonly delivery: "direct";
+      readonly targetParticipantId: string;
+      readonly payload: unknown;
+    };
+
+export interface RelaySnapshot {
+  readonly revision: number;
+  readonly hash: string;
+  readonly payload: unknown;
+}
+
+export interface RelaySyncMessage {
+  readonly type: "RELAY_SYNC";
   readonly v: ProtocolVersion;
   readonly generation: number;
-  readonly code: MultiplayerAbortCode;
+  readonly serverSeq: number;
+  readonly snapshot: RelaySnapshot | null;
+}
+
+export interface RelayRejectedMessage {
+  readonly type: "RELAY_REJECTED";
+  readonly v: ProtocolVersion;
+  readonly generation: number;
+  readonly clientSeq: number;
+  readonly code: MultiplayerRelayRejectionCode;
+}
+
+export interface RelayClosedMessage {
+  readonly type: "RELAY_CLOSED";
+  readonly v: ProtocolVersion;
+  readonly generation: number;
+  readonly code: MultiplayerRelayCloseCode;
 }
 
 export type HostToGameMultiplayerMessage =
   | MultiInitMessage
   | MultiConnectedMessage
-  | MultiParticipantMessage
-  | MultiStateMessage
-  | MultiEventMessage
-  | MultiTerminalPendingMessage
-  | MultiTerminalCommittedMessage
-  | MultiActionRejectedMessage
   | MultiDisconnectedMessage
-  | MultiAbortedMessage;
+  | RelayMessage
+  | RelaySyncMessage
+  | RelayRejectedMessage
+  | RelayClosedMessage;
 
 const textEncoder = new TextEncoder();
 const OPAQUE_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
-const ACTION_ID_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
-const RULESET_KEY_PATTERN = /^[a-z0-9][a-z0-9._:/-]{0,95}$/;
-const EVENT_NAME_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -187,8 +200,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
-function hasExactKeys(data: Record<string, unknown>, allowed: readonly string[]): boolean {
-  return Object.keys(data).every((key) => allowed.includes(key));
+function hasExactKeys(data: Record<string, unknown>, expected: readonly string[]): boolean {
+  const keys = Object.keys(data);
+  return keys.length === expected.length && keys.every((key) => expected.includes(key));
 }
 
 type ProtocolEnvelope = Record<string, unknown> & { readonly v: ProtocolVersion };
@@ -200,11 +214,11 @@ function isProtocolEnvelope(data: Record<string, unknown>): data is ProtocolEnve
 }
 
 function isPositiveInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value > 0;
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
 function isNonNegativeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 function isOpaqueId(value: unknown): value is string {
@@ -229,77 +243,156 @@ function commonClientEnvelope(data: Record<string, unknown>): data is ClientEnve
 }
 
 function commonServerEnvelope(data: Record<string, unknown>): data is ServerEnvelope {
-  return (
-    isProtocolEnvelope(data) &&
-    isPositiveInteger(data.generation) &&
-    isNonNegativeInteger(data.serverSeq)
-  );
+  return commonClientEnvelope(data) && isNonNegativeInteger(data.serverSeq);
 }
 
-export function parseGameToHostMultiplayerMessage(
-  value: unknown,
-): GameToHostMultiplayerMessage | null {
-  if (!isWithinPayloadLimit(value, MULTIPLAYER_CLIENT_MAX_PAYLOAD_BYTES)) return null;
+export function parseGameToHostRelayMessage(value: unknown): GameToHostRelayMessage | null {
+  if (!isWithinPayloadLimit(value, MULTIPLAYER_RELAY_MAX_CLIENT_ENVELOPE_BYTES)) return null;
   if (!isPlainObject(value) || typeof value.type !== "string" || !commonClientEnvelope(value)) {
     return null;
   }
-
-  switch (value.type) {
-    case "MULTI_READY":
-    case "MULTI_LEAVE":
-      return hasExactKeys(value, ["type", "v", "generation"])
-        ? ({ type: value.type, v: 1, generation: value.generation } as
-            MultiReadyMessage | MultiLeaveMessage)
-        : null;
-
-    case "MULTI_ACTION":
-      if (
-        !hasExactKeys(value, [
-          "type",
-          "v",
-          "generation",
-          "clientSeq",
-          "clientActionId",
-          "expectedRevision",
-          "payload",
-        ]) ||
-        !isNonNegativeInteger(value.clientSeq) ||
-        typeof value.clientActionId !== "string" ||
-        !ACTION_ID_PATTERN.test(value.clientActionId) ||
-        !isNonNegativeInteger(value.expectedRevision) ||
-        !isJsonSafeValue(value.payload)
-      ) {
-        return null;
-      }
-      return {
-        type: "MULTI_ACTION",
-        v: 1,
-        generation: value.generation,
-        clientSeq: value.clientSeq,
-        clientActionId: value.clientActionId,
-        expectedRevision: value.expectedRevision,
-        payload: value.payload,
-      };
-
-    case "MULTI_INPUT":
-      if (
-        !hasExactKeys(value, ["type", "v", "generation", "clientSeq", "payload"]) ||
-        !isNonNegativeInteger(value.clientSeq) ||
-        !isJsonSafeValue(value.payload)
-      ) {
-        return null;
-      }
-      return {
-        type: "MULTI_INPUT",
-        v: 1,
-        generation: value.generation,
-        clientSeq: value.clientSeq,
-        payload: value.payload,
-      };
-
-    default:
-      return null;
+  if (value.type === "MULTI_READY" || value.type === "MULTI_LEAVE") {
+    return hasExactKeys(value, ["type", "v", "generation"])
+      ? { type: value.type, v: 1, generation: value.generation }
+      : null;
   }
+  if (value.type === "RELAY_SEND") {
+    if (
+      !isPositiveInteger(value.clientSeq) ||
+      (value.delivery !== "broadcast" && value.delivery !== "direct") ||
+      !isJsonSafeValue(value.payload) ||
+      !isWithinPayloadLimit(value.payload, MULTIPLAYER_CLIENT_MAX_PAYLOAD_BYTES)
+    ) {
+      return null;
+    }
+    if (value.delivery === "broadcast") {
+      return hasExactKeys(value, ["type", "v", "generation", "clientSeq", "delivery", "payload"])
+        ? {
+            type: "RELAY_SEND",
+            v: 1,
+            generation: value.generation,
+            clientSeq: value.clientSeq,
+            delivery: "broadcast",
+            payload: value.payload,
+          }
+        : null;
+    }
+    if (
+      !hasExactKeys(value, [
+        "type",
+        "v",
+        "generation",
+        "clientSeq",
+        "delivery",
+        "targetParticipantId",
+        "payload",
+      ]) ||
+      !isOpaqueId(value.targetParticipantId)
+    ) {
+      return null;
+    }
+    return {
+      type: "RELAY_SEND",
+      v: 1,
+      generation: value.generation,
+      clientSeq: value.clientSeq,
+      delivery: "direct",
+      targetParticipantId: value.targetParticipantId,
+      payload: value.payload,
+    };
+  }
+  if (
+    value.type === "RELAY_SNAPSHOT_SET" &&
+    hasExactKeys(value, ["type", "v", "generation", "clientSeq", "payload"]) &&
+    isPositiveInteger(value.clientSeq) &&
+    isJsonSafeValue(value.payload) &&
+    isWithinPayloadLimit(value.payload, MULTIPLAYER_RELAY_MAX_SNAPSHOT_BYTES)
+  ) {
+    return {
+      type: "RELAY_SNAPSHOT_SET",
+      v: 1,
+      generation: value.generation,
+      clientSeq: value.clientSeq,
+      payload: value.payload,
+    };
+  }
+  return null;
+}
+
+function parseRelaySender(value: unknown): RelaySender | null {
+  if (
+    !isPlainObject(value) ||
+    !hasExactKeys(value, ["participantId", "seatIndex", "role"]) ||
+    !isOpaqueId(value.participantId) ||
+    !isNonNegativeInteger(value.seatIndex) ||
+    value.seatIndex > 7 ||
+    (value.role !== "HOST" && value.role !== "PLAYER")
+  ) {
+    return null;
+  }
+  return { participantId: value.participantId, seatIndex: value.seatIndex, role: value.role };
+}
+
+function parseRelaySnapshot(value: unknown): RelaySnapshot | null {
+  if (
+    !isPlainObject(value) ||
+    !hasExactKeys(value, ["revision", "hash", "payload"]) ||
+    !isPositiveInteger(value.revision) ||
+    typeof value.hash !== "string" ||
+    !SHA256_PATTERN.test(value.hash) ||
+    !isJsonSafeValue(value.payload) ||
+    !isWithinPayloadLimit(value.payload, MULTIPLAYER_RELAY_MAX_SNAPSHOT_BYTES)
+  ) {
+    return null;
+  }
+  return { revision: value.revision, hash: value.hash, payload: value.payload };
+}
+
+function parseBootstrapParticipant(value: unknown): MultiplayerBootstrapParticipant | null {
+  return parseRelaySender(value);
+}
+
+function sameBootstrapParticipant(
+  left: MultiplayerBootstrapParticipant,
+  right: MultiplayerBootstrapParticipant,
+): boolean {
+  return (
+    left.participantId === right.participantId &&
+    left.seatIndex === right.seatIndex &&
+    left.role === right.role
+  );
+}
+
+function parseBootstrapRuntime(value: unknown): MultiplayerBootstrapRuntime | null {
+  if (
+    !isPlainObject(value) ||
+    !hasExactKeys(value, ["kind", "protocolVersion", "resultTrust"]) ||
+    value.kind !== "relay" ||
+    value.protocolVersion !== MULTIPLAYER_BRIDGE_PROTOCOL_VERSION ||
+    value.resultTrust !== "UNVERIFIED"
+  ) {
+    return null;
+  }
+  return { kind: "relay", protocolVersion: 1, resultTrust: "UNVERIFIED" };
+}
+
+function parseBootstrapCapabilities(value: unknown): MultiplayerBootstrapCapabilities | null {
+  if (
+    !isPlainObject(value) ||
+    !hasExactKeys(value, ["reconnect", "broadcast", "directMessages", "hostSnapshot"]) ||
+    (value.reconnect !== "none" && value.reconnect !== "resume") ||
+    value.broadcast !== true ||
+    typeof value.directMessages !== "boolean" ||
+    typeof value.hostSnapshot !== "boolean"
+  ) {
+    return null;
+  }
+  return {
+    reconnect: value.reconnect,
+    broadcast: true,
+    directMessages: value.directMessages,
+    hostSnapshot: value.hostSnapshot,
+  };
 }
 
 export function parseHostToGameMultiplayerMessage(
@@ -310,201 +403,198 @@ export function parseHostToGameMultiplayerMessage(
     return null;
   }
 
-  switch (value.type) {
-    case "MULTI_INIT":
-      if (
-        !hasExactKeys(value, [
-          "type",
-          "v",
-          "participantId",
-          "gameVersionId",
-          "profileRevision",
-          "rulesetKey",
-          "rulesetRevision",
-          "generation",
-        ]) ||
-        !isOpaqueId(value.participantId) ||
-        !isPositiveInteger(value.gameVersionId) ||
-        !isPositiveInteger(value.profileRevision) ||
-        typeof value.rulesetKey !== "string" ||
-        !RULESET_KEY_PATTERN.test(value.rulesetKey) ||
-        !isPositiveInteger(value.rulesetRevision) ||
-        !isPositiveInteger(value.generation)
-      ) {
-        return null;
-      }
-      return {
-        type: "MULTI_INIT",
-        v: 1,
-        participantId: value.participantId,
-        gameVersionId: value.gameVersionId,
-        profileRevision: value.profileRevision,
-        rulesetKey: value.rulesetKey,
-        rulesetRevision: value.rulesetRevision,
-        generation: value.generation,
-      };
-
-    case "MULTI_CONNECTED":
-      if (
-        !hasExactKeys(value, ["type", "v", "generation", "connectionGeneration"]) ||
-        !isPositiveInteger(value.generation) ||
-        !isPositiveInteger(value.connectionGeneration)
-      ) {
-        return null;
-      }
-      return {
-        type: "MULTI_CONNECTED",
-        v: 1,
-        generation: value.generation,
-        connectionGeneration: value.connectionGeneration,
-      };
-
-    case "MULTI_PLAYER_JOINED":
-    case "MULTI_PLAYER_LEFT":
-      if (
-        !hasExactKeys(value, ["type", "v", "generation", "serverSeq", "participantId"]) ||
-        !commonServerEnvelope(value) ||
-        !isOpaqueId(value.participantId)
-      ) {
-        return null;
-      }
-      return {
-        type: value.type,
-        v: 1,
-        generation: value.generation,
-        serverSeq: value.serverSeq,
-        participantId: value.participantId,
-      };
-
-    case "MULTI_SYNC":
-    case "MULTI_STATE":
-      if (
-        !hasExactKeys(value, ["type", "v", "generation", "serverSeq", "revision", "payload"]) ||
-        !commonServerEnvelope(value) ||
-        !isNonNegativeInteger(value.revision) ||
-        !isJsonSafeValue(value.payload)
-      ) {
-        return null;
-      }
-      return {
-        type: value.type,
-        v: 1,
-        generation: value.generation,
-        serverSeq: value.serverSeq,
-        revision: value.revision,
-        payload: value.payload,
-      };
-
-    case "MULTI_EVENT":
-      if (
-        !hasExactKeys(value, ["type", "v", "generation", "serverSeq", "name", "payload"]) ||
-        !commonServerEnvelope(value) ||
-        typeof value.name !== "string" ||
-        !EVENT_NAME_PATTERN.test(value.name) ||
-        ("payload" in value && value.payload !== undefined && !isJsonSafeValue(value.payload))
-      ) {
-        return null;
-      }
-      return {
-        type: "MULTI_EVENT",
-        v: 1,
-        generation: value.generation,
-        serverSeq: value.serverSeq,
-        name: value.name,
-        ...(value.payload !== undefined ? { payload: value.payload } : {}),
-      };
-
-    case "MULTI_TERMINAL_PENDING":
-      if (
-        !hasExactKeys(value, ["type", "v", "generation", "serverSeq"]) ||
-        !commonServerEnvelope(value)
-      ) {
-        return null;
-      }
-      return {
-        type: "MULTI_TERMINAL_PENDING",
-        v: 1,
-        generation: value.generation,
-        serverSeq: value.serverSeq,
-      };
-
-    case "MULTI_TERMINAL_COMMITTED":
-      if (
-        !hasExactKeys(value, ["type", "v", "generation", "serverSeq", "result"]) ||
-        !commonServerEnvelope(value) ||
-        !isJsonSafeValue(value.result)
-      ) {
-        return null;
-      }
-      return {
-        type: "MULTI_TERMINAL_COMMITTED",
-        v: 1,
-        generation: value.generation,
-        serverSeq: value.serverSeq,
-        result: value.result,
-      };
-
-    case "MULTI_ACTION_REJECTED":
-      if (
-        !hasExactKeys(value, [
-          "type",
-          "v",
-          "generation",
-          "serverSeq",
-          "clientActionId",
-          "code",
-          "currentRevision",
-        ]) ||
-        !commonClientEnvelope(value) ||
-        !isNonNegativeInteger(value.serverSeq) ||
-        typeof value.clientActionId !== "string" ||
-        !ACTION_ID_PATTERN.test(value.clientActionId) ||
-        !isAllowedString(value.code, MULTIPLAYER_ACTION_REJECTION_CODES) ||
-        !isNonNegativeInteger(value.currentRevision)
-      ) {
-        return null;
-      }
-      return {
-        type: "MULTI_ACTION_REJECTED",
-        v: 1,
-        generation: value.generation,
-        serverSeq: value.serverSeq,
-        clientActionId: value.clientActionId,
-        code: value.code,
-        currentRevision: value.currentRevision,
-      };
-
-    case "MULTI_DISCONNECTED":
-      if (
-        !hasExactKeys(value, ["type", "v", "generation", "code"]) ||
-        !isPositiveInteger(value.generation) ||
-        !isAllowedString(value.code, MULTIPLAYER_DISCONNECT_CODES)
-      ) {
-        return null;
-      }
-      return {
-        type: "MULTI_DISCONNECTED",
-        v: 1,
-        generation: value.generation,
-        code: value.code,
-      };
-
-    case "MULTI_ABORTED":
-      if (
-        !hasExactKeys(value, ["type", "v", "generation", "code"]) ||
-        !isPositiveInteger(value.generation) ||
-        !isAllowedString(value.code, MULTIPLAYER_ABORT_CODES)
-      ) {
-        return null;
-      }
-      return {
-        type: "MULTI_ABORTED",
-        v: 1,
-        generation: value.generation,
-        code: value.code,
-      };
-
-    default:
+  if (value.type === "MULTI_INIT") {
+    if (
+      !hasExactKeys(value, [
+        "type",
+        "v",
+        "gameVersionId",
+        "contentHash",
+        "profileRevision",
+        "generation",
+        "runtime",
+        "self",
+        "roster",
+        "capabilities",
+      ]) ||
+      !isPositiveInteger(value.gameVersionId) ||
+      typeof value.contentHash !== "string" ||
+      !SHA256_PATTERN.test(value.contentHash) ||
+      !isPositiveInteger(value.profileRevision) ||
+      !isPositiveInteger(value.generation) ||
+      !Array.isArray(value.roster) ||
+      value.roster.length < 2 ||
+      value.roster.length > 8
+    ) {
       return null;
+    }
+    const runtime = parseBootstrapRuntime(value.runtime);
+    const self = parseBootstrapParticipant(value.self);
+    const capabilities = parseBootstrapCapabilities(value.capabilities);
+    const roster = value.roster.map(parseBootstrapParticipant);
+    if (!runtime || !self || !capabilities || roster.some((participant) => participant === null)) {
+      return null;
+    }
+    const parsedRoster = roster as MultiplayerBootstrapParticipant[];
+    if (
+      new Set(parsedRoster.map((participant) => participant.participantId)).size !==
+        parsedRoster.length ||
+      new Set(parsedRoster.map((participant) => participant.seatIndex)).size !==
+        parsedRoster.length ||
+      parsedRoster.filter((participant) => participant.role === "HOST").length !== 1 ||
+      parsedRoster.some((participant, index) => {
+        const previous = parsedRoster[index - 1];
+        return previous !== undefined && participant.seatIndex <= previous.seatIndex;
+      }) ||
+      !parsedRoster.some((participant) => sameBootstrapParticipant(participant, self))
+    ) {
+      return null;
+    }
+    return {
+      type: "MULTI_INIT",
+      v: 1,
+      gameVersionId: value.gameVersionId,
+      contentHash: value.contentHash,
+      profileRevision: value.profileRevision,
+      generation: value.generation,
+      runtime,
+      self,
+      roster: parsedRoster,
+      capabilities,
+    };
   }
+
+  if (value.type === "MULTI_CONNECTED") {
+    return hasExactKeys(value, ["type", "v", "generation", "connectionGeneration"]) &&
+      isPositiveInteger(value.generation) &&
+      isPositiveInteger(value.connectionGeneration)
+      ? {
+          type: "MULTI_CONNECTED",
+          v: 1,
+          generation: value.generation,
+          connectionGeneration: value.connectionGeneration,
+        }
+      : null;
+  }
+
+  if (value.type === "MULTI_DISCONNECTED") {
+    return hasExactKeys(value, ["type", "v", "generation", "code"]) &&
+      isPositiveInteger(value.generation) &&
+      isAllowedString(value.code, MULTIPLAYER_DISCONNECT_CODES)
+      ? {
+          type: "MULTI_DISCONNECTED",
+          v: 1,
+          generation: value.generation,
+          code: value.code,
+        }
+      : null;
+  }
+
+  if (value.type === "RELAY_MESSAGE") {
+    if (
+      !commonServerEnvelope(value) ||
+      (value.delivery !== "broadcast" && value.delivery !== "direct") ||
+      !isJsonSafeValue(value.payload) ||
+      !isWithinPayloadLimit(value.payload, MULTIPLAYER_CLIENT_MAX_PAYLOAD_BYTES)
+    ) {
+      return null;
+    }
+    const sender = parseRelaySender(value.sender);
+    if (!sender) return null;
+    if (value.delivery === "broadcast") {
+      return hasExactKeys(value, [
+        "type",
+        "v",
+        "generation",
+        "serverSeq",
+        "sender",
+        "delivery",
+        "payload",
+      ])
+        ? {
+            type: "RELAY_MESSAGE",
+            v: 1,
+            generation: value.generation,
+            serverSeq: value.serverSeq,
+            sender,
+            delivery: "broadcast",
+            payload: value.payload,
+          }
+        : null;
+    }
+    if (
+      !hasExactKeys(value, [
+        "type",
+        "v",
+        "generation",
+        "serverSeq",
+        "sender",
+        "delivery",
+        "targetParticipantId",
+        "payload",
+      ]) ||
+      !isOpaqueId(value.targetParticipantId)
+    ) {
+      return null;
+    }
+    return {
+      type: "RELAY_MESSAGE",
+      v: 1,
+      generation: value.generation,
+      serverSeq: value.serverSeq,
+      sender,
+      delivery: "direct",
+      targetParticipantId: value.targetParticipantId,
+      payload: value.payload,
+    };
+  }
+
+  if (value.type === "RELAY_SYNC") {
+    if (
+      !hasExactKeys(value, ["type", "v", "generation", "serverSeq", "snapshot"]) ||
+      !commonServerEnvelope(value)
+    ) {
+      return null;
+    }
+    const snapshot = value.snapshot === null ? null : parseRelaySnapshot(value.snapshot);
+    return value.snapshot === null || snapshot
+      ? {
+          type: "RELAY_SYNC",
+          v: 1,
+          generation: value.generation,
+          serverSeq: value.serverSeq,
+          snapshot,
+        }
+      : null;
+  }
+
+  if (value.type === "RELAY_REJECTED") {
+    return hasExactKeys(value, ["type", "v", "generation", "clientSeq", "code"]) &&
+      commonClientEnvelope(value) &&
+      isPositiveInteger(value.clientSeq) &&
+      isAllowedString(value.code, MULTIPLAYER_RELAY_REJECTION_CODES)
+      ? {
+          type: "RELAY_REJECTED",
+          v: 1,
+          generation: value.generation,
+          clientSeq: value.clientSeq,
+          code: value.code,
+        }
+      : null;
+  }
+
+  if (value.type === "RELAY_CLOSED") {
+    return hasExactKeys(value, ["type", "v", "generation", "code"]) &&
+      isPositiveInteger(value.generation) &&
+      isAllowedString(value.code, MULTIPLAYER_RELAY_CLOSE_CODES)
+      ? {
+          type: "RELAY_CLOSED",
+          v: 1,
+          generation: value.generation,
+          code: value.code,
+        }
+      : null;
+  }
+
+  return null;
 }

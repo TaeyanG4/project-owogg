@@ -1,8 +1,4 @@
-import type {
-  OwoggGameCreatorManifestV1,
-  OwoggGameCreatorManifestV2,
-  ScoreConfig,
-} from "@owogg/game-sdk/contracts";
+import type { OwoggGameCreatorManifest, ScoreConfig } from "@owogg/game-sdk/contracts";
 import type { SandboxGameMetadataInput, SandboxGameRecord } from "../ports/sandboxGames.js";
 import { isGameCreatorScorePolicyConfigured } from "./gameCreatorScorePolicy.js";
 import {
@@ -140,7 +136,7 @@ export function patchUserGameCanonical(
 
   if (
     input.mode !== undefined &&
-    existing.creatorManifest?.schemaVersion === 2 &&
+    existing.creatorManifest !== undefined &&
     (updated.mode === "single") !==
       existing.creatorManifest.game.playModes.every((playMode) => playMode === "single")
   ) {
@@ -148,69 +144,37 @@ export function patchUserGameCanonical(
   }
 
   const creatorManifest = existing.creatorManifest
-    ? existing.creatorManifest.schemaVersion === 2
-      ? ({
-          ...existing.creatorManifest,
-          game: {
-            ...existing.creatorManifest.game,
-            ...(input.title !== undefined ? { title: updated.title } : {}),
-            ...(input.shortDescription !== undefined
-              ? { shortDescription: updated.shortDescription ?? "" }
-              : {}),
-            ...(input.description !== undefined ? { description: updated.description ?? "" } : {}),
-            ...(input.genre !== undefined ? { genre: updated.genre } : {}),
-            ...(input.mode !== undefined ? { mode: updated.mode } : {}),
-          },
-          result: {
-            ...existing.creatorManifest.result,
-            score:
-              score.score === null
-                ? null
-                : {
-                    unit: score.score.unit,
-                    direction: score.score.direction,
-                    ...(score.score.precision !== undefined
-                      ? { precision: score.score.precision }
-                      : {}),
-                    range: {
-                      min: score.score.min,
-                      max: score.score.max,
-                      outOfRange: score.score.outOfRange ?? "reject",
-                    },
+    ? ({
+        ...existing.creatorManifest,
+        game: {
+          ...existing.creatorManifest.game,
+          ...(input.title !== undefined ? { title: updated.title } : {}),
+          ...(input.shortDescription !== undefined
+            ? { shortDescription: updated.shortDescription ?? "" }
+            : {}),
+          ...(input.description !== undefined ? { description: updated.description ?? "" } : {}),
+          ...(input.genre !== undefined ? { genre: updated.genre } : {}),
+          ...(input.mode !== undefined ? { mode: updated.mode } : {}),
+        },
+        result: {
+          ...existing.creatorManifest.result,
+          score:
+            score.score === null
+              ? null
+              : {
+                  unit: score.score.unit,
+                  direction: score.score.direction,
+                  ...(score.score.precision !== undefined
+                    ? { precision: score.score.precision }
+                    : {}),
+                  range: {
+                    min: score.score.min,
+                    max: score.score.max,
+                    outOfRange: score.score.outOfRange ?? "reject",
                   },
-          },
-        } satisfies OwoggGameCreatorManifestV2)
-      : ({
-          ...existing.creatorManifest,
-          game: {
-            ...existing.creatorManifest.game,
-            ...(input.title !== undefined ? { title: updated.title } : {}),
-            ...(input.shortDescription !== undefined
-              ? { shortDescription: updated.shortDescription ?? "" }
-              : {}),
-            ...(input.description !== undefined ? { description: updated.description ?? "" } : {}),
-            ...(input.genre !== undefined ? { genre: updated.genre } : {}),
-            ...(input.mode !== undefined ? { mode: updated.mode } : {}),
-          },
-          result: {
-            ...existing.creatorManifest.result,
-            score:
-              score.score === null
-                ? null
-                : {
-                    unit: score.score.unit,
-                    direction: score.score.direction,
-                    ...(score.score.precision !== undefined
-                      ? { precision: score.score.precision }
-                      : {}),
-                    range: {
-                      min: score.score.min,
-                      max: score.score.max,
-                      outOfRange: score.score.outOfRange ?? "reject",
-                    },
-                  },
-          },
-        } satisfies OwoggGameCreatorManifestV1)
+                },
+        },
+      } satisfies OwoggGameCreatorManifest)
     : undefined;
 
   return {

@@ -144,6 +144,7 @@ export interface Dictionary {
     categoryHeader: string;
     recordHeader: string;
     dateHeader: string;
+    modeHeader: string;
     levelHeader: string;
     totalXpHeader: string;
     recordOrCategory: string;
@@ -999,6 +1000,7 @@ export interface Dictionary {
     metadataAvgPerTargetMs: string;
     metadataSequenceLength: string;
     metadataGrade: string;
+    metadataAuthoritativeRawScore: string;
     guestNoticeTitle: string;
     guestNoticeBody: string;
     guestLoginCta: string;
@@ -1300,6 +1302,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       categoryHeader: "종목",
       recordHeader: "기록",
       dateHeader: "달성일",
+      modeHeader: "모드",
       levelHeader: "레벨",
       totalXpHeader: "총 경험치",
       recordOrCategory: "기록 / 종목",
@@ -2334,6 +2337,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       metadataAvgPerTargetMs: "타겟당 평균 (ms)",
       metadataSequenceLength: "패턴 길이",
       metadataGrade: "등급",
+      metadataAuthoritativeRawScore: "검증 원점수",
       guestNoticeTitle: "게스트 기록은 이 기기에만 저장됩니다.",
       guestNoticeBody: "로그인하면 다음 플레이부터 랭킹에 참여할 수 있습니다.",
       guestLoginCta: "로그인",
@@ -2594,6 +2598,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       categoryHeader: "Game",
       recordHeader: "Record",
       dateHeader: "Date",
+      modeHeader: "Mode",
       levelHeader: "Level",
       totalXpHeader: "Total XP",
       recordOrCategory: "Record / Game",
@@ -3649,6 +3654,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       metadataAvgPerTargetMs: "Avg. per target (ms)",
       metadataSequenceLength: "Pattern length",
       metadataGrade: "Grade",
+      metadataAuthoritativeRawScore: "Verified raw score",
       guestNoticeTitle: "Guest records are saved only on this device.",
       guestNoticeBody: "Sign in to join the leaderboard starting with your next play.",
       guestLoginCta: "Sign in",
@@ -3911,6 +3917,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       categoryHeader: "種目",
       recordHeader: "記録",
       dateHeader: "達成日",
+      modeHeader: "モード",
       levelHeader: "レベル",
       totalXpHeader: "総経験値",
       recordOrCategory: "記録 / 種目",
@@ -4963,6 +4970,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       metadataAvgPerTargetMs: "ターゲット毎の平均（ms）",
       metadataSequenceLength: "パターンの長さ",
       metadataGrade: "評価",
+      metadataAuthoritativeRawScore: "検証済み元スコア",
       guestNoticeTitle: "ゲストの記録はこの端末にのみ保存されます。",
       guestNoticeBody: "ログインすると、次回のプレイからランキングに参加できます。",
       guestLoginCta: "ログイン",
@@ -5225,6 +5233,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       categoryHeader: "项目",
       recordHeader: "记录",
       dateHeader: "达成日期",
+      modeHeader: "模式",
       levelHeader: "等级",
       totalXpHeader: "总经验值",
       recordOrCategory: "记录 / 项目",
@@ -6227,6 +6236,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       metadataAvgPerTargetMs: "每目标平均用时（ms）",
       metadataSequenceLength: "序列长度",
       metadataGrade: "评级",
+      metadataAuthoritativeRawScore: "已验证原始分数",
       guestNoticeTitle: "访客记录仅保存在本设备。",
       guestNoticeBody: "登录后，从下一次游玩开始即可参与排行榜。",
       guestLoginCta: "登录",

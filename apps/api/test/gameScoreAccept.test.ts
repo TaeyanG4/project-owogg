@@ -297,6 +297,7 @@ async function postScore(
       title: "Test Game",
       shortDescription: "",
       description: "",
+      publisher: { official: false },
       policy: {
         score:
           canonicalGame.score_unit &&
