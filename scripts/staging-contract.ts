@@ -483,6 +483,44 @@ export function resolveSmokeTargets(env: Environment): { apiUrl: string; webUrl:
   };
 }
 
+export interface PublicGameDeploymentTarget {
+  slug: string;
+  mediaUrl: string | null;
+}
+
+export function parsePublicGameDeploymentTargets(
+  value: unknown,
+  options: { allowEmpty?: boolean } = {},
+): PublicGameDeploymentTarget[] {
+  if (!value || typeof value !== "object") {
+    throw new Error("GET /api/games returned a malformed public catalog");
+  }
+
+  const games = (value as { games?: unknown }).games;
+  if (!Array.isArray(games)) {
+    throw new Error("GET /api/games returned a malformed public catalog");
+  }
+  if (games.length === 0 && !options.allowEmpty) {
+    throw new Error("GET /api/games returned an empty public catalog");
+  }
+
+  const seen = new Set<string>();
+  return games.map((candidate, index) => {
+    if (!candidate || typeof candidate !== "object") {
+      throw new Error(`GET /api/games item ${index} is not an object`);
+    }
+    const { slug, mediaUrl } = candidate as { slug?: unknown; mediaUrl?: unknown };
+    if (typeof slug !== "string" || !slug.trim() || seen.has(slug)) {
+      throw new Error(`GET /api/games item ${index} has an invalid or duplicate slug`);
+    }
+    if (mediaUrl !== null && typeof mediaUrl !== "string") {
+      throw new Error(`GET /api/games item ${index} has an invalid mediaUrl`);
+    }
+    seen.add(slug);
+    return { slug, mediaUrl };
+  });
+}
+
 function resolveSmokeUrl(value: string | undefined, fallback: string, name: string): string {
   const candidate = value?.trim() || fallback;
   let url: URL;

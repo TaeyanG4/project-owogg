@@ -9,6 +9,7 @@ import {
   STAGING_D1_ID_SENTINEL,
   materializeStagingWranglerConfig,
   parseJsonc,
+  parsePublicGameDeploymentTargets,
   resolveSmokeTargets,
   validateCloudflareDomainAssignments,
   validateStagingEnvironment,
@@ -212,6 +213,28 @@ test("smoke targets keep Production defaults and support explicit Staging overri
   assert.throws(() => resolveSmokeTargets({ SMOKE_API_URL: "http://api-stg.owogg.com" }), /HTTPS/);
 });
 
+test("empty public catalogs require an explicit smoke allowance and malformed catalogs still fail", () => {
+  assert.throws(() => parsePublicGameDeploymentTargets({ games: [] }), /empty public catalog/);
+  assert.deepEqual(parsePublicGameDeploymentTargets({ games: [] }, { allowEmpty: true }), []);
+  assert.throws(
+    () => parsePublicGameDeploymentTargets({}, { allowEmpty: true }),
+    /malformed public catalog/,
+  );
+  assert.throws(
+    () =>
+      parsePublicGameDeploymentTargets(
+        {
+          games: [
+            { slug: "duplicate", mediaUrl: null },
+            { slug: "duplicate", mediaUrl: null },
+          ],
+        },
+        { allowEmpty: true },
+      ),
+    /invalid or duplicate slug/,
+  );
+});
+
 test("Cloudflare domain preflight permits empty/already-correct Staging mappings and blocks conflicts", () => {
   assert.deepEqual(validateCloudflareDomainAssignments([]), []);
   assert.deepEqual(
@@ -241,6 +264,10 @@ test("Staging workflow is push-after-CI only and contains no Production variable
   const ci = fs.readFileSync(path.join(repoRoot, ".github", "workflows", "ci.yml"), "utf8");
   const deploy = fs.readFileSync(
     path.join(repoRoot, ".github", "workflows", "deploy-staging.yml"),
+    "utf8",
+  );
+  const productionDeploy = fs.readFileSync(
+    path.join(repoRoot, ".github", "workflows", "deploy.yml"),
     "utf8",
   );
   const packageJson = fs.readFileSync(path.join(repoRoot, "package.json"), "utf8");
@@ -276,4 +303,7 @@ test("Staging workflow is push-after-CI only and contains no Production variable
   assert.match(deploy, /put_secret GOOGLE_CLIENT_SECRET/);
   assert.match(deploy, /put_secret MULTIPLAYER_TICKET_SECRET/);
   assert.match(deploy, /put_optional_secret MULTIPLAYER_TICKET_PREVIOUS_SECRET/);
+  assert.match(deploy, /smoke:prod --api-only --allow-empty-catalog/);
+  assert.match(deploy, /smoke:prod --web-only --allow-empty-catalog/);
+  assert.doesNotMatch(productionDeploy, /allow-empty-catalog/);
 });

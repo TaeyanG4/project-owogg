@@ -173,6 +173,9 @@ Staging 통합 검증이 끝나면 검증한 `staging` tree를 대상으로 `sta
    업로드합니다.
 5. API health/provenance를 확인합니다. 기존 게임은 Staging D1/B2에서 유지되며 deploy가 Git source로
    다시 빌드·발행하거나 live version을 변경하지 않습니다.
+   Staging D1은 의도적으로 빈 catalog일 수 있어 smoke가 `--allow-empty-catalog`를 명시하지만, 응답
+   schema와 존재하는 모든 게임의 detail/media는 계속 검증합니다. Production smoke에는 이 옵션을
+   사용하지 않습니다.
 6. Web Worker를 빌드·배포합니다.
 7. `STAGING_WEB_SMOKE_ENABLED=true`일 때만 Access service token으로 Web smoke를 실행합니다.
 8. Discord 명령을 `DISCORD_TEST_GUILD_ID`에만 등록합니다.

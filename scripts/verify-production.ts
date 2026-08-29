@@ -1,5 +1,9 @@
 import process from "node:process";
-import { resolveSmokeTargets } from "./staging-contract.js";
+import {
+  parsePublicGameDeploymentTargets,
+  resolveSmokeTargets,
+  type PublicGameDeploymentTarget,
+} from "./staging-contract.js";
 
 const { apiUrl: API_URL, webUrl: WEB_URL } = resolveSmokeTargets(process.env);
 
@@ -32,14 +36,10 @@ const STATIC_ROUTES_TO_CHECK = [
   "/site.webmanifest",
 ];
 
-interface PublicGameDeploymentTarget {
-  slug: string;
-  mediaUrl: string | null;
-}
-
 interface VerifyOptions {
   apiOnly: boolean;
   webOnly: boolean;
+  allowEmptyCatalog: boolean;
   expectedSha?: string;
 }
 
@@ -47,19 +47,21 @@ function parseArgs(): VerifyOptions {
   const args = process.argv.slice(2);
   let apiOnly = false;
   let webOnly = false;
+  let allowEmptyCatalog = false;
   let expectedSha = process.env.EXPECTED_SHA || "";
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--api-only") apiOnly = true;
     if (arg === "--web-only") webOnly = true;
+    if (arg === "--allow-empty-catalog") allowEmptyCatalog = true;
     if (arg === "--sha" && i + 1 < args.length) {
       expectedSha = args[i + 1] ?? "";
       i++;
     }
   }
 
-  return { apiOnly, webOnly, expectedSha: expectedSha.trim() };
+  return { apiOnly, webOnly, allowEmptyCatalog, expectedSha: expectedSha.trim() };
 }
 
 async function fetchWithTimeout(
@@ -79,34 +81,19 @@ async function fetchWithTimeout(
   }
 }
 
-async function fetchPublicGameCatalog(): Promise<PublicGameDeploymentTarget[]> {
+async function fetchPublicGameCatalog(
+  allowEmptyCatalog: boolean,
+): Promise<PublicGameDeploymentTarget[]> {
   const res = await fetchWithTimeout(`${API_URL}/api/games?v=${Date.now()}`, FETCH_TIMEOUT_MS);
   if (!res.ok) throw new Error(`GET /api/games returned HTTP ${res.status}`);
 
-  const body = (await res.json()) as { games?: unknown };
-  if (!Array.isArray(body.games) || body.games.length === 0) {
-    throw new Error("GET /api/games returned an empty or malformed public catalog");
-  }
-
-  const seen = new Set<string>();
-  return body.games.map((candidate, index) => {
-    if (!candidate || typeof candidate !== "object") {
-      throw new Error(`GET /api/games item ${index} is not an object`);
-    }
-    const { slug, mediaUrl } = candidate as { slug?: unknown; mediaUrl?: unknown };
-    if (typeof slug !== "string" || !slug.trim() || seen.has(slug)) {
-      throw new Error(`GET /api/games item ${index} has an invalid or duplicate slug`);
-    }
-    if (mediaUrl !== null && typeof mediaUrl !== "string") {
-      throw new Error(`GET /api/games item ${index} has an invalid mediaUrl`);
-    }
-    seen.add(slug);
-    return { slug, mediaUrl };
-  });
+  return parsePublicGameDeploymentTargets(await res.json(), { allowEmpty: allowEmptyCatalog });
 }
 
-async function verifyPublicGameApi(): Promise<PublicGameDeploymentTarget[]> {
-  const games = await fetchPublicGameCatalog();
+async function verifyPublicGameApi(
+  allowEmptyCatalog: boolean,
+): Promise<PublicGameDeploymentTarget[]> {
+  const games = await fetchPublicGameCatalog(allowEmptyCatalog);
   const targets = games.flatMap((game) => {
     const detailUrl = `${API_URL}/api/games/${encodeURIComponent(game.slug)}`;
     if (!game.mediaUrl) return [{ label: `${game.slug} detail`, url: detailUrl }];
@@ -136,7 +123,10 @@ async function verifyPublicGameApi(): Promise<PublicGameDeploymentTarget[]> {
   return games;
 }
 
-async function verifyApi(expectedSha?: string): Promise<boolean> {
+async function verifyApi(
+  expectedSha: string | undefined,
+  allowEmptyCatalog: boolean,
+): Promise<boolean> {
   console.log("🔍 Starting API Health & Provenance Check...");
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
@@ -156,7 +146,7 @@ async function verifyApi(expectedSha?: string): Promise<boolean> {
             `⚠️ API commit (${data.commit}) does not match expected (${expectedSha}) yet. Retrying...`,
           );
         } else {
-          await verifyPublicGameApi();
+          await verifyPublicGameApi(allowEmptyCatalog);
           console.log("✅ API Health, Provenance & Public Game Catalog Verified Successfully!");
           return true;
         }
@@ -239,7 +229,10 @@ async function verifyStreamerProviders(): Promise<boolean> {
   return allRequiredConfigured;
 }
 
-async function verifyWeb(expectedSha?: string): Promise<boolean> {
+async function verifyWeb(
+  expectedSha: string | undefined,
+  allowEmptyCatalog: boolean,
+): Promise<boolean> {
   console.log("🔍 Starting Web Version & Route Provenance Check...");
   let shaVerified = false;
   const accessHeaders = cloudflareAccessHeaders();
@@ -280,7 +273,7 @@ async function verifyWeb(expectedSha?: string): Promise<boolean> {
 
   let publicGames: PublicGameDeploymentTarget[];
   try {
-    publicGames = await fetchPublicGameCatalog();
+    publicGames = await fetchPublicGameCatalog(allowEmptyCatalog);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`❌ Public game catalog discovery failed: ${message}`);
@@ -353,15 +346,15 @@ async function main() {
   try {
     let success = true;
     if (options.apiOnly) {
-      const apiOk = await verifyApi(options.expectedSha);
+      const apiOk = await verifyApi(options.expectedSha, options.allowEmptyCatalog);
       const streamerProvidersOk = await verifyStreamerProviders();
       success = apiOk && streamerProvidersOk;
     } else if (options.webOnly) {
-      success = await verifyWeb(options.expectedSha);
+      success = await verifyWeb(options.expectedSha, options.allowEmptyCatalog);
     } else {
-      const apiOk = await verifyApi(options.expectedSha);
+      const apiOk = await verifyApi(options.expectedSha, options.allowEmptyCatalog);
       const streamerProvidersOk = await verifyStreamerProviders();
-      const webOk = await verifyWeb(options.expectedSha);
+      const webOk = await verifyWeb(options.expectedSha, options.allowEmptyCatalog);
       success = apiOk && streamerProvidersOk && webOk;
     }
 
