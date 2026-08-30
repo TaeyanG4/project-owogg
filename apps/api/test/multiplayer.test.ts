@@ -787,6 +787,33 @@ test("authenticated ticket endpoint advances D1 generation and returns parent-on
   assert.equal(started.participant.role, "HOST");
   assert.equal(started.participant.status, "READY");
 
+  const activeSignalCount = lobbySignalRequests.length;
+  const activeResumeResponse = await app.request(
+    "http://localhost/api/multiplayer/instances/join",
+    {
+      ...request,
+      headers: {
+        ...request.headers,
+        Cookie: `owogg_session=${playerSessionToken}`,
+      },
+      body: JSON.stringify({ publicCode: "APITICKET001", inviteToken: null }),
+    },
+    env as any,
+  );
+  assert.equal(activeResumeResponse.status, 200);
+  const activeResume = MultiplayerRoomAdmissionResponseSchema.parse(
+    await activeResumeResponse.json(),
+  );
+  assert.equal(activeResume.replayed, true);
+  assert.equal(activeResume.instance.status, "ACTIVE");
+  assert.equal(activeResume.participant.id, joined.participant.id);
+  assert.equal(activeResume.participant.seatIndex, 1);
+  assert.equal(
+    lobbySignalRequests.length,
+    activeSignalCount,
+    "active resume must not wake the closed lobby signal object",
+  );
+
   const lobbyNotifications = await Promise.all(
     lobbySignalRequests
       .filter(
