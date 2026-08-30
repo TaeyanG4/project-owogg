@@ -39,6 +39,7 @@ assert.deepEqual(
 );
 
 for (const game of officialV1Games) {
+  assert.match(game.artifactVersion, /^\d+\.\d+\.\d+$/, `${game.slug}: artifact SemVer`);
   const artifact = inventoryBySlug.get(game.slug);
   assert.ok(artifact, `missing inventory entry: ${game.slug}`);
   assert.equal(

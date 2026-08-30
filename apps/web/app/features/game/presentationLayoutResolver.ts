@@ -76,6 +76,34 @@ function resolveResponsiveLayout(
   viewport: Extract<GamePresentation["viewport"], { mode: "responsive" }>,
   available: AvailableViewport,
 ): PresentationLayout {
+  if (viewport.preferredWidth !== undefined && viewport.preferredHeight !== undefined) {
+    const { preferredWidth, preferredHeight } = viewport;
+    const minimumScale = Math.max(
+      viewport.minWidth !== undefined ? viewport.minWidth / preferredWidth : 0,
+      viewport.minHeight !== undefined ? viewport.minHeight / preferredHeight : 0,
+    );
+    const maximumScale = Math.min(
+      available.width / preferredWidth,
+      available.height / preferredHeight,
+      viewport.maxWidth !== undefined
+        ? viewport.maxWidth / preferredWidth
+        : Number.POSITIVE_INFINITY,
+      viewport.maxHeight !== undefined
+        ? viewport.maxHeight / preferredHeight
+        : Number.POSITIVE_INFINITY,
+    );
+    // A pair of preferred dimensions defines one coherent canvas, not two unrelated caps. Keep
+    // that ratio while fitting it into the platform box. The preferred native size (scale 1) wins
+    // when possible; declared minima can enlarge it only when the real viewport still allows it.
+    // If a minimum conflicts with the device, the actual viewport remains authoritative.
+    const scale = Math.min(Math.max(1, minimumScale), maximumScale);
+    return {
+      kind: "responsive",
+      displayWidth: preferredWidth * scale,
+      displayHeight: preferredHeight * scale,
+    };
+  }
+
   const displayWidth = clampToAvailable(
     viewport.preferredWidth ?? available.width,
     viewport.minWidth,

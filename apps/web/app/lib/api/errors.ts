@@ -6,11 +6,18 @@ export class ApiClientError extends Error {
   readonly detail?: string | undefined;
   readonly code?: string | undefined;
   readonly data?: unknown | undefined;
+  readonly retryAfterSeconds?: number | undefined;
 
   constructor(
     kind: ApiErrorKind,
     message: string,
-    options?: { status?: number; detail?: string; code?: string; data?: unknown },
+    options?: {
+      status?: number;
+      detail?: string;
+      code?: string;
+      data?: unknown;
+      retryAfterSeconds?: number;
+    },
   ) {
     super(message);
     this.name = "ApiClientError";
@@ -26,6 +33,9 @@ export class ApiClientError extends Error {
     }
     if (options?.data !== undefined) {
       this.data = options.data;
+    }
+    if (options?.retryAfterSeconds !== undefined) {
+      this.retryAfterSeconds = options.retryAfterSeconds;
     }
   }
 }

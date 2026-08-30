@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   ChevronDown,
   CircleAlert,
+  Clock3,
   FileArchive,
   FileJson,
   FlaskConical,
@@ -41,49 +42,12 @@ import {
   type AdminGamePageSize,
 } from "./AdminGamePagination";
 import { ManagedRelayProfileControl } from "./ManagedRelayProfileControl";
+import {
+  createOfficialGameUploadQueue,
+  type OfficialGameBatchUploadResult,
+} from "./officialGameUploadQueue";
 
-export interface OfficialGameBatchUploadResult {
-  readonly fileName: string;
-  readonly status: "PENDING" | "SUCCESS" | "FAILED";
-  readonly message: string;
-  readonly slug?: string | undefined;
-}
-
-/** Publishes admin-selected ZIPs serially so each D1/B2 publication finishes before the next one.
- * A bad archive is isolated to its own row and never prevents the remaining files from running. */
-export async function uploadOfficialGameBatch<TFile extends { readonly name: string }>(
-  files: readonly TFile[],
-  publish: (file: TFile) => Promise<{ readonly slug: string; readonly title: string }>,
-  onProgress?: ((results: readonly OfficialGameBatchUploadResult[]) => void) | undefined,
-): Promise<readonly OfficialGameBatchUploadResult[]> {
-  const results: OfficialGameBatchUploadResult[] = files.map((file) => ({
-    fileName: file.name,
-    status: "PENDING",
-    message: "게시 대기 중",
-  }));
-  onProgress?.([...results]);
-
-  for (const [index, file] of files.entries()) {
-    try {
-      const published = await publish(file);
-      results[index] = {
-        fileName: file.name,
-        status: "SUCCESS",
-        message: `${published.title} (${published.slug}) 게시 완료`,
-        slug: published.slug,
-      };
-    } catch (error) {
-      results[index] = {
-        fileName: file.name,
-        status: "FAILED",
-        message: error instanceof Error ? error.message : "공식 게임을 게시하지 못했습니다.",
-      };
-    }
-    onProgress?.([...results]);
-  }
-
-  return results;
-}
+export { uploadOfficialGameBatch } from "./officialGameUploadQueue";
 
 /** Keeps a successful destructive mutation visible even if an older in-flight list request or a
  * briefly stale edge response arrives afterwards. The total is adjusted only when the returned
@@ -175,6 +139,8 @@ export function OfficialGameManagement() {
   const [listLoading, setListLoading] = useState(false);
   const listRequestIdRef = useRef(0);
   const deletedGameIdsRef = useRef<Set<string>>(new Set());
+  const uploadListContextRef = useRef({ page, pageSize, catalogRole });
+  uploadListContextRef.current = { page, pageSize, catalogRole };
 
   const loadGames = useCallback(
     async (
@@ -206,6 +172,32 @@ export function OfficialGameManagement() {
     [],
   );
 
+  const officialUploadQueue = useMemo(
+    () =>
+      createOfficialGameUploadQueue<File>({
+        publish: uploadOfficialGame,
+        onProgress: setUploadResults,
+        onRunningChange: setUploading,
+        onIdle: (results) => {
+          const succeeded = results.filter((result) => result.status === "SUCCESS");
+          const failed = results.filter((result) => result.status === "FAILED");
+          succeeded.forEach((result) => {
+            if (result.slug) deletedGameIdsRef.current.delete(result.slug);
+          });
+          setUploadMessage(
+            failed.length === 0
+              ? `${succeeded.length}개 게임을 모두 게시했습니다.`
+              : `${succeeded.length}개 게시 완료 · ${failed.length}개 실패 — 파일별 결과를 확인해 주세요.`,
+          );
+          if (succeeded.length > 0) {
+            const context = uploadListContextRef.current;
+            void loadGames(context.page, context.pageSize, context.catalogRole);
+          }
+        },
+      }),
+    [loadGames],
+  );
+
   useEffect(() => {
     void loadGames(page, pageSize, catalogRole);
   }, [catalogRole, loadGames, page, pageSize]);
@@ -224,28 +216,16 @@ export function OfficialGameManagement() {
     }
   };
 
-  const handleOfficialUploads = async (files: readonly File[]) => {
-    if (files.length === 0 || uploading) return;
-    setUploading(true);
+  const handleOfficialUploads = (files: readonly File[]) => {
+    if (files.length === 0) return;
+    const wasRunning = officialUploadQueue.isRunning();
     setError(null);
-    setUploadMessage(`${files.length}개 ZIP 게시를 시작합니다.`);
-    setUploadResults([]);
-    try {
-      const results = await uploadOfficialGameBatch(files, uploadOfficialGame, setUploadResults);
-      const succeeded = results.filter((result) => result.status === "SUCCESS");
-      const failed = results.length - succeeded.length;
-      succeeded.forEach((result) => {
-        if (result.slug) deletedGameIdsRef.current.delete(result.slug);
-      });
-      setUploadMessage(
-        failed === 0
-          ? `${succeeded.length}개 게임을 모두 게시했습니다.`
-          : `${succeeded.length}개 게시 완료 · ${failed}개 실패 — 파일별 결과를 확인해 주세요.`,
-      );
-      if (succeeded.length > 0) await loadGames(page, pageSize, catalogRole);
-    } finally {
-      setUploading(false);
-    }
+    officialUploadQueue.enqueue(files);
+    setUploadMessage(
+      wasRunning
+        ? `${files.length}개 ZIP을 현재 게시 큐 뒤에 추가했습니다.`
+        : `${files.length}개 ZIP 게시를 시작합니다. 요청 제한 시 자동으로 기다렸다가 계속합니다.`,
+    );
   };
 
   const handleOfficialDelete = async (gameId: string, title: string) => {
@@ -361,6 +341,7 @@ export function OfficialGameManagement() {
         title="owogg.json이 포함된 ZIP 하나 또는 여러 개를 끌어다 놓으면 slug별로 등록·업데이트됩니다"
         actionLabel="또는 ZIP 여러 개 선택"
         multiple
+        acceptWhileBusy
         onFile={(file) => handleOfficialUploads([file])}
         onFiles={handleOfficialUploads}
       />
@@ -375,13 +356,12 @@ export function OfficialGameManagement() {
           className="grid gap-2 rounded-xl border border-border bg-surface p-3"
           aria-live="polite"
         >
-          {uploadResults.map((result, index) => (
-            <li
-              key={`${result.fileName}:${index}`}
-              className="flex min-w-0 items-start gap-2 text-xs"
-            >
-              {result.status === "PENDING" ? (
+          {uploadResults.map((result) => (
+            <li key={result.id} className="flex min-w-0 items-start gap-2 text-xs">
+              {result.status === "PENDING" || result.status === "UPLOADING" ? (
                 <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-brand" />
+              ) : result.status === "RETRY_WAIT" ? (
+                <Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent-yellow" />
               ) : result.status === "SUCCESS" ? (
                 <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent-green" />
               ) : (
@@ -391,7 +371,11 @@ export function OfficialGameManagement() {
                 <strong className="break-all text-text-primary">{result.fileName}</strong>
                 <span
                   className={`ml-2 ${
-                    result.status === "FAILED" ? "text-accent-red" : "text-text-muted"
+                    result.status === "FAILED"
+                      ? "text-accent-red"
+                      : result.status === "RETRY_WAIT"
+                        ? "text-accent-yellow"
+                        : "text-text-muted"
                   }`}
                 >
                   {result.message}

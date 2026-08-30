@@ -17,6 +17,9 @@ mkdirSync(outputDirectory, { recursive: true });
 mkdirSync(backupRoot, { recursive: true });
 
 for (const game of officialV1Games) {
+  if (!/^\d+\.\d+\.\d+$/.test(game.artifactVersion)) {
+    throw new Error(`${game.slug}: artifactVersion must use SemVer, for example 1.0.0`);
+  }
   const gameDirectory = path.join(here, game.slug);
   const entries = Object.fromEntries(
     game.files.map((file) => [file, readFileSync(path.join(gameDirectory, file))]),
@@ -32,7 +35,7 @@ for (const game of officialV1Games) {
     const existingHash = createHash("sha256").update(readFileSync(backupPath)).digest("hex");
     if (existingHash !== sha256) {
       throw new Error(
-        `${backupPath} already exists with different content; increment artifactVersion before rebuilding`,
+        `${backupPath} already exists with different content; increment the SemVer artifactVersion before rebuilding`,
       );
     }
   } else {

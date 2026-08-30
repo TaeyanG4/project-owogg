@@ -1,6 +1,7 @@
 export interface OfficialV1GameSource {
   readonly slug: string;
-  readonly artifactVersion: number;
+  /** Immutable ZIP artifact version in SemVer form, without the leading `v`. */
+  readonly artifactVersion: `${number}.${number}.${number}`;
   readonly files: readonly string[];
 }
 

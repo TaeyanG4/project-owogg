@@ -24,23 +24,27 @@
 
       <section id="play" class="play hidden" aria-label="타자 테스트">
         <div class="stats">
-          <span><small id="elapsed-label">경과 시간</small><b id="elapsed">0.0초</b></span>
+          <span><small id="elapsed-label">남은 시간</small><b id="elapsed">90.0초</b></span>
+          <span><small id="score-label">종합 점수</small><b id="score">0</b></span>
           <span><small id="wpm-label">속도 (WPM)</small><b id="wpm">0</b></span>
           <span><small id="cpm-label">타수 (CPM)</small><b id="cpm">0</b></span>
           <span><small id="accuracy-label">정확도</small><b id="accuracy">100%</b></span>
         </div>
         <div id="passage-card" class="passage-card">
           <span id="passage-source" class="passage-source"></span>
+          <div id="previous-lines" class="line-stack previous-lines" aria-hidden="true"></div>
           <p id="passage" class="passage" aria-live="polite"></p>
-          <textarea
+          <input
             id="typing-input"
-            rows="1"
+            type="text"
             autocomplete="off"
             autocapitalize="off"
             spellcheck="false"
             aria-label="표시된 문장 입력"
-          ></textarea>
+            placeholder="여기에 현재 줄을 입력하세요"
+          />
           <p id="input-note" class="input-note">키보드를 눌러 시작하세요.</p>
+          <div id="next-lines" class="line-stack next-lines" aria-hidden="true"></div>
         </div>
       </section>
 

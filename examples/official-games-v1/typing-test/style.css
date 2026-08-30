@@ -30,7 +30,7 @@ body {
 }
 
 button,
-textarea {
+input {
   font: inherit;
 }
 
@@ -148,7 +148,7 @@ h1 {
 
 .stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.7rem;
   margin-bottom: 1rem;
 }
@@ -188,10 +188,13 @@ h1 {
   color: #a78bfa;
 }
 
+.stats span:nth-child(5) b {
+  color: #fb7185;
+}
+
 .passage-card {
-  position: relative;
   flex: 1;
-  min-height: 25rem;
+  min-height: 18rem;
   overflow: hidden;
   border: 1px solid #1e293b;
   border-radius: 1.5rem;
@@ -210,13 +213,40 @@ h1 {
   letter-spacing: 0.04em;
 }
 
+.line-stack {
+  display: grid;
+  gap: 0.45rem;
+  min-height: 2.2rem;
+  color: #475569;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: clamp(0.72rem, 1.7vw, 0.9rem);
+  line-height: 1.45;
+}
+
+.line-stack p {
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.previous-lines {
+  margin-bottom: 0.8rem;
+  opacity: 0.62;
+}
+
+.next-lines {
+  margin-top: 0.85rem;
+  opacity: 0.82;
+}
+
 .passage {
-  min-height: 9rem;
+  min-height: 4.8rem;
   display: flex;
   flex-wrap: wrap;
   align-content: flex-start;
   margin: 0;
-  color: #64748b;
+  color: #e2e8f0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: clamp(1.05rem, 3vw, 1.5rem);
   line-height: 1.8;
@@ -250,18 +280,27 @@ h1 {
 }
 
 #typing-input {
-  position: absolute;
-  inset: 0;
   width: 100%;
-  height: 100%;
-  border: 0;
-  opacity: 0.01;
+  min-height: 3.4rem;
+  margin-top: 0.8rem;
+  border: 1px solid #334155;
+  border-radius: 0.85rem;
+  padding: 0.8rem 1rem;
+  color: #f8fafc;
+  background: #0b1020;
   cursor: text;
-  resize: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: clamp(0.95rem, 2.2vw, 1.15rem);
+  caret-color: #818cf8;
 }
 
 #typing-input:focus {
-  outline: 0;
+  border-color: #818cf8;
+  outline: 3px solid rgb(99 102 241 / 18%);
+}
+
+#typing-input::placeholder {
+  color: #475569;
 }
 
 .input-note {
@@ -328,7 +367,11 @@ h1 {
 
 @media (max-width: 700px) {
   .stats {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .stats span {
+    min-height: 4.4rem;
   }
 }
 

@@ -38,8 +38,14 @@ export interface RateLimitBinding {
  * game bundle uploads) need two separate bindings, not two `name` prefixes on one. `name` remains
  * the logical key prefix within whichever binding is chosen, for log/metric readability.
  */
-export function rateLimit(options: { name: string; binding?: string }): MiddlewareHandler<ApiEnv> {
-  const { name, binding = "RATE_LIMITER" } = options;
+export function rateLimit(options: {
+  name: string;
+  binding?: string;
+  /** Must match the bound Cloudflare rate-limit period. It is returned to clients so a queued
+   * write can wait instead of immediately failing every remaining item after the first 429. */
+  retryAfterSeconds?: number;
+}): MiddlewareHandler<ApiEnv> {
+  const { name, binding = "RATE_LIMITER", retryAfterSeconds = 60 } = options;
 
   return async (c, next) => {
     const limiter = (c.env as unknown as Record<string, RateLimitBinding | undefined>)?.[binding];
@@ -67,11 +73,13 @@ export function rateLimit(options: { name: string; binding?: string }): Middlewa
     }
 
     if (!allowed) {
+      c.header("Retry-After", String(retryAfterSeconds));
       return c.json(
         {
           error: {
             code: "RATE_LIMITED",
             message: "요청이 너무 잦습니다. 잠시 후 다시 시도해주세요.",
+            retryAfterSeconds,
           },
         },
         429,

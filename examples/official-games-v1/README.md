@@ -11,18 +11,19 @@ pnpm exec tsx examples/official-games-v1/verify-all.mjs
 ```
 
 검증용 ZIP은 `examples/official-games-v1/dist/`에 놓이며 Git에는 포함하지 않습니다. 장기 보관본은
-기본적으로 형제 디렉터리 `project-owogg-games/<slug>/<slug>_v<artifactVersion>.zip`에 함께
-생성합니다. 다른 위치가 필요하면 `OWOGG_GAMES_BACKUP_DIR` 환경 변수를 사용합니다. 같은 버전명이
-이미 다른 내용으로 존재하면 덮어쓰지 않고 빌드를 실패시키므로 `games.mjs`의 `artifactVersion`을
-올려야 합니다. `inventory.json`의 SHA-256과 로컬 결과가 일치하는 artifact만 등록합니다.
+기본적으로 형제 디렉터리 `project-owogg-games/<slug>/<slug>_v<major.minor.patch>.zip`에 함께
+생성합니다. 예를 들면 `typing-test/typing-test_v1.0.0.zip`입니다. 다른 위치가 필요하면
+`OWOGG_GAMES_BACKUP_DIR` 환경 변수를 사용합니다. 같은 버전명이 이미 다른 내용으로 존재하면
+덮어쓰지 않고 빌드를 실패시키므로 `games.mjs`의 SemVer `artifactVersion`을 올려야 합니다.
+`inventory.json`의 SHA-256과 로컬 결과가 일치하는 artifact만 등록합니다.
 
 2026-08-30 Staging 관리자 목록을 새로고침해 동결한 재등록 대상은 아래 5개 `GAME` identity
 전부입니다. `relay-protocol-probe`는 별도 `INTERNAL_TOOL`이므로 삭제·게임 재등록 대상이 아닙니다.
 
 - `official-omok`: 같은 기기의 `local-multi`와 공용 Relay 기반 `online-multi`
-- `reaction-time`: challenge seed와 클릭 시점 evidence를 검증하는 PlayConfig 게임
+- `reaction-time`: 2~8초 신호 범위와 클릭 시점 evidence를 검증하는 PlayConfig 게임
 - `aim-test`: seed 기반 표적 좌표와 순차 hit evidence를 검증하는 PlayConfig 게임
-- `typing-test`: seed가 선택한 문장과 입력 evidence로 WPM을 계산하는 PlayConfig 게임
+- `typing-test`: seed가 선택한 문장을 90초 동안 줄 단위로 입력하고 WPM·CPM·정확도 종합 점수를 계산하는 PlayConfig 게임
 - `memory-test`: seed 기반 색상 순서와 입력 evidence로 완료 level을 계산하는 PlayConfig 게임
 
 게임은 `await OWOGG.whenReady()` 뒤 공개 PlayConfig를 읽습니다. 선택기와 기본값은 `owogg.json`에서
@@ -39,7 +40,8 @@ leaderboard 보안을 위한 검토 완료 서버 코드이므로 Relay 게임 �
 
 Staging 등록 순서는 다음과 같습니다.
 
-1. 관리자가 다중 ZIP 선택으로 `project-owogg-games/` 백업본을 한꺼번에 등록·업데이트하고,
+1. 관리자가 다중 ZIP 선택 또는 연속 drag로 `project-owogg-games/` 백업본을 누적 큐에 넣어
+   등록·업데이트하고, 업로드 제한 응답은 화면이 안내한 시간만큼 자동 대기·재시도합니다. 완료 뒤
    파일별 결과와 `inventory.json`의 bytes/SHA-256을 대조합니다.
 2. 싱글 4종은 게임 실행·gs2 결과·리더보드를 확인합니다.
 3. 오목은 exact version의 Relay 요청을 게임 관리 카드에서 승인한 뒤 profile을 별도로 활성화합니다.
