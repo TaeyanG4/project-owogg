@@ -8,32 +8,30 @@
   </head>
   <body>
     <main class="shell">
-      <header>
-        <p class="eyebrow">SERVER VERIFIED</p>
-        <h1>반응속도 테스트</h1>
-        <p id="status" role="status">서버 실행 환경을 확인하는 중입니다.</p>
+      <header class="round-header">
+        <span id="round">반응속도 테스트</span>
+        <span id="average" aria-live="polite"></span>
       </header>
-      <section id="setup" class="panel">
-        <div class="config-grid">
-          <label>난이도<select id="difficulty"></select></label>
-          <label>모드<select id="variant"></select></label>
+
+      <section id="config-panel" class="config-panel hidden" aria-label="게임 설정">
+        <div id="difficulty-group" class="config-axis hidden">
+          <span>난이도</span>
+          <div id="difficulty-options" class="option-row"></div>
         </div>
-        <button id="start" class="primary" type="button">서버 승인 후 시작</button>
-      </section>
-      <section id="play" class="panel hidden">
-        <div class="stats">
-          <span>라운드 <strong id="round">0 / 0</strong></span
-          ><span>평균 <strong id="average">-</strong></span>
+        <div id="variant-group" class="config-axis hidden">
+          <span>모드</span>
+          <div id="variant-options" class="option-row"></div>
         </div>
-        <button id="reaction-pad" class="reaction-pad waiting" type="button" disabled>
-          <span id="pad-title">기다리세요</span><small id="pad-note">초록색이 되면 누르세요.</small>
-        </button>
       </section>
-      <section id="finished" class="panel hidden">
-        <h2>측정 완료</h2>
-        <p id="summary"></p>
-        <p>점수는 OWOGG 서버가 evidence를 검증한 뒤 계산합니다.</p>
-      </section>
+
+      <button id="reaction-pad" class="reaction-pad idle" type="button" disabled>
+        <strong id="pad-title">게임을 준비하는 중입니다</strong>
+        <span id="pad-note">잠시만 기다려 주세요.</span>
+      </button>
+
+      <div id="results" class="results" aria-label="라운드별 기록"></div>
+      <p id="status" class="status" role="status">게임을 준비하는 중입니다.</p>
+      <button id="retry" class="retry hidden" type="button">다시 도전하기</button>
     </main>
     <script src="./rules.js"></script>
     <script src="./game.js"></script>

@@ -5,6 +5,9 @@ Unified Manifest v1과 PlayConfig/gs2 서버 검증 경로를 보여주는 업�
 `challengeSeed`만 사용합니다. 완료 시에는 좌표·순서·상대 시간으로 구성된 작은 evidence만
 `OWOGG.complete()`에 전달합니다.
 
+브리지는 `OWOGG.whenReady()` 이후 `playConfig`를 읽습니다. 난이도나 모드 축이 하나뿐이면 해당
+선택기는 표시하지 않으며, 모든 선택 값과 허용 조합은 게시된 `owogg.json`에서만 옵니다.
+
 ## 빌드와 검증
 
 ```text

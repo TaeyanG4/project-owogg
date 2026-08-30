@@ -1,5 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="에임 테스트 로고">
-  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffdd65"/><stop offset=".5" stop-color="#fa4d7a"/><stop offset="1" stop-color="#766cff"/></linearGradient></defs>
-  <rect width="512" height="512" rx="112" fill="#0a1426"/><circle cx="256" cy="256" r="156" fill="none" stroke="url(#g)" stroke-width="40"/><circle cx="256" cy="256" r="78" fill="none" stroke="#f5f7ff" stroke-width="32"/><circle cx="256" cy="256" r="22" fill="#ffdc63"/>
-  <g stroke="#8fa8dc" stroke-width="24" stroke-linecap="round"><path d="M256 54v76M256 382v76M54 256h76M382 256h76"/></g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <linearGradient id="aim-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f43f5e"/>
+      <stop offset="100%" stop-color="#be123c"/>
+    </linearGradient>
+  </defs>
+  <rect width="100" height="100" rx="20" fill="url(#aim-bg)"/>
+  <circle cx="50" cy="50" r="32" fill="none" stroke="white" stroke-width="4" opacity="0.9"/>
+  <circle cx="50" cy="50" r="22" fill="none" stroke="white" stroke-width="3" opacity="0.7"/>
+  <circle cx="50" cy="50" r="12" fill="white" opacity="0.9"/>
+  <circle cx="50" cy="50" r="4" fill="#f43f5e"/>
+  <path d="M50 10 L50 22 M50 78 L50 90 M10 50 L22 50 M78 50 L90 50" stroke="white" stroke-width="3.5" stroke-linecap="round"/>
 </svg>

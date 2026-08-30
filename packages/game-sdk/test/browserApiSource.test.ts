@@ -142,6 +142,7 @@ test("generic calls expose no host session state", () => {
     "requestStart",
     "selectPlayMode",
     "start",
+    "whenReady",
   ]);
   assert.deepEqual(Object.keys(api.multiplayer).sort(), [
     "bootstrap",
@@ -157,6 +158,30 @@ test("generic calls expose no host session state", () => {
   assert.equal(api.multiplayer.bootstrap, null);
   assert.equal(api.playConfig, null);
   assert.deepEqual(plain(api.playModes), []);
+});
+
+test("whenReady waits for generic bootstrap and exposes the populated PlayConfig", async () => {
+  const { api, connectGeneric } = loadBrowserApi();
+  let resolved = false;
+  void api.whenReady().then(() => {
+    resolved = true;
+  });
+  await Promise.resolve();
+  assert.equal(resolved, false);
+  assert.equal(api.playConfig, null);
+
+  connectGeneric({ postMessage() {} }, PLAY_CONFIG);
+  await api.whenReady();
+  assert.equal(resolved, true);
+  assert.deepEqual(plain(api.playConfig), PLAY_CONFIG);
+});
+
+test("whenReady also resolves for a multiplayer bootstrap", async () => {
+  const { api, connectMultiplayer } = loadBrowserApi();
+  const pending = api.whenReady();
+  connectMultiplayer({ postMessage() {} });
+  await pending;
+  assert.deepEqual(plain(api.multiplayer.bootstrap), MULTIPLAYER_BOOTSTRAP);
 });
 
 test("hybrid topology selection is host-approved before local lifecycle can begin", async () => {

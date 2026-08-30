@@ -320,6 +320,19 @@ signed one-use `gs1` session을 발급합니다. PlayConfig 게임은 사용자�
 선택 topology와 canonical pair, reward factor, ruleset revision, verifier ID를 서명하고 공개
 `startContext`만 iframe에 전달합니다. `gs2` token은 parent memory 밖으로 노출하지 않습니다.
 
+게임은 주입된 객체가 존재하는 즉시 `playConfig`를 읽지 않고 먼저 `await OWOGG.whenReady()`를
+호출해야 합니다. 그 뒤 공개된 `difficulties`, `variants`, `allowedConfigs`, 기본값만으로 게임 내부
+설정 화면을 구성합니다. 축의 항목이 하나뿐이면 해당 선택기를 숨기고 기본값을 사용하며, 두 축 모두
+하나뿐이면 선택 화면 없이 바로 시작 동작을 제공할 수 있습니다. 플랫폼 UI와 slug별 코드는 이 목록을
+복제하지 않습니다. `owogg.json`에서 생략한 difficulty는 내부 canonical에서 `normal` 한 개로
+정규화되므로 게임에는 난이도 선택기를 표시하지 않습니다.
+
+`owogg.json`은 선택지의 ID·표시명·기본값·허용 조합에 대한 단일 선언 권한이지 실행 가능한 게임 규칙은
+아닙니다. 새 difficulty/variant ID가 실제 동작하려면 ZIP의 게임 로직이 그 ID의 플레이 규칙을 구현해야
+하고, 경쟁 결과를 쓰는 PlayConfig 게임은 선택한 `verifierId`의 서버 verifier도 같은 ID와 evidence를
+지원해야 합니다. 플랫폼 shell이나 slug별 UI 코드를 고칠 필요는 없지만, manifest만 바꿔서 존재하지
+않는 규칙 또는 검증 알고리즘을 생성할 수는 없습니다.
+
 Phase 5-D/E에서 trusted verifier registry, 게시/session gate, first-evidence hash claim, 검증 coordinator와
 authoritative 결과 저장이 구현됐습니다. reviewed entry는 reference용 `verified-aim-test-v1`과 공식
 재작성 게임용 `reaction-time-v1`, `aim-test-v1`, `typing-test-v1`, `memory-test-v1`입니다. 다른
@@ -341,8 +354,9 @@ attempt 소비, result, 선택적 score projection, claim terminal 전환은 한
 `complete()`로 보냅니다. build/verify 스크립트와 서버 verifier가 같은 결정론 test vector를 검증하지만,
 이 참조 구현 자체가 사람과 자동화 클라이언트를 완전히 구별하는 anti-bot 보장은 아닙니다.
 
-`examples/official-games-v1`에는 2026-08-30 Staging D1에서 동결한 공식 GAME 5종의 unified manifest
-v1 재작성 소스와 결정론 ZIP/SHA inventory가 있습니다. 이 디렉터리는 runtime registry가 아니며
+`examples/official-games-v1`에는 2026-08-30 Staging D1에서 동결한 공식 GAME 5종의 기존 UI·로고를
+보존하면서 unified manifest v1과 evidence/Relay 경계로 이식한 소스 및 결정론 ZIP/SHA inventory가
+있습니다. 이 디렉터리는 runtime registry가 아니며
 등록은 관리자 ZIP 업로드를 통해서만 수행합니다. 온라인 오목 규칙은 ZIP에만 있고, 서버의 공식 4종
 Verifier는 경쟁 싱글 결과 검증을 위한 별도 신뢰 경계입니다.
 

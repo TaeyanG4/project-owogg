@@ -8,28 +8,34 @@
   </head>
   <body>
     <main class="shell">
-      <header>
-        <p class="eyebrow">OWOGG BOARD</p>
-        <h1>오목</h1>
-        <p id="status" role="status">플레이 방식을 선택하세요.</p>
+      <header class="game-header">
+        <div>
+          <p class="eyebrow">OWOGG OFFICIAL</p>
+          <h1>오목</h1>
+        </div>
+        <div id="stone-badge" class="stone-badge hidden" aria-live="polite">
+          <span id="badge-stone" class="stone neutral"></span>
+          <span id="stone-label">돌 확인 중</span>
+        </div>
       </header>
 
-      <section id="launcher" class="panel launcher" aria-labelledby="launcher-title">
-        <h2 id="launcher-title">어떻게 플레이할까요?</h2>
-        <div class="mode-grid">
-          <button id="local-mode" type="button">
-            <strong>한 기기에서</strong><span>두 사람이 번갈아 착수합니다.</span>
-          </button>
-          <button id="online-mode" type="button">
-            <strong>온라인에서</strong><span>방을 만들거나 코드로 참가합니다.</span>
-          </button>
+      <section class="status-card" aria-live="polite">
+        <strong id="status-title">게임을 준비하는 중입니다</strong>
+        <span id="status-detail">잠시만 기다려 주세요.</span>
+      </section>
+
+      <section id="launcher" class="launcher hidden" aria-labelledby="launcher-title">
+        <div class="launcher-copy">
+          <p class="eyebrow">PLAY MODE</p>
+          <h2 id="launcher-title">어떻게 플레이할까요?</h2>
         </div>
+        <div id="mode-options" class="mode-grid"></div>
       </section>
 
       <section id="game" class="game hidden" aria-labelledby="game-title">
         <div class="game-heading">
           <div>
-            <p id="mode-label" class="eyebrow">LOCAL</p>
+            <p id="mode-label" class="eyebrow">LOCAL MULTI</p>
             <h2 id="game-title">15 × 15</h2>
           </div>
           <div class="actions">
@@ -41,9 +47,15 @@
           <span id="black-label"><i class="stone black"></i>흑 · 선공</span>
           <span id="white-label"><i class="stone white"></i>백</span>
         </div>
-        <div id="board" class="board" role="grid" aria-label="15 곱하기 15 오목판"></div>
-        <p class="rule-note">흑은 정확히 5목, 백은 5목 이상이면 승리합니다.</p>
+        <div class="board-wrap" aria-label="15 곱하기 15 오목판">
+          <div id="board" class="board" role="grid" aria-label="오목판"></div>
+        </div>
       </section>
+
+      <footer>
+        <span id="revision-label">플레이 방식 대기 중</span>
+        <span>흑은 정확히 5목 · 백은 5목 이상 연결 시 승리</span>
+      </footer>
     </main>
     <script src="./rules.js"></script>
     <script src="./game.js"></script>

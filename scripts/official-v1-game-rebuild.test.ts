@@ -54,6 +54,87 @@ test("Phase 7 source covers exactly every frozen Staging GAME identity", () => {
   }
 });
 
+test("official manifests expose only their product-owned configuration axes", () => {
+  const manifest = (slug: string) =>
+    parseGameCreatorManifest(
+      JSON.parse(fs.readFileSync(path.join(fixtureRoot, slug, "owogg.json"), "utf8")),
+    );
+
+  const aim = manifest("aim-test");
+  assert.deepEqual(
+    aim.difficulties?.map((difficulty) => difficulty.id),
+    ["normal", "hard"],
+  );
+  assert.deepEqual(
+    aim.playConfig?.variants.map((variant) => variant.id),
+    ["standard"],
+  );
+  assert.deepEqual(
+    aim.playConfig?.allowedConfigs.map(({ difficultyId, variantId }) => ({
+      difficultyId,
+      variantId,
+    })),
+    [
+      { difficultyId: "normal", variantId: "standard" },
+      { difficultyId: "hard", variantId: "standard" },
+    ],
+  );
+
+  for (const slug of ["reaction-time", "memory-test"]) {
+    const singleConfig = manifest(slug);
+    assert.equal(singleConfig.difficulties, undefined, `${slug}: redundant difficulty axis`);
+    assert.deepEqual(
+      singleConfig.playConfig?.variants.map((variant) => variant.id),
+      ["standard"],
+    );
+    assert.deepEqual(singleConfig.playConfig?.allowedConfigs, [
+      { difficultyId: "normal", variantId: "standard", rewardFactor: 1 },
+    ]);
+  }
+
+  const typing = manifest("typing-test");
+  assert.deepEqual(
+    typing.difficulties?.map((difficulty) => difficulty.id),
+    ["normal", "hard"],
+  );
+  assert.deepEqual(
+    typing.playConfig?.variants.map((variant) => variant.id),
+    ["ko", "en"],
+  );
+  assert.equal(typing.playConfig?.allowedConfigs.length, 4);
+
+  const omok = manifest("official-omok");
+  assert.equal(omok.playConfig, undefined);
+  assert.equal(omok.leaderboard?.enabled, false);
+  assert.equal(omok.result.score, null);
+  assert.deepEqual(omok.game.playModes, ["local-multi", "online-multi"]);
+});
+
+test("official game UI waits for host bootstrap and derives choices from its public descriptor", () => {
+  const forbiddenRuntimeCopy = "OWOGG의 서버 검증 실행 환경에서만 시작할 수 있습니다.";
+  for (const game of officialV1Games) {
+    const source = fs.readFileSync(path.join(fixtureRoot, game.slug, "game.js"), "utf8");
+    assert.match(source, /await api\.whenReady\(\)/, `${game.slug}: async host readiness`);
+    assert.equal(source.includes(forbiddenRuntimeCopy), false, `${game.slug}: obsolete warning`);
+  }
+
+  for (const slug of ["aim-test", "reaction-time", "memory-test"]) {
+    const source = fs.readFileSync(path.join(fixtureRoot, slug, "game.js"), "utf8");
+    assert.match(source, /config\.difficulties\.length/);
+    assert.match(source, /config\.variants\.length/);
+    assert.match(source, /config\.allowedConfigs/);
+  }
+
+  const typing = fs.readFileSync(path.join(fixtureRoot, "typing-test", "game.js"), "utf8");
+  assert.match(typing, /config\.allowedConfigs\.map/);
+  assert.match(typing, /config\.allowedConfigs\.length > 1/);
+
+  const omok = fs.readFileSync(path.join(fixtureRoot, "official-omok", "game.js"), "utf8");
+  assert.match(omok, /const modes = api\.playModes/);
+  assert.doesNotMatch(omok, /api\.complete\s*\(/);
+  assert.doesNotMatch(omok, /api\.requestStart\s*\(/);
+});
+
 test("standalone game sources never open their own network or persistent browser storage", () => {
   const forbidden = [
     /\bfetch\s*\(/,
@@ -73,32 +154,33 @@ test("standalone game sources never open their own network or persistent browser
 });
 
 test("standalone deterministic rules match their reviewed server verifiers", () => {
-  const vector = {
-    challengeSeed: "phase-seven-parity-0000000001",
-    difficultyId: "hard" as const,
-  };
+  const challengeSeed = "phase-seven-parity-0000000001";
   const reaction = loadBrowserRules<{
     createWaits(input: {
       challengeSeed: string;
-      difficultyId: "hard";
-      variantId: "focus";
+      difficultyId: "normal";
+      variantId: "standard";
     }): readonly number[];
   }>("reaction-time", "OwoggReactionRules");
   assert.deepEqual(
-    [...reaction.createWaits({ ...vector, variantId: "focus" })],
-    [...createReactionTimeWaits({ ...vector, variantId: "focus" })],
+    [...reaction.createWaits({ challengeSeed, difficultyId: "normal", variantId: "standard" })],
+    [...createReactionTimeWaits({ challengeSeed, difficultyId: "normal", variantId: "standard" })],
   );
 
   const aim = loadBrowserRules<{
     createTargets(input: {
       challengeSeed: string;
       difficultyId: "hard";
-      variantId: "precision";
+      variantId: "standard";
     }): readonly { readonly x: number; readonly y: number; readonly radius: number }[];
   }>("aim-test", "OwoggAimRules");
   assert.deepEqual(
-    JSON.parse(JSON.stringify(aim.createTargets({ ...vector, variantId: "precision" }))),
-    createAimTestTargets({ ...vector, variantId: "precision" }),
+    JSON.parse(
+      JSON.stringify(
+        aim.createTargets({ challengeSeed, difficultyId: "hard", variantId: "standard" }),
+      ),
+    ),
+    createAimTestTargets({ challengeSeed, difficultyId: "hard", variantId: "standard" }),
   );
 
   const typing = loadBrowserRules<{
@@ -108,12 +190,16 @@ test("standalone deterministic rules match their reviewed server verifiers", () 
     };
   }>("typing-test", "OwoggTypingRules");
   assert.deepEqual(
-    { ...typing.createChallenge({ ...vector, variantId: "en" }) },
-    createTypingTestChallenge({ ...vector, variantId: "en" }),
+    { ...typing.createChallenge({ challengeSeed, difficultyId: "hard", variantId: "en" }) },
+    createTypingTestChallenge({ challengeSeed, difficultyId: "hard", variantId: "en" }),
   );
 
   const memory = loadBrowserRules<{
-    createChallenge(input: { challengeSeed: string; difficultyId: "hard"; variantId: "reverse" }): {
+    createChallenge(input: {
+      challengeSeed: string;
+      difficultyId: "normal";
+      variantId: "standard";
+    }): {
       readonly sequence: readonly number[];
       readonly maxLevel: number;
       readonly extra: number;
@@ -121,15 +207,20 @@ test("standalone deterministic rules match their reviewed server verifiers", () 
     expectedForLevel(
       challenge: { readonly sequence: readonly number[]; readonly extra: number },
       level: number,
-      variantId: "reverse",
+      variantId: "standard",
     ): readonly number[];
   }>("memory-test", "OwoggMemoryRules");
-  const browserMemory = memory.createChallenge({ ...vector, variantId: "reverse" });
-  const serverMemory = createMemoryTestChallenge({ ...vector, variantId: "reverse" });
+  const memoryConfig = {
+    challengeSeed,
+    difficultyId: "normal" as const,
+    variantId: "standard" as const,
+  };
+  const browserMemory = memory.createChallenge(memoryConfig);
+  const serverMemory = createMemoryTestChallenge(memoryConfig);
   assert.deepEqual(JSON.parse(JSON.stringify(browserMemory)), serverMemory);
   assert.deepEqual(
-    [...memory.expectedForLevel(browserMemory, 4, "reverse")],
-    [...memoryTestExpectedForLevel(serverMemory, 4, "reverse")],
+    [...memory.expectedForLevel(browserMemory, 4, "standard")],
+    [...memoryTestExpectedForLevel(serverMemory, 4, "standard")],
   );
 });
 
@@ -163,9 +254,14 @@ test("Omok application rules stay inside the ZIP and support local state transit
 });
 
 test("platform runtime has no official game driver, slug gate, or removed workspace reference", () => {
-  const relayRuntime = [
+  const platformRuntime = [
     read("apps/api/src/multiplayer/MultiplayerInstanceObject.ts"),
     read("apps/api/src/multiplayer/MultiplayerLobbySignalObject.ts"),
+    read("apps/web/app/features/game/GameHost.tsx"),
+    read("apps/web/app/features/game/runtime/gameBridgeHost.ts"),
+    read("apps/web/app/features/game/runtime/multiplayerBridgeHost.ts"),
+    read("apps/web/app/features/game/runtime/multiplayerRuntimeResolution.ts"),
+    read("packages/game-sdk/src/bridge/browserApiSource.ts"),
   ].join("\n");
   for (const token of [
     "official-omok",
@@ -175,7 +271,7 @@ test("platform runtime has no official game driver, slug gate, or removed worksp
     "ReactionDriver",
     "PongDriver",
   ]) {
-    assert.equal(relayRuntime.includes(token), false, token);
+    assert.equal(platformRuntime.includes(token), false, token);
   }
   assert.equal(read("tsconfig.json").includes('"./games/'), false);
   const lockfile = read("pnpm-lock.yaml");
@@ -185,4 +281,5 @@ test("platform runtime has no official game driver, slug gate, or removed worksp
   const gameHost = read("apps/web/app/features/game/GameHost.tsx");
   assert.equal(gameHost.includes("getReactionTier"), false);
   assert.equal(gameHost.includes("reactionTier"), false);
+  assert.match(gameHost, /game\?\.difficulty && !game\.playConfig/);
 });

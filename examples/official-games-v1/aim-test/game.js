@@ -5,41 +5,70 @@
   const api = window.OWOGG;
   const status = document.querySelector("#status");
   const setup = document.querySelector("#setup");
-  const play = document.querySelector("#play");
+  const countdown = document.querySelector("#countdown");
   const finished = document.querySelector("#finished");
-  const difficulty = document.querySelector("#difficulty");
-  const variant = document.querySelector("#variant");
+  const difficultyGroup = document.querySelector("#difficulty-group");
+  const difficultyOptions = document.querySelector("#difficulty-options");
+  const variantGroup = document.querySelector("#variant-group");
+  const variantOptions = document.querySelector("#variant-options");
   const start = document.querySelector("#start");
+  const retry = document.querySelector("#retry");
   const arena = document.querySelector("#arena");
   const target = document.querySelector("#target");
   const progress = document.querySelector("#progress");
   const elapsed = document.querySelector("#elapsed");
   const summary = document.querySelector("#summary");
+  const resultDetail = document.querySelector("#result-detail");
 
+  let config = null;
+  let selection = null;
   let targets = [];
   let events = [];
   let startedAt = 0;
   let timer = null;
 
-  function setOptions(select, options, selected) {
-    select.replaceChildren(
-      ...options.map((option) => {
-        const item = document.createElement("option");
-        item.value = option.id;
-        item.textContent = option.label;
-        item.selected = option.id === selected;
-        return item;
+  function selectedConfig() {
+    if (!config || !selection) return null;
+    return config.allowedConfigs.find(
+      (item) =>
+        item.difficultyId === selection.difficultyId && item.variantId === selection.variantId,
+    );
+  }
+
+  function chooseAxis(axis, id) {
+    if (!config || !selection) return;
+    const otherAxis = axis === "difficultyId" ? "variantId" : "difficultyId";
+    const candidate =
+      config.allowedConfigs.find(
+        (item) => item[axis] === id && item[otherAxis] === selection[otherAxis],
+      ) ?? config.allowedConfigs.find((item) => item[axis] === id);
+    if (!candidate) return;
+    selection = { difficultyId: candidate.difficultyId, variantId: candidate.variantId };
+    renderConfig();
+  }
+
+  function renderAxis(container, entries, axis) {
+    container.replaceChildren(
+      ...entries.map((option) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = option.label;
+        button.classList.toggle("selected", option.id === selection?.[axis]);
+        button.addEventListener("click", () => chooseAxis(axis, option.id));
+        return button;
       }),
     );
   }
-  function selectedConfig(config) {
-    return config.allowedConfigs.find(
-      (item) => item.difficultyId === difficulty.value && item.variantId === variant.value,
-    );
+
+  function renderConfig() {
+    if (!config) return;
+    difficultyGroup.classList.toggle("hidden", config.difficulties.length <= 1);
+    variantGroup.classList.toggle("hidden", config.variants.length <= 1);
+    renderAxis(difficultyOptions, config.difficulties, "difficultyId");
+    renderAxis(variantOptions, config.variants, "variantId");
+    start.disabled = !selectedConfig();
   }
-  function updateStart(config) {
-    start.disabled = !selectedConfig(config);
-  }
+
   function elapsedMs() {
     return Math.max(0, Math.round(performance.now() - startedAt));
   }
@@ -53,7 +82,7 @@
     target.style.height = `${item.radius * 200}%`;
     target.classList.remove("hidden");
     target.disabled = true;
-    progress.textContent = `${index} / ${targets.length}`;
+    progress.textContent = `${index + 1} / ${targets.length}`;
     const unlockAt =
       index === 0
         ? rules.TIMING.minFirstHitMs
@@ -70,12 +99,12 @@
     target.classList.add("hidden");
     if (timer !== null) window.clearInterval(timer);
     timer = null;
-    play.classList.add("hidden");
     finished.classList.remove("hidden");
+    summary.textContent = `${tMs} ms`;
+    resultDetail.textContent = `표적당 평균 ${Math.round(tMs / events.length)} ms`;
     progress.textContent = `${events.length} / ${targets.length}`;
     elapsed.textContent = `${tMs} ms`;
-    summary.textContent = `로컬 측정 ${tMs} ms · 표적 ${events.length}개`;
-    status.textContent = "evidence를 제출했습니다. 서버 검증 결과를 확인하세요.";
+    status.textContent = "플레이 기록을 안전하게 확인하고 있습니다.";
     api.complete({ evidence: { version: 1, completedAtMs: tMs, events: [...events] } });
   }
 
@@ -93,14 +122,26 @@
     else showTarget(events.length);
   });
 
+  async function runCountdown() {
+    countdown.classList.remove("hidden");
+    for (const value of ["3", "2", "1", "GO!"]) {
+      countdown.textContent = value;
+      await new Promise((resolve) => window.setTimeout(resolve, value === "GO!" ? 450 : 650));
+    }
+    countdown.classList.add("hidden");
+  }
+
   async function begin() {
-    const config = api?.playConfig;
-    const allowed = config ? selectedConfig(config) : null;
-    if (!api || !config || !allowed) return;
+    const allowed = selectedConfig();
+    if (!config || !allowed) return;
     start.disabled = true;
-    difficulty.disabled = true;
-    variant.disabled = true;
-    status.textContent = "선택한 설정을 서버에 승인 요청하는 중입니다.";
+    difficultyOptions.querySelectorAll("button").forEach((button) => {
+      button.disabled = true;
+    });
+    variantOptions.querySelectorAll("button").forEach((button) => {
+      button.disabled = true;
+    });
+    status.textContent = "선택한 설정으로 플레이를 준비하고 있습니다.";
     try {
       const context = await api.requestStart({
         difficultyId: allowed.difficultyId,
@@ -116,7 +157,7 @@
       events = [];
       setup.classList.add("hidden");
       finished.classList.add("hidden");
-      play.classList.remove("hidden");
+      await runCountdown();
       startedAt = performance.now();
       api.start();
       status.textContent = "표적을 순서대로 클릭하세요.";
@@ -125,21 +166,37 @@
       }, 33);
       showTarget(0);
     } catch {
-      status.textContent = "서버가 시작을 승인하지 않았습니다. 플랫폼에서 게임을 다시 여세요.";
+      status.textContent = "게임을 시작하지 못했습니다. 페이지를 새로고침해 다시 시도해 주세요.";
+      start.disabled = false;
+      difficultyOptions.querySelectorAll("button").forEach((button) => {
+        button.disabled = false;
+      });
+      variantOptions.querySelectorAll("button").forEach((button) => {
+        button.disabled = false;
+      });
     }
   }
 
-  start.addEventListener("click", () => void begin());
-  const config = api?.playConfig;
-  if (!api || !config) {
-    status.textContent = "OWOGG의 서버 검증 실행 환경에서만 시작할 수 있습니다.";
-    start.disabled = true;
-  } else {
-    setOptions(difficulty, config.difficulties, config.defaultDifficultyId);
-    setOptions(variant, config.variants, config.defaultVariantId);
-    difficulty.addEventListener("change", () => updateStart(config));
-    variant.addEventListener("change", () => updateStart(config));
-    updateStart(config);
-    status.textContent = "난이도와 모드를 고른 뒤 시작하세요.";
+  async function initialize() {
+    if (!api?.whenReady) return;
+    await api.whenReady();
+    config = api.playConfig;
+    if (!config) {
+      status.textContent = "게임 준비 정보를 불러오지 못했습니다.";
+      return;
+    }
+    selection = {
+      difficultyId: config.defaultDifficultyId,
+      variantId: config.defaultVariantId,
+    };
+    renderConfig();
+    status.textContent =
+      config.difficulties.length > 1 || config.variants.length > 1
+        ? "게임 안에서 설정을 선택하고 시작하세요."
+        : "준비가 끝났습니다.";
   }
+
+  start.addEventListener("click", () => void begin());
+  retry.addEventListener("click", () => window.location.reload());
+  void initialize();
 })();
