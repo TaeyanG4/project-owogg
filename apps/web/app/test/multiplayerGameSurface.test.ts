@@ -22,7 +22,7 @@ import {
   updateMultiplayerLatencies,
 } from "../features/game/runtime/MultiplayerIframeRuntime";
 
-test("active multiplayer keeps the viewport-fitted game ahead of detached room controls", () => {
+test("active multiplayer keeps room controls above an independently viewport-fitted game", () => {
   const room = {
     replayed: false,
     instance: {
@@ -67,8 +67,8 @@ test("active multiplayer keeps the viewport-fitted game ahead of detached room c
   assert.match(markup, /data-testid="multiplayer-game-stage"[^>]*style="width:960px;height:540px"/);
   assert.match(markup, /style="width:100%;height:100%"/);
   assert.ok(
-    markup.indexOf('data-testid="multiplayer-game-stage"') <
-      markup.indexOf('data-testid="multiplayer-room-controls"'),
+    markup.indexOf('data-testid="multiplayer-room-controls"') <
+      markup.indexOf('data-testid="multiplayer-game-stage"'),
   );
 });
 

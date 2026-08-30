@@ -422,32 +422,8 @@ export function MultiplayerIframeRuntime({
   return (
     <div data-testid="multiplayer-runtime-surface" className="w-full overflow-hidden bg-[#08090d]">
       <div
-        data-testid="multiplayer-game-stage"
-        className={`${frameClassName ?? ""} relative overflow-hidden`}
-        style={frameStyle}
-      >
-        <GameFrame
-          key={`${attemptKey}:${room.instance.generation}:${retryKey}`}
-          src={src}
-          title={title}
-          autoStart
-          className="h-full min-h-0"
-          frameClassName="h-full w-full"
-          frameStyle={MULTIPLAYER_GAME_FRAME_STYLE}
-          iframeStyle={iframeStyle}
-          onFrameLoad={handleFrameLoad}
-          documentScrolling={allowDocumentScrolling ? "enabled" : "disabled"}
-        />
-        <MultiplayerConnectionOverlay
-          state={connectionState}
-          onRetry={retry}
-          onLeave={() => void leave()}
-          hideConnectedStatus
-        />
-      </div>
-      <div
         data-testid="multiplayer-room-controls"
-        className="border-t border-white/10 bg-surface-raised px-3 py-3 sm:px-4"
+        className="border-b border-white/10 bg-surface-raised px-3 py-3 sm:px-4"
       >
         <div className="flex min-w-0 flex-col items-center gap-2">
           <div className="flex max-w-full flex-wrap items-stretch justify-center gap-2">
@@ -533,6 +509,30 @@ export function MultiplayerIframeRuntime({
             </p>
           )}
         </div>
+      </div>
+      <div
+        data-testid="multiplayer-game-stage"
+        className={`${frameClassName ?? ""} relative overflow-hidden`}
+        style={frameStyle}
+      >
+        <GameFrame
+          key={`${attemptKey}:${room.instance.generation}:${retryKey}`}
+          src={src}
+          title={title}
+          autoStart
+          className="h-full min-h-0"
+          frameClassName="h-full w-full"
+          frameStyle={MULTIPLAYER_GAME_FRAME_STYLE}
+          iframeStyle={iframeStyle}
+          onFrameLoad={handleFrameLoad}
+          documentScrolling={allowDocumentScrolling ? "enabled" : "disabled"}
+        />
+        <MultiplayerConnectionOverlay
+          state={connectionState}
+          onRetry={retry}
+          onLeave={() => void leave()}
+          hideConnectedStatus
+        />
       </div>
     </div>
   );
