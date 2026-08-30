@@ -56,9 +56,10 @@ export interface GameFrameProps {
   /** Multiplayer owns reconnect and reload semantics outside the sandbox, so it can hide the
    * generic manual reload affordance that would otherwise create a second connection. */
   showReloadControl?: boolean | undefined;
-  /** Multiplayer reference clients are viewport-fitted and must never expose their document's
-   * own scrollbar as a second nested scroll surface. */
-  disableScrolling?: boolean | undefined;
+  /** Controls the framed document's own scroll surface. `auto` preserves the generic game
+   * behavior, `disabled` keeps viewport-fitted managed multiplayer free of a nested scrollbar,
+   * and `enabled` is reserved for explicit tools such as the admin Relay probe. */
+  documentScrolling?: "auto" | "disabled" | "enabled" | undefined;
   /** Fires once per iframe `load` event, after GameFrame's own loading-overlay state is cleared —
    * the hook a runtime (see runtime/IframeRuntime.tsx) uses to establish the Game Bridge once the
    * framed document actually exists to receive it. Receives the
@@ -90,7 +91,7 @@ export function GameFrame({
   frameStyle,
   iframeStyle,
   showReloadControl = true,
-  disableScrolling = false,
+  documentScrolling = "auto",
   onFrameLoad,
 }: GameFrameProps) {
   const [started, setStarted] = useState(autoStart);
@@ -152,13 +153,21 @@ export function GameFrame({
         <iframe
           ref={iframeRef}
           key={reloadKey}
-          className="block h-full w-full overflow-hidden"
+          className={`block h-full w-full ${
+            documentScrolling === "enabled" ? "overflow-auto" : "overflow-hidden"
+          }`}
           style={iframeStyle}
           src={src}
           title={title}
           sandbox={GAME_IFRAME_SANDBOX}
           allow={GAME_IFRAME_ALLOW}
-          scrolling={disableScrolling ? "no" : undefined}
+          scrolling={
+            documentScrolling === "disabled"
+              ? "no"
+              : documentScrolling === "enabled"
+                ? "yes"
+                : undefined
+          }
           // The game's own document additionally carries `connect-src 'none'` from the serving
           // Worker (apps/api/src/routes/gameServing.ts), so it cannot reach the network at all.
           referrerPolicy={GAME_IFRAME_REFERRER_POLICY}

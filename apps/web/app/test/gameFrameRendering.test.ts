@@ -30,12 +30,20 @@ test("GameFrame autoStart mounts the iframe immediately without a PLAY gate", ()
   assert.doesNotMatch(html, />PLAY</);
 });
 
-test("GameFrame suppresses document scrolling only when its caller requests it", () => {
+test("GameFrame keeps auto scrolling implicit and honors explicit enabled or disabled modes", () => {
+  const automatic = renderToStaticMarkup(
+    createElement(GameFrame, {
+      src: "https://play.example.test/play/automatic-demo",
+      title: "Automatic demo",
+      autoStart: true,
+    }),
+  );
   const scrollable = renderToStaticMarkup(
     createElement(GameFrame, {
       src: "https://play.example.test/play/scrollable-demo",
       title: "Scrollable demo",
       autoStart: true,
+      documentScrolling: "enabled",
     }),
   );
   const fitted = renderToStaticMarkup(
@@ -43,10 +51,15 @@ test("GameFrame suppresses document scrolling only when its caller requests it",
       src: "https://play.example.test/play/fitted-demo",
       title: "Fitted demo",
       autoStart: true,
-      disableScrolling: true,
+      documentScrolling: "disabled",
     }),
   );
 
-  assert.doesNotMatch(scrollable, /scrolling="no"/);
+  assert.doesNotMatch(automatic, /scrolling=/);
+  assert.match(automatic, /overflow-hidden/);
+  assert.match(scrollable, /scrolling="yes"/);
+  assert.match(scrollable, /<iframe class="[^"]*overflow-auto[^"]*"/);
+  assert.doesNotMatch(scrollable, /<iframe class="[^"]*overflow-hidden[^"]*"/);
   assert.match(fitted, /scrolling="no"/);
+  assert.match(fitted, /<iframe class="[^"]*overflow-hidden[^"]*"/);
 });

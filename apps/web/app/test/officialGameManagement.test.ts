@@ -111,4 +111,5 @@ test("Relay operations stay per-game while the removed global review panel stays
   assert.match(relayControlSource, /Relay 요청 승인/);
   assert.match(relayControlSource, /Relay 활성화/);
   assert.match(relayControlSource, /테스터 열기/);
+  assert.match(relayControlSource, /allowDocumentScrolling/);
 });
