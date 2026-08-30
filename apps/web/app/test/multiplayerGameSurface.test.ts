@@ -13,16 +13,50 @@ import {
   multiplayerPingTone,
   multiplayerRoomClipboardValue,
   multiplayerRuntimeInitialRoster,
+  updateMultiplayerLatencies,
 } from "../features/game/runtime/MultiplayerIframeRuntime";
 
 test("participant ping labels distinguish measuring, healthy, delayed, and poor links", () => {
-  assert.equal(multiplayerPingLabel(null), "핑 측정 중");
-  assert.equal(multiplayerPingLabel(42), "핑 42ms");
-  assert.equal(multiplayerPingTone(null), "text-text-muted");
-  assert.equal(multiplayerPingTone(80), "text-emerald-400");
-  assert.equal(multiplayerPingTone(81), "text-amber-300");
-  assert.equal(multiplayerPingTone(180), "text-amber-300");
-  assert.equal(multiplayerPingTone(181), "text-red-300");
+  assert.equal(multiplayerPingLabel(null), "Ping —");
+  assert.equal(multiplayerPingLabel(42), "Ping 42ms");
+  assert.equal(multiplayerPingLabel(42, true), "연결 끊김");
+  assert.match(multiplayerPingTone(null), /text-text-muted/);
+  assert.match(multiplayerPingTone(80), /text-emerald-300/);
+  assert.match(multiplayerPingTone(81), /text-amber-200/);
+  assert.match(multiplayerPingTone(180), /text-amber-200/);
+  assert.match(multiplayerPingTone(181), /text-red-300/);
+  assert.match(multiplayerPingTone(42, true), /text-text-muted/);
+});
+
+test("authoritative latency samples mark absent known participants disconnected until they return", () => {
+  let latencies = updateMultiplayerLatencies(
+    new Map(),
+    [{ participantId: "host", rttMs: 42 }],
+    "MERGE",
+  );
+  latencies = updateMultiplayerLatencies(
+    latencies,
+    [
+      { participantId: "host", rttMs: 45 },
+      { participantId: "guest", rttMs: 91 },
+    ],
+    "REPLACE",
+  );
+  latencies = updateMultiplayerLatencies(
+    latencies,
+    [{ participantId: "host", rttMs: 47 }],
+    "REPLACE",
+  );
+
+  assert.deepEqual(latencies.get("host"), { rttMs: 47, connected: true });
+  assert.deepEqual(latencies.get("guest"), { rttMs: 91, connected: false });
+
+  latencies = updateMultiplayerLatencies(
+    latencies,
+    [{ participantId: "guest", rttMs: 88 }],
+    "MERGE",
+  );
+  assert.deepEqual(latencies.get("guest"), { rttMs: 88, connected: true });
 });
 
 test("the shared room launcher accepts only an exact available PRIVATE + OPEN profile", () => {

@@ -329,12 +329,15 @@ test("heartbeat RTT is reported outside game traffic and synchronized per partic
   const socket = createSocketHarness();
   let nowMs = 10_000;
   let heartbeatTick: (() => void) | undefined;
-  const samples: Array<readonly { participantId: string; seatIndex: number; rttMs: number }[]> = [];
+  const samples: Array<{
+    readonly values: readonly { participantId: string; seatIndex: number; rttMs: number }[];
+    readonly mode: "MERGE" | "REPLACE";
+  }> = [];
   const host = createMultiplayerBridgeHost(
     iframe.windowLike,
     socket.socket,
     BOOTSTRAP,
-    { onLatencySamples: (next) => samples.push(next) },
+    { onLatencySamples: (values, mode) => samples.push({ values, mode }) },
     {
       now: () => nowMs,
       setInterval: (callback) => {
@@ -358,14 +361,17 @@ test("heartbeat RTT is reported outside game traffic and synchronized per partic
     generation: 3,
     rttMs: 42,
   });
-  assert.deepEqual(samples[0], [
-    {
-      participantId: "participant_host_0001",
-      seatIndex: 0,
-      rttMs: 42,
-      sampledAt: 10_042,
-    },
-  ]);
+  assert.deepEqual(samples[0], {
+    mode: "MERGE",
+    values: [
+      {
+        participantId: "participant_host_0001",
+        seatIndex: 0,
+        rttMs: 42,
+        sampledAt: 10_042,
+      },
+    ],
+  });
 
   nowMs = 10_100;
   heartbeatTick?.();
@@ -401,9 +407,10 @@ test("heartbeat RTT is reported outside game traffic and synchronized per partic
       ],
     }),
   );
-  await waitUntil(() => samples.at(-1)?.length ?? 0, 2);
+  await waitUntil(() => samples.at(-1)?.values.length ?? 0, 2);
   assert.equal(gameMessages.length, 0);
-  assert.equal(samples.at(-1)?.[1]?.rttMs, 85);
+  assert.equal(samples.at(-1)?.mode, "REPLACE");
+  assert.equal(samples.at(-1)?.values[1]?.rttMs, 85);
 
   host.close();
   port.close();

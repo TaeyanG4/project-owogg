@@ -702,6 +702,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       return;
     }
     if (!this.markDisconnected(attachment, Math.ceil(Date.now() / 1_000))) return;
+    this.relay.sendLatencySync(this.currentLatencySamples(attachment.generation));
     if (
       runtime.lifecycle === "ACTIVE" &&
       (authority.role === "HOST" || relayAuthority.policy.reconnect === "none")

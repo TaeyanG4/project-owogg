@@ -67,7 +67,10 @@ export interface MultiplayerBridgeHostCallbacks {
   onReady?: () => void;
   onLeave?: () => void;
   onConnectionState?: (state: MultiplayerParentConnectionState) => void;
-  onLatencySamples?: (samples: readonly MultiplayerLatencySample[]) => void;
+  onLatencySamples?: (
+    samples: readonly MultiplayerLatencySample[],
+    mode: "MERGE" | "REPLACE",
+  ) => void;
   onProtocolDrop?: (direction: "GAME_TO_HOST" | "SERVER_TO_HOST") => void;
 }
 
@@ -249,14 +252,17 @@ export function createMultiplayerBridgeHost(
       const sampledAt = now();
       const rttMs = Math.min(60_000, Math.max(0, Math.round(sampledAt - heartbeatSentAt)));
       heartbeatSentAt = null;
-      callbacks.onLatencySamples?.([
-        {
-          participantId: bootstrap.self.participantId,
-          seatIndex: bootstrap.self.seatIndex,
-          rttMs,
-          sampledAt,
-        },
-      ]);
+      callbacks.onLatencySamples?.(
+        [
+          {
+            participantId: bootstrap.self.participantId,
+            seatIndex: bootstrap.self.seatIndex,
+            rttMs,
+            sampledAt,
+          },
+        ],
+        "MERGE",
+      );
       const mayReport =
         lastReportedLatency === null ||
         sampledAt - lastLatencyReportAt >= LATENCY_REPORT_MIN_INTERVAL_MS;
@@ -289,7 +295,7 @@ export function createMultiplayerBridgeHost(
         notifyDrop("SERVER_TO_HOST");
         return;
       }
-      callbacks.onLatencySamples?.(latencySync.data.samples);
+      callbacks.onLatencySamples?.(latencySync.data.samples, "REPLACE");
       return;
     }
     const message = parseHostToGameMultiplayerMessage(decoded);
