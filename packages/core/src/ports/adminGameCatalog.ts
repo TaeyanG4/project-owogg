@@ -18,6 +18,7 @@ export interface AdminGameCatalogPage {
 export interface AdminGameCatalogRepository {
   listPage(input: {
     publisherType: "OWOGG" | "USER";
+    catalogRole: "GAME" | "INTERNAL_TOOL";
     limit: number;
     offset: number;
   }): Promise<AdminGameCatalogPage>;

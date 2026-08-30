@@ -19,7 +19,10 @@ export class RuntimeGameAvailability {
   constructor(
     private readonly identities: GameIdentityRepository,
     private readonly versions: GameVersionRepository,
-    private readonly settings: Pick<GameSettingsRepository, "getDisabledGameIds">,
+    private readonly settings: Pick<
+      GameSettingsRepository,
+      "getDisabledGameIds" | "getPublicCatalogExcludedGameIds"
+    >,
     private readonly versionLeases?: RuntimeGameVersionLeaseAvailability,
   ) {}
 
@@ -72,15 +75,15 @@ export class RuntimeGameAvailability {
       return false;
     }
 
-    const disabledSlugs = await this.settings.getDisabledGameIds();
-    return !disabledSlugs.includes(identity.slug);
+    const excludedSlugs = await this.settings.getPublicCatalogExcludedGameIds();
+    return !excludedSlugs.includes(identity.slug);
   }
 
   /** A registry result already contains the exact validated identity/live READY version. Public
-   * catalog reads only need one fresh kill-switch query for the whole set, rather than repeating
-   * identity + version + disabled-list reads once per game. */
+   * catalog reads only need one fresh exclusion query for the whole set, rather than repeating
+   * identity + version + setting reads once per game. */
   async filterResolvedRuntimes(runtimes: readonly RuntimeGame[]): Promise<readonly RuntimeGame[]> {
-    const disabledSlugs = new Set(await this.settings.getDisabledGameIds());
+    const excludedSlugs = new Set(await this.settings.getPublicCatalogExcludedGameIds());
     return runtimes.filter(
       (runtime) =>
         runtime.identity.deletedAt === null &&
@@ -88,7 +91,7 @@ export class RuntimeGameAvailability {
         runtime.identity.liveVersionId === runtime.liveVersion.id &&
         runtime.liveVersion.gameId === runtime.identity.id &&
         runtime.liveVersion.publishStatus === "READY" &&
-        !disabledSlugs.has(runtime.identity.slug),
+        !excludedSlugs.has(runtime.identity.slug),
     );
   }
 }

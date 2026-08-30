@@ -258,6 +258,7 @@ test("exact-version availability serves a non-live READY version only while its 
   const user = identity(2, "user", { type: "USER", userId: 7 });
   const versionRows = [version(official.id), version(user.id)];
   const disabled = new Set<string>();
+  const internalTools = new Set<string>();
   const leasedVersions = new Set<number>();
   const availability = new RuntimeGameAvailability(
     new IdentityRepo([official, user]),
@@ -265,6 +266,9 @@ test("exact-version availability serves a non-live READY version only while its 
     {
       async getDisabledGameIds() {
         return [...disabled];
+      },
+      async getPublicCatalogExcludedGameIds() {
+        return [...new Set([...disabled, ...internalTools])];
       },
     },
     {
@@ -277,6 +281,7 @@ test("exact-version availability serves a non-live READY version only while its 
   const officialVersionId = requiredLiveVersionId(official);
   const userVersionId = requiredLiveVersionId(user);
   assert.equal(await availability.isVersionServable(official.id, officialVersionId), true);
+  assert.equal(await availability.isIdentityServable(official), true);
   assert.equal(await availability.isVersionServable(user.id, userVersionId), true);
   assert.equal(await availability.isVersionServable(official.id, 999), false);
 
@@ -295,9 +300,17 @@ test("exact-version availability serves a non-live READY version only while its 
   versionRows[0] = version(official.id);
   disabled.add(official.slug);
   assert.equal(await availability.isVersionServable(official.id, officialVersionId), false);
+  disabled.delete(official.slug);
+  internalTools.add(official.slug);
+  assert.equal(await availability.isIdentityServable(official), false);
+  assert.equal(
+    await availability.isVersionServable(official.id, officialVersionId),
+    true,
+    "an administrator's room-pinned internal tool still needs its exact immutable bundle",
+  );
 });
 
-test("resolved catalog availability reads the kill switch once without repeating identity/version queries", async () => {
+test("resolved catalog availability reads safety and internal-tool exclusions without identity/version queries", async () => {
   const official = identity(1, "official", { type: "OWOGG" });
   const user = identity(2, "user", { type: "USER", userId: 7 });
   let identityReads = 0;
@@ -334,6 +347,9 @@ test("resolved catalog availability reads the kill switch once without repeating
     },
     {
       async getDisabledGameIds() {
+        return [];
+      },
+      async getPublicCatalogExcludedGameIds() {
         settingsReads += 1;
         return [user.slug];
       },

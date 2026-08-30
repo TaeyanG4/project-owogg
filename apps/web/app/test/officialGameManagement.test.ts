@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AdminGameListResponse, GameAvailabilityDto } from "@owogg/contracts";
-import { hideDeletedAdminGames } from "../components/admin/OfficialGameManagement";
+import {
+  adminGameCatalogBadge,
+  hideDeletedAdminGames,
+} from "../components/admin/OfficialGameManagement";
 
 function game(gameId: string): GameAvailabilityDto {
   return {
@@ -13,6 +16,8 @@ function game(gameId: string): GameAvailabilityDto {
     mode: "single",
     latestUploadedAt: "2026-08-27T00:00:00.000Z",
     publisherType: "OWOGG",
+    catalogRole: "GAME",
+    catalogState: "READY",
     status: "PUBLISHED",
     enabled: true,
     disabledReason: null,
@@ -65,4 +70,22 @@ test("an already-fresh server page is not decremented again", () => {
   };
 
   assert.equal(hideDeletedAdminGames(fresh, new Set(["deleted"])), fresh);
+});
+
+test("admin catalog badges do not call an incomplete identity public", () => {
+  assert.equal(adminGameCatalogBadge(game("ready")).label, "공개 중");
+  assert.equal(
+    adminGameCatalogBadge({ ...game("tool"), catalogRole: "INTERNAL_TOOL" }).label,
+    "테스트 가능",
+  );
+  assert.deepEqual(adminGameCatalogBadge({ ...game("orphan"), catalogState: "NO_LIVE_VERSION" }), {
+    label: "라이브 버전 없음",
+    className: "bg-surface-overlay text-text-secondary",
+    hint: "삭제되지 않은 identity만 남아 있습니다. 새 규격 ZIP을 재등록하거나 삭제할 수 있습니다.",
+  });
+  assert.equal(
+    adminGameCatalogBadge({ ...game("blocked"), enabled: false, disabledReason: "maintenance" })
+      .label,
+    "안전 차단",
+  );
 });

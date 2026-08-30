@@ -3,11 +3,13 @@ import {
   ChevronDown,
   FileArchive,
   FileJson,
+  FlaskConical,
   Gamepad2,
   Image,
   Loader2,
   Network,
   Pencil,
+  Play,
   Power,
   RefreshCw,
   Settings2,
@@ -16,6 +18,7 @@ import {
 } from "lucide-react";
 import type {
   AdminGameListResponse,
+  AdminGameCatalogRole,
   AdminManagedMultiplayerProfile,
   AdminManagedMultiplayerProfileRequestListResponse,
   GameAvailabilityDto,
@@ -27,6 +30,7 @@ import {
   fetchManagedMultiplayerProfiles,
   postManagedMultiplayerProfileActivation,
   postManagedMultiplayerProfileReview,
+  postAdminGameCatalogRole,
   postToggleAdminGame,
   uploadOfficialGame,
   replaceOfficialGameBundle,
@@ -34,6 +38,8 @@ import {
   replaceOfficialGameLogo,
   patchOfficialGameBasicMetadata,
 } from "../../features/adminApi";
+import { useAuth } from "../../features/auth/AuthContext";
+import { MultiplayerGameSurface } from "../../features/game/runtime/MultiplayerGameSurface";
 import { ApiClientError } from "../../lib/api";
 import { GameBundleDropzone } from "../game/GameBundleDropzone";
 import {
@@ -66,12 +72,57 @@ export function hideDeletedAdminGames(
   };
 }
 
+export function adminGameCatalogBadge(game: GameAvailabilityDto): {
+  readonly label: string;
+  readonly className: string;
+  readonly hint: string | null;
+} {
+  if (!game.enabled) {
+    return {
+      label: "안전 차단",
+      className: "bg-accent-red/10 text-accent-red",
+      hint: game.disabledReason ? `비활성화 사유: ${game.disabledReason}` : null,
+    };
+  }
+  if (game.catalogState === "READY") {
+    return game.catalogRole === "INTERNAL_TOOL"
+      ? {
+          label: "테스트 가능",
+          className: "bg-accent-green/10 text-accent-green",
+          hint: "실행 정보는 준비됐지만 공개 게임 catalog에서는 제외됩니다.",
+        }
+      : { label: "공개 중", className: "bg-accent-green/10 text-accent-green", hint: null };
+  }
+  if (game.catalogState === "PRIVATE") {
+    return {
+      label: "미공개",
+      className: "bg-accent-yellow/10 text-accent-yellow",
+      hint: "라이브 버전은 있지만 catalog 공개 상태가 아닙니다.",
+    };
+  }
+  if (game.catalogState === "NO_LIVE_VERSION") {
+    return {
+      label: "라이브 버전 없음",
+      className: "bg-surface-overlay text-text-secondary",
+      hint: "삭제되지 않은 identity만 남아 있습니다. 새 규격 ZIP을 재등록하거나 삭제할 수 있습니다.",
+    };
+  }
+  return {
+    label: "실행 정보 확인 불가",
+    className: "bg-accent-yellow/10 text-accent-yellow",
+    hint: "공개 identity는 남아 있지만 현재 canonical 실행 정보를 확인할 수 없습니다.",
+  };
+}
+
+const ignoreMultiplayerRuntimeResolution = () => undefined;
+
 /** `games.moderate` portion of the combined admin game workspace.
  *
  * Review permission remains independent, so this panel fails closed without hiding the review
  * tools from moderators who intentionally do not hold the official-publication permission.
  */
 export function OfficialGameManagement() {
+  const { user } = useAuth();
   const [data, setData] = useState<AdminGameListResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [accessDenied, setAccessDenied] = useState(false);
@@ -84,32 +135,46 @@ export function OfficialGameManagement() {
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<AdminGamePageSize>(10);
+  const [catalogRole, setCatalogRole] = useState<AdminGameCatalogRole>("GAME");
+  const [listLoading, setListLoading] = useState(false);
+  const [activeToolId, setActiveToolId] = useState<string | null>(null);
+  const [toolAttemptKey, setToolAttemptKey] = useState(0);
   const listRequestIdRef = useRef(0);
   const deletedGameIdsRef = useRef<Set<string>>(new Set());
 
-  const loadGames = useCallback(async (targetPage: number, targetPageSize: AdminGamePageSize) => {
-    const requestId = ++listRequestIdRef.current;
-    setError(null);
-    try {
-      const fetched = await fetchAdminGames(targetPage, targetPageSize);
-      if (requestId !== listRequestIdRef.current) return;
-      const result = hideDeletedAdminGames(fetched, deletedGameIdsRef.current);
-      setData(result);
-      setAccessDenied(false);
-      if (targetPage > result.totalPages) setPage(result.totalPages);
-    } catch (err) {
-      if (requestId !== listRequestIdRef.current) return;
-      if (err instanceof ApiClientError && (err.status === 401 || err.status === 403)) {
-        setAccessDenied(true);
-        return;
+  const loadGames = useCallback(
+    async (
+      targetPage: number,
+      targetPageSize: AdminGamePageSize,
+      targetCatalogRole: AdminGameCatalogRole,
+    ) => {
+      const requestId = ++listRequestIdRef.current;
+      setListLoading(true);
+      setError(null);
+      try {
+        const fetched = await fetchAdminGames(targetPage, targetPageSize, targetCatalogRole);
+        if (requestId !== listRequestIdRef.current) return;
+        const result = hideDeletedAdminGames(fetched, deletedGameIdsRef.current);
+        setData(result);
+        setAccessDenied(false);
+        if (targetPage > result.totalPages) setPage(result.totalPages);
+      } catch (err) {
+        if (requestId !== listRequestIdRef.current) return;
+        if (err instanceof ApiClientError && (err.status === 401 || err.status === 403)) {
+          setAccessDenied(true);
+          return;
+        }
+        setError(err instanceof Error ? err.message : "공식 identity 목록을 불러올 수 없습니다.");
+      } finally {
+        if (requestId === listRequestIdRef.current) setListLoading(false);
       }
-      setError(err instanceof Error ? err.message : "공개 게임 목록을 불러올 수 없습니다.");
-    }
-  }, []);
+    },
+    [],
+  );
 
   useEffect(() => {
-    void loadGames(page, pageSize);
-  }, [loadGames, page, pageSize]);
+    void loadGames(page, pageSize, catalogRole);
+  }, [catalogRole, loadGames, page, pageSize]);
 
   const handleToggle = async (gameId: string, nextEnabled: boolean) => {
     const reason = nextEnabled ? null : (reasons[gameId]?.trim() ?? "") || null;
@@ -117,7 +182,7 @@ export function OfficialGameManagement() {
     setError(null);
     try {
       await postToggleAdminGame(gameId, nextEnabled, reason);
-      await loadGames(page, pageSize);
+      await loadGames(page, pageSize, catalogRole);
     } catch (err) {
       setError(err instanceof Error ? err.message : "게임 상태를 변경하지 못했습니다.");
     } finally {
@@ -133,7 +198,7 @@ export function OfficialGameManagement() {
       const result = await uploadOfficialGame(file);
       deletedGameIdsRef.current.delete(result.slug);
       setUploadMessage(`${result.title} (${result.slug})을 OWOGG 공식 게임으로 게시했습니다.`);
-      await loadGames(page, pageSize);
+      await loadGames(page, pageSize, catalogRole);
     } catch (err) {
       setError(err instanceof Error ? err.message : "공식 게임을 게시하지 못했습니다.");
     } finally {
@@ -168,7 +233,7 @@ export function OfficialGameManagement() {
       );
       const nextPage = nextData?.page ?? page;
       if (nextPage !== page) setPage(nextPage);
-      else await loadGames(nextPage, pageSize);
+      else await loadGames(nextPage, pageSize, catalogRole);
     } catch (err) {
       setError(err instanceof Error ? err.message : "공식 게임을 완전히 삭제하지 못했습니다.");
     } finally {
@@ -192,11 +257,34 @@ export function OfficialGameManagement() {
           ? `${gameId} 로고를 교체했습니다.`
           : `${gameId} ${kind === "bundle" ? "전체 ZIP" : "owogg.json"}을 새 공식 버전으로 게시했습니다.`,
       );
-      await loadGames(page, pageSize);
+      await loadGames(page, pageSize, catalogRole);
     } catch (err) {
       setError(err instanceof Error ? err.message : "게임 파일을 재업로드하지 못했습니다.");
     } finally {
       setPartBusy(null);
+    }
+  };
+
+  const handleCatalogRole = async (game: GameAvailabilityDto) => {
+    const nextRole: AdminGameCatalogRole = game.catalogRole === "GAME" ? "INTERNAL_TOOL" : "GAME";
+    const confirmed = window.confirm(
+      nextRole === "INTERNAL_TOOL"
+        ? `${game.title}을 공개 게임 목록에서 제외하고 내부 테스트 도구로 이동할까요?`
+        : `${game.title}을 내부 도구에서 일반 게임 관리 목록으로 되돌릴까요?`,
+    );
+    if (!confirmed) return;
+
+    setBusyGameId(game.gameId);
+    setError(null);
+    try {
+      await postAdminGameCatalogRole(game.gameId, nextRole);
+      setExpandedGameId(null);
+      if (activeToolId === game.gameId) setActiveToolId(null);
+      await loadGames(page, pageSize, catalogRole);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "게임 표시 분류를 변경하지 못했습니다.");
+    } finally {
+      setBusyGameId(null);
     }
   };
 
@@ -247,33 +335,83 @@ export function OfficialGameManagement() {
       <ManagedMultiplayerRelayControl />
 
       <div className="border-t border-border pt-4">
+        <div className="mb-4 inline-flex rounded-xl border border-border bg-surface p-1">
+          <button
+            type="button"
+            aria-pressed={catalogRole === "GAME"}
+            onClick={() => {
+              listRequestIdRef.current += 1;
+              setCatalogRole("GAME");
+              setPage(1);
+              setData(null);
+              setExpandedGameId(null);
+              setActiveToolId(null);
+            }}
+            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold ${
+              catalogRole === "GAME"
+                ? "bg-brand text-white"
+                : "text-text-secondary hover:text-text-primary"
+            }`}
+          >
+            <Gamepad2 className="h-3.5 w-3.5" /> 게임
+          </button>
+          <button
+            type="button"
+            aria-pressed={catalogRole === "INTERNAL_TOOL"}
+            onClick={() => {
+              listRequestIdRef.current += 1;
+              setCatalogRole("INTERNAL_TOOL");
+              setPage(1);
+              setData(null);
+              setExpandedGameId(null);
+            }}
+            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold ${
+              catalogRole === "INTERNAL_TOOL"
+                ? "bg-brand text-white"
+                : "text-text-secondary hover:text-text-primary"
+            }`}
+          >
+            <FlaskConical className="h-3.5 w-3.5" /> 내부 테스트 도구
+          </button>
+        </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-black text-text-primary">전체 공개 게임 안전 제어</h3>
+            <h3 className="text-sm font-black text-text-primary">
+              {catalogRole === "GAME"
+                ? "전체 공식 게임 identity 및 서비스 상태"
+                : "내부 테스트 도구"}
+            </h3>
             <p className="mt-1 text-xs text-text-muted">
-              비활성화하면 카탈로그에서 즉시 숨겨지고, 랭킹 대상 게임은 랭킹에서도 숨겨지며 새 결과
-              제출이 거부됩니다.
+              {catalogRole === "GAME"
+                ? "실제 삭제된 identity는 표시하지 않습니다. 미공개·라이브 버전 없음·실행 정보 오류 상태는 재등록 또는 삭제를 위해 남겨 두며, 안전 차단은 catalog 준비 상태와 별도로 표시합니다."
+                : "관리자가 명시적으로 분리한 Relay·SDK 검증 도구입니다. 공개 카탈로그에는 노출되지 않으며 여기서 일반 대기실과 Relay 실행을 점검합니다."}
             </p>
           </div>
           <button
             type="button"
-            onClick={() => void loadGames(page, pageSize)}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface-raised px-3 py-2 text-xs font-bold text-text-primary transition-colors hover:border-brand hover:bg-surface-overlay"
+            disabled={listLoading}
+            onClick={() => void loadGames(page, pageSize, catalogRole)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface-raised px-3 py-2 text-xs font-bold text-text-primary transition-colors hover:border-brand hover:bg-surface-overlay disabled:cursor-wait disabled:opacity-60"
           >
-            <RefreshCw className="h-3.5 w-3.5" />
-            새로고침
+            <RefreshCw className={`h-3.5 w-3.5 ${listLoading ? "animate-spin" : ""}`} />
+            {listLoading ? "확인 중" : "새로고침"}
           </button>
         </div>
 
         {!data ? (
           <p className="py-6 text-center text-xs text-text-muted">게임 목록을 불러오는 중...</p>
         ) : data.games.length === 0 ? (
-          <p className="py-6 text-center text-xs text-text-muted">등록된 공개 게임이 없습니다.</p>
+          <p className="py-6 text-center text-xs text-text-muted">
+            {catalogRole === "GAME"
+              ? "관리할 공식 게임 identity가 없습니다."
+              : "분리된 내부 테스트 도구가 없습니다. 게임 관리에서 도구로 이동할 수 있습니다."}
+          </p>
         ) : (
           <div className="mt-4 grid gap-3">
             {data.games.map((game) => {
               const busy = busyGameId === game.gameId;
               const expanded = expandedGameId === game.gameId;
+              const catalogBadge = adminGameCatalogBadge(game);
               return (
                 <article
                   key={game.gameId}
@@ -284,7 +422,11 @@ export function OfficialGameManagement() {
                   <div className="flex flex-col gap-4 p-4 sm:p-5 lg:flex-row lg:items-center lg:justify-between">
                     <div className="flex min-w-0 items-start gap-3.5">
                       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-brand/20 bg-brand/10 text-brand-light">
-                        <Gamepad2 className="h-5 w-5" />
+                        {game.catalogRole === "INTERNAL_TOOL" ? (
+                          <FlaskConical className="h-5 w-5" />
+                        ) : (
+                          <Gamepad2 className="h-5 w-5" />
+                        )}
                       </span>
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
@@ -292,14 +434,15 @@ export function OfficialGameManagement() {
                             {game.title}
                           </h4>
                           <span
-                            className={`rounded-full px-2 py-0.5 text-[10px] font-black ${
-                              game.enabled
-                                ? "bg-accent-green/10 text-accent-green"
-                                : "bg-accent-red/10 text-accent-red"
-                            }`}
+                            className={`rounded-full px-2 py-0.5 text-[10px] font-black ${catalogBadge.className}`}
                           >
-                            {game.enabled ? "공개 중" : "비활성"}
+                            {catalogBadge.label}
                           </span>
+                          {game.catalogRole === "INTERNAL_TOOL" && (
+                            <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-bold text-brand-light">
+                              카탈로그 제외
+                            </span>
+                          )}
                           {game.mode === "multi" && (
                             <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-bold text-brand-light">
                               멀티
@@ -321,9 +464,13 @@ export function OfficialGameManagement() {
                           </span>
                           <span>업로드 {formatServerUploadDate(game.latestUploadedAt)} KST</span>
                         </p>
-                        {!game.enabled && game.disabledReason && (
-                          <p className="mt-1.5 text-[11px] text-accent-red">
-                            비활성화 사유: {game.disabledReason}
+                        {catalogBadge.hint && (
+                          <p
+                            className={`mt-1.5 text-[11px] ${
+                              game.enabled ? "text-text-muted" : "text-accent-red"
+                            }`}
+                          >
+                            {catalogBadge.hint}
                           </p>
                         )}
                       </div>
@@ -461,6 +608,87 @@ export function OfficialGameManagement() {
                         </section>
                       </div>
 
+                      <section className="mt-4 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <h5 className="text-xs font-black text-text-primary">UI 분류</h5>
+                          <p className="mt-1 text-[11px] text-text-muted">
+                            {game.catalogRole === "GAME"
+                              ? "일반 게임으로 공개 catalog 후보에 포함됩니다. 테스트 fixture라면 내부 도구로 분리하세요."
+                              : "공개 catalog에서 제외된 서버 소유 테스트 도구입니다. ZIP은 이 분류를 직접 선언할 수 없습니다."}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void handleCatalogRole(game)}
+                          className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-brand/30 bg-brand/10 px-3 py-2 text-xs font-bold text-brand-light transition-colors hover:bg-brand/20 disabled:opacity-50"
+                        >
+                          {busy ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : game.catalogRole === "GAME" ? (
+                            <FlaskConical className="h-3.5 w-3.5" />
+                          ) : (
+                            <Gamepad2 className="h-3.5 w-3.5" />
+                          )}
+                          {game.catalogRole === "GAME"
+                            ? "내부 테스트 도구로 이동"
+                            : "일반 게임으로 되돌리기"}
+                        </button>
+                      </section>
+
+                      {game.catalogRole === "INTERNAL_TOOL" && game.mode === "multi" && (
+                        <section className="mt-4 border-t border-border pt-4">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <h5 className="text-xs font-black text-text-primary">
+                                Relay 테스트 실행
+                              </h5>
+                              <p className="mt-1 text-[11px] text-text-muted">
+                                실제 공용 방 입장·Ready·방장 시작·iframe Relay bootstrap을 같은
+                                관리자 화면에서 점검합니다.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (activeToolId === game.gameId) {
+                                  setActiveToolId(null);
+                                  return;
+                                }
+                                setToolAttemptKey((current) => current + 1);
+                                setActiveToolId(game.gameId);
+                              }}
+                              className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-brand px-3 py-2 text-xs font-bold text-white"
+                            >
+                              <Play className="h-3.5 w-3.5" />
+                              {activeToolId === game.gameId ? "테스터 닫기" : "테스터 열기"}
+                            </button>
+                          </div>
+                          {activeToolId === game.gameId && (
+                            <div className="mt-4 overflow-hidden rounded-2xl border border-border">
+                              <MultiplayerGameSurface
+                                gameSlug={game.gameId}
+                                title={game.title}
+                                attemptKey={toolAttemptKey}
+                                viewer={
+                                  user
+                                    ? { nickname: user.nickname, avatarUrl: user.avatar_url }
+                                    : null
+                                }
+                                onRuntimeResolved={ignoreMultiplayerRuntimeResolution}
+                                frameClassName="min-h-[560px]"
+                                fallback={
+                                  <div className="flex min-h-[320px] items-center justify-center bg-surface p-6 text-center text-sm text-text-secondary">
+                                    활성화된 exact-version Relay 프로필이 없습니다. 위 Relay
+                                    심사에서 프로필을 승인·활성화한 뒤 다시 확인하세요.
+                                  </div>
+                                }
+                              />
+                            </div>
+                          )}
+                        </section>
+                      )}
+
                       {game.publisherType === "OWOGG" && (
                         <section className="mt-4 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
                           <div>
@@ -492,7 +720,7 @@ export function OfficialGameManagement() {
                           onSaved={async (message) => {
                             setUploadMessage(message);
                             setEditingSlug(null);
-                            await loadGames(page, pageSize);
+                            await loadGames(page, pageSize, catalogRole);
                           }}
                           onError={setError}
                         />

@@ -1,6 +1,7 @@
 import type { GameSettingsRepository, GameSettingRecord } from "../ports/repositories.js";
 import type { GameCanonicalRepository } from "../modules/game/ports/gameCanonicalRepository.js";
 import type { GameIdentityRepository } from "../modules/game/ports/gameIdentityRepository.js";
+import type { GameIdentity } from "../modules/game/domain/gameIdentity.js";
 import type {
   AdminGameCatalogRepository,
   AdminGameCatalogPageItem,
@@ -16,6 +17,12 @@ export interface GameAvailability {
   /** Latest bundle/manifest revision receipt time from server-owned game_versions data. */
   latestUploadedAt: string | null;
   publisherType: "OWOGG" | "USER";
+  /** Server-owned UI classification. INTERNAL_TOOL identities never enter public catalogs. */
+  catalogRole: "GAME" | "INTERNAL_TOOL";
+  /** Why this identity is or is not eligible for the public runtime catalog. The independent
+   * `enabled` flag below is only the emergency safety override and must not be presented as proof
+   * that an incomplete/private identity is publicly playable. */
+  catalogState: "READY" | "PRIVATE" | "NO_LIVE_VERSION" | "CANONICAL_UNAVAILABLE";
   /** The registry's own static status (draft/beta/published/hidden) — for context only, the
    * live `enabled` flag below is what actually gates play/scoring/catalog visibility. */
   status: string;
@@ -23,6 +30,15 @@ export interface GameAvailability {
   disabledReason: string | null;
   updatedByAdminId: number | null;
   updatedAt: string | null;
+}
+
+function catalogState(
+  identity: GameIdentity,
+  canonicalAvailable: boolean,
+): GameAvailability["catalogState"] {
+  if (identity.liveVersionId === null) return "NO_LIVE_VERSION";
+  if (identity.visibility !== "PUBLIC") return "PRIVATE";
+  return canonicalAvailable ? "READY" : "CANONICAL_UNAVAILABLE";
 }
 
 export type SetGameEnabledResult =
@@ -59,6 +75,8 @@ export class GameSettingsUseCases {
       mode: canonical?.catalog.type === "GENRE_MODE" ? canonical.catalog.mode : null,
       latestUploadedAt: item.latestUploadedAt,
       publisherType: identity.publisher.type,
+      catalogRole: setting?.catalogRole ?? "GAME",
+      catalogState: catalogState(identity, canonical !== null),
       status: identity.visibility === "PUBLIC" ? "published" : "draft",
       enabled: setting?.enabled ?? true,
       disabledReason: setting?.disabledReason ?? null,
@@ -69,6 +87,7 @@ export class GameSettingsUseCases {
 
   async listPage(input: {
     publisherType: "OWOGG" | "USER";
+    catalogRole: "GAME" | "INTERNAL_TOOL";
     page: number;
     pageSize: number;
   }): Promise<{
@@ -81,6 +100,7 @@ export class GameSettingsUseCases {
     if (!this.adminCatalog) throw new Error("Admin game catalog query is not configured");
     const result = await this.adminCatalog.listPage({
       publisherType: input.publisherType,
+      catalogRole: input.catalogRole,
       limit: input.pageSize,
       offset: (input.page - 1) * input.pageSize,
     });
@@ -126,6 +146,8 @@ export class GameSettingsUseCases {
         mode: canonical?.catalog.type === "GENRE_MODE" ? canonical.catalog.mode : null,
         latestUploadedAt: null,
         publisherType: identity.publisher.type,
+        catalogRole: override?.catalogRole ?? "GAME",
+        catalogState: catalogState(identity, canonical !== null),
         status: identity.visibility === "PUBLIC" ? "published" : "draft",
         enabled: override ? override.enabled : true,
         disabledReason: override?.disabledReason ?? null,
@@ -151,6 +173,17 @@ export class GameSettingsUseCases {
       return { ok: false, code: "GAME_NOT_FOUND" };
     }
     const record = await this.repo.setEnabled(gameId, enabled, reason, adminId);
+    return { ok: true, record };
+  }
+
+  async setCatalogRole(
+    gameId: string,
+    catalogRole: "GAME" | "INTERNAL_TOOL",
+    adminId: number,
+  ): Promise<SetGameEnabledResult> {
+    const identity = await this.identities.findBySlug(gameId);
+    if (!identity || identity.deletedAt !== null) return { ok: false, code: "GAME_NOT_FOUND" };
+    const record = await this.repo.setCatalogRole(gameId, catalogRole, adminId);
     return { ok: true, record };
   }
 }

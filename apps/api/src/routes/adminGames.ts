@@ -8,6 +8,8 @@ import {
   AdminManagedMultiplayerProfileActivationResponseSchema,
   AdminGameListResponseSchema,
   AdminGameListQuerySchema,
+  AdminGameCatalogRoleRequestSchema,
+  AdminGameCatalogRoleResponseSchema,
   AdminGameToggleRequestSchema,
   AdminOfficialGameDeleteResponseSchema,
   AdminOfficialGameUploadResponseSchema,
@@ -156,6 +158,7 @@ adminGamesRouter.get("/", async (c) => {
   const parsed = AdminGameListQuerySchema.safeParse({
     page: c.req.query("page"),
     pageSize: c.req.query("pageSize"),
+    catalogRole: c.req.query("catalogRole"),
   });
   if (!parsed.success) {
     return c.json({ error: { code: "INVALID_REQUEST", message: "잘못된 목록 조건입니다." } }, 400);
@@ -691,6 +694,52 @@ adminGamesRouter.post("/:gameId/toggle", async (c) => {
       enabled: result.record.enabled,
       disabledReason: result.record.disabledReason,
     },
+    200,
+  );
+});
+
+// POST /api/admin/games/:gameId/catalog-role — operator-owned UI classification. This is never
+// accepted from owogg.json, so an uploaded ZIP cannot grant itself an internal control surface.
+adminGamesRouter.post("/:gameId/catalog-role", async (c) => {
+  const admin = await requireElevatedAdmin(c);
+  if (isElevatedAdminResponse(admin)) return admin;
+  const denied = requirePermission(admin, "games.moderate");
+  if (denied) return denied;
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json(
+      { error: { code: "INVALID_REQUEST", message: "요청 본문이 올바르지 않습니다." } },
+      400,
+    );
+  }
+  const parsed = AdminGameCatalogRoleRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json(
+      { error: { code: "INVALID_REQUEST", message: "catalogRole 값이 올바르지 않습니다." } },
+      400,
+    );
+  }
+
+  const { gameSettingsUseCases } = createContainer(c.env.DB);
+  const result = await gameSettingsUseCases.setCatalogRole(
+    c.req.param("gameId"),
+    parsed.data.catalogRole,
+    admin.userId,
+  );
+  if (!result.ok) {
+    return c.json({ error: { code: result.code, message: "존재하지 않는 게임입니다." } }, 404);
+  }
+
+  await purgePublicGameReadCache(c.req.url, [result.record.gameId], c.env.GAME_ORIGIN);
+  c.header("Clear-Site-Data", '"cache"');
+  return c.json(
+    AdminGameCatalogRoleResponseSchema.parse({
+      gameId: result.record.gameId,
+      catalogRole: result.record.catalogRole,
+    }),
     200,
   );
 });

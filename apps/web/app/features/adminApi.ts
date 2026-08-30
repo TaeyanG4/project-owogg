@@ -13,6 +13,8 @@ import {
   AdminAccountCreateRequestSchema,
   AdminAccountAuditListResponseSchema,
   AdminGameListResponseSchema,
+  AdminGameCatalogRoleResponseSchema,
+  type AdminGameCatalogRole,
   AdminGameToggleResponseSchema,
   AdminOfficialGameDeleteResponseSchema,
   AdminOfficialGameUploadResponseSchema,
@@ -237,10 +239,24 @@ export function putAdminRolePermissions(
   });
 }
 
-export function fetchAdminGames(page = 1, pageSize: 10 | 20 | 30 = 10) {
+export function fetchAdminGames(
+  page = 1,
+  pageSize: 10 | 20 | 30 = 10,
+  catalogRole: AdminGameCatalogRole = "GAME",
+) {
   return apiFetch(
-    `/api/admin/games?page=${page}&pageSize=${pageSize}`,
+    `/api/admin/games?page=${page}&pageSize=${pageSize}&catalogRole=${catalogRole}`,
     AdminGameListResponseSchema,
+    { method: "GET", cache: "no-store" },
+  );
+}
+
+export function postAdminGameCatalogRole(gameId: string, catalogRole: AdminGameCatalogRole) {
+  return refreshCatalogAfter(
+    apiFetch(`/api/admin/games/${gameId}/catalog-role`, AdminGameCatalogRoleResponseSchema, {
+      method: "POST",
+      body: JSON.stringify({ catalogRole }),
+    }),
   );
 }
 

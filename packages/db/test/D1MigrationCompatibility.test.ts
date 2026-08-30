@@ -25,7 +25,7 @@ test("generic production migrations avoid Cloudflare-incompatible TEMP table DDL
   }
 });
 
-test("full production migration chain applies through 0045 with Relay profile semantics", () => {
+test("full production migration chain applies through 0046 with internal tool separation", () => {
   const { raw } = createSqliteD1("");
   const migrationUrl = new URL("../migrations/", import.meta.url);
   const filenames = fs
@@ -43,6 +43,9 @@ test("full production migration chain applies through 0045 with Relay profile se
   }>;
   const userColumns = raw.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>;
   const oauthColumns = raw.prepare("PRAGMA table_info(oauth_accounts)").all() as Array<{
+    name: string;
+  }>;
+  const gameSettingColumns = raw.prepare("PRAGMA table_info(game_settings)").all() as Array<{
     name: string;
   }>;
   assert.ok(gameColumns.some((column) => column.name === "leaderboard_generation"));
@@ -71,6 +74,7 @@ test("full production migration chain applies through 0045 with Relay profile se
   }
   assert.ok(userColumns.some((column) => column.name === "avatar_provider"));
   assert.ok(oauthColumns.some((column) => column.name === "avatar_url"));
+  assert.ok(gameSettingColumns.some((column) => column.name === "catalog_role"));
   const rolePermissions = raw
     .prepare(
       "SELECT role, permission FROM admin_role_permissions WHERE role = 'SYSTEM_DEVELOPER' ORDER BY permission",

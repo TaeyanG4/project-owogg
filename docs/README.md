@@ -33,7 +33,7 @@
 - [게임 제작 가이드](GAME_CREATION_GUIDE.md) — **가이드**, OWOGG source와 USER bundle 흐름
 - [게임 업로드 가이드](GAME_UPLOAD_GUIDE.md) — **가이드**, Game Creator Center 업로드 절차
 - [Ball Dodge 예제](../examples/ball-dodge/README.md) — **가이드**, 예제 상태는 문서 내부의 주의사항 확인
-- [Relay Protocol Probe 예제](../examples/relay-protocol-probe/README.md) — **가이드**, 게임별 서버
+- [Relay Protocol Probe 내부 테스터](../examples/relay-protocol-probe/README.md) — **가이드**, 게임별 서버
   driver 없이 2~8인 Relay SDK를 사용하는 업로드 fixture
 - [게임 라인업](GAME_LINEUP.md) — **제안**, 후보 게임 기획
 - [Generic Multiplayer Relay 전환 계획](MULTIPLAYER_RELAY_PLAN.md) — **구현 중인 기준 계획**,
