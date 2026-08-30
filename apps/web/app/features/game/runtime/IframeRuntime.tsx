@@ -26,8 +26,8 @@ export interface IframeRuntimeProps {
    * the Bridge for the previous attempt is torn down in the same effect that reacts to this. */
   attemptKey: number;
   /** Threaded into HOST_INIT's own optional `difficultyId` field (see gameBridgeHost.ts /
-   * protocol.ts's HostInitMessage) — only a game with real difficulty tiers (aim-test) needs
-   * this; every other caller simply omits it. Bootstrap-only: this protocol has no live-update
+   * protocol.ts's HostInitMessage). Games without host-selected difficulty tiers omit it.
+   * Bootstrap-only: this protocol has no live-update
    * message, so a difficulty change reaching a game already mid-session requires a fresh mount
    * (a new `attemptKey`) — see GameHost.tsx's own doc comment for how that's enforced. */
   difficultyId?: string;

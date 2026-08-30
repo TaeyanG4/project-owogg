@@ -8,7 +8,6 @@
     { "path": "./packages/db" },
     { "path": "./packages/game-sdk" },
     { "path": "./packages/shared" },
-    { "path": "./packages/ui" },
-    { "path": "./games/reaction-time" }
+    { "path": "./packages/ui" }
   ]
 }

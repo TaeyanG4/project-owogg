@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="순서 기억력 테스트 로고">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#a58aff"/><stop offset="1" stop-color="#6557dc"/></linearGradient></defs>
+  <rect width="512" height="512" rx="112" fill="#0d1429"/><path d="M256 82c-73 0-132 53-132 120 0 30 12 58 33 79-14 22-18 50-8 76 16 43 61 70 107 58 46 12 91-15 107-58 10-26 6-54-8-76 21-21 33-49 33-79 0-67-59-120-132-120z" fill="url(#g)" opacity=".9"/>
+  <g fill="#f4f0ff"><circle cx="199" cy="190" r="25"/><circle cx="313" cy="190" r="25"/><circle cx="199" cy="304" r="25"/><circle cx="313" cy="304" r="25"/></g><path d="M256 113v286M145 256h222" stroke="#4e43ae" stroke-width="18" opacity=".8"/>
+</svg>

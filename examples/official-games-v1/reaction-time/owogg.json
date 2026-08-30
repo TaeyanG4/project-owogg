@@ -1,0 +1,59 @@
+{
+  "$schema": "https://owogg.com/schemas/manifest/v1.json",
+  "schemaVersion": 1,
+  "game": {
+    "slug": "reaction-time",
+    "title": "반응속도 테스트",
+    "genre": "reaction",
+    "mode": "single",
+    "playModes": ["single"],
+    "shortDescription": "서버가 정한 신호 시점에 얼마나 빠르게 반응하는지 측정합니다.",
+    "description": "난이도와 모드를 선택한 뒤 화면이 초록색으로 바뀌는 순간 누르세요. OWOGG verifier가 challenge seed로 신호 시점을 재생성하고 evidence에서 평균 반응 시간을 계산합니다.",
+    "tags": ["reaction", "timing", "verified"]
+  },
+  "input": ["mouse", "touch", "keyboard"],
+  "presentation": { "orientation": "any", "aspectRatio": "16:9" },
+  "difficulties": [
+    { "id": "normal", "title": "보통", "default": true },
+    { "id": "hard", "title": "어려움" }
+  ],
+  "playConfig": {
+    "version": 1,
+    "rulesetRevision": 1,
+    "verifierId": "reaction-time-v1",
+    "variants": [
+      { "id": "standard", "title": "표준", "default": true },
+      { "id": "focus", "title": "집중" }
+    ],
+    "allowedConfigs": [
+      { "difficultyId": "normal", "variantId": "standard", "rewardFactor": 1 },
+      { "difficultyId": "normal", "variantId": "focus", "rewardFactor": 1.1 },
+      { "difficultyId": "hard", "variantId": "standard", "rewardFactor": 1.2 },
+      { "difficultyId": "hard", "variantId": "focus", "rewardFactor": 1.35 }
+    ]
+  },
+  "progression": {
+    "type": "round",
+    "range": { "min": 0, "max": 7, "outOfRange": "reject" }
+  },
+  "result": {
+    "outcome": { "values": ["success"] },
+    "score": {
+      "unit": "ms",
+      "direction": "asc",
+      "precision": 0,
+      "range": { "min": 50, "max": 10000, "outOfRange": "reject" }
+    },
+    "metrics": {
+      "rounds": {
+        "type": "integer",
+        "range": { "min": 0, "max": 7, "outOfRange": "reject" }
+      }
+    }
+  },
+  "leaderboard": { "enabled": true },
+  "events": {
+    "round_completed": { "maxPerAttempt": 7 },
+    "completed": { "maxPerAttempt": 1 }
+  }
+}

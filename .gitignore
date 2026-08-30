@@ -69,3 +69,5 @@ examples/ball-dodge/ball-dodge.zip
 # are reviewed; regenerate the ZIP at the upload boundary.
 examples/verified-aim-test/verified-aim-test.zip
 examples/relay-protocol-probe/relay-protocol-probe.zip
+# Phase 7 official game upload artifacts are rebuilt deterministically from reviewed sources.
+examples/official-games-v1/dist/

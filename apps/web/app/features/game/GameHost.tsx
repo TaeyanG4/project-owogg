@@ -15,7 +15,6 @@ import {
   consumeActivePlayToken,
   fetchLeaderboardApi,
 } from "../scores/api";
-import { getReactionTierById } from "@owogg/shared";
 import { useAuth } from "../auth";
 import { usePersonalization } from "../personalization";
 import { useI18n } from "../i18n/I18nContext";
@@ -190,8 +189,8 @@ export function buildPublicPlayConfigDescriptor(
  * for this slug" (a fresh mount, or just navigated here) — that case always returns `false`: the
  * very first mount already reads the CURRENT `selectedDifficultyId` via the `difficultyId` prop,
  * so forcing an extra remount before anything has even loaded once would be pure waste.
- * `hasDifficultyTiers` gates every other game (memory-test, typing-test, and reaction-time today)
- * out entirely — an iframe-runtime game with no difficulty tiers has no selector to change in the
+ * `hasDifficultyTiers` gates games without difficulty tiers out entirely — an iframe-runtime game
+ * with no difficulty tiers has no selector to change in the
  * first place, so this must never fire for it even if some caller mistakenly passed a difficulty
  * value.
  */
@@ -240,14 +239,6 @@ export function buildGameResultFromBridgeComplete(
     clientEndedAt: now,
   };
 }
-
-// Metadata keys that get their own dedicated presentation elsewhere in the result screen (e.g.
-// "tier" renders as a colored badge below the score, "rounds" is the raw per-round ms array used
-// only for the tier calculation) or aren't meaningful to show as a raw key/value pair ("mode" is
-// an internal typing-test mode id, e.g. "ko-short"; "difficultyId" is aim-test's own internal tier
-// id, e.g. "hard" — already visible via the difficulty selector in the header, not something a
-// second raw grid row adds anything to) — kept out of the generic key/value grid.
-export const METADATA_GRID_EXCLUDED_KEYS = new Set(["tier", "rounds", "mode", "difficultyId"]);
 
 // Today's fallback for every shipped game (none declares `presentation` yet — see
 // presentationLayoutResolver.ts's own doc comment): the exact `frameClassName` restored in #44,
@@ -541,13 +532,6 @@ export function GameHost({ slug }: GameHostProps) {
   const [isMobilePlayOpen, setIsMobilePlayOpen] = useState(false);
   const [gameShareState, setGameShareState] = useState<"idle" | "shared">("idle");
   const [mobileLinkCopied, setMobileLinkCopied] = useState(false);
-  // Reaction-time games may provide a display badge through metadata.tier.
-  // Other games don't set this metadata key, so this stays undefined for them.
-  const resultTier = useMemo(() => {
-    const tierId = result?.metadata?.tier;
-    return typeof tierId === "string" ? getReactionTierById(tierId) : undefined;
-  }, [result]);
-
   // Attempt Lifecycle State & Auth Eligibility
   const [attemptKey, setAttemptKey] = useState<number>(0);
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
@@ -1009,7 +993,7 @@ export function GameHost({ slug }: GameHostProps) {
   }, [handleRetryGame]);
 
   // Forces a fresh iframe mount when the difficulty selector changes for a game that has real
-  // difficulty tiers (aim-test today). The Game Bridge's HOST_INIT bootstrap is a one-time
+  // difficulty tiers. The Game Bridge's HOST_INIT bootstrap is a one-time
   // handshake, so an already-connected iframe has no way to learn a NEW difficulty short of a
   // full reload. Reusing handleRetryGame's own reset
   // (new sessionId, cleared result/leaderboard, bumped attemptKey) is what remounts IframeRuntime
@@ -1421,39 +1405,21 @@ export function GameHost({ slug }: GameHostProps) {
             </div>
           )}
 
-          {resultTier && (
-            <span
-              className="mt-2 inline-flex items-center gap-1.5 rounded-full px-3.5 py-1 text-xs font-black text-white shadow-md"
-              style={{
-                backgroundImage: `linear-gradient(to right, ${resultTier.colorFrom}, ${resultTier.colorTo})`,
-              }}
-            >
-              {resultTier.label}
-            </span>
-          )}
-
           {/* Metadata Formatters */}
-          {result.metadata &&
-            Object.entries(result.metadata).filter(([key]) => !METADATA_GRID_EXCLUDED_KEYS.has(key))
-              .length > 0 && (
-              <div className="grid grid-cols-2 gap-4 mt-6 pt-6 border-t border-border/80">
-                {Object.entries(result.metadata)
-                  .filter(([key]) => !METADATA_GRID_EXCLUDED_KEYS.has(key))
-                  .map(([key, value]) => (
-                    <div
-                      key={key}
-                      className="bg-surface/50 p-2.5 rounded-xl border border-border/40"
-                    >
-                      <p className="text-xs text-text-muted font-bold mb-0.5">
-                        {formatMetadataKey(key, dict.gamePlay)}
-                      </p>
-                      <p className="font-extrabold text-text-primary text-sm">
-                        {formatMetadataValue(key, value)}
-                      </p>
-                    </div>
-                  ))}
-              </div>
-            )}
+          {result.metadata && Object.entries(result.metadata).length > 0 && (
+            <div className="grid grid-cols-2 gap-4 mt-6 pt-6 border-t border-border/80">
+              {Object.entries(result.metadata).map(([key, value]) => (
+                <div key={key} className="bg-surface/50 p-2.5 rounded-xl border border-border/40">
+                  <p className="text-xs text-text-muted font-bold mb-0.5">
+                    {formatMetadataKey(key, dict.gamePlay)}
+                  </p>
+                  <p className="font-extrabold text-text-primary text-sm">
+                    {formatMetadataValue(key, value)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
 
           <p className="mt-6 text-[10px] font-bold uppercase tracking-wider text-text-muted">
             owogg.com

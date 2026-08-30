@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": "feature/unified-v1-game-rebuild",
+  "frozenAt": "2026-08-30T00:00:00+09:00",
+  "authority": "Staging admin D1-backed game list after refresh",
+  "registration": "Delete each stale GAME identity, then upload the matching ZIP through /admin/games",
+  "internalTools": ["relay-protocol-probe"],
+  "games": [
+    {
+      "slug": "official-omok",
+      "filename": "official-omok.zip",
+      "bytes": 7266,
+      "sha256": "fd6e8eedba5a1bfaaddc25e1a79fe0f46479d5eb6e0352768e8ac00b2355deae",
+      "playModes": ["local-multi", "online-multi"],
+      "verifierId": null
+    },
+    {
+      "slug": "reaction-time",
+      "filename": "reaction-time.zip",
+      "bytes": 6306,
+      "sha256": "6352e8189e6e41c2715b5d6c9c06cdfd356bbe764a83b567798696bb037468f9",
+      "playModes": ["single"],
+      "verifierId": "reaction-time-v1"
+    },
+    {
+      "slug": "aim-test",
+      "filename": "aim-test.zip",
+      "bytes": 6385,
+      "sha256": "320c7cd9a000872329f363d15d49bc3ea62cee87676281f3e1df8c5b88d0e22c",
+      "playModes": ["single"],
+      "verifierId": "aim-test-v1"
+    },
+    {
+      "slug": "typing-test",
+      "filename": "typing-test.zip",
+      "bytes": 6978,
+      "sha256": "24d01c3f954c59762092705b914d5a5840330435a9bf9ce743b11c913952f67c",
+      "playModes": ["single"],
+      "verifierId": "typing-test-v1"
+    },
+    {
+      "slug": "memory-test",
+      "filename": "memory-test.zip",
+      "bytes": 6985,
+      "sha256": "e5bdacf2fa941f8ee62156347feca89f7489918a8b4b3a24dbc2283962db6c76",
+      "playModes": ["single"],
+      "verifierId": "memory-test-v1"
+    }
+  ]
+}

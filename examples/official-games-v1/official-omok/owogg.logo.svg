@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="오목 로고">
+  <defs><linearGradient id="b" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#dba45d"/><stop offset="1" stop-color="#8a5428"/></linearGradient></defs>
+  <rect width="512" height="512" rx="112" fill="#0b1729"/><rect x="68" y="68" width="376" height="376" rx="44" fill="url(#b)"/>
+  <g stroke="#70431f" stroke-width="10"><path d="M130 92v328M193 92v328M256 92v328M319 92v328M382 92v328M92 130h328M92 193h328M92 256h328M92 319h328M92 382h328"/></g>
+  <circle cx="193" cy="193" r="48" fill="#080b11"/><circle cx="319" cy="319" r="48" fill="#f5f7fb" stroke="#cbd4e2" stroke-width="5"/>
+</svg>

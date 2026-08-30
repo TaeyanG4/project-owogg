@@ -71,9 +71,10 @@ OwOGG Game Platform
   Durable Object transport로 분리됩니다. iframe bootstrap은 ruleset 대신 runtime/self/2~8인
   roster/capabilities를 전달하며, Relay는 sender와 transport 한계만 검증합니다. 따라서 online 결과는
   `UNVERIFIED`이고 leaderboard/reward/XP/MMR에 투영하지 않습니다. trusted verifier registry,
-  first-evidence claim, `/result`의 authoritative 검증과 원자 결과 저장이 구현됐고, Phase 6의 첫 reviewed verifier
-  `verified-aim-test-v1`만 정적으로 설치돼 있습니다. 미등록 ID와 reference verifier의 intended slug
-  불일치는 계속 fail closed입니다.
+  first-evidence claim, `/result`의 authoritative 검증과 원자 결과 저장이 구현됐습니다. registry에는
+  reference용 `verified-aim-test-v1`과 공식 재작성 4종의 `reaction-time-v1`, `aim-test-v1`,
+  `typing-test-v1`, `memory-test-v1`만 정적으로 설치돼 있습니다. 미등록 ID와 각 verifier의 intended
+  slug/revision 불일치는 계속 fail closed입니다.
 
 ## USER 제어 영역
 

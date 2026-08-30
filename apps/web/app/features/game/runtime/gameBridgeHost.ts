@@ -75,8 +75,8 @@ export interface GameBridgeHost {
  */
 export interface GameBridgeHostOptions {
   /** Threaded into HOST_INIT's own optional `difficultyId` field (see protocol.ts's
-   * HostInitMessage) — only a game with real difficulty tiers (aim-test) reads it; every other
-   * caller omits this and the bootstrap stays exactly the bare `{type:"HOST_INIT"}` it always was.
+   * HostInitMessage). Games without host-selected difficulty tiers omit it and the bootstrap stays
+   * exactly the bare `{type:"HOST_INIT"}` it always was.
    * Never auth/token/API address — see this file's own doc comment on what HOST_INIT carries. */
   difficultyId?: string;
   /** Public canonical choices only. Its presence switches this bridge to verifier-backed mode. */

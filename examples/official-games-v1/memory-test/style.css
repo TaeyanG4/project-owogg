@@ -1,0 +1,133 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, Pretendard, system-ui, sans-serif;
+  color: #eef4ff;
+  background: #07111f;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: radial-gradient(circle at 80% 12%, #3d326b 0, transparent 40%), #07111f;
+}
+.shell {
+  width: min(44rem, 100%);
+  margin: 0 auto;
+  padding: clamp(1rem, 4vw, 2.5rem);
+}
+.eyebrow {
+  margin: 0 0 0.4rem;
+  color: #b3a2ff;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+h1 {
+  margin: 0;
+  font-size: clamp(2rem, 7vw, 3.8rem);
+  line-height: 1;
+}
+h2,
+p {
+  margin-top: 0;
+}
+#status {
+  min-height: 1.5rem;
+  margin: 0.75rem 0 1.4rem;
+  color: #bdcae6;
+}
+.panel {
+  border: 1px solid #403c71;
+  border-radius: 1.15rem;
+  padding: clamp(1rem, 3vw, 1.5rem);
+  background: rgb(15 25 49 / 91%);
+}
+.config-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.8rem;
+}
+label {
+  display: grid;
+  gap: 0.4rem;
+  color: #beb7e7;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+select,
+button {
+  min-height: 2.9rem;
+  border: 1px solid #555088;
+  border-radius: 0.8rem;
+  padding: 0.7rem 0.9rem;
+  color: inherit;
+  background: #1b2445;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+.primary {
+  width: 100%;
+  margin-top: 1rem;
+  border-color: #8174f5;
+  background: #6658dc;
+  font-weight: 800;
+}
+.stats {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  color: #c9c4e9;
+}
+.memory-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+  width: min(100%, 30rem);
+  margin: 0 auto;
+}
+.pad {
+  min-height: 0;
+  border-width: 0.2rem;
+  aspect-ratio: 1;
+  filter: saturate(0.55) brightness(0.72);
+  transition:
+    filter 0.12s ease,
+    transform 0.12s ease;
+}
+.pad:not(:disabled):active,
+.pad.active {
+  filter: saturate(1.25) brightness(1.55);
+  transform: scale(0.96);
+}
+.pad.red {
+  border-color: #f36b7a;
+  background: #b52e43;
+}
+.pad.blue {
+  border-color: #68a9ff;
+  background: #2767bc;
+}
+.pad.green {
+  border-color: #5ce0a2;
+  background: #23895b;
+}
+.pad.yellow {
+  border-color: #ffe273;
+  background: #bb8e24;
+}
+.hidden {
+  display: none !important;
+}
+@media (max-width: 520px) {
+  .config-grid {
+    grid-template-columns: 1fr;
+  }
+}

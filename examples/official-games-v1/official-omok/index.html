@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>오목</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <p class="eyebrow">OWOGG BOARD</p>
+        <h1>오목</h1>
+        <p id="status" role="status">플레이 방식을 선택하세요.</p>
+      </header>
+
+      <section id="launcher" class="panel launcher" aria-labelledby="launcher-title">
+        <h2 id="launcher-title">어떻게 플레이할까요?</h2>
+        <div class="mode-grid">
+          <button id="local-mode" type="button">
+            <strong>한 기기에서</strong><span>두 사람이 번갈아 착수합니다.</span>
+          </button>
+          <button id="online-mode" type="button">
+            <strong>온라인에서</strong><span>방을 만들거나 코드로 참가합니다.</span>
+          </button>
+        </div>
+      </section>
+
+      <section id="game" class="game hidden" aria-labelledby="game-title">
+        <div class="game-heading">
+          <div>
+            <p id="mode-label" class="eyebrow">LOCAL</p>
+            <h2 id="game-title">15 × 15</h2>
+          </div>
+          <div class="actions">
+            <button id="reset" type="button">다시 두기</button>
+            <button id="leave" class="danger hidden" type="button">방 나가기</button>
+          </div>
+        </div>
+        <div class="turns" aria-label="돌 색 안내">
+          <span id="black-label"><i class="stone black"></i>흑 · 선공</span>
+          <span id="white-label"><i class="stone white"></i>백</span>
+        </div>
+        <div id="board" class="board" role="grid" aria-label="15 곱하기 15 오목판"></div>
+        <p class="rule-note">흑은 정확히 5목, 백은 5목 이상이면 승리합니다.</p>
+      </section>
+    </main>
+    <script src="./rules.js"></script>
+    <script src="./game.js"></script>
+  </body>
+</html>

@@ -321,9 +321,10 @@ signed one-use `gs1` session을 발급합니다. PlayConfig 게임은 사용자�
 `startContext`만 iframe에 전달합니다. `gs2` token은 parent memory 밖으로 노출하지 않습니다.
 
 Phase 5-D/E에서 trusted verifier registry, 게시/session gate, first-evidence hash claim, 검증 coordinator와
-authoritative 결과 저장이 구현됐습니다. Phase 6에서는 첫 reviewed entry `verified-aim-test-v1`이
-설치됐습니다. 다른 verifier ID는 계속 fail closed이며 reference verifier도 canonical slug와 revision을
-다시 확인합니다. `/result`는 evidence를 검증하고 서버 facts를 반환합니다. 요청은 64 KiB, canonical
+authoritative 결과 저장이 구현됐습니다. reviewed entry는 reference용 `verified-aim-test-v1`과 공식
+재작성 게임용 `reaction-time-v1`, `aim-test-v1`, `typing-test-v1`, `memory-test-v1`입니다. 다른
+verifier ID는 계속 fail closed이며 각 verifier도 canonical slug와 revision을 다시 확인합니다. `/result`는
+evidence를 검증하고 서버 facts를 반환합니다. 요청은 64 KiB, canonical
 evidence는 16 KiB·깊이 12·배열 1,024·객체 key 256·전체 node 4,096으로 제한되며 raw evidence는 저장하지
 않습니다. online 선택은 `gs1`/`gs2`를 발급하지 않고 approved exact-version Relay profile과 Durable
 Object transport를 사용하며, Relay 결과를 경쟁 결과로 승인하지 않습니다.
@@ -339,6 +340,11 @@ attempt 소비, result, 선택적 score projection, claim terminal 전환은 한
 `requestStart()`로 승인된 seed/config를 받고, 점수 대신 최대 10개의 순차 좌표·상대시간 evidence만
 `complete()`로 보냅니다. build/verify 스크립트와 서버 verifier가 같은 결정론 test vector를 검증하지만,
 이 참조 구현 자체가 사람과 자동화 클라이언트를 완전히 구별하는 anti-bot 보장은 아닙니다.
+
+`examples/official-games-v1`에는 2026-08-30 Staging D1에서 동결한 공식 GAME 5종의 unified manifest
+v1 재작성 소스와 결정론 ZIP/SHA inventory가 있습니다. 이 디렉터리는 runtime registry가 아니며
+등록은 관리자 ZIP 업로드를 통해서만 수행합니다. 온라인 오목 규칙은 ZIP에만 있고, 서버의 공식 4종
+Verifier는 경쟁 싱글 결과 검증을 위한 별도 신뢰 경계입니다.
 
 non-PlayConfig gs1 완료 후 server는 다음을 다시 검증합니다.
 
