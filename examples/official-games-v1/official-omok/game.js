@@ -16,7 +16,6 @@
   const boardGrid = document.querySelector("#board-grid");
   const reset = document.querySelector("#reset");
   const rematch = document.querySelector("#rematch");
-  const leave = document.querySelector("#leave");
   const languageToggle = document.querySelector("#language-toggle");
   const soundToggle = document.querySelector("#sound-toggle");
   const modeLabel = document.querySelector("#mode-label");
@@ -51,7 +50,6 @@
       reset: "새 대국",
       rematch: "재대결 요청",
       rematchSent: "재대결 대기 중",
-      leave: "방 나가기",
       black: "흑 · 선공",
       white: "백",
       currentTurn: "현재 차례",
@@ -76,7 +74,7 @@
       connectingDetail: "잠시 후 대전 상태를 불러옵니다.",
       yourTurn: "내 차례입니다. 빈 교차점을 선택하세요.",
       opponentTurn: "상대의 착수를 기다리고 있습니다.",
-      onlineFinished: "재대결을 요청하거나 방을 나갈 수 있습니다.",
+      onlineFinished: "재대결을 요청해 새 대국을 시작할 수 있습니다.",
       opponentRematch: "상대가 재대결을 요청했습니다.",
       waitingRematch: "상대의 재대결 응답을 기다리고 있습니다.",
       newRound: "새 대국이 시작됐습니다.",
@@ -90,7 +88,6 @@
       requestFailed: "요청을 처리하지 못했습니다",
       relayClosed: "온라인 대전이 종료됐습니다",
       readyFailed: "Relay 준비 요청을 보내지 못했습니다",
-      leaving: "방을 나가는 중입니다",
       localRevision: (moves, round) => `로컬 ${round}국 · ${moves}수`,
       onlineRevision: (moves, round) => `Relay ${round}국 · ${moves}수`,
       pendingMode: "플레이 방식 대기 중",
@@ -124,7 +121,6 @@
       reset: "New game",
       rematch: "Request rematch",
       rematchSent: "Waiting for rematch",
-      leave: "Leave room",
       black: "Black · first",
       white: "White",
       currentTurn: "Current turn",
@@ -149,7 +145,7 @@
       connectingDetail: "Loading the match state.",
       yourTurn: "Your turn. Select an empty intersection.",
       opponentTurn: "Waiting for the opponent's move.",
-      onlineFinished: "Request a rematch or leave the room.",
+      onlineFinished: "Request a rematch to start a new game.",
       opponentRematch: "Your opponent requested a rematch.",
       waitingRematch: "Waiting for the opponent's rematch response.",
       newRound: "A new game has started.",
@@ -163,7 +159,6 @@
       requestFailed: "The request could not be processed",
       relayClosed: "The online match has ended",
       readyFailed: "Relay could not be readied",
-      leaving: "Leaving the room",
       localRevision: (moves, round) => `Local game ${round} · move ${moves}`,
       onlineRevision: (moves, round) => `Relay game ${round} · move ${moves}`,
       pendingMode: "Waiting for a play mode",
@@ -361,9 +356,7 @@
   function renderControls() {
     const copy = text();
     reset.textContent = copy.reset;
-    leave.textContent = copy.leave;
     reset.classList.toggle("hidden", mode !== "local");
-    leave.classList.toggle("hidden", mode !== "online");
     const showRematch = mode === "online" && state.winner !== 0;
     rematch.classList.toggle("hidden", !showRematch);
     const color = selfColor();
@@ -712,12 +705,6 @@
     adoptState(rules.createState(round, state.revision + 1));
   });
   rematch.addEventListener("click", requestOnlineRematch);
-  leave.addEventListener("click", () => {
-    closed = true;
-    relay?.leave();
-    setStatus(text().leaving, text().wait);
-    renderBoard();
-  });
   soundToggle.addEventListener("click", () => {
     soundEnabled = !soundEnabled;
     renderLocale();

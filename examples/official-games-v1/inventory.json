@@ -1,18 +1,18 @@
 {
   "schemaVersion": 1,
-  "generatedFrom": "fix/admin-game-upload-queue",
-  "frozenAt": "2026-08-31T00:57:54+09:00",
+  "generatedFrom": "fix/multiplayer-viewport-and-omok-controls",
+  "frozenAt": "2026-08-31T07:49:19+09:00",
   "authority": "Staging admin D1-backed game list after refresh",
   "registration": "Upload the versioned ZIP backups through the /admin/games multi-file publisher",
   "internalTools": ["relay-protocol-probe"],
   "games": [
     {
       "slug": "official-omok",
-      "filename": "official-omok_v1.0.1.zip",
-      "artifactVersion": "1.0.1",
-      "backupRelativePath": "official-omok/official-omok_v1.0.1.zip",
-      "bytes": 16520,
-      "sha256": "85439fe79cf5a67f63a5ea37ad686fd86420b96266a2f6eb662036be06a07e3f",
+      "filename": "official-omok_v1.0.5.zip",
+      "artifactVersion": "1.0.5",
+      "backupRelativePath": "official-omok/official-omok_v1.0.5.zip",
+      "bytes": 16375,
+      "sha256": "2261b6dfe361b6de335fbd407b4cd86bff53f86de6fbfd48a96e89770f108d49",
       "playModes": ["local-multi", "online-multi"],
       "verifierId": null
     },

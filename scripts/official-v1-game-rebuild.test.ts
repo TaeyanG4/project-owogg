@@ -25,7 +25,7 @@ const frozenGameSlugs = [
 const expectedArtifactVersions = new Map([
   ["aim-test", "1.0.1"],
   ["memory-test", "1.0.1"],
-  ["official-omok", "1.0.1"],
+  ["official-omok", "1.0.5"],
   ["reaction-time", "1.0.0"],
   ["typing-test", "1.0.0"],
 ]);
@@ -151,9 +151,12 @@ test("official game UI waits for host bootstrap and derives choices from its pub
   assert.match(typing, /config\.allowedConfigs\.length > 1/);
 
   const omok = fs.readFileSync(path.join(fixtureRoot, "official-omok", "game.js"), "utf8");
+  const omokHtml = fs.readFileSync(path.join(fixtureRoot, "official-omok", "index.html"), "utf8");
   assert.match(omok, /const modes = api\.playModes/);
   assert.doesNotMatch(omok, /api\.complete\s*\(/);
   assert.doesNotMatch(omok, /api\.requestStart\s*\(/);
+  assert.doesNotMatch(omokHtml, /id=["']leave["']/);
+  assert.doesNotMatch(omok, /\brelay\??\.leave\s*\(/);
 });
 
 test("every official game owns bilingual UI, sound settings, and in-game restart controls", () => {

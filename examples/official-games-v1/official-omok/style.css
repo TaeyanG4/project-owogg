@@ -271,12 +271,6 @@ h2 {
   font-weight: 800;
 }
 
-.actions .danger {
-  border-color: #7d4054;
-  color: #ffc3d0;
-  background: #351925;
-}
-
 .turns {
   grid-column: 1;
   grid-row: 2;
