@@ -42,7 +42,7 @@ button {
   margin: 0;
   padding: clamp(14px, 2.2vw, 26px);
   display: grid;
-  grid-template-columns: minmax(210px, 0.34fr) minmax(0, 1fr);
+  grid-template-columns: minmax(180px, 1fr) minmax(0, 700px) minmax(180px, 1fr);
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 16px;
 }
@@ -170,8 +170,7 @@ h2 {
   text-align: left;
 }
 
-.launcher,
-.game {
+.launcher {
   grid-column: 2;
   grid-row: 1 / -1;
   width: 100%;
@@ -279,6 +278,20 @@ h2 {
   text-align: center;
 }
 
+.shell:not(.launcher-mode) .status-card {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  border: 0;
+  padding: 0;
+  white-space: nowrap;
+}
+
 .shell.launcher-mode .launcher {
   grid-column: 1;
   grid-row: 3;
@@ -308,20 +321,18 @@ h2 {
 }
 
 .game-heading {
-  grid-column: 1;
+  grid-column: 3;
   grid-row: 1;
+  width: min(100%, 220px);
   display: flex;
-  align-items: stretch;
+  align-items: flex-start;
   flex-direction: column;
   justify-content: flex-start;
   gap: 16px;
 }
 
 .game {
-  display: grid;
-  grid-template-columns: minmax(150px, 0.32fr) minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: clamp(10px, 1.5vw, 20px);
+  display: contents;
 }
 
 .actions {
@@ -338,8 +349,9 @@ h2 {
 }
 
 .turns {
-  grid-column: 1;
+  grid-column: 3;
   grid-row: 2;
+  width: min(100%, 220px);
   display: grid;
   grid-template-columns: 1fr;
   align-content: start;
@@ -512,7 +524,7 @@ footer {
 
 @media (max-width: 760px) {
   .shell {
-    grid-template-columns: minmax(170px, 0.38fr) minmax(0, 1fr);
+    grid-template-columns: minmax(110px, 0.7fr) minmax(0, 1.6fr) minmax(110px, 0.7fr);
     gap: 10px;
     padding: 10px;
   }
@@ -536,11 +548,6 @@ footer {
     min-height: 46px;
     gap: 3px;
     padding: 9px 10px;
-  }
-
-  .game {
-    grid-template-columns: minmax(124px, 0.32fr) minmax(0, 1fr);
-    gap: 8px;
   }
 
   .actions button {
@@ -599,16 +606,16 @@ footer {
     padding: 3px;
   }
 
-  .game {
-    grid-template-columns: minmax(118px, 0.3fr) minmax(0, 1fr);
-  }
-
   .board {
     width: min(100%, calc(100vh - 18px), 700px);
   }
 }
 
 @media (max-width: 560px) {
+  .shell {
+    grid-template-columns: minmax(86px, 0.7fr) minmax(0, 1.7fr) minmax(86px, 0.7fr);
+  }
+
   .shell.launcher-mode .game-header {
     align-items: flex-start;
     flex-direction: column;
