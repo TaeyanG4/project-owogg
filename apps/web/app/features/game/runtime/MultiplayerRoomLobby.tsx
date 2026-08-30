@@ -20,6 +20,7 @@ import {
 
 const BACKGROUND_RECONNECT_MS = 15 * 60_000;
 const MAX_RENDERED_LOBBY_SLOTS = 16;
+export const multiplayerLobbySlotGridTemplate = "repeat(auto-fit, minmax(min(100%, 14rem), 1fr))";
 
 export function multiplayerLobbyCanStart(
   players: readonly MultiplayerRoomPlayer[],
@@ -619,7 +620,10 @@ export function MultiplayerRoomLobby({
           </span>
         </div>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div
+          className="mt-4 grid gap-3"
+          style={{ gridTemplateColumns: multiplayerLobbySlotGridTemplate }}
+        >
           {slots.map((player, index) => (
             <PlayerSlot
               key={player?.participantId ?? `empty-${index}`}

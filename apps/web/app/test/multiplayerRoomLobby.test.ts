@@ -12,6 +12,7 @@ import {
   multiplayerLobbyRosterSounds,
   multiplayerLobbySelfPlayer,
   multiplayerLobbySlotCount,
+  multiplayerLobbySlotGridTemplate,
 } from "../features/game/runtime/MultiplayerRoomLobby";
 import { multiplayerLobbySignalReconnectDelay } from "../features/game/runtime/multiplayerLobbySignal";
 
@@ -40,6 +41,10 @@ test("the shared lobby renders profile-sized slots and is future-safe up to sixt
   assert.equal(multiplayerLobbySlotCount(8, 8), 8);
   assert.equal(multiplayerLobbySlotCount(16, 12), 16);
   assert.equal(multiplayerLobbySlotCount(20, 20), 16);
+});
+
+test("the shared lobby slot grid responds to its rendered container width", () => {
+  assert.equal(multiplayerLobbySlotGridTemplate, "repeat(auto-fit, minmax(min(100%, 14rem), 1fr))");
 });
 
 test("the event-driven signal channel backs off without a roster polling fallback", () => {
