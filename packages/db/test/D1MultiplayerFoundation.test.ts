@@ -1356,6 +1356,65 @@ test("D1 multiplayer request repository pins owner, canonical hash, review CAS, 
   assert.deepEqual(raw.prepare("PRAGMA foreign_key_check").all(), []);
 });
 
+test("quarantined OWOGG re-registration accepts only its server-owned exact-version request", async () => {
+  const { db, raw } = createMigratedD1(INDEX_INCLUSIVE_D1_WRITE_META);
+  seedUsers(raw);
+  seedGameVersion(raw, { gameId: 1, versionId: 10, slug: "official-relay-reupload" });
+  seedGameVersion(raw, { gameId: 2, versionId: 20, slug: "official-relay-claimed" });
+  seedGameVersion(raw, {
+    gameId: 3,
+    versionId: 30,
+    slug: "creator-relay-deleted",
+    publisherType: "USER",
+    publisherUserId: 1,
+    moderationStatus: "APPROVED",
+  });
+  raw
+    .prepare(
+      "UPDATE games SET visibility = 'PRIVATE', live_version_id = NULL, deleted_at = ? WHERE id IN (1, 2, 3)",
+    )
+    .run(LATER);
+
+  const repository = new D1MultiplayerProfileRequestRepository(db);
+  const submitted = await repository.submit({
+    gameId: 1,
+    gameVersionId: 10,
+    contentHash: CONTENT_HASH,
+    requestedByUserId: null,
+    request: relayRequest(),
+    nowIso: LATER,
+  });
+
+  assert.equal(submitted.status, "CREATED");
+  assert.equal(
+    raw.prepare("SELECT deleted_at FROM games WHERE id = 1").get().deleted_at,
+    LATER,
+    "request admission must not unquarantine the identity before publication activation",
+  );
+  assert.deepEqual(
+    await repository.submit({
+      gameId: 2,
+      gameVersionId: 20,
+      contentHash: CONTENT_HASH,
+      requestedByUserId: 1,
+      request: relayRequest(),
+      nowIso: LATER,
+    }),
+    { status: "REJECTED", code: "GAME_VERSION_NOT_FOUND" },
+  );
+  assert.deepEqual(
+    await repository.submit({
+      gameId: 3,
+      gameVersionId: 30,
+      contentHash: CONTENT_HASH,
+      requestedByUserId: 1,
+      request: relayRequest(),
+      nowIso: LATER,
+    }),
+    { status: "REJECTED", code: "GAME_VERSION_NOT_FOUND" },
+  );
+});
+
 test("OWOGG Relay requests use the same exact-version boundary without claiming a user", async () => {
   const { db, raw } = createMigratedD1(INDEX_INCLUSIVE_D1_WRITE_META);
   seedUsers(raw);
