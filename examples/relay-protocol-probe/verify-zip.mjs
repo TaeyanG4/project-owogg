@@ -29,6 +29,14 @@ unzipSync(zipBytes, {
 validateBundleEntryMetadata(metadata);
 
 const decompressed = unzipSync(zipBytes);
+assert.deepEqual(Object.keys(decompressed).sort(), [
+  "game.js",
+  "index.html",
+  "load-protocol.js",
+  "owogg.json",
+  "owogg.logo.svg",
+  "style.css",
+]);
 const prepared = prepareBundleEntries(decompressed);
 const manifest = extractGameCreatorManifest(prepared.files);
 assert.equal(manifest?.schemaVersion, 1);
@@ -39,21 +47,36 @@ assert.deepEqual(manifest?.multiplayer?.players, { min: 2, max: 8 });
 assert.ok(findGameLogoFile(prepared.files));
 
 const gameJs = new TextDecoder().decode(decompressed["game.js"]);
+const loadProtocolJs = new TextDecoder().decode(decompressed["load-protocol.js"]);
+const indexHtml = new TextDecoder().decode(decompressed["index.html"]);
 for (const required of [
   "relay.ready",
   "relay.broadcast",
   "relay.direct",
   "relay.snapshot",
   "relay.leave",
+  "loadProtocol.buildLoadSample",
+  "loadProtocol.summarizeLatencies",
 ]) {
   assert.ok(gameJs.includes(required), `game is missing ${required}`);
 }
+for (const required of ["relay-probe/load-v1", "load-report", "idle-report", "buildLoadSample"]) {
+  assert.ok(loadProtocolJs.includes(required), `load protocol is missing ${required}`);
+}
+for (const required of ["load-start", "load-results", "idle-start", "idle-results"]) {
+  assert.ok(indexHtml.includes(`id="${required}"`), `load UI is missing #${required}`);
+}
 for (const forbidden of ["new WebSocket", "fetch(", "userId", "sessionToken", "ws://", "wss://"]) {
-  assert.equal(
-    gameJs.includes(forbidden),
-    false,
-    `game contains forbidden authority: ${forbidden}`,
-  );
+  for (const [name, source] of [
+    ["game.js", gameJs],
+    ["load-protocol.js", loadProtocolJs],
+  ]) {
+    assert.equal(
+      source.includes(forbidden),
+      false,
+      `${name} contains forbidden authority: ${forbidden}`,
+    );
+  }
 }
 
 const sha256 = createHash("sha256").update(zipBytes).digest("hex");
