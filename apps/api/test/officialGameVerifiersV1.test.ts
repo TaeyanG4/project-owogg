@@ -25,8 +25,10 @@ import {
   reactionTimeV1,
 } from "../src/infrastructure/games/verifiers/ReactionTimeV1.js";
 import {
+  TYPING_TEST_DURATION_MS,
   TYPING_TEST_RULESET_REVISION,
   TYPING_TEST_SLUG,
+  calculateTypingTestFacts,
   createTypingTestChallenge,
   typingTestV1,
 } from "../src/infrastructure/games/verifiers/TypingTestV1.js";
@@ -119,6 +121,18 @@ test("reaction-time verifier derives average reaction from a deterministic sched
   );
 });
 
+test("reaction-time standard signals span an unpredictable 2 to 8 second window", () => {
+  const waits = Array.from({ length: 100 }, (_, index) =>
+    createReactionTimeWaits({
+      challengeSeed: `${CHALLENGE_SEED}-${index}`,
+      difficultyId: "normal",
+      variantId: "standard",
+    }),
+  ).flat();
+  assert.ok(waits.every((wait) => wait >= 2_000 && wait <= 8_000));
+  assert.ok(Math.max(...waits) - Math.min(...waits) > 5_000);
+});
+
 test("aim-test verifier checks every seeded target and rejects a fabricated hit", async () => {
   const targets = createAimTestTargets({
     challengeSeed: CHALLENGE_SEED,
@@ -156,17 +170,21 @@ test("aim-test verifier checks every seeded target and rejects a fabricated hit"
   );
 });
 
-test("typing-test verifier selects the seed-bound passage and computes WPM", async () => {
+test("typing-test verifier checks sequential line evidence and computes a 90-second composite", async () => {
   const challenge = createTypingTestChallenge({
     challengeSeed: CHALLENGE_SEED,
     difficultyId: "normal",
     variantId: "zh",
   });
+  const lines = challenge.lines.slice(0, 3).map((line, index) => ({
+    index,
+    typedText: line.text,
+  }));
   const evidence = {
-    version: 1,
+    version: 2,
     passageId: challenge.passageId,
-    typedText: challenge.text,
-    completedAtMs: 30_000,
+    lines,
+    completedAtMs: TYPING_TEST_DURATION_MS,
   };
   const verifierInput = input(
     TYPING_TEST_SLUG,
@@ -177,15 +195,37 @@ test("typing-test verifier selects the seed-bound passage and computes WPM", asy
   const result = await typingTestV1.verify(verifierInput);
   assert.equal(result.accepted, true);
   if (result.accepted) {
+    const expected = calculateTypingTestFacts(
+      challenge.lines.map((line) => line.text),
+      lines,
+      TYPING_TEST_DURATION_MS,
+    );
     assert.equal(result.facts.outcome, "success");
+    assert.equal(result.facts.score, expected.score);
+    assert.equal(result.facts.metrics?.wpm, expected.wpm);
+    assert.equal(result.facts.metrics?.cpm, expected.cpm);
     assert.equal(result.facts.metrics?.accuracy, 100);
   }
   assert.equal(
     await code(typingTestV1, {
       ...verifierInput,
-      evidence: { ...evidence, typedText: `${challenge.text}!` },
+      evidence: {
+        ...evidence,
+        lines: lines.map((line, index) =>
+          index === 0
+            ? { ...line, typedText: `!${Array.from(line.typedText).slice(1).join("")}` }
+            : line,
+        ),
+      },
     }),
     "TYPING_TEXT_MISMATCH",
+  );
+  assert.equal(
+    await code(typingTestV1, {
+      ...verifierInput,
+      evidence: { ...evidence, completedAtMs: 30_000 },
+    }),
+    "TYPING_DURATION_INVALID",
   );
 });
 
@@ -196,8 +236,18 @@ test("typing-test exposes long seed-bound passages for all four language variant
       difficultyId: "normal",
       variantId,
     });
-    assert.ok(Array.from(challenge.text).length >= 150, variantId);
-    assert.ok(challenge.source.length > 0, variantId);
+    assert.ok(
+      challenge.lines.reduce((total, line) => total + Array.from(line.text).length, 0) >= 600,
+      variantId,
+    );
+    assert.ok(
+      challenge.lines.every((line) => Array.from(line.text).length <= 48),
+      variantId,
+    );
+    assert.ok(
+      challenge.lines.every((line) => line.source.length > 0),
+      variantId,
+    );
   }
 });
 

@@ -2,8 +2,10 @@
   "use strict";
 
   const VERIFIER_ID = "typing-test-v1";
-  const RULESET_REVISION = 2;
+  const RULESET_REVISION = 3;
   const MAX_WPM = 300;
+  const DURATION_MS = 90000;
+  const LINE_MAX_CHARACTERS = 48;
   const PASSAGES = Object.freeze({
     ko: Object.freeze([
       Object.freeze({
@@ -76,31 +78,76 @@
     if (difficultyId !== "normal") return null;
     const candidates = PASSAGES[variantId];
     if (!candidates) return null;
-    const index =
+    const startIndex =
       seedHash(`${VERIFIER_ID}|${RULESET_REVISION}|${challengeSeed}|${difficultyId}|${variantId}`) %
       candidates.length;
+    const orderedPassages = Array.from(
+      { length: candidates.length * 3 },
+      (_, index) => candidates[(startIndex + index) % candidates.length],
+    );
     return Object.freeze({
-      passageId: `${variantId}-${difficultyId}-${index + 1}`,
-      source: candidates[index].source,
-      text: candidates[index].text,
+      passageId: `${variantId}-${difficultyId}-${startIndex + 1}`,
+      lines: Object.freeze(
+        orderedPassages.flatMap((passage) =>
+          wrapText(passage.text).map((text) => Object.freeze({ source: passage.source, text })),
+        ),
+      ),
     });
+  }
+
+  function wrapText(text) {
+    const words = text.trim().split(/\s+/u);
+    if (words.length <= 1) {
+      const characters = Array.from(text.trim());
+      return Object.freeze(
+        Array.from({ length: Math.ceil(characters.length / LINE_MAX_CHARACTERS) }, (_, index) =>
+          characters.slice(index * LINE_MAX_CHARACTERS, (index + 1) * LINE_MAX_CHARACTERS).join(""),
+        ).filter(Boolean),
+      );
+    }
+    const lines = [];
+    let current = "";
+    for (const word of words) {
+      const candidate = current.length === 0 ? word : `${current} ${word}`;
+      if (Array.from(candidate).length <= LINE_MAX_CHARACTERS) current = candidate;
+      else {
+        if (current) lines.push(current);
+        current = word;
+      }
+    }
+    if (current) lines.push(current);
+    return Object.freeze(lines);
   }
 
   function characterCount(value) {
     return Array.from(value).length;
   }
-  function calculateFacts(text, completedAtMs) {
-    const typedChars = characterCount(text);
+  function calculateFacts(expectedLines, typedLines, completedAtMs) {
+    let typedChars = 0;
+    let correctChars = 0;
+    for (const line of typedLines) {
+      const expected = Array.from(expectedLines[line.index] || "");
+      const typed = Array.from(line.typedText);
+      typedChars += typed.length;
+      typed.forEach((character, index) => {
+        if (character === expected[index]) correctChars += 1;
+      });
+    }
     const cpm = Math.round((typedChars * 60000) / completedAtMs);
-    const wpm = Math.round(cpm / 5);
-    return { typedChars, cpm, wpm, accuracy: 100 };
+    const wpm = Math.round((correctChars * 12000) / completedAtMs);
+    const accuracy = typedChars === 0 ? 0 : Math.round((correctChars / typedChars) * 100);
+    const accuracyFactor = accuracy / 100;
+    const score = Math.round((wpm * 5 * 0.6 + cpm * 0.4) * accuracyFactor);
+    return { score, typedChars, correctChars, cpm, wpm, accuracy };
   }
 
   window.OwoggTypingRules = Object.freeze({
     VERIFIER_ID,
     RULESET_REVISION,
     MAX_WPM,
+    DURATION_MS,
     createChallenge,
+    wrapText,
     characterCount,
     calculateFacts,
   });

@@ -311,16 +311,25 @@ export async function uploadOfficialGame(file: File) {
   if (!res.ok) {
     let detail: string | undefined;
     let code: string | undefined;
+    let retryAfterSeconds: number | undefined;
     try {
-      const body = (await res.json()) as { error?: { code?: string; message?: string } };
+      const body = (await res.json()) as {
+        error?: { code?: string; message?: string; retryAfterSeconds?: number };
+      };
       detail = body.error?.message;
       code = body.error?.code;
+      retryAfterSeconds = body.error?.retryAfterSeconds;
     } catch {
       // Keep the HTTP fallback below when the response is not JSON.
+    }
+    const retryAfterHeader = Number.parseInt(res.headers.get("Retry-After") ?? "", 10);
+    if (retryAfterSeconds === undefined && Number.isFinite(retryAfterHeader)) {
+      retryAfterSeconds = retryAfterHeader;
     }
     throw new ApiClientError("HttpError", detail || `업로드에 실패했습니다. (HTTP ${res.status})`, {
       status: res.status,
       ...(code ? { code } : {}),
+      ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
     });
   }
   const result = AdminOfficialGameUploadResponseSchema.parse(await res.json());
@@ -344,12 +353,20 @@ async function uploadAdminGameFile<T>(input: {
   if (!res.ok) {
     let detail: string | undefined;
     let code: string | undefined;
+    let retryAfterSeconds: number | undefined;
     try {
-      const body = (await res.json()) as { error?: { code?: string; message?: string } };
+      const body = (await res.json()) as {
+        error?: { code?: string; message?: string; retryAfterSeconds?: number };
+      };
       detail = body.error?.message;
       code = body.error?.code;
+      retryAfterSeconds = body.error?.retryAfterSeconds;
     } catch {
       // Keep the HTTP fallback below.
+    }
+    const retryAfterHeader = Number.parseInt(res.headers.get("Retry-After") ?? "", 10);
+    if (retryAfterSeconds === undefined && Number.isFinite(retryAfterHeader)) {
+      retryAfterSeconds = retryAfterHeader;
     }
     throw new ApiClientError(
       "HttpError",
@@ -357,6 +374,7 @@ async function uploadAdminGameFile<T>(input: {
       {
         status: res.status,
         ...(code ? { code } : {}),
+        ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
       },
     );
   }

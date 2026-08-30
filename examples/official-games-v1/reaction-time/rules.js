@@ -2,7 +2,7 @@
   "use strict";
 
   const VERIFIER_ID = "reaction-time-v1";
-  const RULESET_REVISION = 2;
+  const RULESET_REVISION = 3;
   const BREAK_MS = 1400;
   const TIMING = Object.freeze({ minReactionMs: 80, maxReactionMs: 10_000 });
   const RULES = Object.freeze({
@@ -10,8 +10,8 @@
     hard: Object.freeze({ rounds: 7 }),
   });
   const VARIANTS = Object.freeze({
-    standard: Object.freeze({ waitMin: 1800, waitRange: 1800 }),
-    focus: Object.freeze({ waitMin: 2400, waitRange: 2200 }),
+    standard: Object.freeze({ waitMin: 2000, waitRange: 6001 }),
+    focus: Object.freeze({ waitMin: 2500, waitRange: 6501 }),
   });
 
   function seedHash(value) {

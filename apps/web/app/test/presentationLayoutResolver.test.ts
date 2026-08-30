@@ -3,11 +3,7 @@ import assert from "node:assert/strict";
 import type { GamePresentation } from "@owogg/game-sdk";
 import { resolvePresentationLayout } from "../features/game/presentationLayoutResolver";
 
-/**
- * Synthetic GamePresentation fixtures only — no real shipped game has one today (see
- * presentationLayoutResolver.ts's own doc comment), so nothing here asserts anything about a
- * particular game's actual gameplay.
- */
+/** Synthetic fixtures keep the sizing contract independent of any one game's implementation. */
 function responsive(
   overrides: Partial<Extract<GamePresentation["viewport"], { mode: "responsive" }>> = {},
 ): GamePresentation {
@@ -40,6 +36,25 @@ test("responsive with a preferred size that fits: preferred size wins", () => {
     },
   );
   assert.deepEqual(layout, { kind: "responsive", displayWidth: 800, displayHeight: 600 });
+});
+
+test("responsive paired dimensions keep their 16:9 ratio inside a taller host box", () => {
+  const layout = resolvePresentationLayout(
+    responsive({ preferredWidth: 1600, preferredHeight: 900 }),
+    { width: 1200, height: 820 },
+  );
+  assert.deepEqual(layout, { kind: "responsive", displayWidth: 1200, displayHeight: 675 });
+});
+
+test("responsive paired dimensions use height as the binding constraint without distortion", () => {
+  const layout = resolvePresentationLayout(
+    responsive({ preferredWidth: 1600, preferredHeight: 900 }),
+    { width: 1600, height: 600 },
+  );
+  assert.equal(layout.kind, "responsive");
+  if (layout.kind !== "responsive") return;
+  assert.equal(layout.displayHeight, 600);
+  assert.ok(Math.abs(layout.displayWidth / layout.displayHeight - 16 / 9) < Number.EPSILON * 2);
 });
 
 test("a game's minWidth never overrides a smaller actual viewport — no overflow", () => {

@@ -21,8 +21,24 @@ test("a request is rejected with 429 once the limiter reports failure", async ()
   const res = await request();
 
   assert.equal(res.status, 429);
+  assert.equal(res.headers.get("Retry-After"), "60");
   const body = (await res.json()) as { error: { code: string } };
   assert.equal(body.error.code, "RATE_LIMITED");
+});
+
+test("a route can expose its bound retry window to queued clients", async () => {
+  const app = new Hono();
+  app.post("/upload", rateLimit({ name: "upload", retryAfterSeconds: 90 }), (c) =>
+    c.json({ ok: true }),
+  );
+  const res = await app.request("/upload", { method: "POST" }, {
+    RATE_LIMITER: { limit: async () => ({ success: false }) },
+  } as never);
+
+  assert.equal(res.status, 429);
+  assert.equal(res.headers.get("Retry-After"), "90");
+  const body = (await res.json()) as { error: { retryAfterSeconds: number } };
+  assert.equal(body.error.retryAfterSeconds, 90);
 });
 
 test("a request is allowed when the limiter reports success", async () => {

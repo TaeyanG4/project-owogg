@@ -28,10 +28,11 @@ export async function apiFetch<T>(
   if (!res.ok) {
     let detail: string | undefined;
     let code: string | undefined;
+    let retryAfterSeconds: number | undefined;
     let data: unknown;
     try {
       const body = (await res.json()) as {
-        error?: string | { code?: string; message?: string };
+        error?: string | { code?: string; message?: string; retryAfterSeconds?: number };
         detail?: string;
         message?: string;
         [k: string]: unknown;
@@ -40,6 +41,7 @@ export async function apiFetch<T>(
       if (body?.error && typeof body.error === "object" && typeof body.error.message === "string") {
         detail = body.error.message;
         code = body.error.code;
+        retryAfterSeconds = body.error.retryAfterSeconds;
       } else if (typeof body?.error === "string") {
         detail = body.error;
       } else {
@@ -48,11 +50,22 @@ export async function apiFetch<T>(
     } catch {
       // Failed to parse body as json
     }
-    const errOptions: { status?: number; detail?: string; code?: string; data?: unknown } = {};
+    const retryAfterHeader = Number.parseInt(res.headers.get("Retry-After") ?? "", 10);
+    if (retryAfterSeconds === undefined && Number.isFinite(retryAfterHeader)) {
+      retryAfterSeconds = retryAfterHeader;
+    }
+    const errOptions: {
+      status?: number;
+      detail?: string;
+      code?: string;
+      data?: unknown;
+      retryAfterSeconds?: number;
+    } = {};
     if (res.status) errOptions.status = res.status;
     if (detail) errOptions.detail = detail;
     if (code) errOptions.code = code;
     if (data !== undefined) errOptions.data = data;
+    if (retryAfterSeconds !== undefined) errOptions.retryAfterSeconds = retryAfterSeconds;
 
     throw new ApiClientError(
       "HttpError",

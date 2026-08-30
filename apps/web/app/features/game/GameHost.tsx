@@ -240,10 +240,9 @@ export function buildGameResultFromBridgeComplete(
   };
 }
 
-// Today's fallback for every shipped game (none declares `presentation` yet — see
-// presentationLayoutResolver.ts's own doc comment): the exact `frameClassName` restored in #44,
-// unchanged. Kept as a named constant rather than inlined so the one call site building the
-// iframe's actual layout props (below) can't drift from it by accident.
+// Fallback for a game that omits `presentation`: the exact `frameClassName` restored in #44.
+// Kept as a named constant rather than inlined so the one call site building the iframe's actual
+// layout props (below) cannot drift from it by accident.
 const LEGACY_IFRAME_FRAME_CLASS_NAME = "h-[82vh] min-h-[520px] max-h-[900px] w-full";
 
 /**
@@ -651,9 +650,8 @@ export function GameHost({ slug }: GameHostProps) {
     [presentation, available?.width, available?.height],
   );
   // Game preference ∩ Platform constraints ∩ Actual available viewport → Host decides (see
-  // GamePresentation's own doc comment). "legacy" is every shipped game today: the exact
-  // frameClassName restored in #44, untouched — no frameStyle/iframeStyle at all, so GameFrame's
-  // rendering for this branch is byte-identical to before this PR.
+  // GamePresentation's own doc comment). "legacy" keeps the exact frameClassName restored in #44
+  // for manifests that do not declare presentation data.
   const iframeFrameClassName =
     presentationLayout.kind === "legacy" ? LEGACY_IFRAME_FRAME_CLASS_NAME : "mx-auto max-w-full";
   const iframeFrameStyle =
@@ -677,8 +675,8 @@ export function GameHost({ slug }: GameHostProps) {
   // never the iframe/GameFrame itself, and never anything inside it, so requestFullscreen always
   // targets Host-owned chrome, not a cross-origin document. It is attached to the complete player
   // shell (viewport plus the action footer), so the exit button remains inside the fullscreen
-  // subtree and accessible after entry. presentation === undefined
-  // (every shipped game today) always resolves showFullscreenControl to false, via
+  // subtree and accessible after entry. presentation === undefined always resolves
+  // showFullscreenControl to false, via
   // shouldShowFullscreenControl's own doc comment.
   const showFullscreenControl = shouldShowFullscreenControl(presentation, isFullscreenApiAvailable);
   const renderedIframeFrameClassName = isFullscreen

@@ -25,6 +25,7 @@ import { publicGameToCard } from "../features/catalog/publicGameAdapter";
 import { useI18n } from "../features/i18n/I18nContext";
 import { getLocalizedGameContent } from "../features/catalog/localizedGameContent";
 import { leaderboardVariantLabel } from "../features/scores/variantLabel";
+import { filterLeaderboardGames } from "../features/scores/leaderboardGames";
 
 export function meta() {
   return [
@@ -39,9 +40,10 @@ type LeaderboardState = "loading" | "success" | "error";
 export default function Ranking() {
   const { dict } = useI18n();
   const { games: publicGames } = usePublicGames();
+  const leaderboardGames = useMemo(() => filterLeaderboardGames(publicGames), [publicGames]);
   const gameManifests = useMemo(
-    () => publicGames.map((game) => publicGameToCard(game)),
-    [publicGames],
+    () => leaderboardGames.map((game) => publicGameToCard(game)),
+    [leaderboardGames],
   );
   const [mainTab, setMainTab] = useState<MainTab>("game");
 
@@ -63,6 +65,15 @@ export default function Ranking() {
 
   const [status, setStatus] = useState<LeaderboardState>("loading");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (
+      selectedGameId !== "all" &&
+      !leaderboardGames.some((game) => game.slug === selectedGameId)
+    ) {
+      setSelectedGameId("all");
+    }
+  }, [leaderboardGames, selectedGameId]);
 
   const filteredSidebarGames = useMemo(() => {
     const query = gameSearchQuery.trim().toLowerCase();

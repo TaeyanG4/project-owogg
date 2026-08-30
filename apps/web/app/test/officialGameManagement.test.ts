@@ -8,6 +8,8 @@ import {
   hideDeletedAdminGames,
   uploadOfficialGameBatch,
 } from "../components/admin/OfficialGameManagement";
+import { createOfficialGameUploadQueue } from "../components/admin/officialGameUploadQueue";
+import { ApiClientError } from "../lib/api";
 
 const managementSource = readFileSync(
   fileURLToPath(new URL("../components/admin/OfficialGameManagement.tsx", import.meta.url)),
@@ -146,6 +148,87 @@ test("admin batch upload publishes ZIPs serially and isolates a failed file", as
 
 test("the shared admin dropzone enables multi-file selection without changing creator uploads", () => {
   assert.match(managementSource, /multiple/);
+  assert.match(managementSource, /acceptWhileBusy/);
   assert.match(managementSource, /onFiles=\{handleOfficialUploads\}/);
   assert.match(managementSource, /slug별로 등록·업데이트/);
+});
+
+test("admin upload queue accepts another drop while the first file is still publishing", async () => {
+  let releaseFirst: (() => void) | undefined;
+  const firstBlocked = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  const order: string[] = [];
+  const queue = createOfficialGameUploadQueue({
+    publish: async (file: { name: string }) => {
+      order.push(file.name);
+      if (file.name === "first.zip") await firstBlocked;
+      return { slug: file.name, title: file.name };
+    },
+  });
+
+  queue.enqueue([{ name: "first.zip" }]);
+  await Promise.resolve();
+  queue.enqueue([{ name: "second.zip" }, { name: "third.zip" }]);
+  assert.deepEqual(
+    queue.results().map((result) => result.fileName),
+    ["first.zip", "second.zip", "third.zip"],
+  );
+  releaseFirst?.();
+  const results = await queue.waitForIdle();
+
+  assert.deepEqual(order, ["first.zip", "second.zip", "third.zip"]);
+  assert.deepEqual(
+    results.map((result) => result.status),
+    ["SUCCESS", "SUCCESS", "SUCCESS"],
+  );
+});
+
+test("admin upload queue waits and retries only a rate-limited file", async () => {
+  let calls = 0;
+  const waits: number[] = [];
+  const progress: string[] = [];
+  const results = await uploadOfficialGameBatch(
+    [{ name: "typing.zip" }],
+    async () => {
+      calls += 1;
+      if (calls === 1) {
+        throw new ApiClientError("HttpError", "rate limited", {
+          status: 429,
+          retryAfterSeconds: 7,
+        });
+      }
+      return { slug: "typing-test", title: "타자 속도 테스트" };
+    },
+    (next) => progress.push(next[0]?.status ?? "missing"),
+    { sleep: async (milliseconds) => void waits.push(milliseconds) },
+  );
+
+  assert.equal(calls, 2);
+  assert.deepEqual(waits, [7_000]);
+  assert.ok(progress.includes("RETRY_WAIT"));
+  assert.equal(results[0]?.status, "SUCCESS");
+});
+
+test("admin upload queue replaces an invalid retry hint with the bounded default", async () => {
+  const waits: number[] = [];
+  let calls = 0;
+  const results = await uploadOfficialGameBatch(
+    [{ name: "reaction.zip" }],
+    async () => {
+      calls += 1;
+      if (calls === 1) {
+        throw new ApiClientError("HttpError", "rate limited", {
+          status: 429,
+          retryAfterSeconds: Number.NaN,
+        });
+      }
+      return { slug: "reaction-time", title: "반응속도 테스트" };
+    },
+    undefined,
+    { sleep: async (milliseconds) => void waits.push(milliseconds) },
+  );
+
+  assert.deepEqual(waits, [60_000]);
+  assert.equal(results[0]?.status, "SUCCESS");
 });

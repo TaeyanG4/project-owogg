@@ -9,8 +9,10 @@ import {
 
 export const TYPING_TEST_SLUG = "typing-test";
 export const TYPING_TEST_VERIFIER_ID = "typing-test-v1";
-export const TYPING_TEST_RULESET_REVISION = 2;
+export const TYPING_TEST_RULESET_REVISION = 3;
 export const TYPING_TEST_MAX_WPM = 300;
+export const TYPING_TEST_DURATION_MS = 90_000;
+const TYPING_TEST_LINE_MAX_CHARACTERS = 48;
 
 type DifficultyId = "normal";
 type VariantId = "ko" | "en" | "ja" | "zh";
@@ -75,7 +77,8 @@ const PASSAGES = Object.freeze({
 } as const);
 
 export const TYPING_TEST_TIMING = Object.freeze({
-  maxCompletionMs: 900_000,
+  completionToleranceMs: 2_000,
+  maxCompletionMs: 95_000,
   maxClockLeadMs: 1_500,
   maxSubmissionLagMs: 15_000,
 });
@@ -92,54 +95,136 @@ export function createTypingTestChallenge(input: {
   readonly challengeSeed: string;
   readonly difficultyId: DifficultyId;
   readonly variantId: VariantId;
-}): { readonly passageId: string; readonly source: string; readonly text: string } {
+}): {
+  readonly passageId: string;
+  readonly lines: readonly { readonly source: string; readonly text: string }[];
+} {
   const candidates = PASSAGES[input.variantId];
-  const index =
+  const startIndex =
     seedHash(
       `${TYPING_TEST_VERIFIER_ID}|${TYPING_TEST_RULESET_REVISION}|${input.challengeSeed}|${input.difficultyId}|${input.variantId}`,
     ) % candidates.length;
+  const orderedPassages = Array.from(
+    { length: candidates.length * 3 },
+    (_, index) => candidates[(startIndex + index) % candidates.length],
+  );
   return Object.freeze({
-    passageId: `${input.variantId}-${input.difficultyId}-${index + 1}`,
-    source: candidates[index]?.source ?? "",
-    text: candidates[index]?.text ?? "",
+    passageId: `${input.variantId}-${input.difficultyId}-${startIndex + 1}`,
+    lines: Object.freeze(
+      orderedPassages.flatMap((passage) =>
+        passage
+          ? wrapTypingTestText(passage.text).map((text) =>
+              Object.freeze({ source: passage.source, text }),
+            )
+          : [],
+      ),
+    ),
   });
 }
 
+export function wrapTypingTestText(text: string): readonly string[] {
+  const words = text.trim().split(/\s+/u);
+  if (words.length <= 1) {
+    const characters = Array.from(text.trim());
+    return Object.freeze(
+      Array.from(
+        { length: Math.ceil(characters.length / TYPING_TEST_LINE_MAX_CHARACTERS) },
+        (_, index) =>
+          characters
+            .slice(
+              index * TYPING_TEST_LINE_MAX_CHARACTERS,
+              (index + 1) * TYPING_TEST_LINE_MAX_CHARACTERS,
+            )
+            .join(""),
+      ).filter(Boolean),
+    );
+  }
+
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const candidate = current.length === 0 ? word : `${current} ${word}`;
+    if (Array.from(candidate).length <= TYPING_TEST_LINE_MAX_CHARACTERS) {
+      current = candidate;
+    } else {
+      if (current) lines.push(current);
+      current = word;
+    }
+  }
+  if (current) lines.push(current);
+  return Object.freeze(lines);
+}
+
+interface TypingLineEvidence {
+  readonly index: number;
+  readonly typedText: string;
+}
+
 export function calculateTypingTestFacts(
-  text: string,
+  expectedLines: readonly string[],
+  typedLines: readonly TypingLineEvidence[],
   completedAtMs: number,
 ): {
+  readonly score: number;
   readonly typedChars: number;
+  readonly correctChars: number;
   readonly cpm: number;
   readonly wpm: number;
-  readonly accuracy: 100;
+  readonly accuracy: number;
 } {
-  const typedChars = Array.from(text).length;
+  let typedChars = 0;
+  let correctChars = 0;
+  for (const line of typedLines) {
+    const expected = Array.from(expectedLines[line.index] ?? "");
+    const typed = Array.from(line.typedText);
+    typedChars += typed.length;
+    typed.forEach((character, index) => {
+      if (character === expected[index]) correctChars += 1;
+    });
+  }
   const cpm = Math.round((typedChars * 60_000) / completedAtMs);
-  return { typedChars, cpm, wpm: Math.round(cpm / 5), accuracy: 100 };
+  const wpm = Math.round((correctChars * 12_000) / completedAtMs);
+  const accuracy = typedChars === 0 ? 0 : Math.round((correctChars / typedChars) * 100);
+  const accuracyFactor = accuracy / 100;
+  const score = Math.round((wpm * 5 * 0.6 + cpm * 0.4) * accuracyFactor);
+  return { score, typedChars, correctChars, cpm, wpm, accuracy };
 }
 
 function parseEvidence(
   value: unknown,
-): { passageId: string; typedText: string; completedAtMs: number } | null {
+): { passageId: string; lines: readonly TypingLineEvidence[]; completedAtMs: number } | null {
   if (
     !isPlainRecord(value) ||
-    !hasExactKeys(value, ["version", "passageId", "typedText", "completedAtMs"]) ||
-    value.version !== 1 ||
+    !hasExactKeys(value, ["version", "passageId", "lines", "completedAtMs"]) ||
+    value.version !== 2 ||
     typeof value.passageId !== "string" ||
     value.passageId.length < 1 ||
     value.passageId.length > 64 ||
-    typeof value.typedText !== "string" ||
-    Array.from(value.typedText).length > 2_000 ||
     !Number.isSafeInteger(value.completedAtMs) ||
     (value.completedAtMs as number) < 1 ||
-    (value.completedAtMs as number) > TYPING_TEST_TIMING.maxCompletionMs
+    (value.completedAtMs as number) > TYPING_TEST_TIMING.maxCompletionMs ||
+    !Array.isArray(value.lines) ||
+    value.lines.length > 256
   ) {
     return null;
   }
+  const lines: TypingLineEvidence[] = [];
+  for (const candidate of value.lines) {
+    if (
+      !isPlainRecord(candidate) ||
+      !hasExactKeys(candidate, ["index", "typedText"]) ||
+      !Number.isSafeInteger(candidate.index) ||
+      (candidate.index as number) < 0 ||
+      typeof candidate.typedText !== "string" ||
+      Array.from(candidate.typedText).length > TYPING_TEST_LINE_MAX_CHARACTERS
+    ) {
+      return null;
+    }
+    lines.push({ index: candidate.index as number, typedText: candidate.typedText });
+  }
   return {
     passageId: value.passageId,
-    typedText: value.typedText,
+    lines,
     completedAtMs: value.completedAtMs as number,
   };
 }
@@ -161,27 +246,49 @@ export const typingTestV1: GameVerifier = Object.freeze({
       difficultyId: input.playConfig.difficultyId,
       variantId: input.playConfig.variantId,
     });
-    if (evidence.passageId !== challenge.passageId || evidence.typedText !== challenge.text) {
+    if (evidence.passageId !== challenge.passageId || evidence.lines.length === 0) {
       return rejected("TYPING_TEXT_MISMATCH");
     }
-    const characterCount = Array.from(challenge.text).length;
-    const minimumElapsedMs = Math.ceil((characterCount * 12_000) / TYPING_TEST_MAX_WPM);
-    if (evidence.completedAtMs < minimumElapsedMs) return rejected("TYPING_SPEED_INVALID");
+    for (const [position, line] of evidence.lines.entries()) {
+      const expected = challenge.lines[position];
+      if (
+        !expected ||
+        line.index !== position ||
+        Array.from(line.typedText).length > Array.from(expected.text).length ||
+        (position < evidence.lines.length - 1 && line.typedText !== expected.text)
+      ) {
+        return rejected("TYPING_TEXT_MISMATCH");
+      }
+    }
+    if (
+      Math.abs(evidence.completedAtMs - TYPING_TEST_DURATION_MS) >
+      TYPING_TEST_TIMING.completionToleranceMs
+    ) {
+      return rejected("TYPING_DURATION_INVALID");
+    }
     if (!elapsedMatches(evidence.completedAtMs, input.serverElapsedMs, TYPING_TEST_TIMING)) {
       return rejected("TYPING_ELAPSED_MISMATCH");
     }
-    const facts = calculateTypingTestFacts(challenge.text, evidence.completedAtMs);
-    if (facts.wpm > TYPING_TEST_MAX_WPM) return rejected("TYPING_SPEED_INVALID");
+    const facts = calculateTypingTestFacts(
+      challenge.lines.map((line) => line.text),
+      evidence.lines,
+      evidence.completedAtMs,
+    );
+    if (facts.typedChars === 0 || facts.wpm > TYPING_TEST_MAX_WPM || facts.cpm > 1_500) {
+      return rejected("TYPING_SPEED_INVALID");
+    }
     return {
       accepted: true,
       facts: {
         outcome: "success",
-        score: facts.wpm,
-        progression: { value: facts.typedChars },
+        score: facts.score,
+        progression: { value: facts.correctChars },
         metrics: {
+          wpm: facts.wpm,
           cpm: facts.cpm,
           accuracy: facts.accuracy,
           typedChars: facts.typedChars,
+          correctChars: facts.correctChars,
         },
         events: { completed: 1 },
       },

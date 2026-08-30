@@ -44,7 +44,8 @@ test("Phase 7 source covers exactly every frozen Staging GAME identity", () => {
   assert.match(buildSource, /already exists with different content/);
   assert.match(buildSource, /artifactVersion/);
   for (const game of officialV1Games) {
-    assert.equal(game.artifactVersion, 1, `${game.slug}: artifact version`);
+    assert.equal(game.artifactVersion, "1.0.0", `${game.slug}: artifact version`);
+    assert.match(game.artifactVersion, /^\d+\.\d+\.\d+$/, `${game.slug}: artifact SemVer`);
     const directory = path.join(fixtureRoot, game.slug);
     assert.deepEqual(
       fs.readdirSync(directory).sort(),
@@ -99,11 +100,17 @@ test("official manifests expose only their product-owned configuration axes", ()
 
   const typing = manifest("typing-test");
   assert.equal(typing.difficulties, undefined);
+  assert.equal(typing.playConfig?.rulesetRevision, 3);
+  assert.equal(typing.result.score?.unit, "점");
+  assert.equal(typing.leaderboard?.enabled, true);
   assert.deepEqual(
     typing.playConfig?.variants.map((variant) => variant.id),
     ["ko", "en", "ja", "zh"],
   );
   assert.equal(typing.playConfig?.allowedConfigs.length, 4);
+
+  const reaction = manifest("reaction-time");
+  assert.equal(reaction.playConfig?.rulesetRevision, 3);
 
   const omok = manifest("official-omok");
   assert.equal(omok.playConfig, undefined);
@@ -205,12 +212,15 @@ test("standalone deterministic rules match their reviewed server verifiers", () 
   const typing = loadBrowserRules<{
     createChallenge(input: { challengeSeed: string; difficultyId: "normal"; variantId: "ja" }): {
       readonly passageId: string;
-      readonly source: string;
-      readonly text: string;
+      readonly lines: readonly { readonly source: string; readonly text: string }[];
     };
   }>("typing-test", "OwoggTypingRules");
   assert.deepEqual(
-    { ...typing.createChallenge({ challengeSeed, difficultyId: "normal", variantId: "ja" }) },
+    JSON.parse(
+      JSON.stringify(
+        typing.createChallenge({ challengeSeed, difficultyId: "normal", variantId: "ja" }),
+      ),
+    ),
     createTypingTestChallenge({ challengeSeed, difficultyId: "normal", variantId: "ja" }),
   );
 

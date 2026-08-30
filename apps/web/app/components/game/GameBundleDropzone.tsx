@@ -7,6 +7,9 @@ interface GameBundleDropzoneProps {
   onFile: (file: File) => void | Promise<void>;
   onFiles?: ((files: readonly File[]) => void | Promise<void>) | undefined;
   multiple?: boolean | undefined;
+  /** Admin batch publication owns a cumulative queue, so another selection can be appended while
+   * the current file is still publishing. Creator uploads retain their existing busy lock. */
+  acceptWhileBusy?: boolean | undefined;
   actionLabel?: string;
 }
 
@@ -22,12 +25,13 @@ export function GameBundleDropzone({
   onFile,
   onFiles,
   multiple = false,
+  acceptWhileBusy = false,
   actionLabel = "또는 파일 선택",
 }: GameBundleDropzoneProps) {
   const [dragActive, setDragActive] = useState(false);
 
   const submit = (files: FileList | readonly File[]) => {
-    if (busy) return;
+    if (busy && !acceptWhileBusy) return;
     const selected = Array.from(files);
     if (selected.length === 0) return;
     if (multiple && onFiles) {
@@ -69,7 +73,7 @@ export function GameBundleDropzone({
           accept=".zip,application/zip"
           multiple={multiple}
           className="hidden"
-          disabled={busy}
+          disabled={busy && !acceptWhileBusy}
           onChange={(event) => {
             const files = event.target.files;
             event.target.value = "";
