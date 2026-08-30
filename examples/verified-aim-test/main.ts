@@ -45,6 +45,7 @@ declare global {
   interface Window {
     OWOGG?: {
       readonly playConfig: PublicPlayConfig | null;
+      whenReady(): Promise<void>;
       requestStart(config: {
         readonly difficultyId: string;
         readonly variantId: string;
@@ -73,6 +74,8 @@ const playEl = element<HTMLElement>("play");
 const finishedEl = element<HTMLElement>("finished");
 const difficultyEl = element<HTMLSelectElement>("difficulty");
 const variantEl = element<HTMLSelectElement>("variant");
+const difficultyGroupEl = element<HTMLElement>("difficultyGroup");
+const variantGroupEl = element<HTMLElement>("variantGroup");
 const startEl = element<HTMLButtonElement>("start");
 const arenaEl = element<HTMLDivElement>("arena");
 const targetEl = element<HTMLButtonElement>("target");
@@ -215,15 +218,26 @@ async function begin(): Promise<void> {
 
 startEl.addEventListener("click", () => void begin());
 
-const api = window.OWOGG;
-const playConfig = api?.playConfig;
-if (!api || !playConfig) {
-  statusEl.textContent = "이 참조 게임은 OWOGG의 서버 검증 실행 환경에서만 시작할 수 있습니다.";
-} else {
+async function initialize(): Promise<void> {
+  const api = window.OWOGG;
+  if (!api?.whenReady) return;
+  await api.whenReady();
+  const playConfig = api.playConfig;
+  if (!playConfig) {
+    statusEl.textContent = "게임 준비 정보를 불러오지 못했습니다.";
+    return;
+  }
   setOptions(difficultyEl, playConfig.difficulties, playConfig.defaultDifficultyId);
   setOptions(variantEl, playConfig.variants, playConfig.defaultVariantId);
+  difficultyGroupEl.classList.toggle("hidden", playConfig.difficulties.length <= 1);
+  variantGroupEl.classList.toggle("hidden", playConfig.variants.length <= 1);
   difficultyEl.addEventListener("change", () => updateStartAvailability(playConfig));
   variantEl.addEventListener("change", () => updateStartAvailability(playConfig));
   updateStartAvailability(playConfig);
-  statusEl.textContent = "난이도와 모드를 고른 뒤 서버 승인을 받아 시작하세요.";
+  statusEl.textContent =
+    playConfig.difficulties.length > 1 || playConfig.variants.length > 1
+      ? "게임 안에서 설정을 고른 뒤 시작하세요."
+      : "바로 게임을 시작할 수 있습니다.";
 }
+
+void initialize();

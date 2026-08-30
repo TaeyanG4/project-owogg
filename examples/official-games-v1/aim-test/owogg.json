@@ -8,7 +8,7 @@
     "mode": "single",
     "playModes": ["single"],
     "shortDescription": "서버 seed로 생성된 표적을 빠르고 정확하게 클릭하세요.",
-    "description": "OWOGG 서버가 승인한 난이도와 모드, challenge seed로 표적 위치를 결정합니다. 게임은 점수 대신 순차 hit evidence를 제출하고 verifier가 완료 시간을 계산합니다.",
+    "description": "게임 안에서 난이도를 고르면 OWOGG 서버가 승인한 challenge seed로 표적 위치를 결정합니다. 게임은 점수 대신 순차 hit evidence를 제출하고 verifier가 완료 시간을 계산합니다.",
     "tags": ["aim", "reaction", "verified"]
   },
   "input": ["mouse", "touch"],
@@ -21,15 +21,10 @@
     "version": 1,
     "rulesetRevision": 1,
     "verifierId": "aim-test-v1",
-    "variants": [
-      { "id": "standard", "title": "표준", "default": true },
-      { "id": "precision", "title": "정밀" }
-    ],
+    "variants": [{ "id": "standard", "title": "표준", "default": true }],
     "allowedConfigs": [
       { "difficultyId": "normal", "variantId": "standard", "rewardFactor": 1 },
-      { "difficultyId": "normal", "variantId": "precision", "rewardFactor": 1.1 },
-      { "difficultyId": "hard", "variantId": "standard", "rewardFactor": 1.25 },
-      { "difficultyId": "hard", "variantId": "precision", "rewardFactor": 1.5 }
+      { "difficultyId": "hard", "variantId": "standard", "rewardFactor": 1.25 }
     ]
   },
   "progression": {

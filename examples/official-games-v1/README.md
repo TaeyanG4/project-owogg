@@ -1,7 +1,8 @@
-# OWOGG official game v1 rebuilds
+# OWOGG official game v1 migrations
 
-Phase 7에서 기존 공식 게임 identity를 단일 `owogg.json` v1 규격으로 다시 만든 업로드 전용
-standalone 소스입니다. 이 디렉터리는 runtime registry가 아니며 Web/API가 slug로 참조하지 않습니다.
+Phase 7에서 기존 공식 게임 identity와 UI·상호작용·로고를 보존하고, 클라이언트 점수와 구 runtime
+연결부만 단일 `owogg.json` v1의 PlayConfig/evidence/Relay 경계로 교체한 업로드 전용 standalone
+소스입니다. 이 디렉터리는 runtime registry가 아니며 Web/API가 slug로 참조하지 않습니다.
 관리자 화면에서 기존 identity를 삭제한 뒤 생성된 ZIP을 직접 등록합니다.
 
 ```bash
@@ -20,6 +21,12 @@ pnpm exec tsx examples/official-games-v1/verify-all.mjs
 - `aim-test`: seed 기반 표적 좌표와 순차 hit evidence를 검증하는 PlayConfig 게임
 - `typing-test`: seed가 선택한 문장과 입력 evidence로 WPM을 계산하는 PlayConfig 게임
 - `memory-test`: seed 기반 색상 순서와 입력 evidence로 완료 level을 계산하는 PlayConfig 게임
+
+게임은 `await OWOGG.whenReady()` 뒤 공개 PlayConfig를 읽습니다. 선택기와 기본값은 `owogg.json`에서
+정규화된 값만 사용하며 항목이 하나인 difficulty/variant 축은 표시하지 않습니다. 현재 제품 UI는
+에임의 난이도 2단계, 타자의 한국어·영어/단문·장문 4개 조합만 선택 화면을 보이고, 반응속도와
+기억력은 단일 설정으로 바로 시작합니다. 오목은 local/online topology만 고르며 score와 leaderboard를
+선언하지 않습니다.
 
 온라인 오목의 payload 규칙과 상태 권위는 ZIP 안의 host-authoritative application protocol이
 소유합니다. 플랫폼 서버에는 오목 driver/ruleset이 없습니다. 반대로 싱글 경쟁 결과 verifier는

@@ -29,6 +29,8 @@ export const OWOGG_BROWSER_API_SOURCE = String.raw`(function () {
   var selectedPlayMode = null;
   var pendingPlayMode = null;
   var publicPlayModes = Object.freeze([]);
+  var bridgeReadyResolve = null;
+  var bridgeReady = new Promise(function (resolve) { bridgeReadyResolve = resolve; });
   var bootstrap = null;
   var readyRequested = false;
   var left = false;
@@ -472,6 +474,7 @@ export const OWOGG_BROWSER_API_SOURCE = String.raw`(function () {
   Object.freeze(multiplayerApi);
 
   var api = {
+    whenReady: function () { return bridgeReady; },
     selectPlayMode: function (playMode) {
       if (completed || activeMode === "multiplayer") return Promise.reject(playModeError("MODE_UNAVAILABLE"));
       if (playModeRequested) return Promise.reject(playModeError("ALREADY_SELECTED"));
@@ -560,6 +563,10 @@ export const OWOGG_BROWSER_API_SOURCE = String.raw`(function () {
       genericPort.onmessage = receiveGeneric;
       if (typeof genericPort.start === "function") genericPort.start();
       post(genericPort, { type: "GAME_READY" });
+      if (bridgeReadyResolve) {
+        bridgeReadyResolve();
+        bridgeReadyResolve = null;
+      }
       var queuedGeneric = genericQueue.splice(0);
       if (pendingPlayMode && publicPlayModes.indexOf(pendingPlayMode.playMode) === -1) {
         var invalidMode = pendingPlayMode;
@@ -607,6 +614,10 @@ export const OWOGG_BROWSER_API_SOURCE = String.raw`(function () {
     multiplayerPort = nextPort;
     multiplayerPort.onmessage = receiveMultiplayer;
     if (typeof multiplayerPort.start === "function") multiplayerPort.start();
+    if (bridgeReadyResolve) {
+      bridgeReadyResolve();
+      bridgeReadyResolve = null;
+    }
     multiplayerQueue.splice(0).forEach(sendMultiplayerIntent);
   }
 

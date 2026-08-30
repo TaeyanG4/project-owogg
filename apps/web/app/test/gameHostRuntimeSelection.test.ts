@@ -171,6 +171,63 @@ test("buildPublicPlayConfigDescriptor supplies approved difficulty/variant pairs
   assert.equal("verifierId" in (descriptor ?? {}), false);
 });
 
+test("buildPublicPlayConfigDescriptor supplies one implicit normal difficulty when the manifest omits it", () => {
+  const game = {
+    playConfig: {
+      version: 1,
+      rulesetRevision: 3,
+      defaultVariantId: "solo",
+      variants: [{ id: "solo", label: "바로 시작" }],
+      allowedConfigs: [{ difficultyId: "normal", variantId: "solo", rewardFactor: 1 }],
+    },
+  } as unknown as PublicGame;
+
+  assert.deepEqual(buildPublicPlayConfigDescriptor(game), {
+    defaultDifficultyId: "normal",
+    defaultVariantId: "solo",
+    difficulties: [{ id: "normal", label: "Normal" }],
+    variants: [{ id: "solo", label: "바로 시작" }],
+    allowedConfigs: [{ difficultyId: "normal", variantId: "solo", rewardFactor: 1 }],
+  });
+});
+
+test("buildPublicPlayConfigDescriptor preserves arbitrary reviewed ids and a non-cartesian allowlist", () => {
+  const game = {
+    difficulty: {
+      levels: [
+        { id: "story-calm", label: "Calm" },
+        { id: "story-storm", label: "Storm" },
+      ],
+      defaultLevelId: "story-calm",
+    },
+    playConfig: {
+      version: 1,
+      rulesetRevision: 9,
+      defaultVariantId: "timed-duo",
+      variants: [
+        { id: "timed-duo", label: "Timed Duo" },
+        { id: "endless-solo", label: "Endless Solo" },
+      ],
+      allowedConfigs: [
+        { difficultyId: "story-calm", variantId: "timed-duo", rewardFactor: 1 },
+        { difficultyId: "story-storm", variantId: "endless-solo", rewardFactor: 1.7 },
+      ],
+    },
+  } as unknown as PublicGame;
+
+  const descriptor = buildPublicPlayConfigDescriptor(game);
+  assert.deepEqual(descriptor?.allowedConfigs, [
+    { difficultyId: "story-calm", variantId: "timed-duo", rewardFactor: 1 },
+    { difficultyId: "story-storm", variantId: "endless-solo", rewardFactor: 1.7 },
+  ]);
+  assert.equal(
+    descriptor?.allowedConfigs.some(
+      (config) => config.difficultyId === "story-calm" && config.variantId === "endless-solo",
+    ),
+    false,
+  );
+});
+
 // ── shouldRemountIframeOnDifficultyChange ────────────────────────────────────
 
 test("shouldRemountIframeOnDifficultyChange: never fires for a game with no difficulty tiers", () => {

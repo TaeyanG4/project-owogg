@@ -8,40 +8,40 @@
   </head>
   <body>
     <main class="shell">
-      <header>
-        <p class="eyebrow">SERVER VERIFIED</p>
+      <section id="setup" class="setup">
         <h1>타자 속도 테스트</h1>
-        <p id="status" role="status">서버 실행 환경을 확인하는 중입니다.</p>
-      </header>
-      <section id="setup" class="panel">
-        <div class="config-grid">
-          <label>난이도<select id="difficulty"></select></label
-          ><label>언어<select id="variant"></select></label>
-        </div>
-        <button id="start" class="primary" type="button">서버 승인 후 시작</button>
+        <p id="setup-note">게임을 준비하는 중입니다.</p>
+        <div id="mode-options" class="mode-options"></div>
       </section>
-      <section id="play" class="panel hidden">
-        <p id="passage" class="passage"></p>
-        <label for="typing-input">위 문장을 정확히 입력하세요.</label>
-        <textarea
-          id="typing-input"
-          rows="4"
-          autocomplete="off"
-          autocapitalize="off"
-          spellcheck="false"
-        ></textarea>
+
+      <section id="play" class="play hidden" aria-label="타자 테스트">
         <div class="stats">
-          <span>진행 <strong id="progress">0 / 0</strong></span
-          ><span>정확도 <strong id="accuracy">100%</strong></span
-          ><span>시간 <strong id="elapsed">0.0s</strong></span>
+          <span>경과 시간 <b id="elapsed">0.0초</b></span>
+          <span>속도 (WPM) <b id="wpm">0</b></span>
+          <span>타수 (CPM) <b id="cpm">0</b></span>
+          <span>정확도 <b id="accuracy">100%</b></span>
         </div>
-        <button id="submit" class="primary" type="button" disabled>검증 evidence 제출</button>
+        <div id="passage-card" class="passage-card">
+          <p id="passage" class="passage" aria-live="polite"></p>
+          <input
+            id="typing-input"
+            type="text"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            aria-label="표시된 문장 입력"
+          />
+          <p id="input-note" class="input-note">키보드를 눌러 시작하세요.</p>
+        </div>
       </section>
-      <section id="finished" class="panel hidden">
-        <h2>입력 완료</h2>
-        <p id="summary"></p>
-        <p>표시 점수는 참고용이며 최종 WPM은 서버가 계산합니다.</p>
+
+      <section id="finished" class="finished hidden">
+        <span>입력 완료</span>
+        <strong id="summary"></strong>
+        <p id="result-detail"></p>
+        <button id="retry" type="button">다시 도전하기</button>
       </section>
+      <p id="status" class="status" role="status">게임을 준비하는 중입니다.</p>
     </main>
     <script src="./rules.js"></script>
     <script src="./game.js"></script>

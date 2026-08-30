@@ -4,7 +4,7 @@
 
 기준일: 2026-08-30
 
-기준 브랜치: `feature/unified-v1-game-rebuild` (최종 반영은 Staging-first)
+기준 브랜치: `staging` (작업 브랜치는 최신 Staging에서 분기)
 
 이 문서는 OwOGG 온라인 멀티플레이를 게임별 server ruleset/driver 방식에서 공용 WebSocket
 Relay 방식으로 전환하는 유일한 활성 계획입니다. 이전 M1/M2 driver, managed-template, Creator
@@ -168,7 +168,7 @@ brain 정책이 별도로 검증된 뒤 additive feature로 연다.
 - PlayConfig, gs2 verifier, single/local result와 leaderboard 경계
 - D1/B2 public catalog와 ZIP publication
 
-### 4.2 Relay 기준으로 리팩터링
+### 4.2 Relay 기준 리팩터링 완료 대상
 
 - `packages/game-sdk/src/contracts/multiplayerManifest.ts`
 - `packages/core/src/modules/multiplayer/domain/multiplayerCapability.ts`
@@ -185,7 +185,7 @@ brain 정책이 별도로 검증된 뒤 additive feature로 연다.
 - Admin profile review/activation API와 게임별 exact-version 운영 UI (별도 전역 큐 UI는
   2026-08-30 제거)
 
-### 4.3 Relay cutover 뒤 삭제
+### 4.3 Relay cutover에서 삭제 완료
 
 - `apps/api/src/multiplayer/rulesets/MultiplayerRulesetDriver.ts`
 - `apps/api/src/multiplayer/rulesets/OmokM1Driver.ts`
@@ -200,21 +200,20 @@ brain 정책이 별도로 검증된 뒤 additive feature로 연다.
 - `packages/core/src/modules/multiplayer/application/officialMultiplayerProfileUseCases.ts`
 - `OMOK_V1`, `official:omok`, fixed managed-template activation과 관련 test/fixture
 
-삭제는 Relay 계약·runtime·회귀 테스트가 먼저 통과한 뒤 수행한다. 대체 구현 없이 선삭제하지 않는다.
+Relay 계약·runtime·회귀 테스트를 먼저 통과시킨 뒤 삭제했으며 대체 구현 없는 선삭제는 수행하지 않았다.
 
-### 4.4 일반화하거나 이름 변경
+### 4.4 일반화·이름 변경 완료
 
 - `seatIndex: 0 | 1`, left/right player와 singular opponent를 2~8인 roster로 바꾼다.
 - `requestedByOpponent`를 participant request set/quorum으로 바꾼다.
 - `MultiplayerLegacyFlowGate`는 `SelectedTopologyAuthorityGate`처럼 실제 역할로 이름을 바꾼다.
 - runtime resolution의 `LEGACY`는 `GENERIC`으로 바꾼다.
-- `gameSessionV2`는 manifest v2가 아니므로 gs2 wire prefix는 유지하되 source 이름을
-  `verifiedGameSession`으로 바꾼다.
+- verified session source 이름은 token wire prefix와 분리해 `verifiedGameSession`으로 정리했다.
 
 ### 4.5 삭제하면 안 되는 false positive
 
 - 경쟁 싱글게임의 reviewed verifier는 leaderboard 신뢰 경계이며 multiplayer driver와 무관하다.
-- `gs2`는 manifest/canonical v2가 아니라 server-verified session token이다.
+- `gs2`는 manifest/schema 버전이 아니라 server-verified session token의 wire prefix다.
 - historical migration은 runtime compatibility code가 아니다.
 - applied migration, audit row와 D1/B2 identity는 이름에 legacy가 있어도 소비자를 확인하기 전 삭제하지
   않는다.
@@ -253,7 +252,7 @@ brain 정책이 별도로 검증된 뒤 additive feature로 연다.
 
 Phase 0 시작 전 기준은 80/120점, 67% 완료·33% 남음이었다. Phase 0 완료 기준은 81/120점,
 67.5% 완료·32.5% 남음이다. Phase 1 완료 기준은 85/120점, 70.8% 완료·29.2% 남음이다. 각 Phase가
-끝날 때 완료율, 계획 준수, 계획 변경과 검증 범위를 `WORK_PROGRESS.md`에 기록한다. Phase 2 완료
+끝날 때 완료율, 계획 준수, 계획 변경과 검증 범위를 이 문서의 각 Phase 기록에 남긴다. Phase 2 완료
 기준은 93/120점, 77.5% 완료·22.5% 남음이고 Phase 3 완료 기준은 98/120점, 81.7% 완료·18.3% 남음이다.
 Phase 4 완료 기준은 101/120점, 84.2% 완료·15.8% 남음이다. Phase 5 완료 기준은 104/120점,
 86.7% 완료·13.3% 남음이다.
@@ -442,12 +441,21 @@ Phase 7은 2026-08-30 로컬 구현과 산출물 검증을 완료했고 Staging 
   삭제·게임 재등록 대상이 아니다.
 - 5개 모두 root 6-file standalone ZIP source와 unified manifest v1로 재작성했다. 오목은 같은 ZIP의
   `local-multi + online-multi`이며 online application rule/state/win 처리는 ZIP 안에만 있다.
+- 최초 conformance fixture 중심 재작성은 제품 UI·상호작용·로고를 불필요하게 버린 범위 판단 오류로
+  확인했다. historical 게임의 UI·상호작용·로고와 재사용 가능한 로직은 복원하고, 신뢰할 수 없는
+  client score/random/session 연결부만 seed/evidence/Relay 경계로 교체했다.
+- 모든 게임은 `await OWOGG.whenReady()` 뒤 공개 descriptor를 읽는다. 에임과 타자의 실제 선택지만
+  게임 내부에 표시하고, difficulty/variant가 각각 한 개뿐인 반응속도·기억력은 선택기를 숨겨 바로
+  시작한다. 오목은 manifest의 `playModes`에서 local/online 런처를 만들고 score/leaderboard를 사용하지
+  않는다.
 - 경쟁 싱글 4종은 `reaction-time-v1`, `aim-test-v1`, `typing-test-v1`, `memory-test-v1` reviewed
   verifier가 seed/config/evidence를 검증하고 서버에서 점수를 계산한다. 이는 Relay driver가 아니라
   leaderboard 신뢰 경계이며 intended slug/revision 불일치를 fail closed한다.
 - 브라우저 규칙과 서버 verifier parity, manifest, ZIP path/size, 금지 network API, Bridge 호출,
   deterministic rebuild를 검증했다. 재현 SHA와 bytes는 `examples/official-games-v1/inventory.json`에
   고정했다.
+- 1280×720, 640×720, 375×667 로컬 browser 검증에서 다섯 게임의 내부 선택기·직접 시작·local 전환과
+  가로/세로 overflow가 없음을 확인했다.
 - 삭제된 game workspace의 tsconfig/lock importer와 Web의 반응속도 전용 tier 결과 UI를 제거했다.
   active Relay runtime에는 게임 slug/driver/ruleset 종속이 없다.
 - 루트 `pnpm verify`와 별도 strict ZIP 검증이 모두 통과했다.

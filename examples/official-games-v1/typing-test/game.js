@@ -3,60 +3,103 @@
 
   const rules = window.OwoggTypingRules;
   const api = window.OWOGG;
-  const status = document.querySelector("#status");
   const setup = document.querySelector("#setup");
+  const setupNote = document.querySelector("#setup-note");
+  const modeOptions = document.querySelector("#mode-options");
   const play = document.querySelector("#play");
   const finished = document.querySelector("#finished");
-  const difficulty = document.querySelector("#difficulty");
-  const variant = document.querySelector("#variant");
-  const start = document.querySelector("#start");
   const passage = document.querySelector("#passage");
+  const passageCard = document.querySelector("#passage-card");
   const input = document.querySelector("#typing-input");
-  const progress = document.querySelector("#progress");
-  const accuracy = document.querySelector("#accuracy");
+  const inputNote = document.querySelector("#input-note");
   const elapsed = document.querySelector("#elapsed");
-  const submit = document.querySelector("#submit");
+  const wpm = document.querySelector("#wpm");
+  const cpm = document.querySelector("#cpm");
+  const accuracy = document.querySelector("#accuracy");
   const summary = document.querySelector("#summary");
+  const resultDetail = document.querySelector("#result-detail");
+  const retry = document.querySelector("#retry");
+  const status = document.querySelector("#status");
 
+  let config = null;
   let challenge = null;
   let startedAt = 0;
   let timer = null;
   let completed = false;
+  let typingStarted = false;
 
-  function setOptions(select, options, selected) {
-    select.replaceChildren(
-      ...options.map((option) => {
-        const item = document.createElement("option");
-        item.value = option.id;
-        item.textContent = option.label;
-        item.selected = option.id === selected;
-        return item;
-      }),
-    );
+  function labelFor(entries, id) {
+    return entries.find((entry) => entry.id === id)?.label ?? id;
   }
-  function selectedConfig(config) {
-    return config.allowedConfigs.find(
-      (item) => item.difficultyId === difficulty.value && item.variantId === variant.value,
-    );
+
+  function configLabel(item) {
+    if (!config) return { title: "기본", detail: "" };
+    const parts = [];
+    if (config.variants.length > 1) parts.push(labelFor(config.variants, item.variantId));
+    if (config.difficulties.length > 1)
+      parts.push(labelFor(config.difficulties, item.difficultyId));
+    return {
+      title: parts.join(" · ") || "바로 시작",
+      detail:
+        config.variants.length > 1 && config.difficulties.length > 1
+          ? `${labelFor(config.variants, item.variantId)} / ${labelFor(config.difficulties, item.difficultyId)}`
+          : "선택한 설정으로 시작합니다.",
+    };
   }
-  function updateStart(config) {
-    start.disabled = !selectedConfig(config);
-  }
+
   function elapsedMs() {
     return Math.max(1, Math.round(performance.now() - startedAt));
   }
 
-  function renderInput() {
+  function calculateLiveStats() {
+    if (!challenge) return { correct: 0, typed: 0, cpm: 0, wpm: 0, accuracy: 100 };
+    const expected = Array.from(challenge.text);
+    const typed = Array.from(input.value);
+    let correct = 0;
+    for (let index = 0; index < typed.length; index += 1) {
+      if (typed[index] === expected[index]) correct += 1;
+    }
+    const duration = elapsedMs();
+    const liveCpm = typingStarted ? Math.round((typed.length * 60_000) / duration) : 0;
+    return {
+      correct,
+      typed: typed.length,
+      cpm: liveCpm,
+      wpm: typingStarted ? Math.round((correct * 12_000) / duration) : 0,
+      accuracy: typed.length === 0 ? 100 : Math.round((correct / typed.length) * 100),
+    };
+  }
+
+  function renderPassage() {
     if (!challenge) return;
     const expected = Array.from(challenge.text);
     const typed = Array.from(input.value);
-    let matches = 0;
-    for (let index = 0; index < Math.min(expected.length, typed.length); index += 1)
-      if (expected[index] === typed[index]) matches += 1;
-    const denominator = Math.max(expected.length, typed.length, 1);
-    progress.textContent = `${typed.length} / ${expected.length}`;
-    accuracy.textContent = `${Math.round((matches / denominator) * 100)}%`;
-    submit.disabled = completed || input.value !== challenge.text;
+    passage.replaceChildren(
+      ...expected.map((expectedCharacter, index) => {
+        const character = document.createElement("span");
+        const actualCharacter = typed[index];
+        character.textContent = expectedCharacter === " " ? "\u00a0" : expectedCharacter;
+        if (actualCharacter !== undefined) {
+          character.className = actualCharacter === expectedCharacter ? "correct" : "incorrect";
+          if (actualCharacter !== expectedCharacter) {
+            character.textContent = actualCharacter === " " ? "␣" : actualCharacter;
+          }
+        } else if (index === typed.length && !completed) {
+          character.className = "current";
+        }
+        return character;
+      }),
+    );
+    const live = calculateLiveStats();
+    wpm.textContent = String(live.wpm);
+    cpm.textContent = String(live.cpm);
+    accuracy.textContent = `${live.accuracy}%`;
+    inputNote.textContent = `${live.typed} / ${expected.length}자`;
+  }
+
+  function updateClock() {
+    elapsed.textContent = `${(elapsedMs() / 1000).toFixed(1)}초`;
+    renderPassage();
   }
 
   function complete() {
@@ -66,12 +109,12 @@
     if (timer !== null) window.clearInterval(timer);
     timer = null;
     input.disabled = true;
-    submit.disabled = true;
+    const facts = rules.calculateFacts(challenge.text, completedAtMs);
     play.classList.add("hidden");
     finished.classList.remove("hidden");
-    const facts = rules.calculateFacts(challenge.text, completedAtMs);
-    summary.textContent = `로컬 측정 ${facts.wpm} WPM · ${facts.cpm} CPM · ${(completedAtMs / 1000).toFixed(1)}초`;
-    status.textContent = "evidence를 제출했습니다. 서버 검증 결과를 확인하세요.";
+    summary.textContent = `${facts.wpm} WPM`;
+    resultDetail.textContent = `${facts.cpm} CPM · 정확도 100% · ${(completedAtMs / 1000).toFixed(1)}초`;
+    status.textContent = "플레이 기록을 안전하게 확인하고 있습니다.";
     api.complete({
       evidence: {
         version: 1,
@@ -82,14 +125,24 @@
     });
   }
 
-  async function begin() {
-    const config = api?.playConfig;
-    const allowed = config ? selectedConfig(config) : null;
-    if (!api || !config || !allowed) return;
-    start.disabled = true;
-    difficulty.disabled = true;
-    variant.disabled = true;
-    status.textContent = "선택한 설정을 서버에 승인 요청하는 중입니다.";
+  function handleInput() {
+    if (!challenge || completed) return;
+    if (!typingStarted && input.value.length > 0) {
+      typingStarted = true;
+      startedAt = performance.now();
+      api.start();
+      timer = window.setInterval(updateClock, 100);
+      status.textContent = "문장을 똑같이 입력하세요.";
+    }
+    renderPassage();
+    if (input.value === challenge.text) complete();
+  }
+
+  async function begin(allowed) {
+    modeOptions.querySelectorAll("button").forEach((button) => {
+      button.disabled = true;
+    });
+    setupNote.textContent = "선택한 모드로 플레이를 준비하고 있습니다.";
     try {
       const context = await api.requestStart({
         difficultyId: allowed.difficultyId,
@@ -103,37 +156,67 @@
       });
       if (!challenge) throw new Error("config");
       completed = false;
+      typingStarted = false;
       input.value = "";
-      passage.textContent = challenge.text;
+      input.disabled = false;
+      elapsed.textContent = "0.0초";
       setup.classList.add("hidden");
       finished.classList.add("hidden");
       play.classList.remove("hidden");
-      startedAt = performance.now();
-      api.start();
-      status.textContent = "문장을 똑같이 입력하세요.";
-      renderInput();
+      renderPassage();
+      status.textContent = "키보드를 눌러 테스트를 시작하세요.";
       input.focus();
-      timer = window.setInterval(() => {
-        elapsed.textContent = `${(elapsedMs() / 1000).toFixed(1)}s`;
-      }, 100);
     } catch {
-      status.textContent = "서버가 시작을 승인하지 않았습니다. 플랫폼에서 게임을 다시 여세요.";
+      setupNote.textContent = "게임을 시작하지 못했습니다. 페이지를 새로고침해 주세요.";
+      status.textContent = "게임을 시작하지 못했습니다.";
+      modeOptions.querySelectorAll("button").forEach((button) => {
+        button.disabled = false;
+      });
     }
   }
 
-  input.addEventListener("input", renderInput);
-  submit.addEventListener("click", complete);
-  start.addEventListener("click", () => void begin());
-  const config = api?.playConfig;
-  if (!api || !config) {
-    status.textContent = "OWOGG의 서버 검증 실행 환경에서만 시작할 수 있습니다.";
-    start.disabled = true;
-  } else {
-    setOptions(difficulty, config.difficulties, config.defaultDifficultyId);
-    setOptions(variant, config.variants, config.defaultVariantId);
-    difficulty.addEventListener("change", () => updateStart(config));
-    variant.addEventListener("change", () => updateStart(config));
-    updateStart(config);
-    status.textContent = "난이도와 언어를 고른 뒤 시작하세요.";
+  function renderModes() {
+    if (!config) return;
+    const hasChoice = config.allowedConfigs.length > 1;
+    modeOptions.classList.toggle("hidden", !hasChoice);
+    modeOptions.replaceChildren(
+      ...config.allowedConfigs.map((allowed) => {
+        const labels = configLabel(allowed);
+        const button = document.createElement("button");
+        button.type = "button";
+        const title = document.createElement("strong");
+        const detail = document.createElement("span");
+        title.textContent = labels.title;
+        detail.textContent = labels.detail;
+        button.append(title, detail);
+        button.addEventListener("click", () => void begin(allowed));
+        return button;
+      }),
+    );
+    setupNote.textContent = hasChoice
+      ? "게임 안에서 언어와 지문 길이를 선택하세요."
+      : "바로 플레이를 준비하고 있습니다.";
+    status.textContent = hasChoice
+      ? "게임 안에서 모드를 선택하고 시작하세요."
+      : "게임 플레이를 준비하고 있습니다.";
+    if (!hasChoice) void begin(config.allowedConfigs[0]);
   }
+
+  async function initialize() {
+    if (!api?.whenReady) return;
+    await api.whenReady();
+    config = api.playConfig;
+    if (!config) {
+      setupNote.textContent = "게임 준비 정보를 불러오지 못했습니다.";
+      status.textContent = "게임 준비 정보를 불러오지 못했습니다.";
+      return;
+    }
+    renderModes();
+  }
+
+  input.addEventListener("input", handleInput);
+  input.addEventListener("paste", (event) => event.preventDefault());
+  passageCard.addEventListener("click", () => input.focus());
+  retry.addEventListener("click", () => window.location.reload());
+  void initialize();
 })();

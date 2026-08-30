@@ -167,7 +167,11 @@ READY != APPROVED
 → GameHost → IframeRuntime → 자동 주입된 window.OWOGG
 ```
 
-게임은 `OWOGG.start()`, `OWOGG.event()`, `OWOGG.complete()`, `OWOGG.cancel()`만 호출합니다.
+게임은 먼저 `await OWOGG.whenReady()`로 host 초기화를 기다린 뒤 `OWOGG.start()`,
+`OWOGG.event()`, `OWOGG.complete()`, `OWOGG.cancel()`을 호출합니다. PlayConfig 게임의 난이도·모드
+선택기는 게임 내부에서 공개 `difficulties`, `variants`, `allowedConfigs`만으로 만들며, 항목이 하나인
+축은 숨기고 기본값을 사용합니다. 선택지와 허용 조합을 플랫폼 UI나 slug별 코드에 별도로 복제하지
+않습니다.
 bundle URL은 version-scoped immutable 경로입니다. `/official-games/*`, release map,
 과거 Game Creator 전용 런타임 이름인 `CreatorGameHost`, `transitionalCreatorGameResolver`를 요구하는
 가이드는 현재 구현과 맞지 않습니다.

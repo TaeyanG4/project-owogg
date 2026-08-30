@@ -8,29 +8,17 @@
     "mode": "single",
     "playModes": ["single"],
     "shortDescription": "서버 seed로 정해진 색상 순서를 기억하고 그대로 입력하세요.",
-    "description": "난이도와 표준·역순 모드를 고른 뒤 점점 길어지는 색상 패턴을 재현합니다. verifier가 seed로 정답을 재생성하고 완료 레벨을 계산합니다.",
+    "description": "점점 길어지는 색상 패턴을 같은 순서로 재현합니다. verifier가 seed로 정답을 재생성하고 완료 레벨을 계산합니다.",
     "tags": ["memory", "pattern", "brain", "verified"]
   },
   "input": ["mouse", "touch", "keyboard"],
   "presentation": { "orientation": "any", "aspectRatio": "1:1" },
-  "difficulties": [
-    { "id": "normal", "title": "보통", "default": true },
-    { "id": "hard", "title": "어려움" }
-  ],
   "playConfig": {
     "version": 1,
     "rulesetRevision": 1,
     "verifierId": "memory-test-v1",
-    "variants": [
-      { "id": "standard", "title": "표준", "default": true },
-      { "id": "reverse", "title": "역순" }
-    ],
-    "allowedConfigs": [
-      { "difficultyId": "normal", "variantId": "standard", "rewardFactor": 1 },
-      { "difficultyId": "normal", "variantId": "reverse", "rewardFactor": 1.1 },
-      { "difficultyId": "hard", "variantId": "standard", "rewardFactor": 1.25 },
-      { "difficultyId": "hard", "variantId": "reverse", "rewardFactor": 1.4 }
-    ]
+    "variants": [{ "id": "standard", "title": "기본", "default": true }],
+    "allowedConfigs": [{ "difficultyId": "normal", "variantId": "standard", "rewardFactor": 1 }]
   },
   "progression": {
     "type": "level",

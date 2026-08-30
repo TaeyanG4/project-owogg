@@ -8,14 +8,14 @@
     "mode": "single",
     "playModes": ["single"],
     "shortDescription": "서버가 선택한 문장을 입력하고 검증된 WPM과 정확도를 확인하세요.",
-    "description": "난이도와 한국어·영어 모드를 고르면 서버 challenge seed가 문장을 선택합니다. verifier가 제출된 입력과 서버 경과 시간을 대조해 WPM, CPM, 정확도를 계산합니다.",
+    "description": "게임 안에서 한국어·영어와 지문 길이 모드를 고르면 서버 challenge seed가 문장을 선택합니다. verifier가 제출된 입력과 서버 경과 시간을 대조해 WPM, CPM, 정확도를 계산합니다.",
     "tags": ["typing", "brain", "verified"]
   },
   "input": ["keyboard"],
   "presentation": { "orientation": "landscape", "aspectRatio": "16:9" },
   "difficulties": [
-    { "id": "normal", "title": "보통", "default": true },
-    { "id": "hard", "title": "어려움" }
+    { "id": "normal", "title": "단문", "default": true },
+    { "id": "hard", "title": "장문" }
   ],
   "playConfig": {
     "version": 1,

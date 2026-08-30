@@ -8,35 +8,55 @@
   </head>
   <body>
     <main class="shell">
-      <header>
-        <p class="eyebrow">SERVER VERIFIED</p>
-        <h1>순서 기억력 테스트</h1>
-        <p id="status" role="status">서버 실행 환경을 확인하는 중입니다.</p>
+      <header class="game-header">
+        <div class="title">
+          <i class="brain-icon" aria-hidden="true"></i><strong>순서 기억력 패드</strong>
+        </div>
+        <div class="score-boxes">
+          <span>LEVEL <b id="level">0</b></span>
+          <span>BEST <b id="best">0</b></span>
+        </div>
       </header>
-      <section id="setup" class="panel">
-        <div class="config-grid">
-          <label>난이도<select id="difficulty"></select></label
-          ><label>모드<select id="variant"></select></label>
+
+      <section id="config-panel" class="config-panel hidden" aria-label="게임 설정">
+        <div id="difficulty-group" class="config-axis hidden">
+          <span>난이도</span>
+          <div id="difficulty-options" class="option-row"></div>
         </div>
-        <button id="start" class="primary" type="button">서버 승인 후 시작</button>
-      </section>
-      <section id="play" class="panel hidden">
-        <div class="stats">
-          <span>레벨 <strong id="level">1</strong></span
-          ><span>입력 <strong id="progress">0 / 0</strong></span>
-        </div>
-        <div class="memory-grid" aria-label="색상 기억 패드">
-          <button class="pad red" data-color="0" type="button" aria-label="빨강"></button
-          ><button class="pad blue" data-color="1" type="button" aria-label="파랑"></button
-          ><button class="pad green" data-color="2" type="button" aria-label="초록"></button
-          ><button class="pad yellow" data-color="3" type="button" aria-label="노랑"></button>
+        <div id="variant-group" class="config-axis hidden">
+          <span>모드</span>
+          <div id="variant-options" class="option-row"></div>
         </div>
       </section>
-      <section id="finished" class="panel hidden">
-        <h2 id="finish-title">도전 종료</h2>
-        <p id="summary"></p>
-        <p>서버가 seed 기반 정답과 입력 시점을 다시 검증합니다.</p>
+
+      <section id="setup" class="setup">
+        <div class="hero-brain" aria-hidden="true">◇</div>
+        <h1>아케이드 순서 기억력</h1>
+        <p>깜빡이는 4색 패드의 패턴을 기억하고 같은 순서로 눌러보세요.</p>
+        <button id="start" class="primary" type="button" disabled>게임 시작</button>
       </section>
+
+      <section id="play" class="play hidden">
+        <div id="turn-status" class="turn-status">패턴을 준비하는 중입니다.</div>
+        <div class="memory-console" aria-label="색상 기억 패드">
+          <div class="memory-grid">
+            <button class="pad red" data-color="0" type="button" aria-label="빨강"></button>
+            <button class="pad green" data-color="1" type="button" aria-label="초록"></button>
+            <button class="pad blue" data-color="2" type="button" aria-label="파랑"></button>
+            <button class="pad yellow" data-color="3" type="button" aria-label="노랑"></button>
+          </div>
+          <div class="hub"><span>STAGE</span><b id="hub-level">01</b></div>
+        </div>
+        <p id="progress" class="progress">0 / 0</p>
+      </section>
+
+      <section id="finished" class="finished hidden">
+        <span id="finish-title" class="finish-label">게임 종료</span>
+        <strong id="summary" class="finish-score"></strong>
+        <p id="grade"></p>
+        <button id="retry" class="primary" type="button">다시 도전하기</button>
+      </section>
+      <p id="status" class="status" role="status">게임을 준비하는 중입니다.</p>
     </main>
     <script src="./rules.js"></script>
     <script src="./game.js"></script>

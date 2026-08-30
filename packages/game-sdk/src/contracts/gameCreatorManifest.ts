@@ -189,6 +189,8 @@ export interface OwoggMultiplayerBrowserApi {
 }
 
 export interface OwoggBrowserApi {
+  /** Resolves after the parent Host has supplied generic or multiplayer bootstrap data. */
+  whenReady(): Promise<void>;
   /** Approved topology choices for a game-owned launcher; empty when no negotiation is required. */
   readonly playModes: readonly OwoggPlayMode[];
   selectPlayMode(playMode: OwoggPlayMode): Promise<OwoggPlayMode>;
