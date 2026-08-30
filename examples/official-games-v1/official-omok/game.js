@@ -6,6 +6,7 @@
   const relay = api?.multiplayer;
   const statusTitle = document.querySelector("#status-title");
   const statusDetail = document.querySelector("#status-detail");
+  const shell = document.querySelector(".shell");
   const launcher = document.querySelector("#launcher");
   const launcherTitle = document.querySelector("#launcher-title");
   const modeOptions = document.querySelector("#mode-options");
@@ -406,6 +407,7 @@
 
   function openGame(nextMode) {
     mode = nextMode;
+    shell.classList.remove("launcher-mode");
     launcher.classList.add("hidden");
     game.classList.remove("hidden");
     modeLabel.textContent = nextMode === "online" ? text().onlineMode : text().localMode;
@@ -546,6 +548,7 @@
   }
 
   function renderLauncher() {
+    shell.classList.add("launcher-mode");
     const modes = api.playModes;
     if (modes.length === 0) {
       setStatus(text().modeMissing, text().retryInside);

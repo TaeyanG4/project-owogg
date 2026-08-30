@@ -25,7 +25,7 @@ const frozenGameSlugs = [
 const expectedArtifactVersions = new Map([
   ["aim-test", "1.0.1"],
   ["memory-test", "1.0.1"],
-  ["official-omok", "1.0.5"],
+  ["official-omok", "1.0.6"],
   ["reaction-time", "1.0.0"],
   ["typing-test", "1.0.0"],
 ]);
@@ -152,7 +152,13 @@ test("official game UI waits for host bootstrap and derives choices from its pub
 
   const omok = fs.readFileSync(path.join(fixtureRoot, "official-omok", "game.js"), "utf8");
   const omokHtml = fs.readFileSync(path.join(fixtureRoot, "official-omok", "index.html"), "utf8");
+  const omokStyle = fs.readFileSync(path.join(fixtureRoot, "official-omok", "style.css"), "utf8");
   assert.match(omok, /const modes = api\.playModes/);
+  assert.match(omokHtml, /class="shell launcher-mode"/);
+  assert.match(omok, /shell\.classList\.add\("launcher-mode"\)/);
+  assert.match(omok, /shell\.classList\.remove\("launcher-mode"\)/);
+  assert.match(omokStyle, /\.shell\.launcher-mode \.launcher \{[^}]*grid-column: 1;/s);
+  assert.match(omokStyle, /\.shell\.launcher-mode \.mode-grid \{[^}]*width: min\(900px, 72vw\);/s);
   assert.doesNotMatch(omok, /api\.complete\s*\(/);
   assert.doesNotMatch(omok, /api\.requestStart\s*\(/);
   assert.doesNotMatch(omokHtml, /id=["']leave["']/);

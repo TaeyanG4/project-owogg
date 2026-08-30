@@ -1,7 +1,7 @@
 export const officialV1Games = Object.freeze([
   Object.freeze({
     slug: "official-omok",
-    artifactVersion: "1.0.5",
+    artifactVersion: "1.0.6",
     files: Object.freeze([
       "index.html",
       "style.css",
