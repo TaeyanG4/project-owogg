@@ -166,16 +166,21 @@ export class D1MultiplayerProfileRequestRepository implements MultiplayerProfile
   private async findExactVersionOwner(
     gameId: number,
     gameVersionId: number,
+    requestedByUserId: number | null,
   ): Promise<ExactVersionOwner | null> {
     const row = await this.db
       .prepare(
         `SELECT game.publisher_type, game.publisher_user_id, version.content_hash
          FROM game_versions version
          JOIN games game ON game.id = version.game_id
-         WHERE version.id = ? AND version.game_id = ? AND game.deleted_at IS NULL
+         WHERE version.id = ? AND version.game_id = ?
+           AND (
+             game.deleted_at IS NULL
+             OR (game.publisher_type = 'OWOGG' AND ? IS NULL)
+           )
          LIMIT 1`,
       )
-      .bind(gameVersionId, gameId)
+      .bind(gameVersionId, gameId, requestedByUserId)
       .first<Record<string, unknown>>();
     if (!row) return null;
     if (row.publisher_type !== "OWOGG" && row.publisher_type !== "USER") {
@@ -203,7 +208,14 @@ export class D1MultiplayerProfileRequestRepository implements MultiplayerProfile
     }
     assertNowIso(input.nowIso);
 
-    const owner = await this.findExactVersionOwner(input.gameId, input.gameVersionId);
+    // An OWOGG identity with immutable multiplayer history remains quarantined during
+    // re-registration. Its server-owned request must be stored before activate() clears
+    // deleted_at, while deleted USER games and requests claiming a user identity stay hidden.
+    const owner = await this.findExactVersionOwner(
+      input.gameId,
+      input.gameVersionId,
+      input.requestedByUserId,
+    );
     if (!owner) return { status: "REJECTED", code: "GAME_VERSION_NOT_FOUND" };
     if (owner.contentHash !== input.contentHash) {
       return { status: "REJECTED", code: "REQUEST_CONFLICT" };
@@ -250,7 +262,11 @@ export class D1MultiplayerProfileRequestRepository implements MultiplayerProfile
         )
         .run();
     } catch (error) {
-      const currentOwner = await this.findExactVersionOwner(input.gameId, input.gameVersionId);
+      const currentOwner = await this.findExactVersionOwner(
+        input.gameId,
+        input.gameVersionId,
+        input.requestedByUserId,
+      );
       if (!currentOwner) return { status: "REJECTED", code: "GAME_VERSION_NOT_FOUND" };
       if (currentOwner.contentHash !== input.contentHash) {
         return { status: "REJECTED", code: "REQUEST_CONFLICT" };
