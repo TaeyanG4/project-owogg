@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import type { AdminGameListResponse, GameAvailabilityDto } from "@owogg/contracts";
 import {
   adminGameCatalogBadge,
   hideDeletedAdminGames,
 } from "../components/admin/OfficialGameManagement";
+
+const managementSource = readFileSync(
+  fileURLToPath(new URL("../components/admin/OfficialGameManagement.tsx", import.meta.url)),
+  "utf8",
+);
 
 function game(gameId: string): GameAvailabilityDto {
   return {
@@ -88,4 +95,11 @@ test("admin catalog badges do not call an incomplete identity public", () => {
       .label,
     "안전 차단",
   );
+});
+
+test("the global Relay review panel is absent while the internal tool tester remains", () => {
+  assert.doesNotMatch(managementSource, /일반 Multiplayer Relay 심사/);
+  assert.doesNotMatch(managementSource, /ManagedMultiplayerRelayControl/);
+  assert.match(managementSource, /내부 테스트 도구/);
+  assert.match(managementSource, /테스터 열기/);
 });

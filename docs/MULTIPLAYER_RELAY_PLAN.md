@@ -178,7 +178,7 @@ brain 정책이 별도로 검증된 뒤 additive feature로 연다.
 - `packages/game-sdk/src/bridge/multiplayerClient.ts`
 - `apps/web/app/features/game/runtime/MultiplayerIframeRuntime.tsx`
 - `packages/core/src/modules/multiplayer/application/multiplayerRoomUseCases.ts`
-- Admin profile review/activation API와 UI
+- Admin profile review/activation API (별도 전역 UI는 2026-08-30 제거)
 
 ### 4.3 Relay cutover 뒤 삭제
 
@@ -349,8 +349,9 @@ Phase 4는 2026-08-30 로컬 구현과 검증을 완료했다.
 - migration `0045`와 D1 repository를 generic `RELAY` profile authority로 전환했다. 요청·승인 profile·
   room instance·join ticket·public profile·iframe bootstrap·DO authority는 모두 exact
   `(gameId, gameVersionId, contentHash, profileRevision)`을 확인한다.
-- 관리자가 요청을 승인하면 disabled profile만 생성된다. `/admin/games`의 일반 Relay 심사 UI와 API는
-  pending request와 승인된 profile을 별도로 조회하며, 새로고침 뒤에도 독립 activation을 수행할 수 있다.
+- 관리자가 요청을 승인하면 disabled profile만 생성된다. exact-version review/activation API와 D1 안전
+  경계는 유지하지만, 게임 관리 화면의 전역 Relay 심사 패널은 내부 도구 UI와 책임이 겹쳐 제거했다.
+  이 UI 정리는 자동 승인이나 manifest 자체 권한으로의 정책 변경이 아니다.
 - 현재 활성 가능한 조합은 `websocket + relay`뿐이다. worker/container와 지원되지 않는 Relay capability는
   review 전에 fail closed하고, generic profile은 `PRIVATE + OPEN`만 허용한다. 따라서 일회용 invite API도
   OPEN room에서 `FORBIDDEN`으로 닫힌다.

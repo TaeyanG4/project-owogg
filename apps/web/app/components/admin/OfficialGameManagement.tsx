@@ -7,7 +7,6 @@ import {
   Gamepad2,
   Image,
   Loader2,
-  Network,
   Pencil,
   Play,
   Power,
@@ -19,17 +18,11 @@ import {
 import type {
   AdminGameListResponse,
   AdminGameCatalogRole,
-  AdminManagedMultiplayerProfile,
-  AdminManagedMultiplayerProfileRequestListResponse,
   GameAvailabilityDto,
 } from "@owogg/contracts";
 import {
   deleteOfficialGame,
   fetchAdminGames,
-  fetchManagedMultiplayerProfileRequests,
-  fetchManagedMultiplayerProfiles,
-  postManagedMultiplayerProfileActivation,
-  postManagedMultiplayerProfileReview,
   postAdminGameCatalogRole,
   postToggleAdminGame,
   uploadOfficialGame,
@@ -331,8 +324,6 @@ export function OfficialGameManagement() {
           {error}
         </p>
       )}
-
-      <ManagedMultiplayerRelayControl />
 
       <div className="border-t border-border pt-4">
         <div className="mb-4 inline-flex rounded-xl border border-border bg-surface p-1">
@@ -679,8 +670,8 @@ export function OfficialGameManagement() {
                                 frameClassName="min-h-[560px]"
                                 fallback={
                                   <div className="flex min-h-[320px] items-center justify-center bg-surface p-6 text-center text-sm text-text-secondary">
-                                    활성화된 exact-version Relay 프로필이 없습니다. 위 Relay
-                                    심사에서 프로필을 승인·활성화한 뒤 다시 확인하세요.
+                                    활성화된 exact-version Relay 프로필이 없습니다. 해당 버전의 운영
+                                    프로필을 준비한 뒤 다시 확인하세요.
                                   </div>
                                 }
                               />
@@ -746,260 +737,6 @@ export function OfficialGameManagement() {
           />
         )}
       </div>
-    </section>
-  );
-}
-
-type ManagedMultiplayerRequest =
-  AdminManagedMultiplayerProfileRequestListResponse["requests"][number];
-
-export function managedMultiplayerResolutionLabel(request: ManagedMultiplayerRequest): string {
-  if (request.resolution.status === "SUPPORTED_V1") return "Relay v1 지원";
-  if (request.resolution.status === "RUNTIME_NOT_AVAILABLE") {
-    return `${request.resolution.runtimeKind} runtime 미지원`;
-  }
-  return `Relay 기능 미지원: ${request.resolution.unsupportedCapabilities.join(", ")}`;
-}
-
-function ManagedMultiplayerRelayControl() {
-  const [requests, setRequests] = useState<readonly ManagedMultiplayerRequest[]>([]);
-  const [profiles, setProfiles] = useState<readonly AdminManagedMultiplayerProfile[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busyKey, setBusyKey] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [requestResult, profileResult] = await Promise.all([
-        fetchManagedMultiplayerProfileRequests(),
-        fetchManagedMultiplayerProfiles(),
-      ]);
-      setRequests(requestResult.requests);
-      setProfiles(profileResult.profiles);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Relay 심사 상태를 불러오지 못했습니다.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const review = async (request: ManagedMultiplayerRequest, decision: "APPROVED" | "REJECTED") => {
-    let reasonCode: string | null = null;
-    if (decision === "REJECTED") {
-      const entered = window.prompt(
-        "거절 사유 코드를 입력하세요. 영문 대문자, 숫자, 밑줄만 사용할 수 있습니다.",
-        "ADMIN_REJECTED",
-      );
-      if (entered === null) return;
-      reasonCode = entered.trim().toUpperCase();
-      if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(reasonCode)) {
-        setError("거절 사유 코드는 영문 대문자로 시작하는 1~64자 코드여야 합니다.");
-        return;
-      }
-    } else if (
-      !window.confirm(
-        `요청 #${request.id}를 승인해 exact bundle용 비활성 Relay 프로필을 생성할까요? 실행 활성화는 별도 단계입니다.`,
-      )
-    ) {
-      return;
-    }
-
-    setBusyKey(`request:${request.id}`);
-    setError(null);
-    try {
-      await postManagedMultiplayerProfileReview(request.id, decision, reasonCode);
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Relay 요청을 심사하지 못했습니다.");
-    } finally {
-      setBusyKey(null);
-    }
-  };
-
-  const toggleProfile = async (profile: AdminManagedMultiplayerProfile) => {
-    const enabled = !profile.enabled;
-    if (
-      !window.confirm(
-        enabled
-          ? `프로필 #${profile.id}를 활성화해 새 Relay 방 생성을 허용할까요?`
-          : `프로필 #${profile.id}를 비활성화해 새 방 생성을 차단할까요?`,
-      )
-    ) {
-      return;
-    }
-    setBusyKey(`profile:${profile.id}`);
-    setError(null);
-    try {
-      await postManagedMultiplayerProfileActivation(
-        profile.id,
-        enabled,
-        enabled ? null : "ADMIN_DISABLED",
-      );
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Relay 프로필 상태를 변경하지 못했습니다.");
-    } finally {
-      setBusyKey(null);
-    }
-  };
-
-  return (
-    <section className="rounded-2xl border border-border bg-surface-raised p-4 sm:p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="flex items-center gap-1.5 text-sm font-black text-text-primary">
-            <Network className="h-4 w-4" /> 일반 Multiplayer Relay 심사
-          </h3>
-          <p className="mt-1 max-w-3xl text-xs leading-relaxed text-text-muted">
-            ZIP은 실행 권한을 직접 얻지 않습니다. exact game version과 content hash에 묶인 요청을
-            심사하면 비활성 프로필이 생성되고, 아래에서 별도로 활성화해야 새 방이 열립니다.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => void load()}
-          disabled={loading || busyKey !== null}
-          className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-xs font-bold text-text-primary hover:border-brand disabled:opacity-50"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> 새로고침
-        </button>
-      </div>
-
-      {error && <p className="mt-3 text-xs text-accent-red">{error}</p>}
-      {loading ? (
-        <p className="mt-4 text-xs text-text-muted">Relay 요청과 프로필을 불러오는 중...</p>
-      ) : (
-        <div className="mt-4 grid gap-4 xl:grid-cols-2">
-          <div>
-            <h4 className="text-xs font-black text-text-primary">
-              대기 중 요청 ({requests.length})
-            </h4>
-            <div className="mt-2 space-y-2">
-              {requests.length === 0 && (
-                <p className="rounded-xl border border-border p-3 text-xs text-text-muted">
-                  심사 대기 중인 요청이 없습니다.
-                </p>
-              )}
-              {requests.map((request) => {
-                const busy = busyKey === `request:${request.id}`;
-                const supported = request.resolution.status === "SUPPORTED_V1";
-                return (
-                  <article key={request.id} className="rounded-xl border border-border p-3">
-                    <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                      <strong className="text-text-primary">요청 #{request.id}</strong>
-                      <span className="text-text-muted">
-                        game {request.gameId} · version {request.gameVersionId}
-                      </span>
-                      <span
-                        className={
-                          supported
-                            ? "rounded-full bg-accent-green/10 px-2 py-0.5 font-bold text-accent-green"
-                            : "rounded-full bg-accent-red/10 px-2 py-0.5 font-bold text-accent-red"
-                        }
-                      >
-                        {managedMultiplayerResolutionLabel(request)}
-                      </span>
-                    </div>
-                    <p className="mt-2 break-all font-mono text-[10px] text-text-muted">
-                      sha256:{request.contentHash}
-                    </p>
-                    <p className="mt-1 text-[11px] text-text-muted">
-                      {request.request.players.min}~{request.request.players.max}명 · reconnect{" "}
-                      {request.request.features.reconnect}
-                      {request.request.features.directMessages ? " · direct" : ""}
-                      {request.request.features.hostSnapshot ? " · host snapshot" : ""}
-                    </p>
-                    <div className="mt-3 flex gap-2">
-                      <button
-                        type="button"
-                        disabled={busyKey !== null || !supported}
-                        onClick={() => void review(request, "APPROVED")}
-                        className="rounded-lg border border-accent-green/40 px-2.5 py-1.5 text-[11px] font-bold text-accent-green disabled:opacity-40"
-                      >
-                        {busy && <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />}
-                        승인 후 프로필 생성
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busyKey !== null}
-                        onClick={() => void review(request, "REJECTED")}
-                        className="rounded-lg border border-accent-red/40 px-2.5 py-1.5 text-[11px] font-bold text-accent-red disabled:opacity-40"
-                      >
-                        거절
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          </div>
-
-          <div>
-            <h4 className="text-xs font-black text-text-primary">
-              승인된 Relay 프로필 ({profiles.length})
-            </h4>
-            <div className="mt-2 space-y-2">
-              {profiles.length === 0 && (
-                <p className="rounded-xl border border-border p-3 text-xs text-text-muted">
-                  승인된 일반 Relay 프로필이 없습니다.
-                </p>
-              )}
-              {profiles.map((profile) => {
-                const busy = busyKey === `profile:${profile.id}`;
-                return (
-                  <article key={profile.id} className="rounded-xl border border-border p-3">
-                    <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                      <strong className="text-text-primary">프로필 #{profile.id}</strong>
-                      <span className="text-text-muted">version {profile.gameVersionId}</span>
-                      <span
-                        className={`rounded-full px-2 py-0.5 font-bold ${
-                          profile.enabled
-                            ? "bg-accent-green/10 text-accent-green"
-                            : "border border-border text-text-muted"
-                        }`}
-                      >
-                        {profile.enabled ? "활성" : "비활성"}
-                      </span>
-                    </div>
-                    <p className="mt-2 break-all font-mono text-[10px] text-text-muted">
-                      sha256:{profile.contentHash}
-                    </p>
-                    <p className="mt-1 text-[11px] text-text-muted">
-                      Relay v{profile.protocolVersion} · {profile.minPlayers}~{profile.maxPlayers}명
-                      · reconnect {profile.reconnect}
-                      {profile.directMessages ? " · direct" : ""}
-                      {profile.hostSnapshot ? " · host snapshot" : ""} · 결과 미검증
-                    </p>
-                    <button
-                      type="button"
-                      disabled={busyKey !== null}
-                      onClick={() => void toggleProfile(profile)}
-                      className={`mt-3 inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold disabled:opacity-40 ${
-                        profile.enabled
-                          ? "border-accent-red/40 text-accent-red"
-                          : "border-accent-green/40 text-accent-green"
-                      }`}
-                    >
-                      {busy ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <Power className="h-3 w-3" />
-                      )}
-                      {profile.enabled ? "비활성화" : "별도 활성화"}
-                    </button>
-                  </article>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
     </section>
   );
 }

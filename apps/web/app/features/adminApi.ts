@@ -18,12 +18,6 @@ import {
   AdminGameToggleResponseSchema,
   AdminOfficialGameDeleteResponseSchema,
   AdminOfficialGameUploadResponseSchema,
-  AdminManagedMultiplayerProfileRequestListResponseSchema,
-  AdminManagedMultiplayerProfileReviewRequestSchema,
-  AdminManagedMultiplayerProfileReviewResponseSchema,
-  AdminManagedMultiplayerProfileListResponseSchema,
-  AdminManagedMultiplayerProfileActivationRequestSchema,
-  AdminManagedMultiplayerProfileActivationResponseSchema,
   GameLogoUpdateResponseSchema,
   AdminUserSearchResponseSchema,
   AdminUserDetailResponseSchema,
@@ -266,52 +260,6 @@ export function postToggleAdminGame(gameId: string, enabled: boolean, reason: st
       method: "POST",
       body: JSON.stringify({ enabled, reason }),
     }),
-  );
-}
-
-export function fetchManagedMultiplayerProfileRequests(limit = 50) {
-  return apiFetch(
-    `/api/admin/games/multiplayer-requests?limit=${limit}`,
-    AdminManagedMultiplayerProfileRequestListResponseSchema,
-  );
-}
-
-export function postManagedMultiplayerProfileReview(
-  requestId: number,
-  decision: "APPROVED" | "REJECTED",
-  reasonCode: string | null = null,
-) {
-  const body = AdminManagedMultiplayerProfileReviewRequestSchema.parse({
-    decision,
-    ...(decision === "REJECTED" ? { reasonCode } : {}),
-  });
-  return apiFetch(
-    `/api/admin/games/multiplayer-requests/${requestId}/review`,
-    AdminManagedMultiplayerProfileReviewResponseSchema,
-    { method: "POST", body: JSON.stringify(body) },
-  );
-}
-
-export function fetchManagedMultiplayerProfiles(limit = 50) {
-  return apiFetch(
-    `/api/admin/games/multiplayer-profiles?limit=${limit}`,
-    AdminManagedMultiplayerProfileListResponseSchema,
-  );
-}
-
-export function postManagedMultiplayerProfileActivation(
-  profileId: number,
-  enabled: boolean,
-  reasonCode: string | null = null,
-) {
-  const body = AdminManagedMultiplayerProfileActivationRequestSchema.parse({
-    enabled,
-    reasonCode,
-  });
-  return apiFetch(
-    `/api/admin/games/multiplayer-profiles/${profileId}/activation`,
-    AdminManagedMultiplayerProfileActivationResponseSchema,
-    { method: "POST", body: JSON.stringify(body) },
   );
 }
 
