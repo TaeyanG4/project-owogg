@@ -12,6 +12,10 @@ const managementSource = readFileSync(
   fileURLToPath(new URL("../components/admin/OfficialGameManagement.tsx", import.meta.url)),
   "utf8",
 );
+const relayControlSource = readFileSync(
+  fileURLToPath(new URL("../components/admin/ManagedRelayProfileControl.tsx", import.meta.url)),
+  "utf8",
+);
 
 function game(gameId: string): GameAvailabilityDto {
   return {
@@ -97,9 +101,14 @@ test("admin catalog badges do not call an incomplete identity public", () => {
   );
 });
 
-test("the global Relay review panel is absent while the internal tool tester remains", () => {
+test("Relay operations stay per-game while the removed global review panel stays absent", () => {
   assert.doesNotMatch(managementSource, /일반 Multiplayer Relay 심사/);
   assert.doesNotMatch(managementSource, /ManagedMultiplayerRelayControl/);
   assert.match(managementSource, /내부 테스트 도구/);
-  assert.match(managementSource, /테스터 열기/);
+  assert.match(managementSource, /ManagedRelayProfileControl/);
+  assert.doesNotMatch(relayControlSource, /일반 Multiplayer Relay 심사/);
+  assert.match(relayControlSource, /온라인 Relay 운영/);
+  assert.match(relayControlSource, /Relay 요청 승인/);
+  assert.match(relayControlSource, /Relay 활성화/);
+  assert.match(relayControlSource, /테스터 열기/);
 });

@@ -224,6 +224,68 @@ export const AdminManagedMultiplayerProfileSchema = z
   .strict();
 export type AdminManagedMultiplayerProfile = z.infer<typeof AdminManagedMultiplayerProfileSchema>;
 
+/** Per-game control-plane snapshot for the current live immutable version. This keeps review and
+ * activation visible next to the game being operated without restoring a global review queue. */
+export const AdminManagedMultiplayerExactVersionResponseSchema = z
+  .object({
+    gameSlug: GameSlugSchema,
+    gameId: z.number().int().positive(),
+    gameVersionId: z.number().int().positive().nullable(),
+    request: AdminManagedMultiplayerProfileRequestSchema.nullable(),
+    profile: AdminManagedMultiplayerProfileSchema.nullable(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.gameVersionId === null) {
+      if (value.request !== null) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["request"],
+          message: "request requires a live game version",
+        });
+      }
+      if (value.profile !== null) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["profile"],
+          message: "profile requires a live game version",
+        });
+      }
+      return;
+    }
+    if (
+      value.request !== null &&
+      (value.request.gameId !== value.gameId || value.request.gameVersionId !== value.gameVersionId)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["request"],
+        message: "request must match the exact live game version",
+      });
+    }
+    if (value.profile !== null && value.profile.gameVersionId !== value.gameVersionId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["profile"],
+        message: "profile must match the exact live game version",
+      });
+    }
+    if (
+      value.request !== null &&
+      value.profile !== null &&
+      value.request.contentHash !== value.profile.contentHash
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["profile", "contentHash"],
+        message: "profile content hash must match the reviewed request",
+      });
+    }
+  });
+export type AdminManagedMultiplayerExactVersionResponse = z.infer<
+  typeof AdminManagedMultiplayerExactVersionResponseSchema
+>;
+
 export const AdminManagedMultiplayerProfileListResponseSchema = z
   .object({ profiles: z.array(AdminManagedMultiplayerProfileSchema).max(100) })
   .strict();

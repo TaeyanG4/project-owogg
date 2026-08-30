@@ -178,7 +178,8 @@ brain 정책이 별도로 검증된 뒤 additive feature로 연다.
 - `packages/game-sdk/src/bridge/multiplayerClient.ts`
 - `apps/web/app/features/game/runtime/MultiplayerIframeRuntime.tsx`
 - `packages/core/src/modules/multiplayer/application/multiplayerRoomUseCases.ts`
-- Admin profile review/activation API (별도 전역 UI는 2026-08-30 제거)
+- Admin profile review/activation API와 게임별 exact-version 운영 UI (별도 전역 큐 UI는
+  2026-08-30 제거)
 
 ### 4.3 Relay cutover 뒤 삭제
 
@@ -350,7 +351,8 @@ Phase 4는 2026-08-30 로컬 구현과 검증을 완료했다.
   room instance·join ticket·public profile·iframe bootstrap·DO authority는 모두 exact
   `(gameId, gameVersionId, contentHash, profileRevision)`을 확인한다.
 - 관리자가 요청을 승인하면 disabled profile만 생성된다. exact-version review/activation API와 D1 안전
-  경계는 유지하지만, 게임 관리 화면의 전역 Relay 심사 패널은 내부 도구 UI와 책임이 겹쳐 제거했다.
+  경계는 유지한다. 게임 관리 화면의 전역 Relay 심사 패널은 내부 도구 UI와 책임이 겹쳐 제거하고,
+  현재 라이브 버전의 요청·프로필 상태와 승인·활성화 조작은 해당 게임의 관리 카드 안으로 이동했다.
   이 UI 정리는 자동 승인이나 manifest 자체 권한으로의 정책 변경이 아니다.
 - 현재 활성 가능한 조합은 `websocket + relay`뿐이다. worker/container와 지원되지 않는 Relay capability는
   review 전에 fail closed하고, generic profile은 `PRIVATE + OPEN`만 허용한다. 따라서 일회용 invite API도
@@ -405,7 +407,7 @@ Phase 6은 2026-08-30 로컬 검증 슬라이스를 진행 중이다.
   cross-room target, non-host snapshot 공격 회귀를 실행한다.
 - `examples/relay-protocol-probe`는 플랫폼 active source에 slug binding 없이 manifest v1과
   `window.OWOGG.multiplayer`만 사용하는 2~8인 ZIP이다. production bundle 전처리 검증을 통과한 현재
-  재현 가능한 ZIP SHA-256은 `e7d719622f8896adf87a2a7c8870ca17ba79097707817e4fca84acb5990851c4`이다.
+  재현 가능한 ZIP SHA-256은 `dfd02698c262aeb107e4492ed0e73e5a642b7e20a9a947c45d0e13037135661`이다.
 - 공개 게임과 Relay protocol fixture를 혼동하지 않도록 `game_settings.catalog_role`의 서버 소유
   `GAME | INTERNAL_TOOL` 분류를 추가했다. manifest는 이 값을 선언하지 못하며, 내부 도구는 public
   catalog에서 제외되고 관리자 전용 탭의 공용 대기실·Relay 실행 UI에서 점검한다. fixture slug는
