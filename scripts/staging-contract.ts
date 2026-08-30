@@ -280,6 +280,13 @@ export function validateWranglerStagingContracts(
   validateMultiplayerRuntime("Production", api, PRODUCTION.apiUrl);
   validateMultiplayerRuntime("Staging", apiStaging, STAGING.apiUrl);
 
+  if (api.vars?.ADMIN_SESSION_TTL_SECONDS !== undefined) {
+    errors.push("Production must keep the default admin session lifetime");
+  }
+  if (apiStaging.vars?.ADMIN_SESSION_TTL_SECONDS !== "43200") {
+    errors.push("Staging admin session lifetime must be exactly 43200 seconds");
+  }
+
   return errors;
 }
 
@@ -325,6 +332,7 @@ export function validateStagingEnvironment(env: Environment): string[] {
   const multiplayerTicketKeyId = required(env, "MULTIPLAYER_TICKET_KEY_ID", errors);
   const multiplayerTicketSecret = required(env, "MULTIPLAYER_TICKET_SECRET", errors);
   const multiplayerEnabled = (env.STAGING_MULTIPLAYER_ENABLED ?? "false").trim();
+  const adminSessionTtlSeconds = (env.STAGING_ADMIN_SESSION_TTL_SECONDS ?? "").trim();
 
   if (frontendUrl !== STAGING.frontendUrl)
     errors.push(`FRONTEND_URL must equal ${STAGING.frontendUrl}`);
@@ -364,6 +372,9 @@ export function validateStagingEnvironment(env: Environment): string[] {
   }
   if (!["true", "false"].includes(multiplayerEnabled)) {
     errors.push("STAGING_MULTIPLAYER_ENABLED must be true or false");
+  }
+  if (adminSessionTtlSeconds !== "43200") {
+    errors.push("STAGING_ADMIN_SESSION_TTL_SECONDS must be exactly 43200");
   }
   if (env.MULTIPLAYER_TICKET_SECRET !== multiplayerTicketSecret) {
     errors.push("MULTIPLAYER_TICKET_SECRET must not have surrounding whitespace");

@@ -135,6 +135,9 @@ export type ApiEnv = {
     ADMIN_LOGIN_USERNAME?: string;
     /** PBKDF2-HMAC-SHA256 파생 레코드 (`pbkdf2_sha256$iterations$salt$hash`). 평문 비밀번호는 어디에도 저장하지 않음. */
     ADMIN_PASSWORD_PBKDF2?: string;
+    /** Optional elevated-admin session lifetime in seconds. Invalid or over-12-hour values fall
+     * back to the 30-minute default. Staging injects 43200; Production leaves it unset. */
+    ADMIN_SESSION_TTL_SECONDS?: string;
     YOUTUBE_CLIENT_ID?: string;
     YOUTUBE_CLIENT_SECRET?: string;
     /** YouTube Data API key (public data) — 6시간 자동 재심사용 공식 지표 조회. */

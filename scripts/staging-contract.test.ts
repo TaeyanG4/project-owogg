@@ -47,6 +47,7 @@ function validStagingEnvironment(): Record<string, string> {
     DISCORD_REDIRECT_URI: `${STAGING.apiUrl}/api/auth/discord/callback`,
     DISCORD_TEST_GUILD_ID: "987654321098765432",
     STAGING_ADMIN_USER_IDS: "",
+    STAGING_ADMIN_SESSION_TTL_SECONDS: "43200",
     STAGING_D1_DATABASE_ID: STAGING_D1_ID,
     STAGING_MULTIPLAYER_ENABLED: "false",
     STAGING_WEB_SMOKE_ENABLED: "false",
@@ -81,6 +82,8 @@ test("Wrangler Staging environments isolate routes, D1, rate limits, Durable Obj
   ]);
   assert.equal(api.vars?.MULTIPLAYER_ENABLED, "false");
   assert.equal(api.env?.staging?.vars?.MULTIPLAYER_ENABLED, "false");
+  assert.equal(api.vars?.ADMIN_SESSION_TTL_SECONDS, undefined);
+  assert.equal(api.env?.staging?.vars?.ADMIN_SESSION_TTL_SECONDS, "43200");
 });
 
 test("Staging environment preflight accepts only the exact isolated target tuple", () => {
@@ -92,12 +95,14 @@ test("Staging environment preflight accepts only the exact isolated target tuple
     B2_BUCKET_NAME: PRODUCTION.b2Bucket,
     STAGING_D1_DATABASE_ID: PRODUCTION.d1Id,
     DISCORD_COMMAND_SYNC_ENABLED: "true",
+    STAGING_ADMIN_SESSION_TTL_SECONDS: "1800",
   };
   const errors = validateStagingEnvironment(crossed).join("\n");
   assert.match(errors, /FRONTEND_URL/);
   assert.match(errors, /B2_BUCKET_NAME/);
   assert.match(errors, /Production D1/);
   assert.match(errors, /DISCORD_COMMAND_SYNC_ENABLED/);
+  assert.match(errors, /STAGING_ADMIN_SESSION_TTL_SECONDS/);
 });
 
 test("Staging Google code exchange requires a non-blank, whitespace-safe server secret", () => {
@@ -293,6 +298,9 @@ test("Staging workflow is push-after-CI only and contains no Production variable
     /owogg-d1-staging --remote --env staging --config apps\/api\/wrangler\.staging\.generated\.jsonc --x-provision=false --x-auto-create=false/,
   );
   assert.match(deploy, /STAGING_ADMIN_USER_IDS/);
+  assert.match(deploy, /STAGING_ADMIN_SESSION_TTL_SECONDS: "43200"/);
+  assert.match(deploy, /ADMIN_SESSION_TTL_SECONDS:43200/);
+  assert.doesNotMatch(productionDeploy, /ADMIN_SESSION_TTL_SECONDS/);
   assert.match(
     deploy,
     /MULTIPLAYER_ENABLED:\$\{\{ vars\.STAGING_MULTIPLAYER_ENABLED \|\| 'false' \}\}/,

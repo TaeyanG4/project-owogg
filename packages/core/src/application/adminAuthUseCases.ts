@@ -71,10 +71,19 @@ export class AdminAuthUseCases {
   async issueAdminSession(input: {
     userId: number;
     rawSessionToken: string;
+    ttlMs?: number;
     now?: Date;
   }): Promise<{ rawToken: string; session: AdminSessionRecord }> {
     const now = input.now ?? new Date();
-    const expiresAt = new Date(now.getTime() + ADMIN_AUTH_POLICY.ADMIN_SESSION_TTL_MS);
+    const ttlMs = input.ttlMs ?? ADMIN_AUTH_POLICY.ADMIN_SESSION_TTL_MS;
+    if (
+      !Number.isSafeInteger(ttlMs) ||
+      ttlMs <= 0 ||
+      ttlMs > ADMIN_AUTH_POLICY.ADMIN_SESSION_MAX_TTL_MS
+    ) {
+      throw new RangeError("admin session ttl is outside the allowed policy range");
+    }
+    const expiresAt = new Date(now.getTime() + ttlMs);
     return this.repo.createAdminSession({
       userId: input.userId,
       rawSessionToken: input.rawSessionToken,

@@ -316,7 +316,7 @@ async function setup() {
     GOOGLE_CLIENT_ID: CLIENT_ID,
     FRONTEND_URL: "http://localhost:5173",
   };
-  return { env };
+  return { env, raw };
 }
 
 test("full admin step-up flow: Google step-up -> login -> elevated session -> logout", async () => {
@@ -326,7 +326,8 @@ test("full admin step-up flow: Google step-up -> login -> elevated session -> lo
   jwks.install();
 
   try {
-    const { env } = await setup();
+    const { env, raw } = await setup();
+    Object.assign(env, { ADMIN_SESSION_TTL_SECONDS: "43200" });
     const sessionCookie = `owogg_session=${OWOGG_SESSION_RAW}`;
 
     // Before any step-up: eligible, not admin-authenticated.
@@ -386,6 +387,16 @@ test("full admin step-up flow: Google step-up -> login -> elevated session -> lo
     });
     const adminSessionCookie = extractCookie(loginRes, "owogg_admin_session");
     assert.ok(adminSessionCookie, "admin session cookie must be set");
+    assert.match(loginRes.headers.get("set-cookie") ?? "", /Max-Age=43200/i);
+    const storedAdminSession = raw
+      .prepare(
+        `SELECT created_at as createdAt, expires_at as expiresAt FROM admin_sessions ORDER BY id DESC LIMIT 1`,
+      )
+      .get() as { createdAt: string; expiresAt: string };
+    assert.equal(
+      Date.parse(storedAdminSession.expiresAt) - Date.parse(storedAdminSession.createdAt),
+      12 * 60 * 60 * 1000,
+    );
 
     // Now elevated.
     const meAfter = await app.request(

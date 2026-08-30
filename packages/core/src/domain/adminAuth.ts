@@ -10,8 +10,10 @@
 export const ADMIN_AUTH_POLICY = {
   /** Google step-up challenge lifetime once verified — must complete admin login within this. */
   STEP_UP_CHALLENGE_TTL_MS: 5 * 60 * 1000,
-  /** Elevated admin session absolute lifetime (v1). */
+  /** Default elevated admin session absolute lifetime. Production keeps this default. */
   ADMIN_SESSION_TTL_MS: 30 * 60 * 1000,
+  /** Hard upper bound for an environment-specific elevated admin session lifetime. */
+  ADMIN_SESSION_MAX_TTL_MS: 12 * 60 * 60 * 1000,
   /** Failed admin password attempts allowed within the rate-limit window before lockout. */
   LOGIN_RATE_LIMIT_MAX_ATTEMPTS: 5,
   /** Rolling window over which failed attempts are counted. */
@@ -28,6 +30,23 @@ export const ADMIN_AUTH_POLICY = {
    * count as step-up proof — rejects a stale/cached token even though it is still cryptographically valid. */
   GOOGLE_TOKEN_MAX_AGE_SECONDS: 300,
 } as const;
+
+/**
+ * Resolve an optional environment-provided session lifetime. Invalid, zero, or over-limit
+ * values fail closed to the shorter default instead of extending administrator access.
+ */
+export function resolveAdminSessionTtlMs(configuredSeconds: string | undefined): number {
+  const normalized = configuredSeconds?.trim();
+  if (!normalized || !/^[1-9]\d*$/.test(normalized)) {
+    return ADMIN_AUTH_POLICY.ADMIN_SESSION_TTL_MS;
+  }
+
+  const ttlMs = Number(normalized) * 1000;
+  if (!Number.isSafeInteger(ttlMs) || ttlMs > ADMIN_AUTH_POLICY.ADMIN_SESSION_MAX_TTL_MS) {
+    return ADMIN_AUTH_POLICY.ADMIN_SESSION_TTL_MS;
+  }
+  return ttlMs;
+}
 
 /** Never authorize by email/nickname/OAuth provider identity — only an allowlisted, canonical
  * Google OIDC subject (`sub`) counts as admin step-up proof. */

@@ -4,7 +4,22 @@ import {
   isAdminGoogleSub,
   evaluateLoginRateLimit,
   ADMIN_AUTH_POLICY,
+  resolveAdminSessionTtlMs,
 } from "../src/domain/adminAuth.js";
+
+test("resolveAdminSessionTtlMs keeps the 30-minute default when unset", () => {
+  assert.equal(resolveAdminSessionTtlMs(undefined), ADMIN_AUTH_POLICY.ADMIN_SESSION_TTL_MS);
+});
+
+test("resolveAdminSessionTtlMs accepts the Staging 12-hour policy at the maximum boundary", () => {
+  assert.equal(resolveAdminSessionTtlMs("43200"), 12 * 60 * 60 * 1000);
+});
+
+test("resolveAdminSessionTtlMs fails closed for malformed, zero, or over-limit values", () => {
+  for (const value of ["", "0", "12h", "43201", "9007199254740991"]) {
+    assert.equal(resolveAdminSessionTtlMs(value), ADMIN_AUTH_POLICY.ADMIN_SESSION_TTL_MS);
+  }
+});
 
 test("isAdminGoogleSub matches only an explicitly allowlisted canonical sub", () => {
   assert.equal(isAdminGoogleSub("sub-a", "sub-a,sub-b"), true);
