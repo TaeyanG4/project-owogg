@@ -126,6 +126,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshUser]);
 
   useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("auth_error") !== "account_previously_registered") return;
+
+    setError("이 계정은 이전에 OwOGG에 등록되어 새 계정으로 다시 가입할 수 없습니다.");
+    setIsLoginModalOpen(true);
+    url.searchParams.delete("auth_error");
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+  }, []);
+
+  useEffect(() => {
     const retryAfterReconnect = () => {
       if (authUnavailable || providerStatus.availability === "unavailable") {
         void refreshUser();

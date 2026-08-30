@@ -210,6 +210,7 @@ export interface AccountMergeRepository {
     | "STREAMER_PLATFORM_CONFLICT"
     | "MULTIPLAYER_PARTICIPATION_CONFLICT"
     | "GAME_CREATOR_REVIEW_CONFLICT"
+    | "OAUTH_REGISTRATION_CONFLICT"
     | null
   >;
   /** Performs the complete Primary-Wins transfer/deletion in one database transaction. */

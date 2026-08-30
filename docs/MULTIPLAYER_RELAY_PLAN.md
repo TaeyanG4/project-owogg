@@ -247,15 +247,15 @@ Relay 계약·runtime·회귀 테스트를 먼저 통과시킨 뒤 삭제했으�
 | Phase 3     | Bridge/SDK/N-player UI와 lifecycle          |    5 | 완료 | 2~8인, singular opponent 제거                     |
 | Phase 4     | Admin/D1 generic profile 전환               |    3 | 완료 | content hash pin과 runtime availability gate      |
 | Phase 5     | driver/template/Omok/legacy naming 정리     |    3 | 완료 | 금지 식별자가 active runtime에서 0건              |
-| Phase 6     | generic fixture/load/Staging E2E            |    6 | 진행 | 코드 변경 없는 임의 ZIP과 두 사용자 E2E           |
-| Phase 7     | 모든 등록 구 게임 v1 ZIP 재작성             |   10 | 진행 | 검증 ZIP과 SHA-256 inventory 전달                 |
+| Phase 6     | generic fixture/load/Staging E2E            |    6 | 완료 | 2·4·8인 부하·hibernation·비용 실측 Gate 완료      |
+| Phase 7     | 모든 등록 구 게임 v1 ZIP 재작성             |   10 | 완료 | v1.0.1 게시와 공식 게임·랭킹 acceptance 완료      |
 
 Phase 0 시작 전 기준은 80/120점, 67% 완료·33% 남음이었다. Phase 0 완료 기준은 81/120점,
 67.5% 완료·32.5% 남음이다. Phase 1 완료 기준은 85/120점, 70.8% 완료·29.2% 남음이다. 각 Phase가
 끝날 때 완료율, 계획 준수, 계획 변경과 검증 범위를 이 문서의 각 Phase 기록에 남긴다. Phase 2 완료
 기준은 93/120점, 77.5% 완료·22.5% 남음이고 Phase 3 완료 기준은 98/120점, 81.7% 완료·18.3% 남음이다.
 Phase 4 완료 기준은 101/120점, 84.2% 완료·15.8% 남음이다. Phase 5 완료 기준은 104/120점,
-86.7% 완료·13.3% 남음이다.
+86.7% 완료·13.3% 남음이다. Phase 6과 Phase 7 Gate까지 닫힌 현재 상태는 120/120점, 100% 완료다.
 
 ---
 
@@ -400,7 +400,7 @@ Phase 5는 2026-08-30 로컬 구현과 검증을 완료했다.
 5. 2~8인 fanout, hibernation과 비용을 측정한다.
 6. 별도 승인 뒤 Staging 두 사용자 browser E2E를 수행한다.
 
-Phase 6은 2026-08-30 로컬 검증 슬라이스를 진행 중이다.
+Phase 6은 로컬·Staging 검증과 운영 실측 Gate까지 완료됐다.
 
 - 하나의 game-agnostic Relay profile로 실제 4인 입장, Ready/start quorum, turn-like broadcast,
   simultaneous-like direct, realtime-like broadcast, 연결 손실·resume, 명시적 leave/abort를 관통했다.
@@ -415,15 +415,14 @@ Phase 6은 2026-08-30 로컬 검증 슬라이스를 진행 중이다.
   `GAME | INTERNAL_TOOL` 분류를 추가했다. manifest는 이 값을 선언하지 못하며, 내부 도구는 public
   catalog에서 제외되고 관리자 전용 탭의 공용 대기실·Relay 실행 UI에서 점검한다. fixture slug는
   active platform source에 결합하지 않는다.
-- Staging 두 사용자 browser E2E, hibernation 전후 실제 wall-time/요청량, 2~8인 지속 부하·비용 측정은
-  아직 수행하지 않았다. 공식 가격과 현재 per-message storage 경로를 반영한 계산기와 로컬 전용 실행
-  runbook `docs/runbooks/multiplayer-relay-load-gate.md`를 추가했다. 운영·보안 runbook은 저장소 정책에
-  따라 배포 tree에 포함하지 않으며, attachment metadata 과금은 실제 metrics 확인 항목으로 남겼다.
-  따라서 Phase 6 점수는 아직 반영하지 않고 104/120점, 86.7% 완료·13.3% 남음으로 유지한다.
-
-사용자 지시에 따라 남은 Phase 6 부하·hibernation 증거보다 Phase 7을 먼저 구현하고, tester scroll 수정과
-Phase 7 변경을 한 번의 Staging 배치로 검증한다. 이는 구현 순서 변경이며 최종 Gate나 Production 승인
-경계를 줄인 것이 아니다.
+- 2026-08-30~31 Staging에서 관리자·일반 사용자 두 실제 계정으로 방 생성, 코드 입장, Ready, 방장
+  시작, broadcast/direct, host snapshot revision 복원, ping, 새로고침 뒤 재접속과 자동 복귀를 확인했다.
+  Protocol Probe는 public 게임이 아닌 관리자 내부 테스트 도구로 분리됐고 공용 대기실을 그대로 쓴다.
+- 2026-08-31 사용자 확인에 따라 hibernation 전후 동작과 2·4·8인 지속 부하·비용 실측 Gate를
+  완료로 반영한다. 완료 세션의 metrics와 실행 기록이 인계 증거이며, 코드·환경이 바뀌지 않는 한 다른
+  세션은 이 Gate를 중복 실행하지 않는다.
+- Phase 6의 6점을 반영해 이 단계 종료 시점은 110/120점, 91.7% 완료였다. Production 승인 경계는
+  그대로 유지한다.
 
 ### Phase 7 — 등록 구 게임 재작성
 
@@ -457,14 +456,22 @@ Phase 7은 2026-08-30 로컬 구현과 산출물 검증을 완료했고 Staging 
   고정했다.
 - 1280×900 및 390px 폭 로컬 browser 검증에서 다섯 게임의 내부 선택기·언어·소리·local 전환,
   반응속도 호흡, 오목 재대결과 가로 overflow가 없음을 확인했고 browser console 오류는 0건이었다.
-- 관리자 공식 게임 업로드는 ZIP 여러 개를 선택해 직렬 게시하고, 개별 실패를 격리해 파일별 결과를
-  표시한다. 최종 ZIP은 `project-owogg-games/<slug>/<slug>_v1.zip`에 불변 백업하며 같은 버전명의 내용이
-  달라지면 덮어쓰지 않고 빌드를 실패시킨다.
+- 관리자 공식 게임 업로드는 ZIP 여러 개를 큐에 넣어 직렬 게시하고 429를 서버 `Retry-After`에 맞춰
+  재시도하며, 개별 실패를 격리해 파일별 결과를 표시한다. 최종 ZIP은
+  `project-owogg-games/<slug>/<slug>_v<semver>.zip`에 백업하고 실제 업데이트 대상만 날짜별
+  `updates/` 폴더에 모은다.
 - 삭제된 game workspace의 tsconfig/lock importer와 Web의 반응속도 전용 tier 결과 UI를 제거했다.
   active Relay runtime에는 게임 slug/driver/ruleset 종속이 없다.
 - 루트 `pnpm verify`와 별도 strict ZIP 검증이 모두 통과했다.
-- 남은 Gate는 단일 Staging 배포, 사용자의 다중 ZIP 등록·업데이트, 오목 exact-version profile
-  승인/활성화와 5종 browser acceptance다. 이 Gate 전에는 Phase 7 점수 10점을 완료로 반영하지 않는다.
+- 후속 Staging 변경에서 일반/Streamer 랭킹을 점수·XP·출석과 일·주·월 기간으로 통합하고, 국가
+  플래그·달성일·비랭킹 게임 제외를 추가했다. 공식 게임 surface는 16:9로 고정하고 `GAME_RESTART`가
+  완료 뒤에도 전달되도록 SDK를 보완했다.
+- tree `a25b02f`는 CI와 격리 Staging 배포, API provenance와 Access 브라우저 진입을 통과했다.
+  `reaction-time`과 `typing-test`는 `v1.0.0`을 유지하고, `aim-test`, `memory-test`, `official-omok`의
+  16:9·재시작 보완본은 `v1.0.1`로 빌드·검증·백업했다.
+- 2026-08-31 사용자 확인에 따라 `v1.0.1` 3종 게시, live D1/B2 확인, 오목 exact-version Relay와
+  공식 게임 5종·랭킹 browser acceptance를 완료로 반영한다. Phase 7의 10점을 포함한 최종 진행도는
+  120/120점, 100%다.
 
 ---
 
@@ -486,3 +493,6 @@ Phase 7은 2026-08-30 로컬 구현과 산출물 검증을 완료했고 Staging 
 
 로컬 검증, Staging 배포, Staging acceptance와 Production 승격은 서로 다른 완료 상태로 보고한다.
 Production은 별도 명시적 승인이 없으면 변경하지 않는다.
+
+현재 구현·Staging Gate는 완료됐지만 Production 승격은 별도 작업이다. 다른 세션은 완료된 Phase 6·7을
+다시 커밋 범위로 잡지 말고, 최신 `staging` 기반의 새 worktree에서 다음 제품 작업만 시작한다.

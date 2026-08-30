@@ -27,6 +27,7 @@ import {
   GoogleAuthorizationCodeLoginRequestSchema,
 } from "@owogg/contracts";
 import type { SocialProvider } from "@owogg/contracts";
+import { OAuthIdentityConflictError } from "@owogg/core";
 
 const KNOWN_PROVIDERS: SocialProvider[] = ["google", "discord"];
 
@@ -259,6 +260,14 @@ authRouter.post("/google", async (c) => {
 
     return await establishGoogleSession(c, verifyResult.profile);
   } catch (err) {
+    if (err instanceof OAuthIdentityConflictError && err.code === "ACCOUNT_PREVIOUSLY_REGISTERED") {
+      return accountError(
+        c,
+        "ACCOUNT_PREVIOUSLY_REGISTERED",
+        "이 Google 계정은 이전에 OwOGG에 등록되어 새 계정으로 다시 가입할 수 없습니다.",
+        409,
+      );
+    }
     console.error("Google Auth Error:", err);
     return c.json({ error: "Internal server error during Google login" }, 500);
   }
@@ -308,6 +317,14 @@ authRouter.post("/google/code", async (c) => {
   try {
     return await establishGoogleSession(c, verified.profile);
   } catch (err) {
+    if (err instanceof OAuthIdentityConflictError && err.code === "ACCOUNT_PREVIOUSLY_REGISTERED") {
+      return accountError(
+        c,
+        "ACCOUNT_PREVIOUSLY_REGISTERED",
+        "이 Google 계정은 이전에 OwOGG에 등록되어 새 계정으로 다시 가입할 수 없습니다.",
+        409,
+      );
+    }
     console.error("Google authorization-code login error:", err);
     return c.json({ error: "Internal server error during Google login" }, 500);
   }
@@ -498,6 +515,9 @@ authRouter.get("/discord/callback", async (c) => {
           `${frontendUrl}/settings?link_status=conflict&provider=discord&challenge=${encodeURIComponent(challenge.challengeId)}`,
         );
       }
+      if (result.code === "ACCOUNT_PREVIOUSLY_REGISTERED") {
+        return c.redirect(`${frontendUrl}/settings?link_status=registered&provider=discord`);
+      }
       return c.redirect(`${frontendUrl}/settings?link_status=already&provider=discord`);
     }
 
@@ -536,13 +556,24 @@ authRouter.get("/discord/callback", async (c) => {
   const profile = exchangeResult.profile;
   const { userRepo, sessionRepo } = createContainer(c.env.DB);
 
-  const user = await userRepo.findOrCreateUser({
-    provider: "discord",
-    providerUserId: profile.id,
-    email: profile.email,
-    nickname: profile.username,
-    avatarUrl: profile.avatarUrl,
-  });
+  let user;
+  try {
+    user = await userRepo.findOrCreateUser({
+      provider: "discord",
+      providerUserId: profile.id,
+      email: profile.email,
+      nickname: profile.username,
+      avatarUrl: profile.avatarUrl,
+    });
+  } catch (error) {
+    if (
+      error instanceof OAuthIdentityConflictError &&
+      error.code === "ACCOUNT_PREVIOUSLY_REGISTERED"
+    ) {
+      return c.redirect(`${frontendUrl}/?auth_error=account_previously_registered`);
+    }
+    throw error;
+  }
 
   const session = await sessionRepo.createSession(user.id);
   const secure = !isLocalhost(c.req.url);
@@ -683,6 +714,14 @@ authRouter.post("/link/google", async (c) => {
           },
           mergeChallenge: validated,
         },
+        409,
+      );
+    }
+    if (result.code === "ACCOUNT_PREVIOUSLY_REGISTERED") {
+      return accountError(
+        c,
+        "ACCOUNT_PREVIOUSLY_REGISTERED",
+        "이 Google 계정은 이전에 OwOGG에 등록되어 다른 계정에 다시 연결할 수 없습니다.",
         409,
       );
     }

@@ -180,6 +180,8 @@ export default function SettingsPage() {
         void refreshUser();
       } else if (linkStatus === "already") {
         setStatusMessage(dict.profile.alreadyLinkedAccount);
+      } else if (linkStatus === "registered") {
+        setStatusMessage(dict.profile.alreadyLinkedAccount);
       } else if (linkStatus === "conflict" && challenge) {
         setMergeChallengeId(challenge);
       } else if (linkStatus === "error") {
@@ -252,6 +254,8 @@ export default function SettingsPage() {
             } else {
               setStatusMessage(dict.profile.googleAccountInUse);
             }
+          } else if (code === "ACCOUNT_PREVIOUSLY_REGISTERED") {
+            setStatusMessage(dict.profile.alreadyLinkedAccount);
           } else if (code === "PROVIDER_ALREADY_LINKED") {
             setStatusMessage(dict.profile.googleAlreadyLinked);
           } else {

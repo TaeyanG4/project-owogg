@@ -33,6 +33,39 @@ CREATE TABLE oauth_accounts (
   UNIQUE(provider, provider_user_id),
   UNIQUE(user_id, provider)
 );
+CREATE TABLE oauth_identity_registrations (
+  provider TEXT NOT NULL,
+  provider_user_id TEXT NOT NULL,
+  registered_user_id INTEGER NOT NULL,
+  registered_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (provider, provider_user_id),
+  UNIQUE (registered_user_id, provider)
+);
+CREATE TRIGGER trg_oauth_accounts_before_insert_registration_guard
+BEFORE INSERT ON oauth_accounts
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM oauth_identity_registrations registration
+  WHERE registration.provider = NEW.provider
+    AND (
+      (registration.provider_user_id = NEW.provider_user_id
+       AND registration.registered_user_id <> NEW.user_id)
+      OR
+      (registration.registered_user_id = NEW.user_id
+       AND registration.provider_user_id <> NEW.provider_user_id)
+    )
+)
+BEGIN
+  SELECT RAISE(ABORT, 'OAUTH_IDENTITY_ALREADY_REGISTERED');
+END;
+CREATE TRIGGER trg_oauth_accounts_after_insert_registration
+AFTER INSERT ON oauth_accounts
+FOR EACH ROW
+BEGIN
+  INSERT OR IGNORE INTO oauth_identity_registrations
+    (provider, provider_user_id, registered_user_id, registered_at)
+  VALUES (NEW.provider, NEW.provider_user_id, NEW.user_id, NEW.created_at);
+END;
 `;
 
 test("new OAuth users keep a provider-specific avatar and select it by default", async () => {
@@ -100,4 +133,88 @@ test("OAuth refresh updates only that provider candidate until the user selects 
   const fallback = await repo.findById(user.id);
   assert.equal(fallback?.avatar_provider, "google");
   assert.equal(fallback?.avatar_url, "https://google.example/avatar.png");
+});
+
+test("a disconnected OAuth identity signs back into its original user instead of creating another account", async () => {
+  const { db, raw } = createSqliteD1(PROFILE_IDENTITY_SCHEMA);
+  const repo = new D1UserRepository(db);
+  const original = await repo.findOrCreateUser({
+    provider: "google",
+    providerUserId: "google-once",
+    email: "owner@example.com",
+    nickname: "Owner",
+    avatarUrl: null,
+  });
+  await repo.linkOAuthAccount(original.id, "discord", "discord-backup", null, null);
+  await repo.unlinkOAuthAccount(original.id, "google");
+
+  const signedInAgain = await repo.findOrCreateUser({
+    provider: "google",
+    providerUserId: "google-once",
+    email: "owner-new@example.com",
+    nickname: "Ignored replacement",
+    avatarUrl: null,
+  });
+
+  assert.equal(signedInAgain.id, original.id);
+  assert.equal(raw.prepare("SELECT COUNT(*) AS count FROM users").get()?.count, 1);
+  assert.equal(
+    raw
+      .prepare(
+        "SELECT user_id FROM oauth_accounts WHERE provider = 'google' AND provider_user_id = 'google-once'",
+      )
+      .get()?.user_id,
+    original.id,
+  );
+});
+
+test("a registered OAuth identity cannot move to another user after it is disconnected", async () => {
+  const { db } = createSqliteD1(PROFILE_IDENTITY_SCHEMA);
+  const repo = new D1UserRepository(db);
+  const owner = await repo.findOrCreateUser({
+    provider: "google",
+    providerUserId: "google-owner",
+    email: null,
+    nickname: "Owner",
+    avatarUrl: null,
+  });
+  const other = await repo.findOrCreateUser({
+    provider: "discord",
+    providerUserId: "discord-other",
+    email: null,
+    nickname: "Other",
+    avatarUrl: null,
+  });
+  await repo.linkOAuthAccount(owner.id, "discord", "discord-owner", null, null);
+  await repo.unlinkOAuthAccount(owner.id, "google");
+
+  await assert.rejects(
+    () => repo.linkOAuthAccount(other.id, "google", "google-owner", null, null),
+    (error: unknown) =>
+      error instanceof Error &&
+      error.name === "OAuthIdentityConflictError" &&
+      error.message === "ACCOUNT_PREVIOUSLY_REGISTERED",
+  );
+});
+
+test("a user cannot replace its registered identity with a second account from the same provider", async () => {
+  const { db } = createSqliteD1(PROFILE_IDENTITY_SCHEMA);
+  const repo = new D1UserRepository(db);
+  const user = await repo.findOrCreateUser({
+    provider: "google",
+    providerUserId: "google-first",
+    email: null,
+    nickname: "Owner",
+    avatarUrl: null,
+  });
+  await repo.linkOAuthAccount(user.id, "discord", "discord-backup", null, null);
+  await repo.unlinkOAuthAccount(user.id, "google");
+
+  await assert.rejects(
+    () => repo.linkOAuthAccount(user.id, "google", "google-second", null, null),
+    (error: unknown) =>
+      error instanceof Error &&
+      error.name === "OAuthIdentityConflictError" &&
+      error.message === "PROVIDER_ALREADY_LINKED",
+  );
 });

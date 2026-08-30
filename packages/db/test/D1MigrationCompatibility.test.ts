@@ -19,13 +19,14 @@ test("generic production migrations avoid Cloudflare-incompatible TEMP table DDL
     "0042_multiplayer_rematch.sql",
     "0043_game_result_verification_claims.sql",
     "0044_verified_result_score_semantics.sql",
+    "0048_oauth_identity_registration_guard.sql",
   ]) {
     const sql = fs.readFileSync(new URL(`../migrations/${filename}`, import.meta.url), "utf8");
     assert.doesNotMatch(sql, /\bCREATE\s+TEMP(?:ORARY)?\s+TABLE\b/i, filename);
   }
 });
 
-test("full production migration chain applies through 0047 with period ranking indexes", () => {
+test("full production migration chain applies through 0048 with OAuth registration guards", () => {
   const { raw } = createSqliteD1("");
   const migrationUrl = new URL("../migrations/", import.meta.url);
   const filenames = fs
@@ -84,6 +85,20 @@ test("full production migration chain applies through 0047 with period ranking i
   }
   assert.ok(userColumns.some((column) => column.name === "avatar_provider"));
   assert.ok(oauthColumns.some((column) => column.name === "avatar_url"));
+  assert.ok(
+    raw
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'oauth_identity_registrations'",
+      )
+      .get(),
+  );
+  assert.ok(
+    raw
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_oauth_accounts_before_insert_registration_guard'",
+      )
+      .get(),
+  );
   assert.ok(gameSettingColumns.some((column) => column.name === "catalog_role"));
   const rolePermissions = raw
     .prepare(
@@ -160,6 +175,103 @@ test("full production migration chain applies through 0047 with period ranking i
   assert.deepEqual(
     { ...rollingScore },
     { leaderboard_generation: 4, variant_id: "standard", ruleset_revision: 1 },
+  );
+});
+
+test("0048 backfills OAuth ownership and blocks identity reuse after disconnect", () => {
+  const migration = fs.readFileSync(
+    new URL("../migrations/0048_oauth_identity_registration_guard.sql", import.meta.url),
+    "utf8",
+  );
+  const { raw } = createSqliteD1(`
+    CREATE TABLE users (id INTEGER PRIMARY KEY, nickname TEXT NOT NULL);
+    CREATE TABLE oauth_accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      provider TEXT NOT NULL,
+      provider_user_id TEXT NOT NULL,
+      provider_email TEXT,
+      created_at TEXT NOT NULL,
+      UNIQUE(provider, provider_user_id),
+      UNIQUE(user_id, provider)
+    );
+    INSERT INTO users (id, nickname) VALUES (1, 'owner'), (2, 'other');
+    INSERT INTO oauth_accounts
+      (user_id, provider, provider_user_id, created_at)
+    VALUES (1, 'google', 'google-once', '2026-08-01T00:00:00.000Z');
+  `);
+
+  raw.exec(migration);
+  assert.deepEqual(
+    {
+      ...raw
+        .prepare(
+          `SELECT provider, provider_user_id, registered_user_id
+           FROM oauth_identity_registrations`,
+        )
+        .get(),
+    },
+    { provider: "google", provider_user_id: "google-once", registered_user_id: 1 },
+  );
+
+  raw.prepare("DELETE FROM oauth_accounts WHERE user_id = 1 AND provider = 'google'").run();
+  assert.throws(
+    () =>
+      raw
+        .prepare(
+          `INSERT INTO oauth_accounts
+             (user_id, provider, provider_user_id, created_at)
+           VALUES (2, 'google', 'google-once', 'now')`,
+        )
+        .run(),
+    /OAUTH_IDENTITY_ALREADY_REGISTERED/,
+  );
+  assert.throws(
+    () =>
+      raw
+        .prepare(
+          `INSERT INTO oauth_accounts
+             (user_id, provider, provider_user_id, created_at)
+           VALUES (1, 'google', 'google-second', 'now')`,
+        )
+        .run(),
+    /OAUTH_IDENTITY_ALREADY_REGISTERED/,
+  );
+
+  raw
+    .prepare(
+      `INSERT INTO oauth_accounts
+         (user_id, provider, provider_user_id, created_at)
+       VALUES (1, 'google', 'google-once', 'now')`,
+    )
+    .run();
+  raw
+    .prepare(
+      `INSERT INTO oauth_accounts
+         (user_id, provider, provider_user_id, created_at)
+       VALUES (2, 'discord', 'discord-secondary', 'now')`,
+    )
+    .run();
+  raw
+    .prepare(
+      `UPDATE oauth_accounts
+       SET user_id = 1
+       WHERE provider = 'discord' AND provider_user_id = 'discord-secondary'`,
+    )
+    .run();
+  assert.equal(
+    raw
+      .prepare(
+        `SELECT registered_user_id
+         FROM oauth_identity_registrations
+         WHERE provider = 'discord' AND provider_user_id = 'discord-secondary'`,
+      )
+      .get()?.registered_user_id,
+    1,
+  );
+  assert.equal(
+    raw.prepare("SELECT COUNT(*) AS count FROM oauth_identity_registrations").get()?.count,
+    2,
   );
 });
 

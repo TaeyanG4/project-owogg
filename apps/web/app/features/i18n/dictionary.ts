@@ -2024,7 +2024,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         calloutCode: "/owogg link",
         calloutSuffix: "를 다시 실행해 새 링크를 받으세요.",
         calloutWarning:
-          "하나의 Discord 계정은 하나의 OwOGG 계정에만 연결됩니다. 이미 다른 OwOGG 계정에 연결된 Discord 계정으로는 새로 연결할 수 없습니다 — 웹에서 연결을 먼저 해제해야 합니다.",
+          "하나의 Discord 계정은 최초 등록된 하나의 OwOGG 계정에만 연결됩니다. 연결을 해제해도 등록 소유권은 유지되며 다른 계정으로 옮길 수 없습니다.",
         footerPrefix: "연결에 실패하나요? ",
         footerLink1: "문제 해결 가이드",
         footerMid: "를 확인하세요. 또는 웹에서 바로 ",
@@ -2178,7 +2178,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         faqAlreadyLinked: {
           question: "계정이 이미 연결되어 있다고 합니다",
           answer:
-            "이 Discord 계정이 이미 다른 OwOGG 계정과 연결되어 있다는 뜻입니다. 하나의 Discord 계정은 하나의 OwOGG 계정에만 연결할 수 있습니다. 다른 계정에 연결하려면 먼저 웹에서 기존 연결을 해제해야 합니다.",
+            "이 Discord 계정이 이미 다른 OwOGG 계정에 등록되어 있다는 뜻입니다. 하나의 Discord 계정은 최초 등록된 OwOGG 계정에 계속 귀속되며, 연결을 해제해도 다른 계정으로 재등록할 수 없습니다.",
         },
         faqServerNotRegistered: {
           question: "/owogg play가 서버 미등록이라고 합니다",
@@ -3345,7 +3345,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         calloutCode: "/owogg link",
         calloutSuffix: " again in Discord to get a new one.",
         calloutWarning:
-          "Each Discord account can link to only one OwOGG account. A Discord account already linked to another OwOGG account can't be linked again — unlink it on the website first.",
+          "Each Discord account stays bound to the first OwOGG account that registered it. Unlinking does not release that ownership or allow it to move to another account.",
         footerPrefix: "Having trouble linking? Check the ",
         footerLink1: "troubleshooting guide",
         footerMid: ", or open the ",
@@ -3502,7 +3502,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         faqAlreadyLinked: {
           question: "It says my account is already linked",
           answer:
-            "This means this Discord account is already linked to a different OwOGG account. Each Discord account can link to only one OwOGG account. To link it to a different one, unlink the existing connection on the website first.",
+            "This Discord account is already registered to another OwOGG account. It remains bound to the first OwOGG account even after unlinking and cannot be registered to a different account.",
         },
         faqServerNotRegistered: {
           question: "/owogg play says the server isn't registered",
@@ -4669,7 +4669,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         calloutCode: "/owogg link",
         calloutSuffix: "を再実行して新しいリンクを取得してください。",
         calloutWarning:
-          "1つのDiscordアカウントは1つのOwOGGアカウントにしか連携できません。すでに別のOwOGGアカウントに連携済みのDiscordアカウントでは新たに連携できません — 先にウェブで連携を解除してください。",
+          "1つのDiscordアカウントは、最初に登録した1つのOwOGGアカウントにのみ紐づきます。連携を解除しても登録上の所有権は維持され、別のアカウントへ移すことはできません。",
         footerPrefix: "連携に失敗しますか？",
         footerLink1: "トラブルシューティングガイド",
         footerMid: "をご確認ください。または、ウェブから直接",
@@ -4826,7 +4826,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         faqAlreadyLinked: {
           question: "アカウントがすでに連携されていると表示されます",
           answer:
-            "このDiscordアカウントがすでに別のOwOGGアカウントと連携されているという意味です。1つのDiscordアカウントは1つのOwOGGアカウントにしか連携できません。別のアカウントに連携するには、まずウェブで既存の連携を解除する必要があります。",
+            "このDiscordアカウントはすでに別のOwOGGアカウントに登録されています。最初に登録したOwOGGアカウントへの紐づきは連携解除後も維持され、別のアカウントへ再登録することはできません。",
         },
         faqServerNotRegistered: {
           question: "/owogg play でサーバーが未登録と表示されます",
@@ -5955,7 +5955,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         calloutCode: "/owogg link",
         calloutSuffix: "以获取新链接。",
         calloutWarning:
-          "一个 Discord 账户只能连接一个 OwOGG 账户。已连接到其他 OwOGG 账户的 Discord 账户无法重新连接 —— 需先在网页上解除原有连接。",
+          "一个 Discord 账户只能归属于首次注册它的 OwOGG 账户。即使解除连接，注册归属仍会保留，不能转移到其他账户。",
         footerPrefix: "连接失败？请查看",
         footerLink1: "问题排查指南",
         footerMid: "。也可以直接在网页上打开",
@@ -6104,7 +6104,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         faqAlreadyLinked: {
           question: "提示账户已连接",
           answer:
-            "这表示此 Discord 账户已连接到另一个 OwOGG 账户。一个 Discord 账户只能连接一个 OwOGG 账户。若要连接到其他账户，需先在网页上解除现有连接。",
+            "这表示此 Discord 账户已注册到另一个 OwOGG 账户。它会一直归属于首次注册的 OwOGG 账户，即使解除连接也不能重新注册到其他账户。",
         },
         faqServerNotRegistered: {
           question: "/owogg play 提示服务器未注册",

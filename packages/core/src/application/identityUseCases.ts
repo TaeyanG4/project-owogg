@@ -1,8 +1,10 @@
 import type { OAuthAccount, UserRepository } from "../ports/repositories.js";
+import { OAuthIdentityConflictError } from "../errors/index.js";
 
 export type LinkProviderResult =
   | { ok: true; provider: string; alreadyLinked: boolean }
   | { ok: false; code: "ACCOUNT_ALREADY_LINKED"; conflictUserId: number }
+  | { ok: false; code: "ACCOUNT_PREVIOUSLY_REGISTERED" }
   | { ok: false; code: "PROVIDER_ALREADY_LINKED" };
 
 export type UnlinkProviderResult =
@@ -40,38 +42,64 @@ export class IdentityUseCases {
     providerEmail: string | null,
     avatarUrl: string | null,
   ): Promise<LinkProviderResult> {
-    // 1. Does this provider identity already exist anywhere?
-    const existing = await this.userRepo.findOAuthAccount(provider, providerUserId);
-    if (existing) {
-      if (existing.user_id === userId) {
-        await this.userRepo.linkOAuthAccount(
-          userId,
-          provider,
-          providerUserId,
-          providerEmail,
-          avatarUrl,
-        );
-        return { ok: true, provider, alreadyLinked: true };
-      }
-      // Belongs to a different OwOGG account — explicit conflict.
-      return { ok: false, code: "ACCOUNT_ALREADY_LINKED", conflictUserId: existing.user_id };
+    const [existing, currentAccounts] = await Promise.all([
+      this.userRepo.findOAuthAccount(provider, providerUserId),
+      this.userRepo.getOAuthAccounts(userId),
+    ]);
+
+    // Re-authenticating the exact identity already attached to this user is idempotent and may
+    // refresh provider-owned profile fields.
+    if (existing?.user_id === userId) {
+      await this.userRepo.linkOAuthAccount(
+        userId,
+        provider,
+        providerUserId,
+        providerEmail,
+        avatarUrl,
+      );
+      return { ok: true, provider, alreadyLinked: true };
     }
 
-    // 2. Does the current account already have a different identity for this provider?
-    const currentAccounts = await this.userRepo.getOAuthAccounts(userId);
+    // Check the current account first. Otherwise choosing a test identity that belongs to a
+    // different user incorrectly opens an account-merge flow even though this account already has
+    // its one allowed identity for the provider.
     const hasProvider = currentAccounts.some((a) => a.provider === provider);
     if (hasProvider) {
       return { ok: false, code: "PROVIDER_ALREADY_LINKED" };
     }
 
-    // 3. Attach the new provider identity to the current account.
-    await this.userRepo.linkOAuthAccount(
-      userId,
-      provider,
-      providerUserId,
-      providerEmail,
-      avatarUrl,
-    );
+    if (existing) {
+      return { ok: false, code: "ACCOUNT_ALREADY_LINKED", conflictUserId: existing.user_id };
+    }
+
+    // The persistence adapter repeats the ownership checks against the durable registration
+    // ledger. That closes the check-then-insert race and also remembers disconnected identities.
+    try {
+      await this.userRepo.linkOAuthAccount(
+        userId,
+        provider,
+        providerUserId,
+        providerEmail,
+        avatarUrl,
+      );
+    } catch (error) {
+      if (error instanceof OAuthIdentityConflictError) {
+        if (error.code === "ACCOUNT_ALREADY_LINKED" && error.conflictUserId !== undefined) {
+          return {
+            ok: false,
+            code: "ACCOUNT_ALREADY_LINKED",
+            conflictUserId: error.conflictUserId,
+          };
+        }
+        if (error.code === "ACCOUNT_PREVIOUSLY_REGISTERED") {
+          return { ok: false, code: "ACCOUNT_PREVIOUSLY_REGISTERED" };
+        }
+        if (error.code === "PROVIDER_ALREADY_LINKED") {
+          return { ok: false, code: "PROVIDER_ALREADY_LINKED" };
+        }
+      }
+      throw error;
+    }
     return { ok: true, provider, alreadyLinked: false };
   }
 

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   IdentityUseCases,
+  OAuthIdentityConflictError,
   type OAuthAccount,
   type User,
   type UserRepository,
@@ -181,6 +182,36 @@ test("linkProvider returns ACCOUNT_ALREADY_LINKED when the identity belongs to a
     assert.equal(result.code, "ACCOUNT_ALREADY_LINKED");
     assert.equal(result.conflictUserId, userB.id);
   }
+});
+
+test("linkProvider rejects a second provider identity before offering an account merge", async () => {
+  const repo = new MockUserRepository();
+  const { userA, userB } = await seedTwoAccounts(repo);
+  await repo.linkOAuthAccount(userB.id, "google", "google-test-account", null, null);
+  const useCases = new IdentityUseCases(repo);
+
+  const result = await useCases.linkProvider(userA.id, "google", "google-test-account", null, null);
+
+  assert.deepEqual(result, { ok: false, code: "PROVIDER_ALREADY_LINKED" });
+});
+
+test("linkProvider maps a durable historical registration conflict to a hard rejection", async () => {
+  const repo = new MockUserRepository();
+  const { userA } = await seedTwoAccounts(repo);
+  repo.linkOAuthAccount = async () => {
+    throw new OAuthIdentityConflictError("ACCOUNT_PREVIOUSLY_REGISTERED", 99);
+  };
+  const useCases = new IdentityUseCases(repo);
+
+  const result = await useCases.linkProvider(
+    userA.id,
+    "discord",
+    "discord-previously-registered",
+    null,
+    null,
+  );
+
+  assert.deepEqual(result, { ok: false, code: "ACCOUNT_PREVIOUSLY_REGISTERED" });
 });
 
 test("linkProvider blocks a second identity for a provider the account already has", async () => {

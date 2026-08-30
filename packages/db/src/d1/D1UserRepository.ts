@@ -1,4 +1,9 @@
-import type { OAuthAccount, User, UserRepository } from "@owogg/core";
+import {
+  OAuthIdentityConflictError,
+  type OAuthAccount,
+  type User,
+  type UserRepository,
+} from "@owogg/core";
 
 export interface D1Database {
   prepare(query: string): D1PreparedStatement;
@@ -19,6 +24,13 @@ export interface D1PreparedStatement {
    * compare-and-set decisions. `meta.rows_written` is D1's billing count and can be larger because
    * it includes index maintenance; generic score acceptance only tests that value for > 0. */
   run(): Promise<D1Result>;
+}
+
+interface OAuthIdentityRegistration {
+  provider: string;
+  provider_user_id: string;
+  registered_user_id: number;
+  registered_at: string;
 }
 
 export class D1UserRepository implements UserRepository {
@@ -92,6 +104,87 @@ export class D1UserRepository implements UserRepository {
     };
   }
 
+  private async findOAuthIdentityRegistration(
+    provider: string,
+    providerUserId: string,
+  ): Promise<OAuthIdentityRegistration | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT provider, provider_user_id, registered_user_id, registered_at
+         FROM oauth_identity_registrations
+         WHERE provider = ? AND provider_user_id = ?`,
+      )
+      .bind(provider, providerUserId)
+      .first<Record<string, unknown>>();
+    if (!row) return null;
+    return {
+      provider: String(row.provider),
+      provider_user_id: String(row.provider_user_id),
+      registered_user_id: Number(row.registered_user_id),
+      registered_at: String(row.registered_at),
+    };
+  }
+
+  private async findUserProviderRegistration(
+    userId: number,
+    provider: string,
+  ): Promise<OAuthIdentityRegistration | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT provider, provider_user_id, registered_user_id, registered_at
+         FROM oauth_identity_registrations
+         WHERE registered_user_id = ? AND provider = ?`,
+      )
+      .bind(userId, provider)
+      .first<Record<string, unknown>>();
+    if (!row) return null;
+    return {
+      provider: String(row.provider),
+      provider_user_id: String(row.provider_user_id),
+      registered_user_id: Number(row.registered_user_id),
+      registered_at: String(row.registered_at),
+    };
+  }
+
+  private async refreshOAuthProfile(
+    userId: number,
+    provider: string,
+    providerUserId: string,
+    email: string | null,
+    avatarUrl: string | null,
+  ): Promise<User> {
+    const existingUser = await this.findById(userId);
+    if (!existingUser) {
+      throw new OAuthIdentityConflictError("ACCOUNT_PREVIOUSLY_REGISTERED", userId);
+    }
+    const selectedProvider = existingUser.avatar_provider ?? provider;
+    const selectedAvatar =
+      selectedProvider === provider && avatarUrl ? avatarUrl : existingUser.avatar_url;
+
+    await this.db.batch([
+      this.db
+        .prepare(
+          `UPDATE oauth_accounts
+           SET provider_email = COALESCE(?, provider_email),
+               avatar_url = COALESCE(?, avatar_url)
+           WHERE user_id = ? AND provider = ? AND provider_user_id = ?`,
+        )
+        .bind(email, avatarUrl, userId, provider, providerUserId),
+      this.db
+        .prepare(
+          `UPDATE users
+           SET email = COALESCE(?, email), avatar_url = ?, avatar_provider = ?,
+               updated_at = datetime('now')
+           WHERE id = ?`,
+        )
+        .bind(email, selectedAvatar, selectedProvider, userId),
+    ]);
+
+    const refreshed = await this.findById(userId);
+    if (!refreshed) throw new Error(`User ${userId} disappeared after OAuth refresh`);
+    return refreshed;
+  }
+
   async findOrCreateUser(data: {
     provider: string;
     providerUserId: string;
@@ -101,34 +194,44 @@ export class D1UserRepository implements UserRepository {
   }): Promise<User> {
     const existingUser = await this.findByOAuth(data.provider, data.providerUserId);
     if (existingUser) {
-      const selectedProvider = existingUser.avatar_provider ?? data.provider;
-      const selectedAvatar =
-        selectedProvider === data.provider && data.avatarUrl
-          ? data.avatarUrl
-          : existingUser.avatar_url;
+      return this.refreshOAuthProfile(
+        existingUser.id,
+        data.provider,
+        data.providerUserId,
+        data.email,
+        data.avatarUrl,
+      );
+    }
 
-      await this.db.batch([
-        this.db
-          .prepare(
-            `UPDATE oauth_accounts
-             SET provider_email = COALESCE(?, provider_email),
-                 avatar_url = COALESCE(?, avatar_url)
-             WHERE user_id = ? AND provider = ? AND provider_user_id = ?`,
-          )
-          .bind(data.email, data.avatarUrl, existingUser.id, data.provider, data.providerUserId),
-        this.db
-          .prepare(
-            `UPDATE users
-             SET email = COALESCE(?, email), avatar_url = ?, avatar_provider = ?,
-                 updated_at = datetime('now')
-             WHERE id = ?`,
-          )
-          .bind(data.email, selectedAvatar, selectedProvider, existingUser.id),
-      ]);
-
-      const refreshed = await this.findById(existingUser.id);
-      if (!refreshed) throw new Error(`User ${existingUser.id} disappeared after OAuth refresh`);
-      return refreshed;
+    // A disconnected identity is not a new signup. Reattach it only to its original OwOGG user;
+    // if that user no longer exists, retain the tombstone and fail closed instead of recreating a
+    // second account with the same Google/Discord identity.
+    const registration = await this.findOAuthIdentityRegistration(
+      data.provider,
+      data.providerUserId,
+    );
+    if (registration) {
+      const registeredUser = await this.findById(registration.registered_user_id);
+      if (!registeredUser) {
+        throw new OAuthIdentityConflictError(
+          "ACCOUNT_PREVIOUSLY_REGISTERED",
+          registration.registered_user_id,
+        );
+      }
+      await this.linkOAuthAccount(
+        registeredUser.id,
+        data.provider,
+        data.providerUserId,
+        data.email,
+        data.avatarUrl,
+      );
+      return this.refreshOAuthProfile(
+        registeredUser.id,
+        data.provider,
+        data.providerUserId,
+        data.email,
+        data.avatarUrl,
+      );
     }
 
     // INSERT ... RETURNING avoids the shared-connection last_insert_rowid() race when two users
@@ -145,15 +248,48 @@ export class D1UserRepository implements UserRepository {
     if (!newUserRow) throw new Error("OAuth user insert returned no row");
     const userId = Number(newUserRow.id);
 
-    // Insert oauth record
-    await this.db
-      .prepare(
-        `INSERT INTO oauth_accounts
-           (user_id, provider, provider_user_id, provider_email, avatar_url)
-         VALUES (?, ?, ?, ?, ?)`,
-      )
-      .bind(userId, data.provider, data.providerUserId, data.email, data.avatarUrl)
-      .run();
+    try {
+      await this.db
+        .prepare(
+          `INSERT INTO oauth_accounts
+             (user_id, provider, provider_user_id, provider_email, avatar_url)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .bind(userId, data.provider, data.providerUserId, data.email, data.avatarUrl)
+        .run();
+    } catch (error) {
+      // A concurrent first login may have won after the initial read. Never leave this request's
+      // user row orphaned, and resolve the verified identity to the single winning account.
+      await this.db
+        .prepare(
+          `DELETE FROM users
+           WHERE id = ? AND NOT EXISTS (SELECT 1 FROM oauth_accounts WHERE user_id = ?)`,
+        )
+        .bind(userId, userId)
+        .run();
+
+      const winner = await this.findByOAuth(data.provider, data.providerUserId);
+      if (winner) {
+        return this.refreshOAuthProfile(
+          winner.id,
+          data.provider,
+          data.providerUserId,
+          data.email,
+          data.avatarUrl,
+        );
+      }
+      const conflictingRegistration = await this.findOAuthIdentityRegistration(
+        data.provider,
+        data.providerUserId,
+      );
+      if (conflictingRegistration) {
+        throw new OAuthIdentityConflictError(
+          "ACCOUNT_PREVIOUSLY_REGISTERED",
+          conflictingRegistration.registered_user_id,
+        );
+      }
+      throw error;
+    }
 
     return {
       id: userId,
@@ -234,18 +370,75 @@ export class D1UserRepository implements UserRepository {
     providerEmail: string | null,
     avatarUrl: string | null,
   ): Promise<void> {
-    await this.db
-      .prepare(
-        `INSERT INTO oauth_accounts
-           (user_id, provider, provider_user_id, provider_email, avatar_url, created_at)
-         VALUES (?, ?, ?, ?, ?, datetime('now'))
-         ON CONFLICT(provider, provider_user_id) DO UPDATE SET
-           provider_email = COALESCE(excluded.provider_email, oauth_accounts.provider_email),
-           avatar_url = COALESCE(excluded.avatar_url, oauth_accounts.avatar_url)
-         WHERE oauth_accounts.user_id = excluded.user_id`,
-      )
-      .bind(userId, provider, providerUserId, providerEmail, avatarUrl)
-      .run();
+    const classifyConflict = async (): Promise<OAuthIdentityConflictError | null> => {
+      const [exactAccount, currentAccounts, exactRegistration, providerRegistration] =
+        await Promise.all([
+          this.findOAuthAccount(provider, providerUserId),
+          this.getOAuthAccounts(userId),
+          this.findOAuthIdentityRegistration(provider, providerUserId),
+          this.findUserProviderRegistration(userId, provider),
+        ]);
+
+      if (exactAccount?.user_id === userId) return null;
+      if (
+        currentAccounts.some((account) => account.provider === provider) ||
+        (providerRegistration && providerRegistration.provider_user_id !== providerUserId)
+      ) {
+        return new OAuthIdentityConflictError("PROVIDER_ALREADY_LINKED");
+      }
+      if (exactAccount) {
+        return new OAuthIdentityConflictError("ACCOUNT_ALREADY_LINKED", exactAccount.user_id);
+      }
+      if (exactRegistration && exactRegistration.registered_user_id !== userId) {
+        return new OAuthIdentityConflictError(
+          "ACCOUNT_PREVIOUSLY_REGISTERED",
+          exactRegistration.registered_user_id,
+        );
+      }
+      return null;
+    };
+
+    const initialConflict = await classifyConflict();
+    if (initialConflict) throw initialConflict;
+
+    const existing = await this.findOAuthAccount(provider, providerUserId);
+    if (existing?.user_id === userId) {
+      await this.db
+        .prepare(
+          `UPDATE oauth_accounts
+           SET provider_email = COALESCE(?, provider_email),
+               avatar_url = COALESCE(?, avatar_url)
+           WHERE user_id = ? AND provider = ? AND provider_user_id = ?`,
+        )
+        .bind(providerEmail, avatarUrl, userId, provider, providerUserId)
+        .run();
+    } else {
+      try {
+        await this.db
+          .prepare(
+            `INSERT INTO oauth_accounts
+               (user_id, provider, provider_user_id, provider_email, avatar_url, created_at)
+             VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+          )
+          .bind(userId, provider, providerUserId, providerEmail, avatarUrl)
+          .run();
+      } catch (error) {
+        const concurrentConflict = await classifyConflict();
+        if (concurrentConflict) throw concurrentConflict;
+
+        // A concurrent idempotent request for this same user may have won. Only convert that exact
+        // state to success; every unexplained database failure remains visible.
+        const concurrentlyLinked = await this.findOAuthAccount(provider, providerUserId);
+        if (concurrentlyLinked?.user_id !== userId) throw error;
+      }
+    }
+
+    const linked = await this.findOAuthAccount(provider, providerUserId);
+    if (linked?.user_id !== userId) {
+      const conflict = await classifyConflict();
+      if (conflict) throw conflict;
+      throw new Error("OAuth identity insert did not persist the requested owner");
+    }
 
     // Legacy rows may not have an initial preference. The first connected provider becomes the
     // default only in that case; linking a second provider never changes an explicit choice.

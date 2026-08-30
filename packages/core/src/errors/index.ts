@@ -25,3 +25,21 @@ export class RateLimitedError extends Error {
     this.name = "RateLimitedError";
   }
 }
+
+export type OAuthIdentityConflictCode =
+  "ACCOUNT_ALREADY_LINKED" | "PROVIDER_ALREADY_LINKED" | "ACCOUNT_PREVIOUSLY_REGISTERED";
+
+/**
+ * Persistence-level OAuth ownership conflict. The application use case converts this into its
+ * public discriminated result, while login routes can also fail closed when a historical
+ * registration no longer has a valid OwOGG user.
+ */
+export class OAuthIdentityConflictError extends Error {
+  constructor(
+    readonly code: OAuthIdentityConflictCode,
+    readonly conflictUserId?: number,
+  ) {
+    super(code);
+    this.name = "OAuthIdentityConflictError";
+  }
+}

@@ -105,8 +105,24 @@ export class D1AccountMergeRepository implements AccountMergeRepository {
     | "STREAMER_PLATFORM_CONFLICT"
     | "MULTIPLAYER_PARTICIPATION_CONFLICT"
     | "GAME_CREATOR_REVIEW_CONFLICT"
+    | "OAUTH_REGISTRATION_CONFLICT"
     | null
   > {
+    const oauthRegistrationRow = await this.db
+      .prepare(
+        `SELECT 1
+         FROM oauth_identity_registrations primary_registration
+         JOIN oauth_identity_registrations secondary_registration
+           ON secondary_registration.provider = primary_registration.provider
+         WHERE primary_registration.registered_user_id = ?
+           AND secondary_registration.registered_user_id = ?
+         LIMIT 1`,
+      )
+      .bind(primaryId, secondaryId)
+      .first();
+
+    if (oauthRegistrationRow) return "OAUTH_REGISTRATION_CONFLICT";
+
     const streamerRow = await this.db
       .prepare(
         `SELECT 1

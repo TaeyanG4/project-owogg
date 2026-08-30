@@ -168,6 +168,9 @@ export class AccountMergeUseCases {
     if (integrityConflict === "GAME_CREATOR_REVIEW_CONFLICT") {
       return { ok: false, code: "MERGE_GAME_CREATOR_CONFLICT" };
     }
+    if (integrityConflict === "OAUTH_REGISTRATION_CONFLICT") {
+      return { ok: false, code: "MERGE_PROVIDER_CONFLICT" };
+    }
 
     // Atomic Primary-Wins merge: secondary data deleted, secondary OAuth moved to primary,
     // secondary user deleted. Performed as a single transaction by the repository.

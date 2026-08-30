@@ -4,9 +4,9 @@
 
 마지막 검증: 2026-08-31
 
-최신 마이그레이션: `0047_public_ranking_period_indexes.sql`
+최신 마이그레이션: `0048_oauth_identity_registration_guard.sql`
 
-스키마 요약: 물리 테이블 `57`, 롤링 배포 호환 뷰 `4`
+스키마 요약: 물리 테이블 `58`, 롤링 배포 호환 뷰 `4`
 
 기준 소스:
 
@@ -15,7 +15,7 @@
 - `apps/api/src/container.ts`
 - [데이터베이스 기준 문서](DATABASE.md)
 
-이 문서는 `0000_initial_schema.sql`부터 `0047_public_ranking_period_indexes.sql`까지를 빈 SQLite에
+이 문서는 `0000_initial_schema.sql`부터 `0048_oauth_identity_registration_guard.sql`까지를 빈 SQLite에
 순서대로 적용한 **최종 D1 schema**를 기준으로 합니다. migration SQL이 유일한 schema 권한
 원천이며, 이 문서는 관계 탐색과 운영 이해를 위한 투영입니다.
 
@@ -44,6 +44,11 @@ erDiagram
     INTEGER user_id FK
     TEXT provider
     TEXT provider_user_id
+  }
+  oauth_identity_registrations {
+    TEXT provider PK
+    TEXT provider_user_id PK
+    INTEGER registered_user_id
   }
   sessions {
     TEXT id PK
@@ -118,6 +123,7 @@ erDiagram
   }
 
   users ||--o{ oauth_accounts : owns
+  users ||..o{ oauth_identity_registrations : permanently_registered
   users ||--o{ sessions : authenticates
   users ||..o{ account_merge_challenges : user_a
   users ||..o{ account_merge_challenges : user_b
@@ -698,6 +704,7 @@ D1 콘솔에서 직접 수정하면 감사 로그와 두 저장소의 일관성�
 | `multiplayer_profiles`                   | Multiplayer     | 서버 승인 immutable runtime profile revision               |
 | `multiplayer_reward_outbox`              | Multiplayer     | committed 결과 기반 exactly-once reward 전달 원장          |
 | `oauth_accounts`                         | Identity        | Google/Discord provider identity와 avatar 후보             |
+| `oauth_identity_registrations`           | Identity        | 연결 해제 뒤에도 보존하는 provider 최초 등록 소유권        |
 | `official_game_deletion_audit_log`       | Operations      | 부모 삭제 뒤에도 남는 OWOGG 완전 삭제 감사 원장            |
 | `sandbox_game_review_audit_log`          | Compatibility   | 직전 USER 게임 심사 계약의 append-only 호환 감사           |
 | `sandbox_game_versions`                  | Compatibility   | 직전 Worker용 USER version 호환 미러                       |
