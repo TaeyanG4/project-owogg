@@ -6,7 +6,14 @@ import { fileURLToPath } from "node:url";
 import { zipSync } from "fflate";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const sourceFiles = ["index.html", "style.css", "game.js", "owogg.json", "owogg.logo.svg"];
+const sourceFiles = [
+  "index.html",
+  "style.css",
+  "load-protocol.js",
+  "game.js",
+  "owogg.json",
+  "owogg.logo.svg",
+];
 const entries = Object.fromEntries(
   sourceFiles.map((file) => [file, readFileSync(path.join(here, file))]),
 );

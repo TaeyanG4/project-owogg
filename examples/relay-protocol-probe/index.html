@@ -34,11 +34,86 @@
         <button id="leave" class="danger" type="button">방 나가기</button>
       </section>
 
+      <section class="load-panel" aria-labelledby="load-title">
+        <div class="load-heading">
+          <div>
+            <h2 id="load-title">Real-account load gate</h2>
+            <p>
+              봇이나 인증 우회 없이 현재 로그인한 모든 좌석이 같은 Relay SDK로 부하를 전송합니다.
+            </p>
+          </div>
+          <p id="load-status" role="status">Host가 실행 조건을 선택할 수 있습니다.</p>
+        </div>
+
+        <div class="load-controls">
+          <label>
+            전송률
+            <select id="load-rate">
+              <option value="1">좌석당 1Hz</option>
+              <option value="5">좌석당 5Hz</option>
+              <option value="20">좌석당 20Hz</option>
+            </select>
+          </label>
+          <label>
+            지속시간
+            <select id="load-duration">
+              <option value="10000">10초 점검</option>
+              <option value="60000">1분</option>
+              <option value="300000">5분</option>
+              <option value="600000">10분</option>
+            </select>
+          </label>
+          <label>
+            payload
+            <select id="load-payload">
+              <option value="256">256B 정상 부하</option>
+              <option value="3072">3072B 상한 보호 시험</option>
+            </select>
+          </label>
+          <button id="load-start" type="button">Host 부하 시작</button>
+          <button id="load-stop" type="button" disabled>부하 중지</button>
+          <button id="idle-start" type="button">60초 idle/wake</button>
+        </div>
+
+        <p class="load-note">
+          3072B × 다인원 × 20Hz는 의도적으로 방 byte 상한을 넘길 수 있으며, 이 경우 연결 보호 동작을
+          확인합니다.
+        </p>
+
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>좌석</th>
+                <th>전송</th>
+                <th>수신</th>
+                <th>거부</th>
+                <th>중복</th>
+                <th>gap</th>
+                <th>self p95</th>
+                <th>self p99</th>
+              </tr>
+            </thead>
+            <tbody id="load-results">
+              <tr>
+                <td colspan="8">아직 실행 결과가 없습니다.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Idle / wake 결과</h3>
+        <ul id="idle-results" class="idle-results" aria-live="polite">
+          <li>idle/wake 결과가 없습니다.</li>
+        </ul>
+      </section>
+
       <section aria-labelledby="log-title">
         <h2 id="log-title">Transport log</h2>
         <ol id="log" class="log" aria-live="polite"></ol>
       </section>
     </main>
+    <script src="./load-protocol.js"></script>
     <script src="./game.js"></script>
   </body>
 </html>

@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
 import { unzipSync } from "fflate";
 import {
   findGameLogoFile,
@@ -13,8 +14,15 @@ import {
 import { extractGameCreatorManifest } from "../packages/core/src/domain/gameCreatorManifest.js";
 
 const fixtureDirectory = join(process.cwd(), "examples", "relay-protocol-probe");
-const fixtureFiles = ["index.html", "style.css", "game.js", "owogg.json", "owogg.logo.svg"];
-const expectedZipSha256 = "e7d719622f8896adf87a2a7c8870ca17ba79097707817e4fca84acb5990851c4";
+const fixtureFiles = [
+  "index.html",
+  "style.css",
+  "load-protocol.js",
+  "game.js",
+  "owogg.json",
+  "owogg.logo.svg",
+];
+const expectedZipSha256 = "dfd02698c262aeb107e4492ed0e73e5a6424b7e20a9a947c45d0e13037135661";
 
 function sourceFilesBelow(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -69,12 +77,16 @@ test("Relay Protocol Probe is an uploadable v1 ZIP with no game-specific server 
   assert.ok(findGameLogoFile(prepared.files));
 
   const gameJs = readFileSync(join(fixtureDirectory, "game.js"), "utf8");
+  const loadProtocolJs = readFileSync(join(fixtureDirectory, "load-protocol.js"), "utf8");
   for (const required of [
     "relay.ready",
     "relay.broadcast",
     "relay.direct",
     "relay.snapshot",
     "relay.leave",
+    "loadProtocol.parseLoadMessage",
+    "loadProtocol.buildLoadSample",
+    "loadProtocol.summarizeLatencies",
   ]) {
     assert.match(gameJs, new RegExp(required.replace(".", "\\.")));
   }
@@ -86,7 +98,8 @@ test("Relay Protocol Probe is an uploadable v1 ZIP with no game-specific server 
     "ws://",
     "wss://",
   ]) {
-    assert.equal(gameJs.includes(forbidden), false, forbidden);
+    assert.equal(gameJs.includes(forbidden), false, `game.js: ${forbidden}`);
+    assert.equal(loadProtocolJs.includes(forbidden), false, `load-protocol.js: ${forbidden}`);
   }
 
   const activeSourceRoots = [
@@ -105,4 +118,60 @@ test("Relay Protocol Probe is an uploadable v1 ZIP with no game-specific server 
     [],
     "the arbitrary ZIP must not require a platform source binding",
   );
+});
+
+test("Relay Protocol Probe load protocol strictly parses messages and pads exact bytes", () => {
+  interface LoadProtocolApi {
+    readonly LOAD_PROTOCOL: string;
+    readonly IDLE_DURATION_MS: number;
+    readonly parseLoadMessage: (value: unknown) => unknown;
+    readonly buildLoadSample: (
+      runId: string,
+      sampleSeq: number,
+      sentAt: number,
+      targetBytes: number,
+    ) => unknown;
+    readonly expectedSamples: (rateHz: number, durationMs: number) => number | null;
+    readonly summarizeLatencies: (values: readonly number[]) => unknown;
+  }
+
+  const context: {
+    window: { RelayProbeLoadProtocol?: LoadProtocolApi };
+    TextEncoder: typeof TextEncoder;
+  } = { window: {}, TextEncoder };
+  runInNewContext(readFileSync(join(fixtureDirectory, "load-protocol.js"), "utf8"), context);
+  const api = context.window.RelayProbeLoadProtocol;
+  assert.ok(api);
+  assert.equal(api.LOAD_PROTOCOL, "relay-probe/load-v1");
+  assert.equal(api.IDLE_DURATION_MS, 60_000);
+
+  const plan = {
+    protocol: api.LOAD_PROTOCOL,
+    type: "load-plan",
+    runId: "load-test-123456",
+    rateHz: 20,
+    durationMs: 300_000,
+    payloadBytes: 256,
+  };
+  assert.deepEqual(JSON.parse(JSON.stringify(api.parseLoadMessage(plan))), plan);
+  assert.equal(api.parseLoadMessage({ ...plan, rateHz: 2 }), null);
+  assert.equal(api.parseLoadMessage({ ...plan, extra: true }), null);
+  assert.equal(api.expectedSamples(20, 300_000), 6_000);
+  assert.equal(api.expectedSamples(2, 300_000), null);
+
+  for (const targetBytes of [256, 3_072]) {
+    const sample = api.buildLoadSample("load-test-123456", 7, 1_800_000_000_000, targetBytes);
+    assert.ok(sample);
+    assert.equal(new TextEncoder().encode(JSON.stringify(sample)).byteLength, targetBytes);
+    assert.notEqual(api.parseLoadMessage(sample), null);
+  }
+
+  assert.deepEqual(JSON.parse(JSON.stringify(api.summarizeLatencies([50, 10, 40, 20, 30]))), {
+    count: 5,
+    min: 10,
+    p50: 30,
+    p95: 50,
+    p99: 50,
+    max: 50,
+  });
 });

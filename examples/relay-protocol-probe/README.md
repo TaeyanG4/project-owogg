@@ -4,6 +4,17 @@
 제작자 코드가 자체 application protocol을 정의하고, host가 counter state와 reconnect snapshot을
 관리합니다. 서버는 payload를 해석하거나 결과·승자를 만들지 않습니다.
 
+같은 fixture 안의 **Real-account load gate**는 봇이나 인증 우회 없이 방에 입장한 실제 계정들이
+동일한 Relay SDK를 사용해 좌석당 1/5/20Hz 부하를 보냅니다. Host가 조건을 선택하면 모든 좌석의
+준비 응답 뒤 3초 후 동시에 시작하며, 좌석별 전송·수신·거부·중복·server sequence gap과 self-echo
+p95/p99 지연을 집계합니다. 60초 idle/wake 시험은 application message가 없는 구간 뒤 첫 broadcast와
+server sequence 연속성을 확인합니다.
+
+- `256B`는 정상 부하와 지연 측정용입니다.
+- `3072B` 다인원 20Hz는 방 전체 byte 상한을 의도적으로 넘길 수 있는 보호 동작 시험입니다.
+- 각 좌석은 서로 다른 정상 사용자 계정이어야 하며, 같은 계정으로 여러 좌석을 만들거나 자동화 계정
+  권한을 우회하지 않습니다.
+
 ```bash
 node examples/relay-protocol-probe/build.mjs
 pnpm exec tsx examples/relay-protocol-probe/verify-zip.mjs
