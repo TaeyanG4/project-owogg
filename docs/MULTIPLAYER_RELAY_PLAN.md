@@ -405,6 +405,10 @@ Phase 6은 2026-08-30 로컬 검증 슬라이스를 진행 중이다.
 - `examples/relay-protocol-probe`는 플랫폼 active source에 slug binding 없이 manifest v1과
   `window.OWOGG.multiplayer`만 사용하는 2~8인 ZIP이다. production bundle 전처리 검증을 통과한 현재
   재현 가능한 ZIP SHA-256은 `e7d719622f8896adf87a2a7c8870ca17ba79097707817e4fca84acb5990851c4`이다.
+- 공개 게임과 Relay protocol fixture를 혼동하지 않도록 `game_settings.catalog_role`의 서버 소유
+  `GAME | INTERNAL_TOOL` 분류를 추가했다. manifest는 이 값을 선언하지 못하며, 내부 도구는 public
+  catalog에서 제외되고 관리자 전용 탭의 공용 대기실·Relay 실행 UI에서 점검한다. fixture slug는
+  active platform source에 결합하지 않는다.
 - Staging 두 사용자 browser E2E, hibernation 전후 실제 wall-time/요청량, 2~8인 지속 부하·비용 측정은
   아직 수행하지 않았다. 공식 가격과 현재 per-message storage 경로를 반영한 계산기와 로컬 전용 실행
   runbook `docs/runbooks/multiplayer-relay-load-gate.md`를 추가했다. 운영·보안 runbook은 저장소 정책에

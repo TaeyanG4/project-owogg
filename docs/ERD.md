@@ -4,7 +4,7 @@
 
 마지막 검증: 2026-08-30
 
-최신 마이그레이션: `0045_generic_multiplayer_relay_profiles.sql`
+최신 마이그레이션: `0046_internal_game_tools.sql`
 
 스키마 요약: 물리 테이블 `57`, 롤링 배포 호환 뷰 `4`
 
@@ -15,7 +15,7 @@
 - `apps/api/src/container.ts`
 - [데이터베이스 기준 문서](DATABASE.md)
 
-이 문서는 `0000_initial_schema.sql`부터 `0045_generic_multiplayer_relay_profiles.sql`까지를 빈 SQLite에
+이 문서는 `0000_initial_schema.sql`부터 `0046_internal_game_tools.sql`까지를 빈 SQLite에
 순서대로 적용한 **최종 D1 schema**를 기준으로 합니다. migration SQL이 유일한 schema 권한
 원천이며, 이 문서는 관계 탐색과 운영 이해를 위한 투영입니다.
 
@@ -220,6 +220,7 @@ erDiagram
   game_settings {
     TEXT game_id PK
     INTEGER enabled
+    TEXT catalog_role
   }
   game_slug_reservations {
     TEXT slug PK
@@ -680,7 +681,7 @@ D1 콘솔에서 직접 수정하면 감사 로그와 두 저장소의 일관성�
 | `game_creator_applications`              | Game Creator    | 자격 신청과 관리자 심사 결과                               |
 | `game_result_verification_claims`        | Result          | gs2 first-evidence hash와 단일 terminal 검증 상태          |
 | `game_results`                           | Result          | 완료 facts와 gs2 세 점수·verifier provenance 원장          |
-| `game_settings`                          | Operations      | TEXT slug 기반 게임 enable/disable override                |
+| `game_settings`                          | Operations      | TEXT slug 기반 safety override 및 서버 소유 catalog role   |
 | `game_slug_reservations`                 | Game Platform   | USER 호환 identity의 slug 선점 불변식                      |
 | `game_version_leases`                    | Multiplayer     | active instance의 exact bundle version 보존 lease          |
 | `game_versions`                          | Game Platform   | 공통 immutable bundle version과 publish/review 상태        |

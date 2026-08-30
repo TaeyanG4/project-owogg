@@ -769,6 +769,8 @@ export interface StreamerRepository {
 export interface GameSettingRecord {
   gameId: string;
   enabled: boolean;
+  /** Server-owned presentation role. Upload metadata cannot self-assign INTERNAL_TOOL. */
+  catalogRole: "GAME" | "INTERNAL_TOOL";
   disabledReason: string | null;
   updatedByAdminId: number | null;
   updatedAt: string;
@@ -777,12 +779,20 @@ export interface GameSettingRecord {
 export interface GameSettingsRepository {
   /** Only game_ids with an explicit `enabled = 0` row — used for the public availability check. */
   getDisabledGameIds(): Promise<string[]>;
+  /** One read for every identity excluded from public catalog surfaces, whether by the emergency
+   * safety switch or the server-owned internal-tool role. */
+  getPublicCatalogExcludedGameIds(): Promise<string[]>;
   /** Every row that has ever been explicitly toggled (enabled or disabled) — used by the admin list. */
   getAllOverrides(): Promise<GameSettingRecord[]>;
   setEnabled(
     gameId: string,
     enabled: boolean,
     reason: string | null,
+    adminId: number,
+  ): Promise<GameSettingRecord>;
+  setCatalogRole(
+    gameId: string,
+    catalogRole: "GAME" | "INTERNAL_TOOL",
     adminId: number,
   ): Promise<GameSettingRecord>;
 }

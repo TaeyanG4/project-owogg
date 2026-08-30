@@ -16,6 +16,12 @@ class FakeGameSettingsRepository implements GameSettingsRepository {
     return [...this.overrides.values()].filter((o) => !o.enabled).map((o) => o.gameId);
   }
 
+  async getPublicCatalogExcludedGameIds(): Promise<string[]> {
+    return [...this.overrides.values()]
+      .filter((override) => !override.enabled || override.catalogRole === "INTERNAL_TOOL")
+      .map((override) => override.gameId);
+  }
+
   async getAllOverrides(): Promise<GameSettingRecord[]> {
     return [...this.overrides.values()];
   }
@@ -29,7 +35,26 @@ class FakeGameSettingsRepository implements GameSettingsRepository {
     const record: GameSettingRecord = {
       gameId,
       enabled,
+      catalogRole: this.overrides.get(gameId)?.catalogRole ?? "GAME",
       disabledReason,
+      updatedByAdminId,
+      updatedAt: new Date().toISOString(),
+    };
+    this.overrides.set(gameId, record);
+    return record;
+  }
+
+  async setCatalogRole(
+    gameId: string,
+    catalogRole: "GAME" | "INTERNAL_TOOL",
+    updatedByAdminId: number,
+  ): Promise<GameSettingRecord> {
+    const previous = this.overrides.get(gameId);
+    const record: GameSettingRecord = {
+      gameId,
+      enabled: previous?.enabled ?? true,
+      catalogRole,
+      disabledReason: previous?.disabledReason ?? null,
       updatedByAdminId,
       updatedAt: new Date().toISOString(),
     };
@@ -224,11 +249,16 @@ test("a broken canonical source cannot block the D1-only kill switch", async () 
   assert.deepEqual(await useCases.getDisabledGameIds(), [knownSlug]);
 });
 
-test("listPage preserves server upload timestamps and pagination metadata", async () => {
+test("listPage preserves server upload timestamps, role filter, and pagination metadata", async () => {
   const repo = new FakeGameSettingsRepository();
   const sources = genericSources(TEST_GAMES.slice(0, 2));
   const identities = await sources.identities.listAll();
-  const calls: Array<{ publisherType: "OWOGG" | "USER"; limit: number; offset: number }> = [];
+  const calls: Array<{
+    publisherType: "OWOGG" | "USER";
+    catalogRole: "GAME" | "INTERNAL_TOOL";
+    limit: number;
+    offset: number;
+  }> = [];
   const adminCatalog: AdminGameCatalogRepository = {
     async listPage(input) {
       calls.push(input);
@@ -251,9 +281,14 @@ test("listPage preserves server upload timestamps and pagination metadata", asyn
     adminCatalog,
   );
 
-  const result = await useCases.listPage({ publisherType: "OWOGG", page: 2, pageSize: 10 });
+  const result = await useCases.listPage({
+    publisherType: "OWOGG",
+    catalogRole: "GAME",
+    page: 2,
+    pageSize: 10,
+  });
 
-  assert.deepEqual(calls, [{ publisherType: "OWOGG", limit: 10, offset: 10 }]);
+  assert.deepEqual(calls, [{ publisherType: "OWOGG", catalogRole: "GAME", limit: 10, offset: 10 }]);
   assert.equal(result.games[0]?.latestUploadedAt, "2026-08-25T09:30:00.000Z");
   assert.equal(result.games[0]?.title, TEST_GAMES[1]?.title);
   assert.deepEqual(
@@ -265,4 +300,16 @@ test("listPage preserves server upload timestamps and pagination metadata", asyn
     },
     { total: 21, page: 2, pageSize: 10, totalPages: 3 },
   );
+});
+
+test("setCatalogRole moves a known identity without changing its safety switch", async () => {
+  const { useCases } = newUseCases();
+  await useCases.setEnabled("aim-test", false, "maintenance", 3);
+
+  const result = await useCases.setCatalogRole("aim-test", "INTERNAL_TOOL", 9);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.record.catalogRole, "INTERNAL_TOOL");
+  assert.equal(result.record.enabled, false);
+  assert.equal(result.record.disabledReason, "maintenance");
 });

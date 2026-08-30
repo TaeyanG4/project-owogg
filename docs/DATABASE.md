@@ -4,7 +4,7 @@
 
 마지막 검증: 2026-08-30
 
-최신 마이그레이션: `0045_generic_multiplayer_relay_profiles.sql`
+최신 마이그레이션: `0046_internal_game_tools.sql`
 
 기준 소스:
 
@@ -16,7 +16,7 @@
 - [`ERD.md`](ERD.md) — 도메인별 관계도와 전체 물리 테이블·호환 뷰 사전
 
 Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 권한 원천입니다. 이 문서는
-현재 `0000_initial_schema.sql`부터 `0045_generic_multiplayer_relay_profiles.sql`까지의 역할을 설명합니다.
+현재 `0000_initial_schema.sql`부터 `0046_internal_game_tools.sql`까지의 역할을 설명합니다.
 
 ## 마이그레이션 범위
 
@@ -45,6 +45,7 @@ Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 
 | `0043`        | gs2 attempt의 first-evidence hash claim과 단일 terminal 전환                |
 | `0044`        | gs2 세 점수 의미, verifier provenance, mode/revision과 원자 랭킹 projection |
 | `0045`        | exact content hash에 묶인 generic Relay profile과 instance authority        |
+| `0046`        | 서버 소유 GAME/INTERNAL_TOOL 분류와 공개 catalog 제외                       |
 
 기존 migration은 변경, squash, 삭제하지 않습니다. 프로덕션 배포는 API보다 먼저
 `pnpm d1:migrate:prod`를 실행합니다.

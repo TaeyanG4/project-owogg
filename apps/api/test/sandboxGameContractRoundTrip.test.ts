@@ -221,6 +221,8 @@ test("admin OWOGG game page carries server pagination and latest upload time", (
         mode: "single",
         latestUploadedAt: "2026-08-25T09:30:00.000Z",
         publisherType: "OWOGG",
+        catalogRole: "GAME",
+        catalogState: "READY",
         status: "published",
         enabled: true,
         disabledReason: null,

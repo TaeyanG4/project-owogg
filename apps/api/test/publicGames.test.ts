@@ -22,6 +22,7 @@ interface FakeGame {
   canonical: GameCanonicalDocument;
   assetKey?: string;
   disabled?: boolean;
+  internalTool?: boolean;
   playerCount?: number;
   bookmarkCount?: number;
 }
@@ -124,6 +125,7 @@ function createDb(games: readonly FakeGame[]) {
         return null;
       },
       async all<T>() {
+        const normalizedQuery = query.replace(/\s+/g, " ").trim();
         if (query.includes("WITH requested(slug)")) {
           return {
             results: values.map((slug) => {
@@ -141,7 +143,18 @@ function createDb(games: readonly FakeGame[]) {
             results: T[];
           };
         }
-        if (query.includes("FROM game_settings WHERE enabled = 0")) {
+        if (
+          normalizedQuery.includes(
+            "FROM game_settings WHERE enabled = 0 OR catalog_role = 'INTERNAL_TOOL'",
+          )
+        ) {
+          return {
+            results: games
+              .filter((game) => game.disabled || game.internalTool)
+              .map((game) => ({ game_id: game.slug })),
+          } as { results: T[] };
+        }
+        if (normalizedQuery.includes("FROM game_settings WHERE enabled = 0")) {
           return {
             results: games.filter((game) => game.disabled).map((game) => ({ game_id: game.slug })),
           } as { results: T[] };
@@ -378,6 +391,33 @@ test("GET /api/games/:slug resolves the same generic projection and denies priva
     games,
   );
   assert.equal(privateResponse.status, 404);
+});
+
+test("internal tools are excluded from generic public catalog and detail routes", async () => {
+  const internalTool: FakeGame = {
+    ...OFFICIAL,
+    id: 11,
+    slug: "transport-diagnostics",
+    internalTool: true,
+    canonical: { ...OFFICIAL.canonical, slug: "transport-diagnostics" },
+  };
+  const games = [USER, internalTool];
+  const db = createDb(games);
+
+  const listResponse = await request("https://api.example.test/api/games", db, games);
+  assert.equal(listResponse.status, 200);
+  const list = (await listResponse.json()) as { games: PublicGameJson[] };
+  assert.deepEqual(
+    list.games.map((game) => game.slug),
+    [USER.slug],
+  );
+
+  const detailResponse = await request(
+    "https://api.example.test/api/games/transport-diagnostics",
+    db,
+    games,
+  );
+  assert.equal(detailResponse.status, 404);
 });
 
 test("generic media route serves a D1 asset without exposing its object key and denies disabled games", async () => {

@@ -7,6 +7,7 @@ const SCHEMA = `${SANDBOX_GAMES_TEST_SCHEMA}
 CREATE TABLE game_settings (
   game_id TEXT PRIMARY KEY,
   enabled INTEGER NOT NULL DEFAULT 1,
+  catalog_role TEXT NOT NULL DEFAULT 'GAME',
   disabled_reason TEXT,
   updated_by_admin_id INTEGER,
   updated_at TEXT NOT NULL
@@ -66,8 +67,18 @@ test("admin catalog pages one publisher and orders by latest server upload", asy
     .run();
 
   const repository = new D1AdminGameCatalogRepository(db);
-  const first = await repository.listPage({ publisherType: "OWOGG", limit: 1, offset: 0 });
-  const second = await repository.listPage({ publisherType: "OWOGG", limit: 1, offset: 1 });
+  const first = await repository.listPage({
+    publisherType: "OWOGG",
+    catalogRole: "GAME",
+    limit: 1,
+    offset: 0,
+  });
+  const second = await repository.listPage({
+    publisherType: "OWOGG",
+    catalogRole: "GAME",
+    limit: 1,
+    offset: 1,
+  });
 
   assert.equal(first.total, 2);
   assert.equal(first.items[0]?.identity.slug, "older-game");
@@ -94,10 +105,47 @@ test("admin catalog keeps USER and OWOGG pages isolated", async () => {
 
   const result = await new D1AdminGameCatalogRepository(db).listPage({
     publisherType: "USER",
+    catalogRole: "GAME",
     limit: 10,
     offset: 0,
   });
 
   assert.equal(result.total, 1);
   assert.equal(result.items[0]?.identity.slug, "user-game");
+});
+
+test("admin catalog separates internal tools without fixture slug knowledge", async () => {
+  const { db, raw } = createSqliteD1(SCHEMA);
+  insertOfficialGame(raw, "ordinary-game", "2026-08-20T00:00:00.000Z");
+  insertOfficialGame(raw, "arbitrary-protocol-fixture", "2026-08-21T00:00:00.000Z");
+  raw
+    .prepare(
+      `INSERT INTO game_settings (game_id, enabled, catalog_role, updated_at)
+       VALUES ('arbitrary-protocol-fixture', 1, 'INTERNAL_TOOL', '2026-08-21T01:00:00.000Z')`,
+    )
+    .run();
+
+  const repository = new D1AdminGameCatalogRepository(db);
+  const games = await repository.listPage({
+    publisherType: "OWOGG",
+    catalogRole: "GAME",
+    limit: 10,
+    offset: 0,
+  });
+  const tools = await repository.listPage({
+    publisherType: "OWOGG",
+    catalogRole: "INTERNAL_TOOL",
+    limit: 10,
+    offset: 0,
+  });
+
+  assert.deepEqual(
+    games.items.map((item) => item.identity.slug),
+    ["ordinary-game"],
+  );
+  assert.deepEqual(
+    tools.items.map((item) => item.identity.slug),
+    ["arbitrary-protocol-fixture"],
+  );
+  assert.equal(tools.items[0]?.setting?.catalogRole, "INTERNAL_TOOL");
 });

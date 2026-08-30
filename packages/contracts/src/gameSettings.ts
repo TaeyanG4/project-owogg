@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+export const AdminGameCatalogRoleSchema = z.enum(["GAME", "INTERNAL_TOOL"]);
+export type AdminGameCatalogRole = z.infer<typeof AdminGameCatalogRoleSchema>;
+
 // Admin-controlled live enable/disable override per game (see
 // packages/db/migrations/0019_game_settings.sql). GameManifest.status is a static, build-time
 // value shared with the Discord bot — this is the separate, DB-backed layer an admin can flip
@@ -14,6 +17,8 @@ export const GameAvailabilityDtoSchema = z.object({
   mode: z.enum(["single", "multi"]).nullable(),
   latestUploadedAt: z.string().nullable(),
   publisherType: z.enum(["OWOGG", "USER"]),
+  catalogRole: AdminGameCatalogRoleSchema,
+  catalogState: z.enum(["READY", "PRIVATE", "NO_LIVE_VERSION", "CANONICAL_UNAVAILABLE"]),
   status: z.string(),
   enabled: z.boolean(),
   disabledReason: z.string().nullable(),
@@ -37,6 +42,7 @@ export const AdminGameListQuerySchema = z.object({
     .number()
     .refine((value): value is 10 | 20 | 30 => value === 10 || value === 20 || value === 30)
     .default(10),
+  catalogRole: AdminGameCatalogRoleSchema.default("GAME"),
 });
 
 export const AdminGameToggleRequestSchema = z.object({
@@ -52,6 +58,17 @@ export const AdminGameToggleResponseSchema = z.object({
   disabledReason: z.string().nullable(),
 });
 export type AdminGameToggleResponse = z.infer<typeof AdminGameToggleResponseSchema>;
+
+export const AdminGameCatalogRoleRequestSchema = z.object({
+  catalogRole: AdminGameCatalogRoleSchema,
+});
+export type AdminGameCatalogRoleRequest = z.infer<typeof AdminGameCatalogRoleRequestSchema>;
+
+export const AdminGameCatalogRoleResponseSchema = z.object({
+  gameId: z.string(),
+  catalogRole: AdminGameCatalogRoleSchema,
+});
+export type AdminGameCatalogRoleResponse = z.infer<typeof AdminGameCatalogRoleResponseSchema>;
 
 // GET /api/games/availability — public, no auth. Just the disabled set, nothing about who/why.
 export const PublicGameAvailabilityResponseSchema = z.object({
