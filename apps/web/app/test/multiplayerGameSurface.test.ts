@@ -3,10 +3,13 @@ import test from "node:test";
 import type { MultiplayerGameAvailabilityResponse } from "@owogg/contracts";
 import {
   buildMultiplayerRoomShareValue,
+  clearMultiplayerRoomResumeValue,
   parseMultiplayerRoomJoinValue,
   readMultiplayerRoomShareValue,
+  readMultiplayerRoomResumeValue,
   supportsPrivateOpenRoomLauncher,
   stripMultiplayerRoomCredentials,
+  writeMultiplayerRoomResumeValue,
 } from "../features/game/runtime/MultiplayerGameSurface";
 import {
   multiplayerPingLabel,
@@ -175,6 +178,56 @@ test("room-code links, plain codes, and optional invite values all normalize saf
     ),
     { publicCode: "ROOMCODE1234", inviteToken: "" },
   );
+});
+
+test("refresh resume stores only a user-and-game-scoped public room code", () => {
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+  };
+
+  assert.equal(
+    writeMultiplayerRoomResumeValue(storage, "creator-relay-demo", 7, "ROOMCODE1234"),
+    true,
+  );
+  assert.equal(readMultiplayerRoomResumeValue(storage, "creator-relay-demo", 7), "ROOMCODE1234");
+  assert.equal(readMultiplayerRoomResumeValue(storage, "creator-relay-demo", 8), "");
+  assert.equal(readMultiplayerRoomResumeValue(storage, "different-game", 7), "");
+  assert.equal(
+    [...values.values()].some((value) => value.includes("invite")),
+    false,
+  );
+
+  clearMultiplayerRoomResumeValue(storage, "creator-relay-demo", 7);
+  assert.equal(readMultiplayerRoomResumeValue(storage, "creator-relay-demo", 7), "");
+});
+
+test("refresh resume fails closed for malformed identities, codes, and stored values", () => {
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+  };
+
+  assert.equal(writeMultiplayerRoomResumeValue(storage, "Bad Slug", 7, "ROOMCODE1234"), false);
+  assert.equal(
+    writeMultiplayerRoomResumeValue(storage, "creator-relay-demo", 0, "ROOMCODE1234"),
+    false,
+  );
+  assert.equal(writeMultiplayerRoomResumeValue(storage, "creator-relay-demo", 7, "short"), false);
+  assert.equal(
+    writeMultiplayerRoomResumeValue(storage, "creator-relay-demo", 7, "ROOMCODE1234"),
+    true,
+  );
+  const [key] = values.keys();
+  assert.ok(key);
+  values.set(key, '{"version":1,"publicCode":"short"}');
+  assert.equal(readMultiplayerRoomResumeValue(storage, "creator-relay-demo", 7), "");
+  values.set(key, "not-json");
+  assert.equal(readMultiplayerRoomResumeValue(storage, "creator-relay-demo", 7), "");
 });
 
 test("room-code and invite-link clipboard actions never substitute for each other", () => {

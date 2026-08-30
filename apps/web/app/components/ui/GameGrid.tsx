@@ -29,6 +29,8 @@ interface GameGridProps {
   mobileColumns: MobileColumns;
   desktopColumns: DesktopColumns;
   emptyMessage?: React.ReactNode;
+  loading?: boolean;
+  loadingMessage?: React.ReactNode;
   /** Clips the grid to exactly this many visual rows regardless of column count — used by the
    * home page's 최근 플레이(1 row)/즐겨찾기(2 rows) sections so they read as a compact preview
    * rather than a full section, without needing to know how many columns are currently active
@@ -47,6 +49,8 @@ export function GameGrid({
   mobileColumns,
   desktopColumns,
   emptyMessage,
+  loading = false,
+  loadingMessage,
   maxRows,
 }: GameGridProps) {
   const rowClampClass =
@@ -62,9 +66,9 @@ export function GameGrid({
         <GameCard key={game.slug} {...game} />
       ))}
 
-      {games.length === 0 && emptyMessage && (
+      {games.length === 0 && (loading ? loadingMessage : emptyMessage) && (
         <div className="col-span-full py-16 text-center text-text-muted bg-surface-raised rounded-3xl border border-border border-dashed">
-          {emptyMessage}
+          {loading ? loadingMessage : emptyMessage}
         </div>
       )}
     </div>

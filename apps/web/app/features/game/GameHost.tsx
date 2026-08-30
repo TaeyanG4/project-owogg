@@ -1726,7 +1726,13 @@ export function GameHost({ slug }: GameHostProps) {
                         title={localizedTitle ?? slug}
                         attemptKey={attemptKey}
                         viewer={
-                          user ? { nickname: user.nickname, avatarUrl: user.avatar_url } : null
+                          user
+                            ? {
+                                userId: user.id,
+                                nickname: user.nickname,
+                                avatarUrl: user.avatar_url,
+                              }
+                            : null
                         }
                         onRuntimeResolved={handleMultiplayerRuntimeResolved}
                         {...(approvedOnlineAvailability

@@ -47,7 +47,11 @@ export function ManagedRelayProfileControl({
 }: {
   readonly gameSlug: string;
   readonly title: string;
-  readonly viewer: { readonly nickname: string; readonly avatarUrl: string | null } | null;
+  readonly viewer: {
+    readonly userId: number;
+    readonly nickname: string;
+    readonly avatarUrl: string | null;
+  } | null;
   readonly showTester: boolean;
 }) {
   const [control, setControl] = useState<AdminManagedMultiplayerExactVersionResponse | null>(null);
@@ -256,6 +260,7 @@ export function ManagedRelayProfileControl({
             attemptKey={attemptKey}
             viewer={viewer}
             onRuntimeResolved={ignoreMultiplayerRuntimeResolution}
+            allowDocumentScrolling
             frameClassName="min-h-[560px]"
             fallback={
               <div className="flex min-h-[320px] items-center justify-center bg-surface p-6 text-center text-sm text-text-secondary">
