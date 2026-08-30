@@ -171,6 +171,7 @@
       ],
       "vars": {
         "COMMIT_SHA": "dev",
+        "ADMIN_SESSION_TTL_SECONDS": "43200",
         "MULTIPLAYER_ENABLED": "false",
         "MULTIPLAYER_SOCKET_ORIGIN": "https://api-stg.owogg.com",
       },

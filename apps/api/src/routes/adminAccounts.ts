@@ -26,7 +26,7 @@ import { verifyAdminPassword, hashAdminPassword } from "../auth/adminPassword.js
 import {
   setAdminCookie,
   ADMIN_SESSION_COOKIE,
-  ADMIN_SESSION_MAX_AGE_SECONDS,
+  resolveAdminSessionMaxAgeSeconds,
 } from "./adminAuth.js";
 import type { ApiEnv } from "./auth.js";
 
@@ -137,11 +137,13 @@ adminAccountsRouter.post("/settings/password", async (c) => {
   // authenticated this request — issue a fresh one now so the caller isn't logged out by their
   // own password change ("revoke all other sessions ... optionally rotate current session
   // cleanly").
+  const maxAgeSeconds = resolveAdminSessionMaxAgeSeconds(c.env.ADMIN_SESSION_TTL_SECONDS);
   const { rawToken } = await adminAuthUseCases.issueAdminSession({
     userId: admin.userId,
     rawSessionToken: admin.rawSessionToken,
+    ttlMs: maxAgeSeconds * 1000,
   });
-  setAdminCookie(c, ADMIN_SESSION_COOKIE, rawToken, ADMIN_SESSION_MAX_AGE_SECONDS);
+  setAdminCookie(c, ADMIN_SESSION_COOKIE, rawToken, maxAgeSeconds);
 
   return c.json(AdminPasswordChangeResponseSchema.parse({ success: true }));
 });

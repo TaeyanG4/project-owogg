@@ -10,6 +10,7 @@ import {
 } from "@owogg/contracts";
 import {
   ADMIN_AUTH_POLICY,
+  resolveAdminSessionTtlMs,
   isAdminGoogleSub,
   evaluateAdminPasswordPolicy,
   AdminAccountUseCaseFailure,
@@ -27,9 +28,10 @@ export const adminAuthRouter = new Hono<ApiEnv>();
 const ADMIN_STEP_UP_COOKIE = "owogg_admin_stepup";
 export const ADMIN_SESSION_COOKIE = "owogg_admin_session";
 const STEP_UP_MAX_AGE_SECONDS = Math.floor(ADMIN_AUTH_POLICY.STEP_UP_CHALLENGE_TTL_MS / 1000);
-export const ADMIN_SESSION_MAX_AGE_SECONDS = Math.floor(
-  ADMIN_AUTH_POLICY.ADMIN_SESSION_TTL_MS / 1000,
-);
+
+export function resolveAdminSessionMaxAgeSeconds(configuredSeconds: string | undefined): number {
+  return Math.floor(resolveAdminSessionTtlMs(configuredSeconds) / 1000);
+}
 
 adminAuthRouter.use("*", async (c, next) => {
   c.header("Cache-Control", "no-store");
@@ -280,11 +282,13 @@ adminAuthRouter.post("/bootstrap", async (c) => {
     throw err;
   }
 
+  const maxAgeSeconds = resolveAdminSessionMaxAgeSeconds(c.env.ADMIN_SESSION_TTL_SECONDS);
   const { rawToken } = await adminAuthUseCases.issueAdminSession({
     userId: eligible.userId,
     rawSessionToken: eligible.rawSessionToken,
+    ttlMs: maxAgeSeconds * 1000,
   });
-  setAdminCookie(c, ADMIN_SESSION_COOKIE, rawToken, ADMIN_SESSION_MAX_AGE_SECONDS);
+  setAdminCookie(c, ADMIN_SESSION_COOKIE, rawToken, maxAgeSeconds);
   deleteCookie(c, ADMIN_STEP_UP_COOKIE, { path: "/" });
 
   return c.json(
@@ -369,12 +373,14 @@ adminAuthRouter.post("/auth/login", async (c) => {
   }
 
   await adminAuthUseCases.recordAttempt(eligible.userId, true);
+  const maxAgeSeconds = resolveAdminSessionMaxAgeSeconds(c.env.ADMIN_SESSION_TTL_SECONDS);
   const { rawToken } = await adminAuthUseCases.issueAdminSession({
     userId: eligible.userId,
     rawSessionToken: eligible.rawSessionToken,
+    ttlMs: maxAgeSeconds * 1000,
   });
 
-  setAdminCookie(c, ADMIN_SESSION_COOKIE, rawToken, ADMIN_SESSION_MAX_AGE_SECONDS);
+  setAdminCookie(c, ADMIN_SESSION_COOKIE, rawToken, maxAgeSeconds);
   deleteCookie(c, ADMIN_STEP_UP_COOKIE, { path: "/" });
 
   return c.json({ adminAuthenticated: true, mustChangePassword });

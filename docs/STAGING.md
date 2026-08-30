@@ -116,6 +116,12 @@ Repository-level Production 값에 기대지 않습니다. 아래 항목은 GitH
 | `STAGING_ADMIN_USER_IDS`             | 최초에는 빈 값, 로그인 후 확인한 Staging user ID를 쉼표로 구분 |
 | `STAGING_WEB_SMOKE_ENABLED`          | Access service token 준비 전 `false`, 준비 후 `true`           |
 
+관리자 승격 세션은 Staging workflow가 Worker runtime의 `ADMIN_SESSION_TTL_SECONDS`를
+`43200`(12시간)으로 고정합니다. 이 값은 GitHub Environment에서 임의 조정하는 변수가 아니며,
+Production에는 전달하지 않아 기본 30분을 유지합니다. 쿠키와 D1 `admin_sessions.expires_at`이 같은
+값을 사용하고, 일반 `owogg_session` 로그아웃·만료나 관리자 세션 철회는 12시간보다 먼저 효력을
+발휘합니다. 이미 발급된 관리자 세션은 배포 후 자동 연장되지 않으므로 다시 로그인해야 합니다.
+
 ### Secrets
 
 | 이름                                 | 용도/조건                                              |

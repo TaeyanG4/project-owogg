@@ -46,6 +46,7 @@ jobs:
           MULTIPLAYER_TICKET_KEY_ID: ${{ vars.MULTIPLAYER_TICKET_KEY_ID }}
           MULTIPLAYER_TICKET_PREVIOUS_KEY_ID: ${{ vars.MULTIPLAYER_TICKET_PREVIOUS_KEY_ID || '' }}
           STAGING_ADMIN_USER_IDS: ${{ vars.STAGING_ADMIN_USER_IDS || '' }}
+          STAGING_ADMIN_SESSION_TTL_SECONDS: "43200"
           STAGING_D1_DATABASE_ID: ${{ vars.STAGING_D1_DATABASE_ID }}
           STAGING_WEB_SMOKE_ENABLED: ${{ vars.STAGING_WEB_SMOKE_ENABLED || 'false' }}
           B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
@@ -120,6 +121,7 @@ jobs:
             FRONTEND_URL:https://stg.owogg.com
             GAME_ORIGIN:https://play-stg.owogg.com
             ADMIN_USER_IDS:${{ vars.STAGING_ADMIN_USER_IDS || '' }}
+            ADMIN_SESSION_TTL_SECONDS:43200
             MULTIPLAYER_ENABLED:${{ vars.STAGING_MULTIPLAYER_ENABLED || 'false' }}
             MULTIPLAYER_SOCKET_ORIGIN:https://api-stg.owogg.com
             MULTIPLAYER_TICKET_KEY_ID:${{ vars.MULTIPLAYER_TICKET_KEY_ID }}
