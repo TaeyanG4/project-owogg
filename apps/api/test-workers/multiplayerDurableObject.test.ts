@@ -1323,6 +1323,19 @@ test("parent-only latency reports synchronize every connected seat outside appli
       { participantId: room.playerClaims.participantId, seatIndex: 1, rttMs: 85 },
     ],
   });
+
+  const disconnectedSeat = nextMessageWhere(
+    room.hostSocket,
+    "disconnected seat latency sync",
+    (message) =>
+      message.type === "MULTI_LATENCY_SYNC" &&
+      Array.isArray(message.samples) &&
+      message.samples.length === 1,
+  );
+  room.playerSocket.close(1000, "reconnect test");
+  expect(await disconnectedSeat).toMatchObject({
+    samples: [{ participantId: room.hostClaims.participantId, seatIndex: 0, rttMs: 42 }],
+  });
 });
 
 test("host snapshot survives DO eviction and reconnect while non-host writes stay rejected", async ({

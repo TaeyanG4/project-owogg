@@ -15,19 +15,30 @@ import {
 } from "./multiplayerTransport";
 import { fetchMultiplayerRoomRoster, leaveMultiplayerRoom } from "./multiplayerRoomApi";
 
+interface ParticipantLatency {
+  readonly rttMs: number;
+  readonly connected: boolean;
+}
+
 function PlayerRosterCard({
   player,
   selfParticipantId,
   pingMs,
+  disconnected,
 }: {
   readonly player: MultiplayerRoomPlayer;
   readonly selfParticipantId: string;
   readonly pingMs: number | null;
+  readonly disconnected: boolean;
 }) {
   const isSelf = player.participantId === selfParticipantId;
   const participantLabel = player.role === "HOST" ? "방장" : "플레이어";
+  const participantTone =
+    player.role === "HOST"
+      ? "border-amber-300/25 bg-amber-300/10 text-amber-200"
+      : "border-brand/25 bg-brand/10 text-brand-light";
   return (
-    <div className="flex min-w-0 items-center gap-2.5 rounded-xl border border-white/10 bg-black/15 px-3 py-2">
+    <div className="flex min-w-0 items-center gap-2.5 rounded-xl border border-white/10 bg-black/15 px-3 py-2.5">
       <span
         className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-brand/35 bg-brand/10 text-sm font-black text-text-primary"
         aria-hidden="true"
@@ -43,30 +54,71 @@ function PlayerRosterCard({
           player.nickname.trim().charAt(0) || String(player.seatIndex + 1)
         )}
       </span>
-      <span className="min-w-0">
+      <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-black text-text-primary">
           {player.nickname}
         </span>
-        <span className="block text-xs font-bold text-text-muted">
-          {`슬롯 ${player.seatIndex + 1} · ${participantLabel}${isSelf ? " · 나" : ""}`}
+        <span className="mt-1 flex flex-wrap items-center gap-1">
+          <span className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-black text-text-muted">
+            {`슬롯 ${player.seatIndex + 1}`}
+          </span>
           <span
-            className={multiplayerPingTone(pingMs)}
-          >{` · ${multiplayerPingLabel(pingMs)}`}</span>
+            className={`rounded-md border px-1.5 py-0.5 text-[10px] font-black ${participantTone}`}
+          >
+            {participantLabel}
+          </span>
+          {isSelf && (
+            <span className="rounded-md border border-emerald-300/25 bg-emerald-300/10 px-1.5 py-0.5 text-[10px] font-black text-emerald-300">
+              나
+            </span>
+          )}
         </span>
+      </span>
+      <span
+        className={`ml-auto shrink-0 rounded-lg border px-2.5 py-1 text-xs font-black tabular-nums ${multiplayerPingTone(pingMs, disconnected)}`}
+      >
+        {multiplayerPingLabel(pingMs, disconnected)}
       </span>
     </div>
   );
 }
 
-export function multiplayerPingLabel(pingMs: number | null): string {
-  return pingMs === null ? "핑 측정 중" : `핑 ${pingMs}ms`;
+export function multiplayerPingLabel(pingMs: number | null, disconnected = false): string {
+  if (disconnected) return "연결 끊김";
+  return pingMs === null ? "Ping —" : `Ping ${pingMs}ms`;
 }
 
-export function multiplayerPingTone(pingMs: number | null): string {
-  if (pingMs === null) return "text-text-muted";
-  if (pingMs <= 80) return "text-emerald-400";
-  if (pingMs <= 180) return "text-amber-300";
-  return "text-red-300";
+export function multiplayerPingTone(pingMs: number | null, disconnected = false): string {
+  if (disconnected || pingMs === null) {
+    return "border-white/10 bg-white/5 text-text-muted";
+  }
+  if (pingMs <= 80) {
+    return "border-emerald-400/25 bg-emerald-400/10 text-emerald-300";
+  }
+  if (pingMs <= 180) {
+    return "border-amber-300/25 bg-amber-300/10 text-amber-200";
+  }
+  return "border-red-300/25 bg-red-300/10 text-red-300";
+}
+
+export function updateMultiplayerLatencies(
+  current: ReadonlyMap<string, ParticipantLatency>,
+  samples: readonly { readonly participantId: string; readonly rttMs: number }[],
+  mode: "MERGE" | "REPLACE",
+): ReadonlyMap<string, ParticipantLatency> {
+  const next = new Map(current);
+  if (mode === "REPLACE") {
+    const connectedIds = new Set(samples.map((sample) => sample.participantId));
+    for (const [participantId, latency] of next) {
+      if (!connectedIds.has(participantId)) {
+        next.set(participantId, { ...latency, connected: false });
+      }
+    }
+  }
+  for (const sample of samples) {
+    next.set(sample.participantId, { rttMs: sample.rttMs, connected: true });
+  }
+  return next;
 }
 
 export function multiplayerRoomClipboardValue(
@@ -151,7 +203,9 @@ export function MultiplayerIframeRuntime({
   const [players, setPlayers] = useState<readonly MultiplayerRoomPlayer[]>(
     () => multiplayerRuntimeInitialRoster(room, initialPlayers) ?? [],
   );
-  const [latencies, setLatencies] = useState<ReadonlyMap<string, number>>(() => new Map());
+  const [latencies, setLatencies] = useState<ReadonlyMap<string, ParticipantLatency>>(
+    () => new Map(),
+  );
   const bridgeRef = useRef<MultiplayerBridgeHost | null>(null);
   const transportRef = useRef<MultiplayerParentTransport | null>(null);
   const openAttemptRef = useRef(0);
@@ -244,12 +298,11 @@ export function MultiplayerIframeRuntime({
   );
 
   const handleLatencySamples = useCallback(
-    (samples: readonly { readonly participantId: string; readonly rttMs: number }[]) => {
-      setLatencies((current) => {
-        const next = new Map(current);
-        for (const sample of samples) next.set(sample.participantId, sample.rttMs);
-        return next;
-      });
+    (
+      samples: readonly { readonly participantId: string; readonly rttMs: number }[],
+      mode: "MERGE" | "REPLACE",
+    ) => {
+      setLatencies((current) => updateMultiplayerLatencies(current, samples, mode));
     },
     [],
   );
@@ -427,14 +480,22 @@ export function MultiplayerIframeRuntime({
           </span>
         </div>
         <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          {orderedPlayers.map((player) => (
-            <PlayerRosterCard
-              key={player.participantId}
-              player={player}
-              selfParticipantId={room.participant.id}
-              pingMs={latencies.get(player.participantId) ?? null}
-            />
-          ))}
+          {orderedPlayers.map((player) => {
+            const latency = latencies.get(player.participantId);
+            return (
+              <PlayerRosterCard
+                key={player.participantId}
+                player={player}
+                selfParticipantId={room.participant.id}
+                pingMs={connectionState.status === "CONNECTED" ? (latency?.rttMs ?? null) : null}
+                disconnected={
+                  connectionState.status === "DISCONNECTED" ||
+                  connectionState.status === "CLOSED" ||
+                  latency?.connected === false
+                }
+              />
+            );
+          })}
           {orderedPlayers.length === 0 && (
             <p className="col-span-full py-2 text-center text-sm font-semibold text-text-muted">
               참가자 정보를 불러오는 중입니다.
