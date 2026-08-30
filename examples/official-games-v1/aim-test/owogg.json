@@ -12,7 +12,7 @@
     "tags": ["aim", "reaction", "verified"]
   },
   "input": ["mouse", "touch"],
-  "presentation": { "orientation": "any", "aspectRatio": "1:1" },
+  "presentation": { "orientation": "landscape", "aspectRatio": "16:9" },
   "difficulties": [
     { "id": "normal", "title": "보통", "default": true },
     { "id": "hard", "title": "어려움" }

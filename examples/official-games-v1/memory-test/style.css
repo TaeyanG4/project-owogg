@@ -19,13 +19,13 @@
 html,
 body {
   width: 100%;
-  min-height: 100%;
+  height: 100%;
   margin: 0;
-  overflow-x: hidden;
+  overflow: hidden;
 }
 
 body {
-  min-height: 100vh;
+  height: 100vh;
   padding: clamp(0.6rem, 1.6vw, 1.25rem);
   background: radial-gradient(circle at 50% 0, rgb(16 185 129 / 11%), transparent 32rem), #0b0d14;
 }
@@ -36,7 +36,8 @@ button {
 
 .shell {
   width: 100%;
-  min-height: calc(100vh - clamp(1.2rem, 3.2vw, 2.5rem));
+  height: calc(100vh - clamp(1.2rem, 3.2vw, 2.5rem));
+  min-height: 0;
   display: flex;
   flex-direction: column;
   padding: clamp(0.5rem, 2vw, 1.25rem);
@@ -167,7 +168,7 @@ button {
 .setup,
 .finished {
   flex: 1;
-  min-height: 27rem;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -223,6 +224,7 @@ h1 {
 
 .play {
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -246,8 +248,9 @@ h1 {
 
 .memory-console {
   position: relative;
-  width: min(72vw, 27rem);
-  height: min(72vw, 27rem);
+  width: min(58vh, 40vw, 27rem);
+  min-width: 12rem;
+  aspect-ratio: 1;
   display: grid;
   place-items: center;
   border: clamp(0.65rem, 2vw, 1rem) solid #18181b;
@@ -412,5 +415,35 @@ h1 {
 
   .config-axis {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-height: 480px) {
+  .shell {
+    padding: 0.45rem;
+  }
+
+  .game-header {
+    padding-bottom: 0.45rem;
+  }
+
+  .brain-icon {
+    width: 1.9rem;
+    height: 1.9rem;
+  }
+
+  .turn-status {
+    min-height: 2rem;
+    margin-bottom: 0.45rem;
+    padding-block: 0.35rem;
+  }
+
+  .play {
+    padding-top: 0.45rem;
+  }
+
+  .progress,
+  .status {
+    margin-top: 0.35rem;
   }
 }

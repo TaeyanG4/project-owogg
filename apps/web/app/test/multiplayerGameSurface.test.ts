@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import type { MultiplayerGameAvailabilityResponse } from "@owogg/contracts";
 import {
   buildMultiplayerRoomShareValue,
@@ -12,12 +14,58 @@ import {
   writeMultiplayerRoomResumeValue,
 } from "../features/game/runtime/MultiplayerGameSurface";
 import {
+  MultiplayerIframeRuntime,
   multiplayerPingLabel,
   multiplayerPingTone,
   multiplayerRoomClipboardValue,
   multiplayerRuntimeInitialRoster,
   updateMultiplayerLatencies,
 } from "../features/game/runtime/MultiplayerIframeRuntime";
+
+test("active multiplayer chrome and the game share one viewport-fitted surface", () => {
+  const room = {
+    replayed: false,
+    instance: {
+      id: "instance_12345678",
+      publicCode: "ROOMCODE1234",
+      gameId: 1,
+      gameVersionId: 1,
+      contentHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      profileRevision: 1,
+      visibility: "PRIVATE",
+      joinPolicy: "OPEN",
+      status: "ACTIVE",
+      generation: 1,
+      participantCount: 2,
+      maxPlayers: 2,
+      expiresAt: "2026-08-28T10:00:00.000Z",
+    },
+    participant: {
+      id: "participant_host_0001",
+      role: "HOST",
+      seatIndex: 0,
+      status: "READY",
+      connectionGeneration: 1,
+    },
+  } as const;
+  const markup = renderToStaticMarkup(
+    createElement(MultiplayerIframeRuntime, {
+      src: "https://play.example.test/game",
+      title: "Generic multiplayer",
+      room,
+      attemptKey: 1,
+      frameClassName: "mx-auto max-w-full",
+      frameStyle: { width: 960, height: 540 },
+      onExit: () => undefined,
+    }),
+  );
+
+  assert.match(markup, /data-testid="multiplayer-runtime-surface"/);
+  assert.match(markup, /mx-auto max-w-full flex w-full flex-col overflow-hidden/);
+  assert.match(markup, /style="width:960px;height:540px"/);
+  assert.match(markup, /relative min-h-0 w-full flex-1 overflow-hidden/);
+  assert.match(markup, /style="width:100%;height:100%"/);
+});
 
 test("participant ping labels distinguish measuring, healthy, delayed, and poor links", () => {
   assert.equal(multiplayerPingLabel(null), "Ping —");

@@ -137,7 +137,11 @@ export const OWOGG_BROWSER_API_SOURCE = String.raw`(function () {
   }
 
   function sendGeneric(message) {
-    if (completed && message.type !== "GAME_COMPLETE") return false;
+    // Completing an attempt seals gameplay/result messages, but the game-owned result screen must
+    // still be able to ask the Host for a fresh iframe/session. GAME_RESTART is intentionally the
+    // one post-completion control message that crosses this boundary; the new mount owns a new
+    // adapter with completed=false, so no state from the finished attempt is reused.
+    if (completed && message.type !== "GAME_COMPLETE" && message.type !== "GAME_RESTART") return false;
     if (activeMode === "multiplayer") return false;
     if (genericPort) return post(genericPort, message);
     return queueGeneric(message);

@@ -158,6 +158,8 @@ export interface MultiplayerIframeRuntimeProps {
   readonly onExit: () => void;
 }
 
+const MULTIPLAYER_GAME_FRAME_STYLE: CSSProperties = { width: "100%", height: "100%" };
+
 export function multiplayerRuntimeInitialRoster(
   room: MultiplayerRoomResponse,
   initialPlayers?: readonly MultiplayerRoomPlayer[],
@@ -418,8 +420,12 @@ export function MultiplayerIframeRuntime({
           : "연결 확인 필요";
 
   return (
-    <div className="w-full bg-[#08090d]">
-      <div className="border-b border-white/10 bg-surface-raised px-3 py-3 sm:px-4">
+    <div
+      data-testid="multiplayer-runtime-surface"
+      className={`${frameClassName ?? ""} flex w-full flex-col overflow-hidden bg-[#08090d]`}
+      style={frameStyle}
+    >
+      <div className="shrink-0 border-b border-white/10 bg-surface-raised px-3 py-3 sm:px-4">
         <div className="flex min-w-0 flex-col items-center gap-2">
           <div className="flex max-w-full flex-wrap items-stretch justify-center gap-2">
             <span className="flex min-h-11 items-center gap-2 rounded-xl border border-border bg-surface px-3.5 py-2">
@@ -481,7 +487,7 @@ export function MultiplayerIframeRuntime({
             {connectionLabel}
           </span>
         </div>
-        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-4">
           {orderedPlayers.map((player) => {
             const latency = latencies.get(player.participantId);
             return (
@@ -505,14 +511,15 @@ export function MultiplayerIframeRuntime({
           )}
         </div>
       </div>
-      <div className="relative w-full overflow-hidden">
+      <div className="relative min-h-0 w-full flex-1 overflow-hidden">
         <GameFrame
           key={`${attemptKey}:${room.instance.generation}:${retryKey}`}
           src={src}
           title={title}
           autoStart
-          frameClassName={frameClassName}
-          frameStyle={frameStyle}
+          className="h-full min-h-0"
+          frameClassName="h-full w-full"
+          frameStyle={MULTIPLAYER_GAME_FRAME_STYLE}
           iframeStyle={iframeStyle}
           onFrameLoad={handleFrameLoad}
           documentScrolling={allowDocumentScrolling ? "enabled" : "disabled"}
