@@ -152,6 +152,7 @@ export interface MultiplayerIframeRuntimeProps {
   readonly frameClassName?: string;
   readonly frameStyle?: CSSProperties;
   readonly iframeStyle?: CSSProperties;
+  readonly allowDocumentScrolling?: boolean;
   readonly shareValue?: string;
   readonly initialPlayers?: readonly MultiplayerRoomPlayer[];
   readonly onExit: () => void;
@@ -187,6 +188,7 @@ export function MultiplayerIframeRuntime({
   frameClassName,
   frameStyle,
   iframeStyle,
+  allowDocumentScrolling = false,
   shareValue,
   initialPlayers,
   onExit,
@@ -514,7 +516,7 @@ export function MultiplayerIframeRuntime({
           iframeStyle={iframeStyle}
           onFrameLoad={handleFrameLoad}
           showReloadControl={false}
-          disableScrolling
+          disableScrolling={!allowDocumentScrolling}
         />
         <MultiplayerConnectionOverlay
           state={connectionState}

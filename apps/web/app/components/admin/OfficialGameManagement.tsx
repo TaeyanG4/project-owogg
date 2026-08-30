@@ -625,7 +625,13 @@ export function OfficialGameManagement() {
                           gameSlug={game.gameId}
                           title={game.title}
                           viewer={
-                            user ? { nickname: user.nickname, avatarUrl: user.avatar_url } : null
+                            user
+                              ? {
+                                  userId: user.id,
+                                  nickname: user.nickname,
+                                  avatarUrl: user.avatar_url,
+                                }
+                              : null
                           }
                           showTester={game.catalogRole === "INTERNAL_TOOL"}
                         />

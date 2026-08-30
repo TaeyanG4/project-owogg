@@ -33,7 +33,7 @@ export default function Games() {
   );
   const { mobileColumns, setMobileColumns, desktopColumns, setDesktopColumns } = useGridColumns();
   const { dict } = useI18n();
-  const { games: publicGames } = usePublicGames();
+  const { games: publicGames, isLoading } = usePublicGames();
   const gameManifests = useMemo(
     () => publicGames.map((game) => publicGameToCard(game)),
     [publicGames],
@@ -124,6 +124,8 @@ export default function Games() {
         games={filteredGames}
         mobileColumns={mobileColumns}
         desktopColumns={desktopColumns}
+        loading={isLoading}
+        loadingMessage={<span role="status">{dict.common.loading}</span>}
         emptyMessage={
           selectedCategory === "favorites" ? dict.games.emptyFavorites : dict.games.emptySearch
         }

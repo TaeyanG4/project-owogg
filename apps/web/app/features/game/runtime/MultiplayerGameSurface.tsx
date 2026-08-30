@@ -31,6 +31,7 @@ export interface MultiplayerGameSurfaceProps {
   readonly iframeStyle?: CSSProperties;
   readonly fallback: ReactNode;
   readonly viewer: {
+    readonly userId: number;
     readonly nickname: string;
     readonly avatarUrl: string | null;
   } | null;
@@ -40,6 +41,9 @@ export interface MultiplayerGameSurfaceProps {
     { readonly status: "AVAILABLE" }
   >;
   readonly onExitToModeSelection?: () => void;
+  /** Internal admin testers may need to inspect long diagnostics. Normal managed game surfaces
+   * remain viewport-fitted and keep their nested document scrollbar disabled. */
+  readonly allowDocumentScrolling?: boolean;
 }
 
 export function supportsPrivateOpenRoomLauncher(
@@ -64,6 +68,79 @@ function errorMessage(error: unknown): string {
 
 const PUBLIC_ROOM_CODE_PATTERN = /^[A-Za-z0-9_-]{12,64}$/;
 const INVITE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
+const GAME_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const MULTIPLAYER_RESUME_STORAGE_PREFIX = "owogg_multiplayer_resume_v1";
+
+interface MultiplayerResumeStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+function browserMultiplayerResumeStorage(): MultiplayerResumeStorage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+function multiplayerResumeStorageKey(gameSlug: string, userId: number): string | null {
+  if (!GAME_SLUG_PATTERN.test(gameSlug) || !Number.isSafeInteger(userId) || userId < 1) return null;
+  return `${MULTIPLAYER_RESUME_STORAGE_PREFIX}:${userId}:${gameSlug}`;
+}
+
+export function readMultiplayerRoomResumeValue(
+  storage: MultiplayerResumeStorage,
+  gameSlug: string,
+  userId: number,
+): string {
+  const key = multiplayerResumeStorageKey(gameSlug, userId);
+  if (!key) return "";
+  try {
+    const raw = storage.getItem(key);
+    if (!raw) return "";
+    const parsed = JSON.parse(raw) as { version?: unknown; publicCode?: unknown };
+    return parsed.version === 1 &&
+      typeof parsed.publicCode === "string" &&
+      PUBLIC_ROOM_CODE_PATTERN.test(parsed.publicCode)
+      ? parsed.publicCode
+      : "";
+  } catch {
+    return "";
+  }
+}
+
+export function writeMultiplayerRoomResumeValue(
+  storage: MultiplayerResumeStorage,
+  gameSlug: string,
+  userId: number,
+  publicCode: string,
+): boolean {
+  const key = multiplayerResumeStorageKey(gameSlug, userId);
+  if (!key || !PUBLIC_ROOM_CODE_PATTERN.test(publicCode)) return false;
+  try {
+    storage.setItem(key, JSON.stringify({ version: 1, publicCode }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function clearMultiplayerRoomResumeValue(
+  storage: MultiplayerResumeStorage,
+  gameSlug: string,
+  userId: number,
+): void {
+  const key = multiplayerResumeStorageKey(gameSlug, userId);
+  if (!key) return;
+  try {
+    storage.removeItem(key);
+  } catch {
+    // Storage can be unavailable in private/restricted browser modes. In-memory play still works.
+  }
+}
 
 /** Keeps the invite credential in parent UI only while producing the one-click URL another player
  * can open. The fragment is never sent in an HTTP request, so the sandbox, origin server, CDN,
@@ -175,6 +252,7 @@ export function MultiplayerGameSurface({
   onRuntimeResolved,
   initialAvailability,
   onExitToModeSelection,
+  allowDocumentScrolling = false,
 }: MultiplayerGameSurfaceProps) {
   const [availability, setAvailability] = useState<
     MultiplayerGameAvailabilityResponse | "LOADING" | "ERROR"
@@ -188,6 +266,24 @@ export function MultiplayerGameSurface({
   const [error, setError] = useState<string | null>(null);
   const createIdempotencyRef = useRef(newIdempotencyKey());
   const pendingAutoJoinRef = useRef<string | null>(null);
+  const viewerUserId = viewer?.userId ?? null;
+
+  const rememberRoom = useCallback(
+    (nextPublicCode: string) => {
+      if (viewerUserId === null) return;
+      const storage = browserMultiplayerResumeStorage();
+      if (storage) {
+        writeMultiplayerRoomResumeValue(storage, gameSlug, viewerUserId, nextPublicCode);
+      }
+    },
+    [gameSlug, viewerUserId],
+  );
+
+  const forgetRoom = useCallback(() => {
+    if (viewerUserId === null) return;
+    const storage = browserMultiplayerResumeStorage();
+    if (storage) clearMultiplayerRoomResumeValue(storage, gameSlug, viewerUserId);
+  }, [gameSlug, viewerUserId]);
 
   const discover = useCallback(() => {
     let active = true;
@@ -239,12 +335,21 @@ export function MultiplayerGameSurface({
   useEffect(() => {
     if (typeof window === "undefined") return;
     const sharedRoom = readMultiplayerRoomShareValue(window.location.href);
-    pendingAutoJoinRef.current = PUBLIC_ROOM_CODE_PATTERN.test(sharedRoom.publicCode)
-      ? `${sharedRoom.publicCode}\u0000${sharedRoom.inviteToken}`
+    const storage = browserMultiplayerResumeStorage();
+    const resumePublicCode =
+      !PUBLIC_ROOM_CODE_PATTERN.test(sharedRoom.publicCode) &&
+      viewerUserId !== null &&
+      storage !== null
+        ? readMultiplayerRoomResumeValue(storage, gameSlug, viewerUserId)
+        : "";
+    const nextPublicCode = sharedRoom.publicCode || resumePublicCode;
+    const nextInviteToken = sharedRoom.publicCode ? sharedRoom.inviteToken : "";
+    pendingAutoJoinRef.current = PUBLIC_ROOM_CODE_PATTERN.test(nextPublicCode)
+      ? `${nextPublicCode}\u0000${nextInviteToken}`
       : null;
-    setPublicCode(sharedRoom.publicCode);
-    setInviteToken(sharedRoom.inviteToken);
-  }, [gameSlug]);
+    setPublicCode(nextPublicCode);
+    setInviteToken(nextInviteToken);
+  }, [gameSlug, viewerUserId]);
 
   const updateJoinEntry = useCallback((value: string) => {
     const parsed = parseMultiplayerRoomJoinValue(value);
@@ -282,45 +387,51 @@ export function MultiplayerGameSurface({
         players: created.players,
       });
       setRoom(created);
+      rememberRoom(created.instance.publicCode);
       createIdempotencyRef.current = newIdempotencyKey();
     } catch (reason) {
       setError(errorMessage(reason));
     } finally {
       setBusy(null);
     }
-  }, [availability, gameSlug]);
+  }, [availability, gameSlug, rememberRoom]);
 
-  const joinRoom = useCallback(async () => {
-    primeMultiplayerLobbySound();
-    const normalizedPublicCode = publicCode.trim();
-    const normalizedInviteToken = inviteToken.trim();
-    setBusy("JOIN");
-    setError(null);
-    try {
-      const joined = await joinMultiplayerRoom({
-        publicCode: normalizedPublicCode,
-        inviteToken: normalizedInviteToken || null,
-      });
-      setShareValue(roomShareValue(joined.instance.publicCode));
-      setInitialRoster({
-        instanceId: joined.instance.id,
-        generation: joined.instance.generation,
-        players: joined.players,
-      });
-      setRoom(joined);
-      if (typeof window !== "undefined") {
-        window.history.replaceState(
-          window.history.state,
-          "",
-          stripMultiplayerRoomCredentials(window.location.href),
-        );
+  const joinRoom = useCallback(
+    async (automaticResume = false) => {
+      primeMultiplayerLobbySound();
+      const normalizedPublicCode = publicCode.trim();
+      const normalizedInviteToken = inviteToken.trim();
+      setBusy("JOIN");
+      setError(null);
+      try {
+        const joined = await joinMultiplayerRoom({
+          publicCode: normalizedPublicCode,
+          inviteToken: normalizedInviteToken || null,
+        });
+        setShareValue(roomShareValue(joined.instance.publicCode));
+        setInitialRoster({
+          instanceId: joined.instance.id,
+          generation: joined.instance.generation,
+          players: joined.players,
+        });
+        setRoom(joined);
+        rememberRoom(joined.instance.publicCode);
+        if (typeof window !== "undefined") {
+          window.history.replaceState(
+            window.history.state,
+            "",
+            stripMultiplayerRoomCredentials(window.location.href),
+          );
+        }
+      } catch (reason) {
+        if (automaticResume) forgetRoom();
+        setError(errorMessage(reason));
+      } finally {
+        setBusy(null);
       }
-    } catch (reason) {
-      setError(errorMessage(reason));
-    } finally {
-      setBusy(null);
-    }
-  }, [inviteToken, publicCode]);
+    },
+    [forgetRoom, inviteToken, publicCode, rememberRoom],
+  );
 
   useEffect(() => {
     if (
@@ -335,7 +446,7 @@ export function MultiplayerGameSurface({
     const pending = pendingAutoJoinRef.current;
     if (pending !== `${publicCode}\u0000${inviteToken}`) return;
     pendingAutoJoinRef.current = null;
-    void joinRoom();
+    void joinRoom(true);
   }, [availability, busy, inviteToken, joinRoom, publicCode, room]);
 
   if (
@@ -376,6 +487,7 @@ export function MultiplayerGameSurface({
           }}
           onRoomChange={setRoom}
           onExit={() => {
+            forgetRoom();
             setRoom(null);
             setInitialRoster(null);
             setShareValue(undefined);
@@ -393,11 +505,13 @@ export function MultiplayerGameSurface({
         {...(frameStyle ? { frameStyle } : {})}
         {...(iframeStyle ? { iframeStyle } : {})}
         {...(shareValue ? { shareValue } : {})}
+        {...(allowDocumentScrolling ? { allowDocumentScrolling: true } : {})}
         {...(initialRoster?.instanceId === room.instance.id &&
         initialRoster.generation === room.instance.generation
           ? { initialPlayers: initialRoster.players }
           : {})}
         onExit={() => {
+          forgetRoom();
           setRoom(null);
           setInitialRoster(null);
           setShareValue(undefined);
