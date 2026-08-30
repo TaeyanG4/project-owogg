@@ -404,7 +404,7 @@ Phase 6은 2026-08-30 로컬 검증 슬라이스를 진행 중이다.
   cross-room target, non-host snapshot 공격 회귀를 실행한다.
 - `examples/relay-protocol-probe`는 플랫폼 active source에 slug binding 없이 manifest v1과
   `window.OWOGG.multiplayer`만 사용하는 2~8인 ZIP이다. production bundle 전처리 검증을 통과한 현재
-  ZIP SHA-256은 `9b6939c72992787bc942dc4cff10972c624f83e1aaba50d88ba2a735dc4b2b36`이다.
+  재현 가능한 ZIP SHA-256은 `e7d719622f8896adf87a2a7c8870ca17ba79097707817e4fca84acb5990851c4`이다.
 - Staging 두 사용자 browser E2E, hibernation 전후 실제 wall-time/요청량, 2~8인 지속 부하·비용 측정은
   아직 수행하지 않았다. 공식 가격과 현재 per-message storage 경로를 반영한 계산기와 로컬 전용 실행
   runbook `docs/runbooks/multiplayer-relay-load-gate.md`를 추가했다. 운영·보안 runbook은 저장소 정책에

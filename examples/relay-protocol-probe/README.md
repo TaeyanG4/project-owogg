@@ -10,5 +10,6 @@ pnpm exec tsx examples/relay-protocol-probe/verify-zip.mjs
 ```
 
 생성된 `relay-protocol-probe.zip`은 일반 Game Creator/Admin ZIP 업로드 경로로 등록할 수 있습니다.
+ZIP entry timestamp는 고정되어 동일 소스에서 항상 같은 content hash를 생성합니다.
 업로드 후 exact version의 multiplayer request를 관리자가 승인하고 profile을 별도로 활성화해야 방을 만들
 수 있습니다. Relay 결과는 `UNVERIFIED`이며 leaderboard, XP, reward, MMR에 반영되지 않습니다.

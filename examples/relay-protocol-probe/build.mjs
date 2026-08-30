@@ -10,7 +10,10 @@ const sourceFiles = ["index.html", "style.css", "game.js", "owogg.json", "owogg.
 const entries = Object.fromEntries(
   sourceFiles.map((file) => [file, readFileSync(path.join(here, file))]),
 );
-const zipped = zipSync(entries, { level: 9 });
+// ZIP headers otherwise inherit the wall clock and produce a different content hash on every
+// build. Use the earliest valid DOS timestamp, constructed in local time so every timezone writes
+// the same date/time fields.
+const zipped = zipSync(entries, { level: 9, mtime: new Date(1980, 0, 1, 0, 0, 0) });
 const zipPath = path.join(here, "relay-protocol-probe.zip");
 writeFileSync(zipPath, zipped);
 

@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { unzipSync, zipSync } from "fflate";
+import { unzipSync } from "fflate";
 import {
   findGameLogoFile,
   prepareBundleEntries,
@@ -12,6 +14,7 @@ import { extractGameCreatorManifest } from "../packages/core/src/domain/gameCrea
 
 const fixtureDirectory = join(process.cwd(), "examples", "relay-protocol-probe");
 const fixtureFiles = ["index.html", "style.css", "game.js", "owogg.json", "owogg.logo.svg"];
+const expectedZipSha256 = "e7d719622f8896adf87a2a7c8870ca17ba79097707817e4fca84acb5990851c4";
 
 function sourceFilesBelow(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -22,10 +25,16 @@ function sourceFilesBelow(directory: string): string[] {
 }
 
 test("Relay Protocol Probe is an uploadable v1 ZIP with no game-specific server authority", () => {
-  const entries = Object.fromEntries(
-    fixtureFiles.map((file) => [file, readFileSync(join(fixtureDirectory, file))]),
+  execFileSync(process.execPath, [join(fixtureDirectory, "build.mjs")], {
+    cwd: process.cwd(),
+    stdio: "pipe",
+  });
+  const zipBytes = readFileSync(join(fixtureDirectory, "relay-protocol-probe.zip"));
+  assert.equal(
+    createHash("sha256").update(zipBytes).digest("hex"),
+    expectedZipSha256,
+    "the upload artifact must be byte-for-byte reproducible",
   );
-  const zipBytes = zipSync(entries, { level: 9 });
   const metadata: Array<{ path: string; declaredSize: number; compressedSize: number }> = [];
   unzipSync(zipBytes, {
     filter(file) {
@@ -39,7 +48,9 @@ test("Relay Protocol Probe is an uploadable v1 ZIP with no game-specific server 
   });
   validateBundleEntryMetadata(metadata);
 
-  const prepared = prepareBundleEntries(unzipSync(zipBytes));
+  const decompressed = unzipSync(zipBytes);
+  assert.deepEqual(Object.keys(decompressed).sort(), [...fixtureFiles].sort());
+  const prepared = prepareBundleEntries(decompressed);
   const manifest = extractGameCreatorManifest(prepared.files);
   assert.equal(prepared.entry, "index.html");
   assert.equal(manifest?.schemaVersion, 1);
