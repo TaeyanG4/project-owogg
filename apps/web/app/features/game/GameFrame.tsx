@@ -53,9 +53,6 @@ export interface GameFrameProps {
    * below carries its own `overflow-hidden` specifically so that box never contributes scrollable
    * overflow beyond the (smaller) displayed surface. */
   iframeStyle?: React.CSSProperties | undefined;
-  /** Multiplayer owns reconnect and reload semantics outside the sandbox, so it can hide the
-   * generic manual reload affordance that would otherwise create a second connection. */
-  showReloadControl?: boolean | undefined;
   /** Controls the framed document's own scroll surface. `auto` preserves the generic game
    * behavior, `disabled` keeps viewport-fitted managed multiplayer free of a nested scrollbar,
    * and `enabled` is reserved for explicit tools such as the admin Relay probe. */
@@ -90,24 +87,16 @@ export function GameFrame({
   frameClassName,
   frameStyle,
   iframeStyle,
-  showReloadControl = true,
   documentScrolling = "auto",
   onFrameLoad,
 }: GameFrameProps) {
   const [started, setStarted] = useState(autoStart);
   const [loading, setLoading] = useState(autoStart);
-  // Bumping this remounts the iframe with a fresh `src` load — the "다시 시작" affordance.
-  const [reloadKey, setReloadKey] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const start = () => {
     setLoading(true);
     setStarted(true);
-  };
-
-  const reload = () => {
-    setLoading(true);
-    setReloadKey((k) => k + 1);
   };
 
   const handleLoad = () => {
@@ -152,7 +141,6 @@ export function GameFrame({
         )}
         <iframe
           ref={iframeRef}
-          key={reloadKey}
           className={`block h-full w-full ${
             documentScrolling === "enabled" ? "overflow-auto" : "overflow-hidden"
           }`}
@@ -174,15 +162,6 @@ export function GameFrame({
           onLoad={handleLoad}
         />
       </div>
-      {showReloadControl && (
-        <button
-          type="button"
-          onClick={reload}
-          className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold text-text-muted hover:text-text-primary"
-        >
-          다시 시작
-        </button>
-      )}
     </div>
   );
 }

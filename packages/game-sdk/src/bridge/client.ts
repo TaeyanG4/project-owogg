@@ -53,6 +53,9 @@ export interface GameBridgeClient {
       evidence?: JsonSafeValue;
     },
   ): void;
+  /** Requests a fresh attempt. Keep the visible restart button inside the game; the parent host
+   * rotates verifier/session state and remounts the sandbox. */
+  restart(): void;
   /** Call if the player backs out without finishing a round. */
   cancel(): void;
   /** Call on an unrecoverable in-game error. `message` is optional and capped at 500 characters
@@ -183,7 +186,7 @@ function createClient(
     message:
       | GameCompleteMessage
       | GameEventMessage
-      | { type: "GAME_READY" | "GAME_STARTED" | "GAME_CANCEL" }
+      | { type: "GAME_READY" | "GAME_STARTED" | "GAME_RESTART" | "GAME_CANCEL" }
       | { type: "GAME_REQUEST_START"; playConfig: PlayConfigSelection }
       | { type: "GAME_SELECT_PLAY_MODE"; playMode: GamePlayMode }
       | { type: "GAME_ERROR"; message?: string },
@@ -331,6 +334,9 @@ function createClient(
         ...(result.metadata !== undefined ? { metadata: result.metadata } : {}),
         ...(result.evidence !== undefined ? { evidence: result.evidence } : {}),
       });
+    },
+    restart() {
+      send({ type: "GAME_RESTART" });
     },
     cancel() {
       send({ type: "GAME_CANCEL" });

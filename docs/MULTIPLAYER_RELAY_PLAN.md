@@ -440,26 +440,30 @@ Phase 7은 2026-08-30 로컬 구현과 산출물 검증을 완료했고 Staging 
   `typing-test`, `memory-test`와 INTERNAL_TOOL 1개 `relay-protocol-probe`를 동결했다. 내부 도구는
   삭제·게임 재등록 대상이 아니다.
 - 5개 모두 root 6-file standalone ZIP source와 unified manifest v1로 재작성했다. 오목은 같은 ZIP의
-  `local-multi + online-multi`이며 online application rule/state/win 처리는 ZIP 안에만 있다.
+  `local-multi + online-multi`이며 자유 오프닝 렌주 금수와 online application rule/state/win 처리는
+  ZIP 안에만 있다.
 - 최초 conformance fixture 중심 재작성은 제품 UI·상호작용·로고를 불필요하게 버린 범위 판단 오류로
   확인했다. historical 게임의 UI·상호작용·로고와 재사용 가능한 로직은 복원하고, 신뢰할 수 없는
   client score/random/session 연결부만 seed/evidence/Relay 경계로 교체했다.
 - 모든 게임은 `await OWOGG.whenReady()` 뒤 공개 descriptor를 읽는다. 에임과 타자의 실제 선택지만
   게임 내부에 표시하고, difficulty/variant가 각각 한 개뿐인 반응속도·기억력은 선택기를 숨겨 바로
   시작한다. 오목은 manifest의 `playModes`에서 local/online 런처를 만들고 score/leaderboard를 사용하지
-  않는다.
+  않는다. 다섯 게임 모두 한국어·영어, 소리 설정과 재시작을 게임 내부에서 제공한다.
 - 경쟁 싱글 4종은 `reaction-time-v1`, `aim-test-v1`, `typing-test-v1`, `memory-test-v1` reviewed
   verifier가 seed/config/evidence를 검증하고 서버에서 점수를 계산한다. 이는 Relay driver가 아니라
   leaderboard 신뢰 경계이며 intended slug/revision 불일치를 fail closed한다.
 - 브라우저 규칙과 서버 verifier parity, manifest, ZIP path/size, 금지 network API, Bridge 호출,
   deterministic rebuild를 검증했다. 재현 SHA와 bytes는 `examples/official-games-v1/inventory.json`에
   고정했다.
-- 1280×720, 640×720, 375×667 로컬 browser 검증에서 다섯 게임의 내부 선택기·직접 시작·local 전환과
-  가로/세로 overflow가 없음을 확인했다.
+- 1280×900 및 390px 폭 로컬 browser 검증에서 다섯 게임의 내부 선택기·언어·소리·local 전환,
+  반응속도 호흡, 오목 재대결과 가로 overflow가 없음을 확인했고 browser console 오류는 0건이었다.
+- 관리자 공식 게임 업로드는 ZIP 여러 개를 선택해 직렬 게시하고, 개별 실패를 격리해 파일별 결과를
+  표시한다. 최종 ZIP은 `project-owogg-games/<slug>/<slug>_v1.zip`에 불변 백업하며 같은 버전명의 내용이
+  달라지면 덮어쓰지 않고 빌드를 실패시킨다.
 - 삭제된 game workspace의 tsconfig/lock importer와 Web의 반응속도 전용 tier 결과 UI를 제거했다.
   active Relay runtime에는 게임 slug/driver/ruleset 종속이 없다.
 - 루트 `pnpm verify`와 별도 strict ZIP 검증이 모두 통과했다.
-- 남은 Gate는 단일 Staging 배포, 사용자의 5개 identity 삭제·ZIP 재등록, 오목 exact-version profile
+- 남은 Gate는 단일 Staging 배포, 사용자의 다중 ZIP 등록·업데이트, 오목 exact-version profile
   승인/활성화와 5종 browser acceptance다. 이 Gate 전에는 Phase 7 점수 10점을 완료로 반영하지 않는다.
 
 ---

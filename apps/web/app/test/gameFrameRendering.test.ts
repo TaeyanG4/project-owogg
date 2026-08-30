@@ -28,6 +28,7 @@ test("GameFrame autoStart mounts the iframe immediately without a PLAY gate", ()
   assert.match(html, /<iframe/);
   assert.match(html, /src="https:\/\/play\.example\.test\/play\/demo"/);
   assert.doesNotMatch(html, />PLAY</);
+  assert.doesNotMatch(html, /다시 시작/);
 });
 
 test("GameFrame keeps auto scrolling implicit and honors explicit enabled or disabled modes", () => {

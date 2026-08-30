@@ -288,15 +288,17 @@ async function connectedClient(
   };
 }
 
-test("ready()/started()/cancel() send their bare message with no extra fields", async () => {
+test("ready()/started()/restart()/cancel() send their bare message with no extra fields", async () => {
   const { client, received, waitForCount, close } = await connectedClient();
   client.ready();
   client.started();
+  client.restart();
   client.cancel();
-  await waitForCount(3);
+  await waitForCount(4);
   assert.deepEqual(received, [
     { type: "GAME_READY" },
     { type: "GAME_STARTED" },
+    { type: "GAME_RESTART" },
     { type: "GAME_CANCEL" },
   ]);
   close();

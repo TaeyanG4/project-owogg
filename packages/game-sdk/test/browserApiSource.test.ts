@@ -124,12 +124,14 @@ test("generic calls expose no host session state", () => {
   api.start();
   api.event("boss_defeated", { phase: 2 });
   api.event("invalid event");
+  api.restart();
   api.cancel();
 
   assert.deepEqual(plain(messages), [
     { type: "GAME_READY" },
     { type: "GAME_STARTED" },
     { type: "GAME_EVENT", name: "boss_defeated", data: { phase: 2 } },
+    { type: "GAME_RESTART" },
     { type: "GAME_CANCEL" },
   ]);
   assert.deepEqual(Object.keys(api).sort(), [
@@ -140,6 +142,7 @@ test("generic calls expose no host session state", () => {
     "playConfig",
     "playModes",
     "requestStart",
+    "restart",
     "selectPlayMode",
     "start",
     "whenReady",

@@ -31,6 +31,7 @@ function createFakeClient(difficultyId?: string): {
       calls.push("complete");
       completed.push(result);
     },
+    restart: () => calls.push("restart"),
     cancel: () => calls.push("cancel"),
     error: () => calls.push("error"),
     disconnect: () => calls.push("disconnect"),

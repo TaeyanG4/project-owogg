@@ -39,7 +39,12 @@ function loadBrowserRules<T>(slug: string, globalName: string): T {
 
 test("Phase 7 source covers exactly every frozen Staging GAME identity", () => {
   assert.deepEqual(officialV1Games.map((game) => game.slug).sort(), frozenGameSlugs);
+  const buildSource = read("examples/official-games-v1/build-all.mjs");
+  assert.match(buildSource, /project-owogg-games/);
+  assert.match(buildSource, /already exists with different content/);
+  assert.match(buildSource, /artifactVersion/);
   for (const game of officialV1Games) {
+    assert.equal(game.artifactVersion, 1, `${game.slug}: artifact version`);
     const directory = path.join(fixtureRoot, game.slug);
     assert.deepEqual(
       fs.readdirSync(directory).sort(),
@@ -93,13 +98,10 @@ test("official manifests expose only their product-owned configuration axes", ()
   }
 
   const typing = manifest("typing-test");
-  assert.deepEqual(
-    typing.difficulties?.map((difficulty) => difficulty.id),
-    ["normal", "hard"],
-  );
+  assert.equal(typing.difficulties, undefined);
   assert.deepEqual(
     typing.playConfig?.variants.map((variant) => variant.id),
-    ["ko", "en"],
+    ["ko", "en", "ja", "zh"],
   );
   assert.equal(typing.playConfig?.allowedConfigs.length, 4);
 
@@ -133,6 +135,23 @@ test("official game UI waits for host bootstrap and derives choices from its pub
   assert.match(omok, /const modes = api\.playModes/);
   assert.doesNotMatch(omok, /api\.complete\s*\(/);
   assert.doesNotMatch(omok, /api\.requestStart\s*\(/);
+});
+
+test("every official game owns bilingual UI, sound settings, and in-game restart controls", () => {
+  for (const game of officialV1Games) {
+    const html = fs.readFileSync(path.join(fixtureRoot, game.slug, "index.html"), "utf8");
+    const source = fs.readFileSync(path.join(fixtureRoot, game.slug, "game.js"), "utf8");
+    assert.match(html, /id="language-toggle"/, `${game.slug}: language control`);
+    assert.match(html, /id="sound-toggle"/, `${game.slug}: sound control`);
+    assert.match(source, /\bko:\s*Object\.freeze/, `${game.slug}: Korean UI`);
+    assert.match(source, /\ben:\s*Object\.freeze/, `${game.slug}: English UI`);
+    assert.match(source, /AudioContext/, `${game.slug}: procedural audio`);
+    assert.doesNotMatch(source, /window\.location\.reload\s*\(/, `${game.slug}: hostless reload`);
+  }
+  for (const slug of ["aim-test", "reaction-time", "memory-test", "typing-test"]) {
+    const source = fs.readFileSync(path.join(fixtureRoot, slug, "game.js"), "utf8");
+    assert.match(source, /api\.restart\s*\(\)/, `${slug}: host-owned fresh attempt`);
+  }
 });
 
 test("standalone game sources never open their own network or persistent browser storage", () => {
@@ -184,14 +203,15 @@ test("standalone deterministic rules match their reviewed server verifiers", () 
   );
 
   const typing = loadBrowserRules<{
-    createChallenge(input: { challengeSeed: string; difficultyId: "hard"; variantId: "en" }): {
+    createChallenge(input: { challengeSeed: string; difficultyId: "normal"; variantId: "ja" }): {
       readonly passageId: string;
+      readonly source: string;
       readonly text: string;
     };
   }>("typing-test", "OwoggTypingRules");
   assert.deepEqual(
-    { ...typing.createChallenge({ challengeSeed, difficultyId: "hard", variantId: "en" }) },
-    createTypingTestChallenge({ challengeSeed, difficultyId: "hard", variantId: "en" }),
+    { ...typing.createChallenge({ challengeSeed, difficultyId: "normal", variantId: "ja" }) },
+    createTypingTestChallenge({ challengeSeed, difficultyId: "normal", variantId: "ja" }),
   );
 
   const memory = loadBrowserRules<{
@@ -230,7 +250,17 @@ test("Omok application rules stay inside the ZIP and support local state transit
     readonly PROTOCOL: string;
     createState(): unknown;
     applyMove(state: unknown, index: number, color: number): unknown;
-    parseState(state: unknown): { readonly revision: number; readonly moves: number } | null;
+    inspectMove(
+      state: unknown,
+      index: number,
+      color: number,
+    ): { readonly legal: boolean; readonly reason?: string };
+    requestRematch(state: unknown, color: number): unknown;
+    parseState(state: unknown): {
+      readonly revision: number;
+      readonly round: number;
+      readonly moves: number;
+    } | null;
   }>("official-omok", "OwoggOmokRules");
   let state = omok.createState();
   for (const [index, color] of [
@@ -248,9 +278,84 @@ test("Omok application rules stay inside the ZIP and support local state transit
     assert.ok(state);
   }
   assert.equal(omok.SIZE, 15);
-  assert.equal(omok.PROTOCOL, "owogg-omok/v1");
+  assert.equal(omok.PROTOCOL, "owogg-omok/v2");
   assert.deepEqual(omok.parseState(state), state);
   assert.equal((state as { winner: number }).winner, 1);
+
+  const firstVote = omok.requestRematch(state, 1);
+  assert.ok(firstVote);
+  const rematched = omok.requestRematch(firstVote, 2);
+  assert.ok(rematched);
+  assert.equal((rematched as { round: number }).round, 2);
+  assert.equal((rematched as { moves: number }).moves, 0);
+});
+
+test("Omok Renju rules reject black overline, double-four, and double-three", () => {
+  const omok = loadBrowserRules<{
+    createState(): unknown;
+    applyMove(state: unknown, index: number, color: number): unknown;
+    inspectMove(
+      state: unknown,
+      index: number,
+      color: number,
+    ): { readonly legal: boolean; readonly reason?: string };
+  }>("official-omok", "OwoggOmokRules");
+
+  function prepared(black: readonly number[], white: readonly number[]): unknown {
+    let state = omok.createState();
+    for (let index = 0; index < black.length; index += 1) {
+      state = omok.applyMove(state, black[index] as number, 1);
+      assert.ok(state);
+      if (white[index] !== undefined) {
+        state = omok.applyMove(state, white[index] as number, 2);
+        assert.ok(state);
+      }
+    }
+    return state;
+  }
+
+  const overline = prepared([108, 109, 110, 112, 113], [0, 2, 4, 6, 8]);
+  assert.deepEqual(JSON.parse(JSON.stringify(omok.inspectMove(overline, 111, 1))), {
+    legal: false,
+    reason: "OVERLINE",
+  });
+
+  const doubleFour = prepared([109, 110, 111, 67, 82, 97], [0, 2, 4, 6, 8, 10]);
+  assert.deepEqual(JSON.parse(JSON.stringify(omok.inspectMove(doubleFour, 112, 1))), {
+    legal: false,
+    reason: "DOUBLE_FOUR",
+  });
+
+  const doubleThree = prepared([111, 113, 97, 127], [0, 2, 4, 6]);
+  assert.deepEqual(JSON.parse(JSON.stringify(omok.inspectMove(doubleThree, 112, 1))), {
+    legal: false,
+    reason: "DOUBLE_THREE",
+  });
+
+  // The vertical shape touches the top edge and cannot become a straight four with two
+  // completion points, so only the horizontal open three is real. This must not be rejected as
+  // a geometric-only double-three.
+  const edgeFalseThree = prepared([21, 23, 7, 37], [150, 152, 154, 156]);
+  assert.deepEqual(JSON.parse(JSON.stringify(omok.inspectMove(edgeFalseThree, 22, 1))), {
+    legal: true,
+    winner: 0,
+  });
+
+  let whiteOverline = omok.createState();
+  for (const [black, white] of [
+    [0, 108],
+    [2, 109],
+    [4, 110],
+    [6, 112],
+    [8, 113],
+    [10, 111],
+  ] as const) {
+    whiteOverline = omok.applyMove(whiteOverline, black, 1);
+    assert.ok(whiteOverline);
+    whiteOverline = omok.applyMove(whiteOverline, white, 2);
+    assert.ok(whiteOverline);
+  }
+  assert.equal((whiteOverline as { winner: number }).winner, 2);
 });
 
 test("platform runtime has no official game driver, slug gate, or removed workspace reference", () => {

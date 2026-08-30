@@ -1,5 +1,6 @@
 export interface OfficialV1GameSource {
   readonly slug: string;
+  readonly artifactVersion: number;
   readonly files: readonly string[];
 }
 

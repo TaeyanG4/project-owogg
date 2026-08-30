@@ -9,7 +9,7 @@ import {
 
 export const AIM_TEST_SLUG = "aim-test";
 export const AIM_TEST_VERIFIER_ID = "aim-test-v1";
-export const AIM_TEST_RULESET_REVISION = 1;
+export const AIM_TEST_RULESET_REVISION = 2;
 
 type DifficultyId = "normal" | "hard";
 type VariantId = "standard" | "precision";
@@ -29,7 +29,7 @@ interface AimEvent {
 
 const DIFFICULTIES = Object.freeze({
   normal: Object.freeze({ targetCount: 20, radiusScale: 1 }),
-  hard: Object.freeze({ targetCount: 30, radiusScale: 0.82 }),
+  hard: Object.freeze({ targetCount: 30, radiusScale: 0.6 }),
 });
 const VARIANTS = Object.freeze({
   standard: Object.freeze({ baseRadius: 0.065 }),

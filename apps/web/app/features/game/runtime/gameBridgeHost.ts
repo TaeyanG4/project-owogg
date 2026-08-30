@@ -32,6 +32,8 @@ export interface GameBridgeHostCallbacks {
       evidence?: JsonSafeValue;
     },
   ) => void;
+  /** A game-owned restart control asks the Host to rotate attempt/session state and remount. */
+  onRestart?: () => void;
   onRequestStart?: (
     playConfig: PlayConfigSelection,
   ) => Promise<GameBridgeStartDecision> | GameBridgeStartDecision;
@@ -260,6 +262,9 @@ export function createGameBridgeHost(
           ...(message.metadata !== undefined ? { metadata: message.metadata } : {}),
           ...(message.evidence !== undefined ? { evidence: message.evidence } : {}),
         });
+        return;
+      case "GAME_RESTART":
+        callbacks.onRestart?.();
         return;
       case "GAME_CANCEL":
         callbacks.onCancel?.();

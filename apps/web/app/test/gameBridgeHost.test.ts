@@ -139,22 +139,24 @@ test("hybrid bootstrap exposes approved local/online topology choices without gr
   gamePortFrom(bootstrap).close();
 });
 
-test("dispatches GAME_READY, GAME_STARTED, and GAME_CANCEL to their callbacks", async () => {
+test("dispatches GAME_READY, GAME_STARTED, GAME_RESTART, and GAME_CANCEL to their callbacks", async () => {
   const fake = createFakeIframeWindow();
   const calls: string[] = [];
   const host = createGameBridgeHost(fake.windowLike, {
     onReady: () => calls.push("ready"),
     onStarted: () => calls.push("started"),
     onCancel: () => calls.push("cancel"),
+    onRestart: () => calls.push("restart"),
   });
 
   const gamePort = gamePortFrom(fake.getBootstrap());
   gamePort.postMessage({ type: "GAME_READY" });
   gamePort.postMessage({ type: "GAME_STARTED" });
+  gamePort.postMessage({ type: "GAME_RESTART" });
   gamePort.postMessage({ type: "GAME_CANCEL" });
   await waitUntil(() => calls.length, 3);
 
-  assert.deepEqual(calls, ["ready", "started", "cancel"]);
+  assert.deepEqual(calls, ["ready", "started", "restart", "cancel"]);
   host.close();
   gamePort.close();
 });

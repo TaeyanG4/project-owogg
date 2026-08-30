@@ -8,7 +8,7 @@
     "mode": "multi",
     "playModes": ["local-multi", "online-multi"],
     "shortDescription": "한 기기 대전과 온라인 Relay 대전을 한 게임에서 선택하는 15×15 오목",
-    "description": "같은 기기에서는 두 사람이 번갈아 두고, 온라인에서는 방장이 상태를 관리하는 공용 Relay application protocol로 대전합니다. 흑은 정확히 5목, 백은 5목 이상을 연결하면 승리합니다.",
+    "description": "같은 기기에서는 두 사람이 번갈아 두고, 온라인에서는 방장이 상태를 관리하는 공용 Relay application protocol로 대전합니다. 게임 안에서 한국어·영어, 소리, 새 대국·온라인 재대결을 제어합니다. 자유 오프닝의 렌주 금수를 적용해 흑은 장목·33·44가 금수이고 정확히 5목으로 승리하며, 백은 5목 이상을 연결하면 승리합니다.",
     "tags": ["omok", "board", "local", "online"]
   },
   "input": ["mouse", "touch"],

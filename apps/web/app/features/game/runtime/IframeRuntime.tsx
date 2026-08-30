@@ -20,10 +20,8 @@ export interface IframeRuntimeProps {
   frameClassName?: string;
   frameStyle?: React.CSSProperties | undefined;
   iframeStyle?: React.CSSProperties | undefined;
-  /** Bumped by GameHost's retry handler. Applied as GameFrame's `key`, so a retry fully remounts
-   * the iframe (fresh `started`/loading
-   * state, a real reload — not just a Bridge reset) exactly the way "다시 시작" already worked;
-   * the Bridge for the previous attempt is torn down in the same effect that reacts to this. */
+  /** Bumped by GameHost's restart handler. Applied as GameFrame's `key`, so a game-owned restart
+   * control gets a fresh iframe and Host attempt/session rather than reusing verifier state. */
   attemptKey: number;
   /** Threaded into HOST_INIT's own optional `difficultyId` field (see gameBridgeHost.ts /
    * protocol.ts's HostInitMessage). Games without host-selected difficulty tiers omit it.
@@ -42,6 +40,7 @@ export interface IframeRuntimeProps {
       evidence?: JsonSafeValue;
     },
   ) => void;
+  onRestart?: () => void;
   onRequestStart?: (
     playConfig: PlayConfigSelection,
   ) => Promise<GameBridgeStartDecision> | GameBridgeStartDecision;
@@ -75,6 +74,7 @@ export function IframeRuntime({
   onStarted,
   onEvent,
   onComplete,
+  onRestart,
   onRequestStart,
   onSelectPlayMode,
   onPlayModeSelected,
@@ -97,9 +97,8 @@ export function IframeRuntime({
 
   const handleFrameLoad = useCallback(
     (iframe: HTMLIFrameElement) => {
-      // Defensive: GameFrame's own "다시 시작" button reloads the iframe (a fresh `load` event)
-      // independently of attemptKey, so a bridge from the previous load must never be left
-      // dangling here either.
+      // Defensive: every load owns exactly one bridge. A game-owned restart normally changes
+      // attemptKey, but an ordinary document reload must not leave the previous port dangling.
       closeBridge();
 
       const contentWindow = iframe.contentWindow;
@@ -112,6 +111,7 @@ export function IframeRuntime({
           ...(onStarted ? { onStarted } : {}),
           ...(onEvent ? { onEvent } : {}),
           ...(onComplete ? { onComplete } : {}),
+          ...(onRestart ? { onRestart } : {}),
           ...(onRequestStart ? { onRequestStart } : {}),
           ...(onSelectPlayMode ? { onSelectPlayMode } : {}),
           ...(onPlayModeSelected ? { onPlayModeSelected } : {}),
@@ -133,6 +133,7 @@ export function IframeRuntime({
       onStarted,
       onEvent,
       onComplete,
+      onRestart,
       onRequestStart,
       onSelectPlayMode,
       onPlayModeSelected,
