@@ -22,7 +22,7 @@ import {
   updateMultiplayerLatencies,
 } from "../features/game/runtime/MultiplayerIframeRuntime";
 
-test("active multiplayer chrome and the game share one viewport-fitted surface", () => {
+test("active multiplayer keeps the viewport-fitted game ahead of detached room controls", () => {
   const room = {
     replayed: false,
     instance: {
@@ -61,10 +61,15 @@ test("active multiplayer chrome and the game share one viewport-fitted surface",
   );
 
   assert.match(markup, /data-testid="multiplayer-runtime-surface"/);
-  assert.match(markup, /mx-auto max-w-full flex w-full flex-col overflow-hidden/);
-  assert.match(markup, /style="width:960px;height:540px"/);
-  assert.match(markup, /relative min-h-0 w-full flex-1 overflow-hidden/);
+  assert.match(markup, /data-testid="multiplayer-game-stage"/);
+  assert.match(markup, /data-testid="multiplayer-room-controls"/);
+  assert.match(markup, /mx-auto max-w-full relative overflow-hidden/);
+  assert.match(markup, /data-testid="multiplayer-game-stage"[^>]*style="width:960px;height:540px"/);
   assert.match(markup, /style="width:100%;height:100%"/);
+  assert.ok(
+    markup.indexOf('data-testid="multiplayer-game-stage"') <
+      markup.indexOf('data-testid="multiplayer-room-controls"'),
+  );
 });
 
 test("participant ping labels distinguish measuring, healthy, delayed, and poor links", () => {
