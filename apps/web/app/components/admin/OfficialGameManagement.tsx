@@ -8,7 +8,6 @@ import {
   Image,
   Loader2,
   Pencil,
-  Play,
   Power,
   RefreshCw,
   Settings2,
@@ -32,7 +31,6 @@ import {
   patchOfficialGameBasicMetadata,
 } from "../../features/adminApi";
 import { useAuth } from "../../features/auth/AuthContext";
-import { MultiplayerGameSurface } from "../../features/game/runtime/MultiplayerGameSurface";
 import { ApiClientError } from "../../lib/api";
 import { GameBundleDropzone } from "../game/GameBundleDropzone";
 import {
@@ -40,6 +38,7 @@ import {
   formatServerUploadDate,
   type AdminGamePageSize,
 } from "./AdminGamePagination";
+import { ManagedRelayProfileControl } from "./ManagedRelayProfileControl";
 
 /** Keeps a successful destructive mutation visible even if an older in-flight list request or a
  * briefly stale edge response arrives afterwards. The total is adjusted only when the returned
@@ -107,8 +106,6 @@ export function adminGameCatalogBadge(game: GameAvailabilityDto): {
   };
 }
 
-const ignoreMultiplayerRuntimeResolution = () => undefined;
-
 /** `games.moderate` portion of the combined admin game workspace.
  *
  * Review permission remains independent, so this panel fails closed without hiding the review
@@ -130,8 +127,6 @@ export function OfficialGameManagement() {
   const [pageSize, setPageSize] = useState<AdminGamePageSize>(10);
   const [catalogRole, setCatalogRole] = useState<AdminGameCatalogRole>("GAME");
   const [listLoading, setListLoading] = useState(false);
-  const [activeToolId, setActiveToolId] = useState<string | null>(null);
-  const [toolAttemptKey, setToolAttemptKey] = useState(0);
   const listRequestIdRef = useRef(0);
   const deletedGameIdsRef = useRef<Set<string>>(new Set());
 
@@ -272,7 +267,6 @@ export function OfficialGameManagement() {
     try {
       await postAdminGameCatalogRole(game.gameId, nextRole);
       setExpandedGameId(null);
-      if (activeToolId === game.gameId) setActiveToolId(null);
       await loadGames(page, pageSize, catalogRole);
     } catch (err) {
       setError(err instanceof Error ? err.message : "게임 표시 분류를 변경하지 못했습니다.");
@@ -336,7 +330,6 @@ export function OfficialGameManagement() {
               setPage(1);
               setData(null);
               setExpandedGameId(null);
-              setActiveToolId(null);
             }}
             className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold ${
               catalogRole === "GAME"
@@ -627,57 +620,15 @@ export function OfficialGameManagement() {
                         </button>
                       </section>
 
-                      {game.catalogRole === "INTERNAL_TOOL" && game.mode === "multi" && (
-                        <section className="mt-4 border-t border-border pt-4">
-                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                            <div>
-                              <h5 className="text-xs font-black text-text-primary">
-                                Relay 테스트 실행
-                              </h5>
-                              <p className="mt-1 text-[11px] text-text-muted">
-                                실제 공용 방 입장·Ready·방장 시작·iframe Relay bootstrap을 같은
-                                관리자 화면에서 점검합니다.
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (activeToolId === game.gameId) {
-                                  setActiveToolId(null);
-                                  return;
-                                }
-                                setToolAttemptKey((current) => current + 1);
-                                setActiveToolId(game.gameId);
-                              }}
-                              className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-brand px-3 py-2 text-xs font-bold text-white"
-                            >
-                              <Play className="h-3.5 w-3.5" />
-                              {activeToolId === game.gameId ? "테스터 닫기" : "테스터 열기"}
-                            </button>
-                          </div>
-                          {activeToolId === game.gameId && (
-                            <div className="mt-4 overflow-hidden rounded-2xl border border-border">
-                              <MultiplayerGameSurface
-                                gameSlug={game.gameId}
-                                title={game.title}
-                                attemptKey={toolAttemptKey}
-                                viewer={
-                                  user
-                                    ? { nickname: user.nickname, avatarUrl: user.avatar_url }
-                                    : null
-                                }
-                                onRuntimeResolved={ignoreMultiplayerRuntimeResolution}
-                                frameClassName="min-h-[560px]"
-                                fallback={
-                                  <div className="flex min-h-[320px] items-center justify-center bg-surface p-6 text-center text-sm text-text-secondary">
-                                    활성화된 exact-version Relay 프로필이 없습니다. 해당 버전의 운영
-                                    프로필을 준비한 뒤 다시 확인하세요.
-                                  </div>
-                                }
-                              />
-                            </div>
-                          )}
-                        </section>
+                      {game.mode === "multi" && (
+                        <ManagedRelayProfileControl
+                          gameSlug={game.gameId}
+                          title={game.title}
+                          viewer={
+                            user ? { nickname: user.nickname, avatarUrl: user.avatar_url } : null
+                          }
+                          showTester={game.catalogRole === "INTERNAL_TOOL"}
+                        />
                       )}
 
                       {game.publisherType === "OWOGG" && (

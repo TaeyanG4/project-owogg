@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import {
   AdminManagedMultiplayerProfileRequestListResponseSchema,
   AdminManagedMultiplayerProfileListResponseSchema,
+  AdminManagedMultiplayerExactVersionResponseSchema,
   AdminManagedMultiplayerProfileReviewRequestSchema,
   AdminManagedMultiplayerProfileReviewResponseSchema,
   AdminManagedMultiplayerProfileActivationRequestSchema,
@@ -220,6 +221,47 @@ adminGamesRouter.get("/multiplayer-profiles", async (c) => {
   return c.json(
     AdminManagedMultiplayerProfileListResponseSchema.parse({
       profiles: profiles.map(managedMultiplayerProfileResponse),
+    }),
+    200,
+  );
+});
+
+// The global review panel was intentionally removed. Operators resolve the current immutable
+// version beside the game they are managing, while approval and activation remain two separate
+// audited mutations below.
+adminGamesRouter.get("/:gameSlug/multiplayer-control", async (c) => {
+  const admin = await requireElevatedAdmin(c);
+  if (isElevatedAdminResponse(admin)) return admin;
+  const denied = requirePermission(admin, "games.moderate");
+  if (denied) return denied;
+
+  const gameSlug = c.req.param("gameSlug");
+  const container = createContainer(c.env.DB, readB2Config(c.env));
+  const identity = await container.gameIdentityRepo.findBySlug(gameSlug);
+  if (!identity) {
+    return c.json(
+      { error: { code: "GAME_NOT_FOUND", message: "관리할 게임을 찾을 수 없습니다." } },
+      404,
+    );
+  }
+
+  const gameVersionId = identity.liveVersionId;
+  const [rawRequest, rawProfile] =
+    gameVersionId === null
+      ? [null, null]
+      : await Promise.all([
+          container.multiplayerProfileRequestRepo.findByExactVersion(gameVersionId),
+          container.multiplayerProfileRepo.findLatestForExactVersion(identity.id, gameVersionId),
+        ]);
+  const request = rawRequest?.gameId === identity.id ? rawRequest : null;
+
+  return c.json(
+    AdminManagedMultiplayerExactVersionResponseSchema.parse({
+      gameSlug: identity.slug,
+      gameId: identity.id,
+      gameVersionId,
+      request: request ? managedMultiplayerRequestResponse(request) : null,
+      profile: managedMultiplayerProfileResponse(rawProfile),
     }),
     200,
   );

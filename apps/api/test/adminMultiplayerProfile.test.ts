@@ -3,6 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 import {
   AdminManagedMultiplayerProfileActivationResponseSchema,
+  AdminManagedMultiplayerExactVersionResponseSchema,
   AdminManagedMultiplayerProfileListResponseSchema,
   AdminManagedMultiplayerProfileRequestListResponseSchema,
   AdminManagedMultiplayerProfileReviewResponseSchema,
@@ -137,6 +138,21 @@ test("Relay request approval creates a disabled exact-bundle profile before sepa
     "UNVERIFIED",
   );
 
+  const pendingControlResponse = await app.request(
+    "http://localhost/api/admin/games/relay-demo/multiplayer-control",
+    { headers: { Cookie: COOKIE } },
+    env,
+  );
+  assert.equal(pendingControlResponse.status, 200);
+  const pendingControl = AdminManagedMultiplayerExactVersionResponseSchema.parse(
+    await pendingControlResponse.json(),
+  );
+  assert.equal(pendingControl.gameId, 21);
+  assert.equal(pendingControl.gameVersionId, 22);
+  assert.equal(pendingControl.request?.id, submitted.record.id);
+  assert.equal(pendingControl.request?.status, "PENDING_REVIEW");
+  assert.equal(pendingControl.profile, null);
+
   const reviewedResponse = await app.request(
     `http://localhost/api/admin/games/multiplayer-requests/${submitted.record.id}/review`,
     {
@@ -166,6 +182,19 @@ test("Relay request approval creates a disabled exact-bundle profile before sepa
   );
   assert.ok(reviewed.profile);
   const profileId = reviewed.profile.id;
+
+  const reviewedControlResponse = await app.request(
+    "http://localhost/api/admin/games/relay-demo/multiplayer-control",
+    { headers: { Cookie: COOKIE } },
+    env,
+  );
+  assert.equal(reviewedControlResponse.status, 200);
+  const reviewedControl = AdminManagedMultiplayerExactVersionResponseSchema.parse(
+    await reviewedControlResponse.json(),
+  );
+  assert.equal(reviewedControl.request?.status, "APPROVED");
+  assert.equal(reviewedControl.profile?.id, profileId);
+  assert.equal(reviewedControl.profile?.enabled, false);
   assert.deepEqual(
     {
       ...(raw

@@ -16,6 +16,9 @@ import {
   AdminGameCatalogRoleResponseSchema,
   type AdminGameCatalogRole,
   AdminGameToggleResponseSchema,
+  AdminManagedMultiplayerExactVersionResponseSchema,
+  AdminManagedMultiplayerProfileReviewResponseSchema,
+  AdminManagedMultiplayerProfileActivationResponseSchema,
   AdminOfficialGameDeleteResponseSchema,
   AdminOfficialGameUploadResponseSchema,
   GameLogoUpdateResponseSchema,
@@ -242,6 +245,40 @@ export function fetchAdminGames(
     `/api/admin/games?page=${page}&pageSize=${pageSize}&catalogRole=${catalogRole}`,
     AdminGameListResponseSchema,
     { method: "GET", cache: "no-store" },
+  );
+}
+
+export function fetchManagedMultiplayerExactVersion(gameSlug: string) {
+  return apiFetch(
+    `/api/admin/games/${encodeURIComponent(gameSlug)}/multiplayer-control`,
+    AdminManagedMultiplayerExactVersionResponseSchema,
+    { method: "GET", cache: "no-store" },
+  );
+}
+
+export function postManagedMultiplayerProfileReview(requestId: number) {
+  return apiFetch(
+    `/api/admin/games/multiplayer-requests/${requestId}/review`,
+    AdminManagedMultiplayerProfileReviewResponseSchema,
+    {
+      method: "POST",
+      body: JSON.stringify({ decision: "APPROVED" }),
+    },
+  );
+}
+
+export function postManagedMultiplayerProfileActivation(
+  profileId: number,
+  enabled: boolean,
+  reasonCode: string | null,
+) {
+  return apiFetch(
+    `/api/admin/games/multiplayer-profiles/${profileId}/activation`,
+    AdminManagedMultiplayerProfileActivationResponseSchema,
+    {
+      method: "POST",
+      body: JSON.stringify({ enabled, reasonCode }),
+    },
   );
 }
 
