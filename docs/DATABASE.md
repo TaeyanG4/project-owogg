@@ -2,9 +2,9 @@
 
 상태: 기준 문서
 
-마지막 검증: 2026-08-30
+마지막 검증: 2026-08-31
 
-최신 마이그레이션: `0046_internal_game_tools.sql`
+최신 마이그레이션: `0047_public_ranking_period_indexes.sql`
 
 기준 소스:
 
@@ -16,7 +16,7 @@
 - [`ERD.md`](ERD.md) — 도메인별 관계도와 전체 물리 테이블·호환 뷰 사전
 
 Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 권한 원천입니다. 이 문서는
-현재 `0000_initial_schema.sql`부터 `0046_internal_game_tools.sql`까지의 역할을 설명합니다.
+현재 `0000_initial_schema.sql`부터 `0047_public_ranking_period_indexes.sql`까지의 역할을 설명합니다.
 
 ## 마이그레이션 범위
 
@@ -46,6 +46,7 @@ Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 
 | `0044`        | gs2 세 점수 의미, verifier provenance, mode/revision과 원자 랭킹 projection |
 | `0045`        | exact content hash에 묶인 generic Relay profile과 instance authority        |
 | `0046`        | 서버 소유 GAME/INTERNAL_TOOL 분류와 공개 catalog 제외                       |
+| `0047`        | KST 일·주·월 공개 랭킹과 활성 출석 조회용 covering/partial index            |
 
 기존 migration은 변경, squash, 삭제하지 않습니다. 프로덕션 배포는 API보다 먼저
 `pnpm d1:migrate:prod`를 실행합니다.
@@ -87,6 +88,15 @@ generation과 canonical ruleset revision에 맞는 row만 읽습니다. 공개 �
 분리합니다. `variant_id`는 플레이한 Mode의 provenance와 표시를 보존하지만 독립 leaderboard partition은
 아닙니다. 따라서 version rollout 또는 ruleset revision 전환은 과거 score를 물리 삭제하지 않고도 현재
 leaderboard를 초기화합니다.
+
+공개 `/api/rankings`는 새 집계 테이블을 복제하지 않고 `scores`, `xp_events`, `users`를 권한 원장으로
+직접 사용합니다. 게임 기록과 XP는 KST 일간·월요일 시작 주간·월간 경계로 제한하고,
+게임 기록은 해당 기간의 사용자별 PB를 SQL window function으로 한 건만 선택합니다. XP는 해당
+기간의 양수 ledger를 합산합니다. 연속 출석은 lazy 갱신된 오래된 값을 순위에 노출하지 않도록 KST
+오늘 또는 어제 활동한 `current_streak`만 읽습니다. 일반/스트리머 범위는 같은 계산을 사용하며,
+스트리머는 지원 플랫폼의 소유권 인증이 유효한 사용자로만 필터링합니다. 공개 identity는
+현재 nickname/avatar/country를 join하며 country가 미지정·비공개·불명인 경우 API에서 `null`로 투영할 수
+있습니다. 각 행은 값과 해당 값의 달성 일자를 함께 반환합니다.
 
 ### `game_versions`
 

@@ -49,8 +49,8 @@ function browserCacheControl(options: EdgeCacheOptions): string {
  * would serve one user's data to everyone else hitting the same URL. Only apply it where the
  * response depends solely on the URL:
  *
- *   ✅ safe:   /api/scores/:gameId (public leaderboard), /api/games/availability,
- *              /api/progression/leaderboard, public guild pages
+ *   ✅ safe:   /api/scores/:gameId and /api/rankings (public leaderboards),
+ *              /api/games/availability, /api/progression/leaderboard, public guild pages
  *   ❌ unsafe: anything reading `owogg_session` (e.g. /api/scores/user/me, /api/auth/me,
  *              /api/personalization/*), anything admin-gated, anything returning
  *              visibility-filtered data (e.g. /api/profile/public/:id — favorites/recent-plays

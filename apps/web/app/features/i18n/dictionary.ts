@@ -138,9 +138,14 @@ export interface Dictionary {
     platformSoop: string;
     scoreMode: string;
     xpMode: string;
+    streakMode: string;
+    dailyPeriod: string;
+    weeklyPeriod: string;
+    monthlyPeriod: string;
     rankHeader: string;
     playerHeader: string;
     streamerHeader: string;
+    countryHeader: string;
     categoryHeader: string;
     recordHeader: string;
     dateHeader: string;
@@ -153,6 +158,8 @@ export interface Dictionary {
     platformHeader: string;
     emptyGames: string;
     emptyXp: string;
+    emptyStreak: string;
+    unknownCountry: string;
     emptyStreamerTitle: string;
     emptyStreamerBody: string;
     retryButton: string;
@@ -1088,9 +1095,9 @@ export interface Dictionary {
     closeDialogCta: string;
     gameLinkCopied: string;
   };
-  /** /games/:slug/ranking — a dedicated per-game leaderboard page (osu!-style: ranking recorded
-   * per map/game, not just one combined table). Table column headers are shared with dict.ranking
-   * (rankHeader/playerHeader/recordHeader/dateHeader etc.) rather than duplicated here. */
+  /** /games/:slug/ranking — a dedicated per-game daily/weekly/monthly leaderboard page. Table
+   * column headers are shared with dict.ranking (rankHeader/playerHeader/recordHeader/dateHeader
+   * etc.) rather than duplicated here. */
   gameRanking: {
     eyebrow: string;
     backToGame: string;
@@ -1288,7 +1295,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       eyebrow: "Leaderboard & Community Hall of Fame",
       title: "명예의 전당",
       subtitle: "최고 기록, 유저 활동 레벨, 그리고 검증된 스트리머 랭킹입니다.",
-      gameTab: "게임 랭킹",
+      gameTab: "일반 랭킹",
       xpTab: "경험치 랭킹",
       streamerTab: "스트리머 랭킹",
       allCategories: "전체 종목",
@@ -1297,9 +1304,14 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       platformSoop: "SOOP (아프리카)",
       scoreMode: "게임 점수",
       xpMode: "경험치 (XP)",
+      streakMode: "연속 출석",
+      dailyPeriod: "일간",
+      weeklyPeriod: "주간",
+      monthlyPeriod: "월간",
       rankHeader: "순위",
       playerHeader: "플레이어",
       streamerHeader: "스트리머",
+      countryHeader: "국가/지역",
       categoryHeader: "종목",
       recordHeader: "기록",
       dateHeader: "달성일",
@@ -1312,9 +1324,11 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       platformHeader: "플랫폼",
       emptyGames: "아직 등록된 기록이 없습니다. 첫 기록의 주인공이 되어보세요.",
       emptyXp: "아직 활동 내역이 있는 유저가 없습니다.",
+      emptyStreak: "현재 이어지고 있는 연속 출석 기록이 없습니다.",
+      unknownCountry: "국가/지역 미지정 또는 비공개",
       emptyStreamerTitle: "아직 검증된 스트리머 기록이 없습니다",
       emptyStreamerBody:
-        "OwOGG 스트리머 채널 소유권 인증 서비스가 준비 중입니다. 인증된 스트리머의 게임 최고 기록과 활동 XP가 여기에 게시됩니다.",
+        "해당 기간과 필터에 맞는 인증 스트리머의 게임 기록·XP·연속 출석이 아직 없습니다.",
       retryButton: "다시 시도",
       rank1: "1위",
       rank2: "2위",
@@ -1883,19 +1897,19 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       gamesRanking: {
         title: "랭킹",
         description:
-          "명예의 전당(/ranking)은 게임 랭킹, 경험치 랭킹, 스트리머 랭킹 세 가지 탭으로 구성됩니다.",
-        gameHeading: "게임 랭킹",
+          "명예의 전당(/ranking)은 일반 랭킹과 스트리머 랭킹을 같은 화면 구조로 제공합니다. 각 범위에서 게임 기록, XP, 연속 출석을 선택할 수 있습니다.",
+        gameHeading: "일반 랭킹",
         gameBody:
-          "게임별 최고 기록(Personal Best) 기준으로 정렬됩니다. 한 사용자가 같은 게임을 여러 번 플레이해도 랭킹에는 가장 좋은 기록 1개만 반영됩니다.",
-        xpHeading: "경험치(XP) 랭킹",
-        xpBodyPrefix: "누적 글로벌 XP 기준으로 정렬됩니다. 자세한 지급 방식은 ",
+          "게임 기록과 XP는 KST 기준 일간·주간·월간으로 나누며, 게임 기록은 해당 기간의 사용자별 최고 기록 1건만 반영합니다. 연속 출석은 현재 유효한 일수를 표시합니다.",
+        xpHeading: "기간·달성일 기준",
+        xpBodyPrefix: "각 행에는 순위 값을 달성한 년·월·일이 표시됩니다. XP 지급 방식은 ",
         xpBodyLink: "XP와 레벨 문서",
         xpBodySuffix: "를 참고하세요.",
         streamerHeading: "스트리머 랭킹",
         streamerBodyPrefix: "YouTube / CHZZK / SOOP / Twitch 중 ",
         streamerBodyStrong: "하나 이상",
         streamerBodySuffix:
-          "의 플랫폼에서 공식 채널 소유권 인증을 완료한 사용자만 노출됩니다. 순위 값은 일반 게임 랭킹/XP 랭킹과 동일한 계산식을 사용하며, 인증한 플랫폼 수는 순위에 영향을 주지 않습니다 — 오른쪽 끝의 플랫폼 아이콘은 필터링·표시 전용입니다.",
+          "의 플랫폼에서 공식 채널 소유권 인증을 완료한 사용자만 노출됩니다. 게임 기록·XP·연속 출석은 일반 랭킹과 동일한 계산식과 UI를 사용하며, 인증 플랫폼 수는 순위에 영향을 주지 않습니다.",
         streamerLinkPrefix: "자세한 인증 방법은 ",
         streamerLink: "Streamer 채널 소유권 인증",
         streamerLinkSuffix: " 문서를 참고하세요.",
@@ -2585,7 +2599,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       eyebrow: "Leaderboard & Community Hall of Fame",
       title: "Hall of Fame",
       subtitle: "Top records, player activity levels, and verified streamer rankings.",
-      gameTab: "Game Ranking",
+      gameTab: "General Ranking",
       xpTab: "XP Ranking",
       streamerTab: "Streamer Ranking",
       allCategories: "All Games",
@@ -2594,9 +2608,14 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       platformSoop: "SOOP",
       scoreMode: "Game Score",
       xpMode: "Experience (XP)",
+      streakMode: "Attendance Streak",
+      dailyPeriod: "Daily",
+      weeklyPeriod: "Weekly",
+      monthlyPeriod: "Monthly",
       rankHeader: "Rank",
       playerHeader: "Player",
       streamerHeader: "Streamer",
+      countryHeader: "Country/Region",
       categoryHeader: "Game",
       recordHeader: "Record",
       dateHeader: "Date",
@@ -2609,9 +2628,11 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       platformHeader: "Platform",
       emptyGames: "No records yet. Be the first to set one.",
       emptyXp: "No users with activity yet.",
+      emptyStreak: "No active attendance streaks yet.",
+      unknownCountry: "Country/region unset or hidden",
       emptyStreamerTitle: "No verified streamers yet",
       emptyStreamerBody:
-        "OwOGG's streamer channel ownership verification is being rolled out. Verified streamers' best game records and activity XP will appear here.",
+        "No verified streamer game, XP, or attendance-streak records match this period and filter yet.",
       retryButton: "Retry",
       rank1: "1st",
       rank2: "2nd",
@@ -3194,19 +3215,20 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       gamesRanking: {
         title: "Ranking",
         description:
-          "The Hall of Fame (/ranking) is organized into three tabs: game ranking, XP ranking, and streamer ranking.",
-        gameHeading: "Game ranking",
+          "The Hall of Fame (/ranking) gives General and Streamer rankings the same layout. Each scope offers game records, XP, and attendance streaks.",
+        gameHeading: "General ranking",
         gameBody:
-          "Sorted by each player's personal best per game. No matter how many times someone plays the same game, only their single best record counts toward the ranking.",
-        xpHeading: "XP ranking",
-        xpBodyPrefix: "Sorted by cumulative global XP. For how XP is granted, see the ",
+          "Game records and XP are split into daily, weekly, and monthly KST periods. Game records count one personal best per user within the selected period; streaks show the currently valid number of days.",
+        xpHeading: "Periods and achieved dates",
+        xpBodyPrefix:
+          "Every row shows the full date when its ranking value was reached. For how XP is granted, see the ",
         xpBodyLink: "XP & levels article",
         xpBodySuffix: ".",
         streamerHeading: "Streamer ranking",
         streamerBodyPrefix: "Only users who completed official channel ownership verification on ",
         streamerBodyStrong: "at least one",
         streamerBodySuffix:
-          " of YouTube / CHZZK / SOOP / Twitch appear here. Ranking values use the exact same formula as the regular game/XP rankings, and the number of verified platforms has no effect on position — the platform icons at the right edge are for filtering and display only.",
+          " of YouTube / CHZZK / SOOP / Twitch appear here. Game, XP, and streak rankings use the same formula and UI as General rankings, and the number of verified platforms has no effect on position.",
         streamerLinkPrefix: "For how to verify, see the ",
         streamerLink: "Streamer channel ownership verification",
         streamerLinkSuffix: " article.",
@@ -3905,7 +3927,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       eyebrow: "Leaderboard & Community Hall of Fame",
       title: "殿堂入り",
       subtitle: "最高記録、ユーザー活動レベル、認証済みストリーマーランキングです。",
-      gameTab: "ゲームランキング",
+      gameTab: "一般ランキング",
       xpTab: "経験値ランキング",
       streamerTab: "ストリーマーランキング",
       allCategories: "全種目",
@@ -3914,9 +3936,14 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       platformSoop: "SOOP",
       scoreMode: "ゲームスコア",
       xpMode: "経験値 (XP)",
+      streakMode: "連続ログイン",
+      dailyPeriod: "日間",
+      weeklyPeriod: "週間",
+      monthlyPeriod: "月間",
       rankHeader: "順位",
       playerHeader: "プレイヤー",
       streamerHeader: "ストリーマー",
+      countryHeader: "国・地域",
       categoryHeader: "種目",
       recordHeader: "記録",
       dateHeader: "達成日",
@@ -3929,9 +3956,11 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       platformHeader: "プラットフォーム",
       emptyGames: "まだ登録された記録がありません。最初の記録に挑戦しましょう。",
       emptyXp: "まだ活動履歴のあるユーザーがいません。",
+      emptyStreak: "現在継続中の連続ログイン記録はありません。",
+      unknownCountry: "国・地域が未設定または非公開",
       emptyStreamerTitle: "まだ認証済みストリーマーがいません",
       emptyStreamerBody:
-        "OwOGGストリーマーチャンネル所有権認証サービスを準備中です。認証済みストリーマーのゲーム最高記録と活動XPがここに表示されます。",
+        "この期間とフィルターに合う認証済みストリーマーのゲーム記録・XP・連続ログイン記録はまだありません。",
       retryButton: "再試行",
       rank1: "1位",
       rank2: "2位",
@@ -4512,19 +4541,19 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       gamesRanking: {
         title: "ランキング",
         description:
-          "殿堂（/ranking）はゲームランキング、経験値ランキング、ストリーマーランキングの3つのタブで構成されています。",
-        gameHeading: "ゲームランキング",
+          "殿堂（/ranking）は、通常ランキングとストリーマーランキングを同じUIで提供します。各範囲でゲーム記録、XP、連続ログインを選択できます。",
+        gameHeading: "通常ランキング",
         gameBody:
-          "ゲームごとの自己ベスト（Personal Best）を基準に並びます。同じゲームを何度プレイしても、ランキングに反映されるのは最も良い記録1件のみです。",
-        xpHeading: "経験値（XP）ランキング",
-        xpBodyPrefix: "累計グローバルXPを基準に並びます。詳しい付与方式は",
+          "ゲーム記録とXPはKST基準の日間・週間・月間に分かれます。ゲーム記録は選択期間内のユーザーごとの自己ベスト1件、連続ログインは現在有効な日数を表示します。",
+        xpHeading: "期間・達成日",
+        xpBodyPrefix: "各行に順位値を達成した年月日を表示します。XPの付与方式は",
         xpBodyLink: "XPとレベルのドキュメント",
         xpBodySuffix: "をご覧ください。",
         streamerHeading: "ストリーマーランキング",
         streamerBodyPrefix: "YouTube / CHZZK / SOOP / Twitch のうち",
         streamerBodyStrong: "1つ以上",
         streamerBodySuffix:
-          "のプラットフォームで公式チャンネル所有権認証を完了したユーザーのみが表示されます。順位の値は通常のゲームランキング・XPランキングと同じ計算式を使用し、認証したプラットフォームの数は順位に影響しません — 右端のプラットフォームアイコンはフィルタリング・表示専用です。",
+          "のプラットフォームで公式チャンネル所有権認証を完了したユーザーのみが表示されます。ゲーム記録・XP・連続ログインは通常ランキングと同じ計算式とUIを使い、認証数は順位に影響しません。",
         streamerLinkPrefix: "詳しい認証方法は",
         streamerLink: "Streamerチャンネル所有権認証",
         streamerLinkSuffix: "のドキュメントをご覧ください。",
@@ -5222,7 +5251,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       eyebrow: "Leaderboard & Community Hall of Fame",
       title: "名人堂",
       subtitle: "最高记录、用户活动等级，以及认证主播排行榜。",
-      gameTab: "游戏排行",
+      gameTab: "综合排行",
       xpTab: "经验排行",
       streamerTab: "主播排行",
       allCategories: "全部项目",
@@ -5231,9 +5260,14 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       platformSoop: "SOOP",
       scoreMode: "游戏分数",
       xpMode: "经验值 (XP)",
+      streakMode: "连续签到",
+      dailyPeriod: "日榜",
+      weeklyPeriod: "周榜",
+      monthlyPeriod: "月榜",
       rankHeader: "排名",
       playerHeader: "玩家",
       streamerHeader: "主播",
+      countryHeader: "国家/地区",
       categoryHeader: "项目",
       recordHeader: "记录",
       dateHeader: "达成日期",
@@ -5246,9 +5280,10 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       platformHeader: "平台",
       emptyGames: "暂无记录，成为第一个创造记录的人吧。",
       emptyXp: "暂无活跃用户。",
+      emptyStreak: "暂无正在持续的连续签到记录。",
+      unknownCountry: "国家/地区未设置或已隐藏",
       emptyStreamerTitle: "暂无认证主播",
-      emptyStreamerBody:
-        "OwOGG 主播频道所有权认证服务正在筹备中。认证主播的游戏最高记录和活动 XP 将显示在这里。",
+      emptyStreamerBody: "暂无符合当前周期和筛选条件的认证主播游戏记录、XP 或连续签到记录。",
       retryButton: "重试",
       rank1: "第1名",
       rank2: "第2名",
@@ -5797,19 +5832,20 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       },
       gamesRanking: {
         title: "排行榜",
-        description: "名人堂（/ranking）由游戏排行榜、经验值排行榜、主播排行榜三个标签页组成。",
-        gameHeading: "游戏排行榜",
+        description:
+          "名人堂（/ranking）使用相同的界面提供普通排行榜和主播排行榜。每个范围都可选择游戏记录、XP 和连续签到。",
+        gameHeading: "普通排行榜",
         gameBody:
-          "按各游戏的个人最佳成绩（Personal Best）排序。即使同一位用户多次游玩同一款游戏，排行榜也只会采用其中最好的一条记录。",
-        xpHeading: "经验值（XP）排行榜",
-        xpBodyPrefix: "按累计全局 XP 排序。详细的发放方式请参阅",
+          "游戏记录和 XP 按 KST 划分为日、周、月。游戏记录只采用所选期间内每位用户的一条最佳成绩；连续签到显示当前有效天数。",
+        xpHeading: "周期与达成日期",
+        xpBodyPrefix: "每行显示达到排名数值的完整年月日。XP 发放方式请参阅",
         xpBodyLink: "XP 与等级文档",
         xpBodySuffix: "。",
         streamerHeading: "主播排行榜",
         streamerBodyPrefix: "只有在 YouTube / CHZZK / SOOP / Twitch 中",
         streamerBodyStrong: "至少一个",
         streamerBodySuffix:
-          "平台完成官方频道所有权认证的用户才会显示。名次数值使用与普通游戏排行榜/XP 排行榜完全相同的计算公式，已认证的平台数量不会影响名次 —— 最右侧的平台图标仅用于筛选与展示。",
+          "平台完成官方频道所有权认证的用户才会显示。游戏记录、XP 和连续签到与普通排行榜使用相同的计算公式和 UI，认证平台数量不影响名次。",
         streamerLinkPrefix: "详细的认证方法请参阅",
         streamerLink: "Streamer 频道所有权认证",
         streamerLinkSuffix: "文档。",

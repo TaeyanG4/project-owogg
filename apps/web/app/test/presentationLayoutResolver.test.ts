@@ -57,6 +57,18 @@ test("responsive paired dimensions use height as the binding constraint without 
   assert.ok(Math.abs(layout.displayWidth / layout.displayHeight - 16 / 9) < Number.EPSILON * 2);
 });
 
+test("a tall or square game is contained by platform height instead of extending the outer page", () => {
+  const layout = resolvePresentationLayout(
+    responsive({ preferredWidth: 1600, preferredHeight: 1600 }),
+    { width: 1400, height: 738 },
+  );
+  assert.deepEqual(layout, {
+    kind: "responsive",
+    displayWidth: 738,
+    displayHeight: 738,
+  });
+});
+
 test("a game's minWidth never overrides a smaller actual viewport — no overflow", () => {
   // The exact scenario called out by name: minWidth 800 on a 390px-wide device must never force
   // 800 — the actual available width always wins.

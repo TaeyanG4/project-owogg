@@ -1,70 +1,85 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import {
-  Trophy,
-  Medal,
   AlertCircle,
-  RefreshCw,
-  Zap,
-  Video,
+  CalendarDays,
+  Flame,
   Gamepad2,
   Globe,
+  Medal,
+  RefreshCw,
   Search,
+  Trophy,
+  Video,
+  Zap,
 } from "lucide-react";
-import { fetchLeaderboardApi } from "../features/scores/api";
-import { fetchXpLeaderboardApi } from "../features/progression/api";
-import { fetchStreamerRankingsApi } from "../features/streamers/streamerApi";
-import { PlatformIconRow, PlatformIcon } from "../components/ui/PlatformIcon";
+import type {
+  PublicRankingEntry,
+  RankingMetric,
+  RankingPeriod,
+  RankingScope,
+  StreamerPlatform,
+} from "@owogg/contracts";
+import { formatPublicUserTag } from "@owogg/core";
+import { CountryFlag } from "../components/ui/CountryFlag";
 import { GameThumbnail } from "../components/ui/GameThumbnail";
-import type { LeaderRecord, XpLeaderboardEntry, StreamerRankEntryDto } from "@owogg/contracts";
-
-import { formatPublicUserTag, levelForTotalXp } from "@owogg/core";
-
-import { usePublicGames } from "../features/publicGamesApi";
+import { PlatformIcon, PlatformIconRow } from "../components/ui/PlatformIcon";
+import { getLocalizedGameContent } from "../features/catalog/localizedGameContent";
 import { publicGameToCard } from "../features/catalog/publicGameAdapter";
 import { useI18n } from "../features/i18n/I18nContext";
-import { getLocalizedGameContent } from "../features/catalog/localizedGameContent";
-import { leaderboardVariantLabel } from "../features/scores/variantLabel";
+import { usePublicGames } from "../features/publicGamesApi";
+import { fetchPublicRankingApi } from "../features/rankings/api";
+import { formatRankingDate } from "../features/rankings/format";
 import { filterLeaderboardGames } from "../features/scores/leaderboardGames";
+import { leaderboardVariantLabel } from "../features/scores/variantLabel";
 
 export function meta() {
   return [
     { title: "명예의 전당 (랭킹) | OwOGG" },
-    { name: "description", content: "최고 기록, XP 레벨, 스트리머 랭킹을 확인하세요." },
+    { name: "description", content: "기간별 일반·스트리머 랭킹을 확인하세요." },
   ];
 }
 
-type MainTab = "game" | "xp" | "streamer";
 type LeaderboardState = "loading" | "success" | "error";
+type PlatformFilter = StreamerPlatform | "ALL";
+
+function RankBadge({ rank, labels }: { rank: number; labels: [string, string, string] }) {
+  if (rank <= 3) {
+    const styles = [
+      "bg-amber-500/20 text-amber-400 border-amber-500/40",
+      "bg-slate-400/20 text-slate-300 border-slate-400/40",
+      "bg-amber-700/20 text-amber-600 border-amber-700/40",
+    ];
+    return (
+      <span
+        className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 font-black ${styles[rank - 1]}`}
+      >
+        <Medal className="h-4 w-4" /> {labels[rank - 1]}
+      </span>
+    );
+  }
+  return <span className="px-3 font-bold text-text-muted">#{rank}</span>;
+}
 
 export default function Ranking() {
-  const { dict } = useI18n();
+  const { dict, locale } = useI18n();
   const { games: publicGames } = usePublicGames();
   const leaderboardGames = useMemo(() => filterLeaderboardGames(publicGames), [publicGames]);
-  const gameManifests = useMemo(
+  const gameCards = useMemo(
     () => leaderboardGames.map((game) => publicGameToCard(game)),
     [leaderboardGames],
   );
-  const [mainTab, setMainTab] = useState<MainTab>("game");
 
-  // Game Score Ranking state
-  const [selectedGameId, setSelectedGameId] = useState<string>("all");
-  const [gameRecords, setGameRecords] = useState<LeaderRecord[]>([]);
-  // Sidebar search for the game picker — a text filter scales to a large catalog far better
-  // than a horizontal chip row or a full card grid does (both of those enumerate every game
-  // unconditionally, which is fine at 4 games and unusable at 100+). See the sidebar below.
+  const [scope, setScope] = useState<RankingScope>("general");
+  const [metric, setMetric] = useState<RankingMetric>("score");
+  const [period, setPeriod] = useState<RankingPeriod>("daily");
+  const [selectedGameId, setSelectedGameId] = useState("all");
+  const [selectedPlatform, setSelectedPlatform] = useState<PlatformFilter>("ALL");
   const [gameSearchQuery, setGameSearchQuery] = useState("");
-
-  // XP Ranking state
-  const [xpRecords, setXpRecords] = useState<XpLeaderboardEntry[]>([]);
-
-  // Streamer Ranking state
-  const [streamerMode, setStreamerMode] = useState<"score" | "xp">("score");
-  const [selectedPlatform, setSelectedPlatform] = useState<string>("ALL");
-  const [streamerRecords, setStreamerRecords] = useState<StreamerRankEntryDto[]>([]);
-
-  const [status, setStatus] = useState<LeaderboardState>("loading");
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [entries, setEntries] = useState<PublicRankingEntry[]>([]);
+  const [status, setStatus] = useState<LeaderboardState>("success");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     if (
@@ -75,249 +90,237 @@ export default function Ranking() {
     }
   }, [leaderboardGames, selectedGameId]);
 
-  const filteredSidebarGames = useMemo(() => {
+  const filteredGames = useMemo(() => {
     const query = gameSearchQuery.trim().toLowerCase();
-    if (!query) return gameManifests;
-    return gameManifests.filter((game) =>
+    if (!query) return gameCards;
+    return gameCards.filter((game) =>
       getLocalizedGameContent(dict, game).title.toLowerCase().includes(query),
     );
-  }, [gameManifests, gameSearchQuery, dict]);
+  }, [dict, gameCards, gameSearchQuery]);
 
   const loadData = useCallback(async () => {
-    // "전체 종목" under the game tab has no meaningful combined leaderboard — scores from
-    // different games aren't comparable (ms vs. WPM etc.), and the API has no "all games mixed"
-    // endpoint (GET /api/scores/all 400s, since "all" isn't a real game id). That state instead
-    // renders a game-picker grid below, so there's nothing to fetch here.
-    if (mainTab === "game" && selectedGameId === "all") {
-      setGameRecords([]);
+    if (metric === "score" && selectedGameId === "all") {
+      setEntries([]);
+      setErrorMessage(null);
       setStatus("success");
       return;
     }
+
     setStatus("loading");
-    setErrorMsg(null);
+    setErrorMessage(null);
     try {
-      if (mainTab === "game") {
-        const data = await fetchLeaderboardApi(selectedGameId);
-        setGameRecords(data);
-      } else if (mainTab === "xp") {
-        const res = await fetchXpLeaderboardApi(50);
-        setXpRecords(res.entries);
-      } else if (mainTab === "streamer") {
-        const res = await fetchStreamerRankingsApi(
-          streamerMode,
-          selectedGameId,
-          selectedPlatform,
-          50,
-          0,
-        );
-        setStreamerRecords(res.entries);
-      }
+      const response = await fetchPublicRankingApi({
+        scope,
+        metric,
+        period,
+        ...(metric === "score" ? { gameId: selectedGameId } : {}),
+        ...(scope === "streamer" && selectedPlatform !== "ALL"
+          ? { platform: selectedPlatform }
+          : {}),
+        limit: 50,
+      });
+      setEntries(response.entries);
       setStatus("success");
-    } catch (err) {
-      console.error("Failed to load leaderboard:", err);
-      setErrorMsg(dict.common.error);
+    } catch (error) {
+      console.error("Failed to load public ranking:", error);
+      setEntries([]);
+      setErrorMessage(dict.common.error);
       setStatus("error");
     }
-  }, [mainTab, selectedGameId, streamerMode, selectedPlatform, dict.common.error]);
+  }, [dict.common.error, metric, period, scope, selectedGameId, selectedPlatform]);
 
   useEffect(() => {
     void loadData();
-  }, [loadData]);
+  }, [loadData, retryKey]);
+
+  const metricOptions: Array<{
+    id: RankingMetric;
+    label: string;
+    icon: typeof Gamepad2;
+  }> = [
+    { id: "score", label: dict.ranking.scoreMode, icon: Gamepad2 },
+    { id: "xp", label: dict.ranking.xpMode, icon: Zap },
+    { id: "streak", label: dict.ranking.streakMode, icon: Flame },
+  ];
+  const periodOptions: Array<{ id: RankingPeriod; label: string }> = [
+    { id: "daily", label: dict.ranking.dailyPeriod },
+    { id: "weekly", label: dict.ranking.weeklyPeriod },
+    { id: "monthly", label: dict.ranking.monthlyPeriod },
+  ];
+  const platformOptions: Array<{ id: PlatformFilter; label: string }> = [
+    { id: "ALL", label: dict.ranking.allPlatforms },
+    { id: "YOUTUBE", label: "YouTube" },
+    { id: "CHZZK", label: dict.ranking.platformChzzk },
+    { id: "SOOP", label: dict.ranking.platformSoop },
+    { id: "TWITCH", label: "Twitch" },
+  ];
+
+  const valueHeader =
+    metric === "score"
+      ? dict.ranking.recordHeader
+      : metric === "xp"
+        ? dict.ranking.xpMode
+        : dict.ranking.streakMode;
+  const emptyMessage =
+    scope === "streamer"
+      ? dict.ranking.emptyStreamerTitle
+      : metric === "score"
+        ? dict.ranking.emptyGames
+        : metric === "xp"
+          ? dict.ranking.emptyXp
+          : dict.ranking.emptyStreak;
+  const selectedGame = publicGames.find((game) => game.slug === selectedGameId);
+  const columnCount = 5 + (metric === "score" ? 1 : 0) + (scope === "streamer" ? 1 : 0);
 
   return (
-    <div className="flex flex-col w-full px-4 md:px-8 py-8 gap-8 max-w-[100rem] mx-auto flex-1 select-none">
-      {/* Title Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-border/60 pb-6">
+    <div className="mx-auto flex w-full max-w-[100rem] flex-1 select-none flex-col gap-7 px-4 py-8 md:px-8">
+      <header className="flex flex-col justify-between gap-6 border-b border-border/60 pb-6 md:flex-row md:items-center">
         <div>
-          <div className="flex items-center gap-2 text-accent-yellow font-bold text-xs uppercase tracking-wider mb-1">
-            <Trophy className="w-4 h-4" />
+          <div className="mb-1 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-accent-yellow">
+            <Trophy className="h-4 w-4" />
             <span>{dict.ranking.eyebrow}</span>
           </div>
-          <h1 className="text-3xl md:text-4xl font-black text-text-primary">
+          <h1 className="text-3xl font-black text-text-primary md:text-4xl">
             {dict.ranking.title}
           </h1>
-          <p className="text-sm text-text-secondary mt-1">{dict.ranking.subtitle}</p>
+          <p className="mt-1 text-sm text-text-secondary">{dict.ranking.subtitle}</p>
         </div>
 
-        {/* Top-Level Mode Tabs */}
-        <div className="flex items-center gap-1.5 rounded-2xl bg-surface-sidebar p-1.5 border border-border">
+        <div className="flex items-center gap-1.5 rounded-2xl border border-border bg-surface-sidebar p-1.5">
           <button
-            onClick={() => setMainTab("game")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs md:text-sm font-extrabold transition-all cursor-pointer ${
-              mainTab === "game"
+            type="button"
+            onClick={() => setScope("general")}
+            className={`flex cursor-pointer items-center gap-2 rounded-xl px-4 py-2 text-xs font-extrabold transition-all md:text-sm ${
+              scope === "general"
                 ? "bg-brand text-white shadow-lg shadow-brand/25"
                 : "text-text-secondary hover:text-text-primary"
             }`}
           >
-            <Gamepad2 className="w-4 h-4" />
-            <span>{dict.ranking.gameTab}</span>
+            <Trophy className="h-4 w-4" /> {dict.ranking.gameTab}
           </button>
-
           <button
-            onClick={() => setMainTab("xp")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs md:text-sm font-extrabold transition-all cursor-pointer ${
-              mainTab === "xp"
-                ? "bg-brand text-white shadow-lg shadow-brand/25"
-                : "text-text-secondary hover:text-text-primary"
-            }`}
-          >
-            <Zap className="w-4 h-4 text-accent-yellow" />
-            <span>{dict.ranking.xpTab}</span>
-          </button>
-
-          <button
-            onClick={() => setMainTab("streamer")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs md:text-sm font-extrabold transition-all cursor-pointer ${
-              mainTab === "streamer"
+            type="button"
+            onClick={() => setScope("streamer")}
+            className={`flex cursor-pointer items-center gap-2 rounded-xl px-4 py-2 text-xs font-extrabold transition-all md:text-sm ${
+              scope === "streamer"
                 ? "bg-purple-600 text-white shadow-lg shadow-purple-600/25"
                 : "text-text-secondary hover:text-text-primary"
             }`}
           >
-            <Video className="w-4 h-4 text-purple-300" />
-            <span>{dict.ranking.streamerTab}</span>
+            <Video className="h-4 w-4" /> {dict.ranking.streamerTab}
           </button>
         </div>
-      </div>
+      </header>
 
-      {/* The game tab's picker moved into a sidebar next to the table (below) — a horizontal
-          chip row here enumerates every game unconditionally, which stops working once the
-          catalog grows well past a handful of entries. */}
-
-      {mainTab === "streamer" && (
-        <div className="space-y-3 border-b border-border/40 pb-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            {/* Platform Filter Pills */}
-            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
-              {(
-                [
-                  { id: "ALL", label: dict.ranking.allPlatforms },
-                  { id: "YOUTUBE", label: "YouTube" },
-                  { id: "CHZZK", label: dict.ranking.platformChzzk },
-                  { id: "SOOP", label: dict.ranking.platformSoop },
-                  { id: "TWITCH", label: "Twitch" },
-                ] as const
-              ).map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => setSelectedPlatform(p.id)}
-                  className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer border ${
-                    selectedPlatform === p.id
-                      ? "bg-purple-600 text-white border-purple-500 shadow-md"
-                      : "bg-surface-raised text-text-secondary border-border/80 hover:text-text-primary"
-                  }`}
-                >
-                  {p.id === "ALL" ? (
-                    <Globe className="h-3.5 w-3.5" />
-                  ) : (
-                    <PlatformIcon platform={p.id} size={16} />
-                  )}
-                  {p.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Metric Mode Switch */}
-            <div className="flex items-center gap-1 rounded-xl bg-surface-sidebar p-1 border border-border self-start sm:self-auto">
-              <button
-                onClick={() => setStreamerMode("score")}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                  streamerMode === "score"
+      <section className="flex flex-col gap-4 rounded-2xl border border-border/70 bg-surface-sidebar/60 p-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-center gap-1 overflow-x-auto rounded-xl bg-surface p-1">
+          {metricOptions.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setMetric(id)}
+              className={`flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-extrabold transition-all ${
+                metric === id
+                  ? scope === "streamer"
                     ? "bg-purple-600 text-white"
+                    : "bg-brand text-white"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              <Icon className="h-4 w-4" /> {label}
+            </button>
+          ))}
+        </div>
+
+        {metric !== "streak" && (
+          <div className="flex items-center gap-1 rounded-xl border border-border/70 bg-surface p-1">
+            <CalendarDays className="ml-2 h-4 w-4 text-text-muted" />
+            {periodOptions.map(({ id, label }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setPeriod(id)}
+                className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${
+                  period === id
+                    ? "bg-surface-overlay text-text-primary"
                     : "text-text-muted hover:text-text-primary"
                 }`}
               >
-                🎮 {dict.ranking.scoreMode}
+                {label}
               </button>
-              <button
-                onClick={() => setStreamerMode("xp")}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                  streamerMode === "xp"
-                    ? "bg-purple-600 text-white"
-                    : "text-text-muted hover:text-text-primary"
-                }`}
-              >
-                ⚡ {dict.ranking.xpMode}
-              </button>
-            </div>
+            ))}
           </div>
+        )}
+      </section>
 
-          {/* If Streamer Score mode, show game selector pills */}
-          {streamerMode === "score" && (
-            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pt-2">
-              <button
-                onClick={() => setSelectedGameId("all")}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all border ${
-                  selectedGameId === "all"
-                    ? "bg-purple-500/20 text-purple-300 border-purple-400/40"
-                    : "bg-surface-raised text-text-muted border-border/60 hover:text-text-primary"
-                }`}
-              >
-                {dict.ranking.allCategories}
-              </button>
-              {gameManifests.map((game) => (
-                <button
-                  key={game.slug}
-                  onClick={() => setSelectedGameId(game.slug)}
-                  className={`px-3 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all border ${
-                    selectedGameId === game.slug
-                      ? "bg-purple-500/20 text-purple-300 border-purple-400/40"
-                      : "bg-surface-raised text-text-muted border-border/60 hover:text-text-primary"
-                  }`}
-                >
-                  {getLocalizedGameContent(dict, game).title}
-                </button>
-              ))}
-            </div>
-          )}
+      {scope === "streamer" && (
+        <div className="flex items-center gap-2 overflow-x-auto border-b border-border/40 pb-4">
+          {platformOptions.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => setSelectedPlatform(option.id)}
+              className={`flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-xl border px-3.5 py-1.5 text-xs font-bold transition-all ${
+                selectedPlatform === option.id
+                  ? "border-purple-500 bg-purple-600 text-white shadow-md"
+                  : "border-border/80 bg-surface-raised text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              {option.id === "ALL" ? (
+                <Globe className="h-3.5 w-3.5" />
+              ) : (
+                <PlatformIcon platform={option.id} size={16} />
+              )}
+              {option.label}
+            </button>
+          ))}
         </div>
       )}
 
-      {/* Sidebar + wide main area for the game tab — the sidebar's search box is what actually
-          lets this scale past a handful of games (a text filter over a scrollable list, instead
-          of enumerating every game as chips or grid cards), and moving the picker out of the
-          top bar into a fixed-width column frees up the rest of the width for the table, which
-          used to compete with a full-width chip row above it for the same horizontal space.
-          xp/streamer tabs have no sidebar and keep the full-width single-column layout. */}
       <div className="flex flex-col gap-6 lg:flex-row">
-        {mainTab === "game" && (
+        {metric === "score" && (
           <aside className="flex shrink-0 flex-col gap-3 lg:w-64">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
               <input
                 type="text"
                 value={gameSearchQuery}
-                onChange={(e) => setGameSearchQuery(e.target.value)}
+                onChange={(event) => setGameSearchQuery(event.target.value)}
                 placeholder={dict.games.searchPlaceholder}
                 className="w-full rounded-xl border border-border/80 bg-surface-raised py-2.5 pl-9 pr-3 text-sm text-text-primary placeholder:text-text-muted focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
               />
             </div>
-
-            <div className="flex flex-col gap-1 lg:max-h-[28rem] lg:overflow-y-auto lg:pr-1">
+            <div className="flex flex-col gap-1 lg:max-h-[30rem] lg:overflow-y-auto lg:pr-1">
               <button
+                type="button"
                 onClick={() => setSelectedGameId("all")}
-                className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-bold transition-all cursor-pointer border ${
+                className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-left text-sm font-bold transition-all ${
                   selectedGameId === "all"
-                    ? "bg-brand text-white border-brand shadow-lg shadow-brand/25"
-                    : "bg-surface-raised text-text-secondary border-border/80 hover:text-text-primary"
+                    ? scope === "streamer"
+                      ? "border-purple-600 bg-purple-600 text-white"
+                      : "border-brand bg-brand text-white"
+                    : "border-border/80 bg-surface-raised text-text-secondary hover:text-text-primary"
                 }`}
               >
                 <Trophy className="h-4 w-4 shrink-0" />
                 <span className="truncate">{dict.ranking.allCategories}</span>
               </button>
-
-              {filteredSidebarGames.length === 0 ? (
+              {filteredGames.length === 0 ? (
                 <p className="px-3 py-4 text-center text-xs text-text-muted">
                   {dict.games.emptySearch}
                 </p>
               ) : (
-                filteredSidebarGames.map((game) => (
+                filteredGames.map((game) => (
                   <button
                     key={game.slug}
+                    type="button"
                     onClick={() => setSelectedGameId(game.slug)}
-                    className={`flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-bold transition-all cursor-pointer border ${
+                    className={`flex cursor-pointer items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left text-sm font-bold transition-all ${
                       selectedGameId === game.slug
-                        ? "bg-brand text-white border-brand shadow-lg shadow-brand/25"
-                        : "bg-surface-raised text-text-secondary border-border/80 hover:text-text-primary"
+                        ? scope === "streamer"
+                          ? "border-purple-600 bg-purple-600 text-white"
+                          : "border-brand bg-brand text-white"
+                        : "border-border/80 bg-surface-raised text-text-secondary hover:text-text-primary"
                     }`}
                   >
                     <GameThumbnail
@@ -335,20 +338,17 @@ export default function Ranking() {
           </aside>
         )}
 
-        <div className="min-w-0 flex-1">
-          {/* "전체 종목" under the game tab: scores aren't comparable across different games (ms
-              vs. WPM etc.), so instead of a combined table this shows a picker — choose a game to
-              see its own dedicated ranking page (osu!-style: ranking per game, not one mixed
-              leaderboard). */}
-          {mainTab === "game" && selectedGameId === "all" ? (
+        <main className="min-w-0 flex-1">
+          {metric === "score" && selectedGameId === "all" ? (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-              {gameManifests.map((game) => {
+              {gameCards.map((game) => {
                 const content = getLocalizedGameContent(dict, game);
                 return (
-                  <Link
+                  <button
                     key={game.slug}
-                    to={`/games/${game.slug}/ranking`}
-                    className="group flex flex-col items-center gap-3 rounded-2xl border border-border bg-surface-raised p-5 text-center shadow-lg transition-all hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-2xl"
+                    type="button"
+                    onClick={() => setSelectedGameId(game.slug)}
+                    className="group flex cursor-pointer flex-col items-center gap-3 rounded-2xl border border-border bg-surface-raised p-5 text-center shadow-lg transition-all hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-2xl"
                   >
                     <GameThumbnail
                       thumbnail={game.thumbnail}
@@ -356,359 +356,143 @@ export default function Ranking() {
                       accent={game.accent}
                       className="h-16 w-16 transition-transform duration-300 group-hover:scale-110"
                     />
-                    <span className="font-bold text-text-primary group-hover:text-brand transition-colors">
+                    <span className="font-bold text-text-primary transition-colors group-hover:text-brand">
                       {content.title}
                     </span>
-                  </Link>
+                  </button>
                 );
               })}
             </div>
           ) : (
-            <>
-              {/* Leaderboard Table Container */}
-              <div className="w-full bg-surface-raised rounded-3xl border border-border overflow-hidden shadow-2xl">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-surface-sidebar border-b border-border text-xs font-extrabold text-text-muted uppercase tracking-wider">
-                        <th className="py-4 px-6">{dict.ranking.rankHeader}</th>
-                        <th className="py-4 px-6">
-                          {mainTab === "streamer"
-                            ? dict.ranking.streamerHeader
-                            : dict.ranking.playerHeader}
-                        </th>
-                        {mainTab === "game" && (
-                          <>
-                            <th className="py-4 px-6">{dict.ranking.categoryHeader}</th>
-                            <th className="py-4 px-6">{dict.ranking.recordHeader}</th>
-                            <th className="py-4 px-6">{dict.ranking.modeHeader}</th>
-                          </>
-                        )}
-                        {mainTab === "xp" && (
-                          <>
-                            <th className="py-4 px-6">{dict.ranking.levelHeader}</th>
-                            <th className="py-4 px-6">{dict.ranking.totalXpHeader}</th>
-                          </>
-                        )}
-                        {mainTab === "streamer" && (
-                          <>
-                            <th className="py-4 px-6">
-                              {streamerMode === "score"
-                                ? dict.ranking.recordOrCategory
-                                : dict.ranking.activityLevel}
-                            </th>
-                            <th className="py-4 px-6">{dict.ranking.badgeHeader}</th>
-                            <th className="py-4 px-6 text-right">{dict.ranking.platformHeader}</th>
-                          </>
-                        )}
+            <div className="w-full overflow-hidden rounded-3xl border border-border bg-surface-raised shadow-2xl">
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-left">
+                  <thead>
+                    <tr className="border-b border-border bg-surface-sidebar text-xs font-extrabold uppercase tracking-wider text-text-muted">
+                      <th className="px-6 py-4">{dict.ranking.rankHeader}</th>
+                      <th className="px-6 py-4">
+                        {scope === "streamer"
+                          ? dict.ranking.streamerHeader
+                          : dict.ranking.playerHeader}
+                      </th>
+                      <th className="px-6 py-4 text-center">{dict.ranking.countryHeader}</th>
+                      <th className="px-6 py-4">{valueHeader}</th>
+                      <th className="px-6 py-4">{dict.ranking.dateHeader}</th>
+                      {metric === "score" && (
+                        <th className="px-6 py-4">{dict.ranking.modeHeader}</th>
+                      )}
+                      {scope === "streamer" && (
+                        <th className="px-6 py-4 text-right">{dict.ranking.platformHeader}</th>
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/50 text-sm font-medium text-text-primary">
+                    {status === "loading" && (
+                      <tr>
+                        <td colSpan={columnCount} className="py-16 text-center text-text-muted">
+                          <span className="animate-pulse">{dict.common.loading}</span>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/50 text-sm font-medium text-text-primary">
-                      {status === "loading" && (
-                        <tr>
+                    )}
+                    {status === "error" && (
+                      <tr>
+                        <td colSpan={columnCount} className="py-16 text-center text-text-muted">
+                          <div className="flex flex-col items-center justify-center gap-3">
+                            <AlertCircle className="h-8 w-8 text-accent-red" />
+                            <p className="font-semibold text-text-primary">{errorMessage}</p>
+                            <button
+                              type="button"
+                              onClick={() => setRetryKey((value) => value + 1)}
+                              className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-surface-raised px-4 py-2 text-xs font-bold transition-colors hover:bg-surface-overlay"
+                            >
+                              <RefreshCw className="h-3.5 w-3.5" /> {dict.ranking.retryButton}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    {status === "success" && entries.length === 0 && (
+                      <tr>
+                        <td colSpan={columnCount} className="py-16 text-center text-text-muted">
+                          {emptyMessage}
+                        </td>
+                      </tr>
+                    )}
+                    {status === "success" &&
+                      entries.map((entry) => (
+                        <tr
+                          key={`${entry.userId}-${entry.rank}`}
+                          className="transition-colors hover:bg-surface-overlay/50"
+                        >
+                          <td className="whitespace-nowrap px-6 py-4">
+                            <RankBadge
+                              rank={entry.rank}
+                              labels={[dict.ranking.rank1, dict.ranking.rank2, dict.ranking.rank3]}
+                            />
+                          </td>
+                          <td className="px-6 py-4 font-bold text-text-primary">
+                            <Link
+                              to={`/users/${entry.userId}`}
+                              className="flex w-fit items-center gap-2.5 text-brand-light hover:underline"
+                            >
+                              <span
+                                className={`flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full text-xs font-black ${
+                                  scope === "streamer"
+                                    ? "border border-purple-500/30 bg-purple-600/30 text-purple-200"
+                                    : "bg-brand/20 text-brand"
+                                }`}
+                              >
+                                {entry.avatarUrl ? (
+                                  <img
+                                    src={entry.avatarUrl}
+                                    alt={entry.nickname}
+                                    className="h-full w-full object-cover"
+                                  />
+                                ) : (
+                                  entry.nickname.slice(0, 2)
+                                )}
+                              </span>
+                              <span>{formatPublicUserTag(entry.nickname, entry.userId)}</span>
+                            </Link>
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <CountryFlag
+                              country={entry.country}
+                              unknownLabel={dict.ranking.unknownCountry}
+                            />
+                          </td>
                           <td
-                            colSpan={6}
-                            className="py-16 text-center text-text-muted animate-pulse"
+                            className={`whitespace-nowrap px-6 py-4 text-base font-black ${
+                              scope === "streamer" ? "text-purple-200" : "text-brand-light"
+                            }`}
                           >
-                            {dict.common.loading}
+                            {metric === "streak"
+                              ? `${entry.value.toLocaleString()} ${dict.userProfile.streakDaysSuffix}`
+                              : entry.formattedValue}
                           </td>
-                        </tr>
-                      )}
-
-                      {status === "error" && (
-                        <tr>
-                          <td colSpan={6} className="py-16 text-center text-text-muted">
-                            <div className="flex flex-col items-center justify-center gap-3">
-                              <AlertCircle className="w-8 h-8 text-accent-red" />
-                              <p className="font-semibold text-text-primary">{errorMsg}</p>
-                              <button
-                                onClick={() => void loadData()}
-                                className="inline-flex items-center gap-2 px-4 py-2 bg-surface-raised border border-border rounded-xl text-xs font-bold hover:bg-surface-overlay transition-colors cursor-pointer"
-                              >
-                                <RefreshCw className="w-3.5 h-3.5" />
-                                {dict.ranking.retryButton}
-                              </button>
-                            </div>
+                          <td className="whitespace-nowrap px-6 py-4 text-xs text-text-secondary">
+                            {formatRankingDate(entry.achievedAt, locale)}
                           </td>
+                          {metric === "score" && (
+                            <td className="whitespace-nowrap px-6 py-4 text-xs text-text-muted">
+                              {leaderboardVariantLabel(selectedGame, entry.variantId ?? "standard")}
+                            </td>
+                          )}
+                          {scope === "streamer" && (
+                            <td className="whitespace-nowrap px-6 py-4">
+                              <div className="flex justify-end">
+                                <PlatformIconRow accounts={entry.platformAccounts} size={24} />
+                              </div>
+                            </td>
+                          )}
                         </tr>
-                      )}
-
-                      {/* Mode 1: Game Score Leaderboard */}
-                      {status === "success" && mainTab === "game" && (
-                        <>
-                          {gameRecords.length === 0 ? (
-                            <tr>
-                              <td colSpan={5} className="py-16 text-center text-text-muted">
-                                {dict.ranking.emptyGames}
-                              </td>
-                            </tr>
-                          ) : (
-                            gameRecords.map((record, index) => {
-                              const rank = index + 1;
-
-                              return (
-                                <tr
-                                  key={record.id}
-                                  className="hover:bg-surface-overlay/50 transition-colors"
-                                >
-                                  <td className="py-4 px-6 whitespace-nowrap">
-                                    {rank === 1 && (
-                                      <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-amber-500/20 text-amber-400 font-black border border-amber-500/40 shadow-md">
-                                        <Medal className="w-4 h-4" /> {dict.ranking.rank1}
-                                      </span>
-                                    )}
-                                    {rank === 2 && (
-                                      <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-slate-400/20 text-slate-300 font-bold border border-slate-400/40">
-                                        <Medal className="w-4 h-4" /> {dict.ranking.rank2}
-                                      </span>
-                                    )}
-                                    {rank === 3 && (
-                                      <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-amber-700/20 text-amber-600 font-bold border border-amber-700/40">
-                                        <Medal className="w-4 h-4" /> {dict.ranking.rank3}
-                                      </span>
-                                    )}
-                                    {rank > 3 && (
-                                      <span className="text-text-muted font-bold px-3">
-                                        #{rank}
-                                      </span>
-                                    )}
-                                  </td>
-
-                                  <td className="py-4 px-6 font-bold text-text-primary">
-                                    {record.userId !== null && record.userId !== undefined ? (
-                                      <Link
-                                        to={`/users/${record.userId}`}
-                                        className="flex w-fit items-center gap-2 text-brand-light hover:underline"
-                                      >
-                                        <div className="w-8 h-8 rounded-full bg-brand/20 text-brand flex items-center justify-center font-black text-xs overflow-hidden">
-                                          {record.avatarUrl ? (
-                                            <img
-                                              src={record.avatarUrl}
-                                              alt={record.playerName}
-                                              className="w-full h-full object-cover"
-                                            />
-                                          ) : (
-                                            record.playerName.slice(0, 2)
-                                          )}
-                                        </div>
-                                        <span>
-                                          {formatPublicUserTag(record.playerName, record.userId)}
-                                        </span>
-                                      </Link>
-                                    ) : (
-                                      <div className="flex items-center gap-2">
-                                        <div className="w-8 h-8 rounded-full bg-brand/20 text-brand flex items-center justify-center font-black text-xs overflow-hidden">
-                                          {record.avatarUrl ? (
-                                            <img
-                                              src={record.avatarUrl}
-                                              alt={record.playerName}
-                                              className="w-full h-full object-cover"
-                                            />
-                                          ) : (
-                                            record.playerName.slice(0, 2)
-                                          )}
-                                        </div>
-                                        <span>{record.playerName}</span>
-                                      </div>
-                                    )}
-                                  </td>
-
-                                  <td className="py-4 px-6 text-text-secondary whitespace-nowrap">
-                                    {record.gameTitle}
-                                  </td>
-
-                                  <td className="py-4 px-6 font-black text-brand-light text-base whitespace-nowrap">
-                                    {record.formattedScore}
-                                  </td>
-
-                                  <td className="py-4 px-6 text-text-muted text-xs whitespace-nowrap">
-                                    {leaderboardVariantLabel(
-                                      publicGames.find((game) => game.slug === record.gameId),
-                                      record.variantId,
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            })
-                          )}
-                        </>
-                      )}
-
-                      {/* Mode 2: XP Leaderboard */}
-                      {status === "success" && mainTab === "xp" && (
-                        <>
-                          {xpRecords.length === 0 ? (
-                            <tr>
-                              <td colSpan={4} className="py-16 text-center text-text-muted">
-                                {dict.ranking.emptyXp}
-                              </td>
-                            </tr>
-                          ) : (
-                            xpRecords.map((record) => {
-                              const level = levelForTotalXp(record.totalXp);
-
-                              return (
-                                <tr
-                                  key={record.userId}
-                                  className="hover:bg-surface-overlay/50 transition-colors"
-                                >
-                                  <td className="py-4 px-6 whitespace-nowrap font-bold">
-                                    {record.rank === 1 ? (
-                                      <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-amber-500/20 text-amber-400 font-black border border-amber-500/40">
-                                        <Medal className="w-4 h-4" /> {dict.ranking.rank1}
-                                      </span>
-                                    ) : record.rank === 2 ? (
-                                      <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-slate-400/20 text-slate-300 font-bold border border-slate-400/40">
-                                        <Medal className="w-4 h-4" /> {dict.ranking.rank2}
-                                      </span>
-                                    ) : record.rank === 3 ? (
-                                      <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-amber-700/20 text-amber-600 font-bold border border-amber-700/40">
-                                        <Medal className="w-4 h-4" /> {dict.ranking.rank3}
-                                      </span>
-                                    ) : (
-                                      <span className="text-text-muted px-3">#{record.rank}</span>
-                                    )}
-                                  </td>
-
-                                  <td className="py-4 px-6 font-bold text-text-primary">
-                                    <Link
-                                      to={`/users/${record.userId}`}
-                                      className="flex w-fit items-center gap-2 text-brand-light hover:underline"
-                                    >
-                                      <div className="w-8 h-8 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center font-black text-xs overflow-hidden">
-                                        {record.avatarUrl ? (
-                                          <img
-                                            src={record.avatarUrl}
-                                            alt={record.nickname}
-                                            className="w-full h-full object-cover"
-                                          />
-                                        ) : (
-                                          record.nickname.slice(0, 2)
-                                        )}
-                                      </div>
-                                      <span>
-                                        {formatPublicUserTag(record.nickname, record.userId)}
-                                      </span>
-                                    </Link>
-                                  </td>
-
-                                  <td className="py-4 px-6 whitespace-nowrap">
-                                    <span className="inline-flex items-center rounded-full bg-indigo-500/10 px-2.5 py-0.5 text-xs font-extrabold text-indigo-300 border border-indigo-500/20">
-                                      Lv. {level}
-                                    </span>
-                                  </td>
-
-                                  <td className="py-4 px-6 font-black text-amber-300 text-base whitespace-nowrap">
-                                    {record.totalXp.toLocaleString()} XP
-                                  </td>
-                                </tr>
-                              );
-                            })
-                          )}
-                        </>
-                      )}
-
-                      {/* Mode 3: Streamer Ranking */}
-                      {status === "success" && mainTab === "streamer" && (
-                        <>
-                          {streamerRecords.length === 0 ? (
-                            <tr>
-                              <td colSpan={5} className="py-16 text-center space-y-3">
-                                <div className="text-3xl">🎥</div>
-                                <p className="text-sm font-semibold text-text-secondary">
-                                  {dict.ranking.emptyStreamerTitle}
-                                </p>
-                                <p className="text-xs text-text-muted max-w-md mx-auto leading-relaxed">
-                                  {dict.ranking.emptyStreamerBody}
-                                </p>
-                              </td>
-                            </tr>
-                          ) : (
-                            streamerRecords.map((record) => (
-                              <tr
-                                key={record.streamerId}
-                                className="hover:bg-surface-overlay/50 transition-colors"
-                              >
-                                <td className="py-4 px-6 whitespace-nowrap font-bold">
-                                  <span className="text-purple-300 px-3">#{record.rank}</span>
-                                </td>
-
-                                <td className="py-4 px-6 font-bold text-text-primary flex items-center gap-3">
-                                  {record.avatarUrl ? (
-                                    <img
-                                      src={record.avatarUrl}
-                                      alt={record.nickname}
-                                      className="w-9 h-9 rounded-full object-cover border border-purple-500/30"
-                                    />
-                                  ) : (
-                                    <div className="w-9 h-9 rounded-full bg-purple-600/30 text-purple-200 flex items-center justify-center font-black text-xs border border-purple-500/30">
-                                      {record.nickname.slice(0, 2)}
-                                    </div>
-                                  )}
-                                  <div>
-                                    <div className="flex items-center gap-1.5">
-                                      <span className="font-bold text-white">
-                                        {formatPublicUserTag(record.nickname, record.userId)}
-                                      </span>
-                                      {record.country && (
-                                        <span className="text-[10px] text-text-muted font-mono">
-                                          [{record.country}]
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                </td>
-
-                                <td className="py-4 px-6 whitespace-nowrap font-black text-purple-200">
-                                  {streamerMode === "score" ? (
-                                    <div>
-                                      <div>{record.formattedScore}</div>
-                                      {record.gameTitle && (
-                                        <div className="text-[11px] font-normal text-text-muted">
-                                          {record.gameTitle}
-                                        </div>
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <div>
-                                      <div className="text-amber-300">
-                                        {(record.totalXp ?? 0).toLocaleString()} XP
-                                      </div>
-                                      <div className="text-[11px] font-normal text-text-muted">
-                                        Lv. {record.level ?? 1}
-                                      </div>
-                                    </div>
-                                  )}
-                                </td>
-
-                                <td className="py-4 px-6 whitespace-nowrap">
-                                  {/* Featured/Partner 배지는 현재 공개 노출하지 않습니다 — 심사 최소 기준을
-                              임시로 낮춘 테스트 단계라, 관리자가 실제로 승인하기 전까지는 모든
-                              검증된 스트리머를 동일하게 "STREAMER"로만 표시합니다. 실제
-                              featuredStatus는 계속 계산/저장되며 관리자 화면(/admin/streamers)에서만
-                              확인할 수 있습니다. */}
-                                  <span className="inline-flex items-center rounded-full border border-indigo-500/30 bg-indigo-500/20 px-2.5 py-0.5 text-[10px] font-extrabold text-indigo-300">
-                                    STREAMER
-                                  </span>
-                                </td>
-
-                                <td className="py-4 px-6 whitespace-nowrap">
-                                  <div className="flex justify-end">
-                                    <PlatformIconRow accounts={record.platformAccounts} size={24} />
-                                  </div>
-                                </td>
-                              </tr>
-                            ))
-                          )}
-                        </>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                      ))}
+                  </tbody>
+                </table>
               </div>
-            </>
+            </div>
           )}
-        </div>
+        </main>
       </div>
     </div>
   );

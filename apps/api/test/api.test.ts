@@ -252,4 +252,7 @@ test("public query endpoints reject invalid values instead of silently defaultin
 
   const scores = await app.request("/api/scores/not-a-real-game");
   assert.equal(scores.status, 400);
+
+  const rankings = await app.request("/api/rankings?metric=xp&difficulty=normal");
+  assert.equal(rankings.status, 400);
 });

@@ -10,6 +10,7 @@ import { discordRouter } from "./routes/discordInteractions.js";
 import { discordLinkRouter } from "./routes/discordLink.js";
 import { discordGuildsRouter } from "./routes/discordGuilds.js";
 import { streamersRouter } from "./routes/streamers.js";
+import { rankingsRouter } from "./routes/rankings.js";
 import { adminRouter } from "./routes/admin.js";
 import { adminAuthRouter } from "./routes/adminAuth.js";
 import { adminAccountsRouter } from "./routes/adminAccounts.js";
@@ -179,6 +180,7 @@ app.route("/api/discord", discordRouter);
 app.route("/api/discord", discordLinkRouter);
 app.route("/api/discord/guilds", discordGuildsRouter);
 app.route("/api/streamers", streamersRouter);
+app.route("/api/rankings", rankingsRouter);
 // One-release rolling-deploy alias for the immediately previous Web revision. New code and docs
 // must use `/api/streamers`; remove this alias only after the rollback window closes.
 app.route("/api/creators", streamersRouter);

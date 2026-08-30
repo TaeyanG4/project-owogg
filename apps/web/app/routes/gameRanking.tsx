@@ -1,87 +1,64 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { useParams, Link } from "react-router";
-import { ArrowLeft, Trophy, Medal, AlertCircle, RefreshCw } from "lucide-react";
-import { fetchLeaderboardApi } from "../features/scores/api";
-import { getLocalizedGameContent } from "../features/catalog/localizedGameContent";
-import { publicGameToCard } from "../features/catalog/publicGameAdapter";
-import { fetchPublicGame } from "../features/publicGamesApi";
-import { localizedDifficultyLabel } from "../features/catalog/difficultyLabels";
-import { leaderboardVariantLabel } from "../features/scores/variantLabel";
-import { useI18n } from "../features/i18n/I18nContext";
-import { GameThumbnail } from "../components/ui/GameThumbnail";
-import type { LeaderRecord, PublicGame } from "@owogg/contracts";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ArrowLeft, AlertCircle, CalendarDays, Medal, RefreshCw, Trophy } from "lucide-react";
+import { Link, useParams } from "react-router";
+import type { PublicGame, PublicRankingEntry, RankingPeriod } from "@owogg/contracts";
 import { formatPublicUserTag } from "@owogg/core";
+import { CountryFlag } from "../components/ui/CountryFlag";
+import { GameThumbnail } from "../components/ui/GameThumbnail";
+import { getLocalizedGameContent } from "../features/catalog/localizedGameContent";
+import { localizedDifficultyLabel } from "../features/catalog/difficultyLabels";
+import { publicGameToCard } from "../features/catalog/publicGameAdapter";
+import { useI18n } from "../features/i18n/I18nContext";
+import { fetchPublicGame } from "../features/publicGamesApi";
+import { fetchPublicRankingApi } from "../features/rankings/api";
+import { formatRankingDate } from "../features/rankings/format";
+import { leaderboardVariantLabel } from "../features/scores/variantLabel";
 
 export function meta() {
   return [
     { title: "게임별 순위 | OwOGG" },
-    { name: "description", content: "게임별 리더보드를 확인하세요." },
+    { name: "description", content: "게임별 기간 리더보드를 확인하세요." },
   ];
 }
 
 type LeaderboardState = "loading" | "success" | "error";
 
-/** Avatar + nickname, linking to the player's public profile when the score is tied to a
- * real account (guest scores have no userId, and stay plain text). */
-function PlayerCell({ record }: { record: LeaderRecord }) {
-  const avatar = (
-    <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-brand/20 text-xs font-black text-brand">
-      {record.avatarUrl ? (
-        <img
-          src={record.avatarUrl}
-          alt={record.playerName}
-          className="h-full w-full object-cover"
-        />
-      ) : (
-        record.playerName.slice(0, 2)
-      )}
-    </div>
-  );
-
-  if (record.userId === null || record.userId === undefined) {
-    return (
-      <div className="flex items-center gap-2">
-        {avatar}
-        <span>{record.playerName}</span>
-      </div>
-    );
-  }
-
+function PlayerCell({ entry }: { entry: PublicRankingEntry }) {
   return (
     <Link
-      to={`/users/${record.userId}`}
+      to={`/users/${entry.userId}`}
       className="flex w-fit items-center gap-2 text-brand-light hover:underline"
     >
-      {avatar}
-      <span>{formatPublicUserTag(record.playerName, record.userId)}</span>
+      <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-brand/20 text-xs font-black text-brand">
+        {entry.avatarUrl ? (
+          <img src={entry.avatarUrl} alt={entry.nickname} className="h-full w-full object-cover" />
+        ) : (
+          entry.nickname.slice(0, 2)
+        )}
+      </span>
+      <span>{formatPublicUserTag(entry.nickname, entry.userId)}</span>
     </Link>
   );
 }
 
-/** Per-game ranking page — osu!-style: ranking recorded per game (like per-beatmap leaderboards)
- * rather than only living inside the single combined /ranking page's game filter. The generic
- * public game contract supplies leaderboard policy, difficulty, and presentation for both
- * publishers. */
 export default function GameRankingRoute() {
-  const params = useParams();
-  const slug = params.slug ?? "";
-  const { dict } = useI18n();
-
+  const slug = useParams().slug ?? "";
+  const { dict, locale } = useI18n();
   const [game, setGame] = useState<PublicGame | null>(null);
   const [gameLoading, setGameLoading] = useState(true);
+  const [records, setRecords] = useState<PublicRankingEntry[]>([]);
+  const [status, setStatus] = useState<LeaderboardState>("loading");
+  const [period, setPeriod] = useState<RankingPeriod>("daily");
+  const [selectedDifficultyId, setSelectedDifficultyId] = useState("normal");
   const card = useMemo(() => (game ? publicGameToCard(game) : null), [game]);
   const content = card ? getLocalizedGameContent(dict, card) : null;
-
-  const [records, setRecords] = useState<LeaderRecord[]>([]);
-  const [status, setStatus] = useState<LeaderboardState>("loading");
-  const [selectedDifficultyId, setSelectedDifficultyId] = useState<string>(
-    () => game?.difficulty?.defaultLevelId ?? "normal",
-  );
 
   useEffect(() => {
     let cancelled = false;
     setGameLoading(true);
     setGame(null);
+    setRecords([]);
+    setStatus("loading");
     fetchPublicGame(slug)
       .then((resolved) => {
         if (!cancelled) setGame(resolved);
@@ -102,17 +79,31 @@ export default function GameRankingRoute() {
   }, [game]);
 
   const loadData = useCallback(async () => {
-    if (!game || !game.policy.leaderboard) return;
+    if (!game?.policy.leaderboard) return;
+    if (
+      game.difficulty &&
+      !game.difficulty.levels.some((level) => level.id === selectedDifficultyId)
+    ) {
+      return;
+    }
     setStatus("loading");
     try {
-      const data = await fetchLeaderboardApi(slug, selectedDifficultyId);
-      setRecords(data);
+      const response = await fetchPublicRankingApi({
+        scope: "general",
+        metric: "score",
+        period,
+        gameId: slug,
+        difficulty: selectedDifficultyId,
+        limit: 50,
+      });
+      setRecords(response.entries);
       setStatus("success");
-    } catch (err) {
-      console.error("Failed to load game leaderboard:", err);
+    } catch (error) {
+      console.error("Failed to load game ranking:", error);
+      setRecords([]);
       setStatus("error");
     }
-  }, [slug, game, selectedDifficultyId]);
+  }, [game?.difficulty, game?.policy.leaderboard, period, selectedDifficultyId, slug]);
 
   useEffect(() => {
     void loadData();
@@ -144,21 +135,25 @@ export default function GameRankingRoute() {
           to={`/games/${slug}`}
           className="mt-6 inline-flex items-center gap-1.5 text-xs font-bold text-brand-light hover:underline"
         >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          {dict.gameRanking.backToGame}
+          <ArrowLeft className="h-3.5 w-3.5" /> {dict.gameRanking.backToGame}
         </Link>
       </div>
     );
   }
 
+  const periods: Array<{ id: RankingPeriod; label: string }> = [
+    { id: "daily", label: dict.ranking.dailyPeriod },
+    { id: "weekly", label: dict.ranking.weeklyPeriod },
+    { id: "monthly", label: dict.ranking.monthlyPeriod },
+  ];
+
   return (
-    <div className="mx-auto w-full max-w-5xl px-4 py-8 md:px-8">
+    <div className="mx-auto w-full max-w-6xl px-4 py-8 md:px-8">
       <Link
         to={`/games/${slug}`}
         className="mb-4 inline-flex items-center gap-1.5 text-xs font-bold text-text-muted hover:text-brand-light"
       >
-        <ArrowLeft className="h-3.5 w-3.5" />
-        {dict.gameRanking.backToGame}
+        <ArrowLeft className="h-3.5 w-3.5" /> {dict.gameRanking.backToGame}
       </Link>
 
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
@@ -177,31 +172,43 @@ export default function GameRankingRoute() {
           </div>
         </div>
 
-        {/* Scores across difficulty tiers are never comparable (see
-            docs/GAME_CREATION_GUIDE.md §4) — the leaderboard below is always scoped to exactly
-            one tier, switched here rather than mixed into one table. */}
-        {game.difficulty && (
-          <div className="flex items-center gap-1 rounded-xl border border-border/80 bg-surface-raised p-1">
-            {game.difficulty.levels.map((level) => {
-              const isSelected = level.id === selectedDifficultyId;
-              return (
+        <div className="flex flex-wrap items-center gap-2">
+          {game.difficulty && (
+            <div className="flex items-center gap-1 rounded-xl border border-border/80 bg-surface-raised p-1">
+              {game.difficulty.levels.map((level) => (
                 <button
                   key={level.id}
                   type="button"
                   onClick={() => setSelectedDifficultyId(level.id)}
-                  aria-pressed={isSelected}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all cursor-pointer ${
-                    isSelected
+                  className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${
+                    level.id === selectedDifficultyId
                       ? "bg-brand text-white shadow-sm"
-                      : "text-text-secondary hover:text-text-primary hover:bg-surface-overlay"
+                      : "text-text-secondary hover:bg-surface-overlay hover:text-text-primary"
                   }`}
                 >
                   {localizedDifficultyLabel(level.id, level.label, dict.gamePlay)}
                 </button>
-              );
-            })}
+              ))}
+            </div>
+          )}
+          <div className="flex items-center gap-1 rounded-xl border border-border/80 bg-surface-raised p-1">
+            <CalendarDays className="ml-2 h-4 w-4 text-text-muted" />
+            {periods.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => setPeriod(option.id)}
+                className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${
+                  option.id === period
+                    ? "bg-brand text-white shadow-sm"
+                    : "text-text-secondary hover:bg-surface-overlay hover:text-text-primary"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
           </div>
-        )}
+        </div>
       </div>
 
       <div className="w-full overflow-hidden rounded-3xl border border-border bg-surface-raised shadow-2xl">
@@ -211,80 +218,82 @@ export default function GameRankingRoute() {
               <tr className="border-b border-border bg-surface-sidebar text-xs font-extrabold uppercase tracking-wider text-text-muted">
                 <th className="px-6 py-4">{dict.ranking.rankHeader}</th>
                 <th className="px-6 py-4">{dict.ranking.playerHeader}</th>
+                <th className="px-6 py-4 text-center">{dict.ranking.countryHeader}</th>
                 <th className="px-6 py-4">{dict.ranking.recordHeader}</th>
+                <th className="px-6 py-4">{dict.ranking.dateHeader}</th>
                 <th className="px-6 py-4">{dict.ranking.modeHeader}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50 text-sm font-medium text-text-primary">
               {status === "loading" && (
                 <tr>
-                  <td colSpan={4} className="animate-pulse py-16 text-center text-text-muted">
+                  <td colSpan={6} className="animate-pulse py-16 text-center text-text-muted">
                     {dict.common.loading}
                   </td>
                 </tr>
               )}
-
               {status === "error" && (
                 <tr>
-                  <td colSpan={4} className="py-16 text-center text-text-muted">
+                  <td colSpan={6} className="py-16 text-center text-text-muted">
                     <div className="flex flex-col items-center justify-center gap-3">
                       <AlertCircle className="h-8 w-8 text-accent-red" />
                       <button
+                        type="button"
                         onClick={() => void loadData()}
                         className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-surface-raised px-4 py-2 text-xs font-bold transition-colors hover:bg-surface-overlay"
                       >
-                        <RefreshCw className="h-3.5 w-3.5" />
-                        {dict.ranking.retryButton}
+                        <RefreshCw className="h-3.5 w-3.5" /> {dict.ranking.retryButton}
                       </button>
                     </div>
                   </td>
                 </tr>
               )}
-
+              {status === "success" && records.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="py-16 text-center text-text-muted">
+                    {dict.gamePlay.leaderboardEmpty}
+                  </td>
+                </tr>
+              )}
               {status === "success" &&
-                (records.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="py-16 text-center text-text-muted">
-                      {dict.gamePlay.leaderboardEmpty}
+                records.map((entry) => (
+                  <tr
+                    key={`${entry.userId}-${entry.rank}`}
+                    className="transition-colors hover:bg-surface-overlay/50"
+                  >
+                    <td className="whitespace-nowrap px-6 py-4">
+                      {entry.rank <= 3 ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-brand/30 bg-brand/10 px-3 py-1 font-black text-brand-light">
+                          <Medal className="h-4 w-4" />
+                          {
+                            [dict.ranking.rank1, dict.ranking.rank2, dict.ranking.rank3][
+                              entry.rank - 1
+                            ]
+                          }
+                        </span>
+                      ) : (
+                        <span className="px-3 font-bold text-text-muted">#{entry.rank}</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 font-bold text-text-primary">
+                      <PlayerCell entry={entry} />
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <CountryFlag
+                        country={entry.country}
+                        unknownLabel={dict.ranking.unknownCountry}
+                      />
+                    </td>
+                    <td className="whitespace-nowrap px-6 py-4 text-base font-black text-brand-light">
+                      {entry.formattedValue}
+                    </td>
+                    <td className="whitespace-nowrap px-6 py-4 text-xs text-text-secondary">
+                      {formatRankingDate(entry.achievedAt, locale)}
+                    </td>
+                    <td className="whitespace-nowrap px-6 py-4 text-xs font-bold text-text-secondary">
+                      {leaderboardVariantLabel(game, entry.variantId ?? "standard")}
                     </td>
                   </tr>
-                ) : (
-                  records.map((record, index) => {
-                    const rank = index + 1;
-                    return (
-                      <tr key={record.id} className="transition-colors hover:bg-surface-overlay/50">
-                        <td className="whitespace-nowrap px-6 py-4">
-                          {rank === 1 && (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/20 px-3 py-1 font-black text-amber-400 shadow-md">
-                              <Medal className="h-4 w-4" /> {dict.ranking.rank1}
-                            </span>
-                          )}
-                          {rank === 2 && (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-slate-400/40 bg-slate-400/20 px-3 py-1 font-bold text-slate-300">
-                              <Medal className="h-4 w-4" /> {dict.ranking.rank2}
-                            </span>
-                          )}
-                          {rank === 3 && (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-amber-700/40 bg-amber-700/20 px-3 py-1 font-bold text-amber-600">
-                              <Medal className="h-4 w-4" /> {dict.ranking.rank3}
-                            </span>
-                          )}
-                          {rank > 3 && (
-                            <span className="px-3 font-bold text-text-muted">#{rank}</span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 font-bold text-text-primary">
-                          <PlayerCell record={record} />
-                        </td>
-                        <td className="whitespace-nowrap px-6 py-4 text-base font-black text-brand-light">
-                          {record.formattedScore}
-                        </td>
-                        <td className="whitespace-nowrap px-6 py-4 text-xs font-bold text-text-secondary">
-                          {leaderboardVariantLabel(game, record.variantId)}
-                        </td>
-                      </tr>
-                    );
-                  })
                 ))}
             </tbody>
           </table>

@@ -10,6 +10,7 @@ export * from "./domain/staffRoles.js";
 export * from "./domain/adminAccounts.js";
 export * from "./domain/i18nPolicy.js";
 export * from "./domain/streak.js";
+export * from "./domain/publicRanking.js";
 export * from "./domain/adminUserQuery.js";
 export * from "./domain/gameCreator.js";
 export * from "./domain/sandboxGames.js";
@@ -36,6 +37,7 @@ export * from "./ports/gameVerifiedResultPersistence.js";
 export * from "./ports/gameAchievements.js";
 export * from "./ports/adminGameCatalog.js";
 export * from "./ports/publicGameMetrics.js";
+export * from "./ports/publicRanking.js";
 
 // Unified Game Platform foundation. sandbox* exports above remain the control-plane path for
 // registration, review, and publishing; runtime reads use RuntimeGameRegistry below.
@@ -102,6 +104,7 @@ export * from "./application/selectedTopologyAuthorityGate.js";
 export * from "./application/clientAuthoredResultFlowGate.js";
 export * from "./application/publicGameCatalog.js";
 export * from "./application/publicGameMetricsUseCases.js";
+export * from "./application/publicRankingUseCases.js";
 export * from "./application/gameScoreAcceptanceUseCases.js";
 export * from "./application/gameResultAcceptanceUseCases.js";
 export * from "./application/gameResultVerificationUseCases.js";

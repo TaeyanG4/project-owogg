@@ -282,29 +282,18 @@ function useElementSize(): [
   return [setNode, size];
 }
 
-// The viewport target remains the default platform constraint. A responsive game's declared
-// preferredHeight may make the player surface taller than the visible viewport so the *host page*
-// scrolls instead of clipping a `scrolling="no"` iframe. This is capped: manifests express a
-// preference, never an unbounded page-height instruction.
+// The player is always contained by the visible viewport. A game's preferred height participates
+// in aspect-ratio calculation inside resolvePresentationLayout, but can never extend the outer
+// page; content that still needs more height scrolls inside the iframe.
 const PLATFORM_HEIGHT_TARGET_RATIO = 0.82;
 const PLATFORM_HEIGHT_CAP_PX = 900;
-const DECLARED_HEIGHT_CAP_PX = 1100;
 
 /** Exported for direct unit testing (apps/web/app/test/gameHostPlatformHeight.test.ts) — the
  * pure half of the height-independence fix this PR makes. Without a declared preferred height it
- * preserves the existing ~82%/900px behavior. Responsive games can request a taller document via
- * manifest presentation data; the host caps that request at 1100px and lets the outer page scroll
- * rather than adding an iframe scrollbar. */
-export function computePlatformHeight(
-  viewportHeight: number,
-  preferredHeight?: number | undefined,
-): number {
-  const viewportTarget = Math.min(
-    viewportHeight * PLATFORM_HEIGHT_TARGET_RATIO,
-    PLATFORM_HEIGHT_CAP_PX,
-  );
-  if (preferredHeight === undefined) return viewportTarget;
-  return Math.max(viewportTarget, Math.min(preferredHeight, DECLARED_HEIGHT_CAP_PX));
+ * preserves the existing ~82%/900px behavior. Manifest dimensions are preferences within this
+ * box and never instructions to make the host page taller. */
+export function computePlatformHeight(viewportHeight: number): number {
+  return Math.min(viewportHeight * PLATFORM_HEIGHT_TARGET_RATIO, PLATFORM_HEIGHT_CAP_PX);
 }
 
 /**
@@ -627,12 +616,7 @@ export function GameHost({ slug }: GameHostProps) {
     viewportHeight !== null
       ? isFullscreen
         ? Math.max(240, viewportHeight - 72)
-        : computePlatformHeight(
-            viewportHeight,
-            presentation?.viewport.mode === "responsive"
-              ? presentation.viewport.preferredHeight
-              : undefined,
-          )
+        : computePlatformHeight(viewportHeight)
       : null;
 
   // `available` is `null` until both an independent width and height measurement exist —

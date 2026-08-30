@@ -11,14 +11,13 @@
  * player ends up seeing is always `Game preference ∩ Platform constraints ∩ Actual device
  * viewport`, decided by the host — a game's `minWidth`, for instance, is a claim about what the
  * game itself needs to be playable, not a size the host is obligated to reserve regardless of what
- * the platform's own layout or the player's actual screen allows. Nothing in this PR computes that
- * intersection; see this file's own field-level comments for what's explicitly deferred.
+ * the platform's own layout or the player's actual screen allows. GameHost computes that
+ * intersection through `presentationLayoutResolver` and contains both dimensions within its own
+ * viewport-height budget.
  *
- * Entirely optional and inert on its own: a game with no `presentation` field works exactly as it
- * always has (every game shipped today has none). Nothing in this PR *reads* the field yet —
- * GameHost's own viewport calculation, fullscreen UI, and any wiring through Game Creator manifests,
- * the public API are separate integration concerns. This is
- * the shared vocabulary those PRs will build on, not the implementation.
+ * Entirely optional: a game with no `presentation` field keeps the platform's legacy frame. Game
+ * Creator manifests can project an aspect ratio into preferred dimensions, while GameHost applies
+ * the same generic host policy to official and user-published games.
  */
 export interface GamePresentation {
   readonly viewport: GamePresentationViewport;

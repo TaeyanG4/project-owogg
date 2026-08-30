@@ -1,5 +1,5 @@
 import type { Session, SessionRepository, User } from "@owogg/core";
-import { nextStreakState, todayUtcDateString } from "@owogg/core";
+import { nextStreakState, todayServiceDateString } from "@owogg/core";
 import type { D1Database } from "./D1UserRepository.js";
 
 export async function hashSessionToken(token: string): Promise<string> {
@@ -130,7 +130,7 @@ export class D1SessionRepository implements SessionRepository {
         longestStreak: Number(row.longest_streak ?? 0),
         lastActiveDate: row.last_active_date ? String(row.last_active_date) : null,
       },
-      todayUtcDateString(),
+      todayServiceDateString(),
     );
     if (streakUpdate.changed) {
       try {
