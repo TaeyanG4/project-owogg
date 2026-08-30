@@ -1,4 +1,8 @@
 import type { GameVerifier, GameVerifierRegistry } from "@owogg/core";
+import { AIM_TEST_VERIFIER_ID, aimTestV1 } from "./verifiers/AimTestV1.js";
+import { MEMORY_TEST_VERIFIER_ID, memoryTestV1 } from "./verifiers/MemoryTestV1.js";
+import { REACTION_TIME_VERIFIER_ID, reactionTimeV1 } from "./verifiers/ReactionTimeV1.js";
+import { TYPING_TEST_VERIFIER_ID, typingTestV1 } from "./verifiers/TypingTestV1.js";
 import { VERIFIED_AIM_TEST_VERIFIER_ID, verifiedAimTestV1 } from "./verifiers/VerifiedAimTestV1.js";
 
 const VERIFIER_ID_PATTERN = /^[a-z0-9][a-z0-9._:/-]{0,95}$/;
@@ -35,5 +39,11 @@ export class StaticGameVerifierRegistry implements GameVerifierRegistry {
 
 /** Reviewed implementations only. Game bundles can request these IDs but never provide code. */
 export function createTrustedGameVerifierRegistry(): GameVerifierRegistry {
-  return new StaticGameVerifierRegistry([[VERIFIED_AIM_TEST_VERIFIER_ID, verifiedAimTestV1]]);
+  return new StaticGameVerifierRegistry([
+    [AIM_TEST_VERIFIER_ID, aimTestV1],
+    [MEMORY_TEST_VERIFIER_ID, memoryTestV1],
+    [REACTION_TIME_VERIFIER_ID, reactionTimeV1],
+    [TYPING_TEST_VERIFIER_ID, typingTestV1],
+    [VERIFIED_AIM_TEST_VERIFIER_ID, verifiedAimTestV1],
+  ]);
 }

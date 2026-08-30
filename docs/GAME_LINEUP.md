@@ -6,20 +6,21 @@
 
 ---
 
-## 1. 🎯 현재 서비스 중인 기본 게임 (4종)
+## 1. 🎯 Phase 7 재등록 기본 게임 (5종)
 
-> 이 표는 재작성 후보를 정리한 문서 snapshot이며 runtime authority가 아닙니다. 통합 v1 재작성 페이즈를
-> 시작할 때 D1/B2의 실제 live catalog를 read-only로 조회해 최종 대상을 동결합니다. 각 게임은 구 규격과
-> 호환시키지 않고 최신 `owogg.json` v1, 필요한 PlayConfig/verifier/managed-online 경계에 맞춰 새로
-> 작성하며 standalone·strict manifest·authority 테스트를 통과한 ZIP과 SHA-256을 전달합니다. 기존 live
-> 게임 삭제와 새 ZIP 등록은 사용자가 수행합니다.
+> 2026-08-30 Staging 관리자 화면을 새로고침해 D1 기반 목록을 확인한 결과입니다. runtime authority는
+> 계속 D1/B2이며 이 문서나 Git source가 아닙니다. 5개 GAME identity는 구 규격과 호환시키지 않고
+> `examples/official-games-v1`의 unified `owogg.json` v1 ZIP으로 재작성했습니다. 별도
+> `relay-protocol-probe` identity는 INTERNAL_TOOL이라 이 목록과 재등록 대상에서 제외합니다. 기존 live
+> identity 삭제와 새 ZIP 등록은 사용자가 수행합니다.
 
-| 게임 ID / Slug  | 타이틀             | 카테고리          | 스코어 단위 / 방향            | 주요 특징                                                    |
-| :-------------- | :----------------- | :---------------- | :---------------------------- | :----------------------------------------------------------- |
-| `reaction-time` | 반응속도 테스트    | `reaction`        | `ms` (asc, 낮을수록 우수)     | 시각 자극에 대한 밀리초 단위 반응속도 측정, 티어 시스템 연동 |
-| `memory-test`   | 순서 기억력 테스트 | `brain`           | `level` (desc, 높을수록 우수) | 3x3 그리드 타일의 점등 순서를 기억하고 순차 입력             |
-| `aim-test`      | 에임 테스트        | `aim`, `reaction` | `ms` (asc, 낮을수록 우수)     | 30개 무작위 타겟 클릭 속도 (Normal 정적 / Hard 동적 이동)    |
-| `typing-test`   | 타자 속도 테스트   | `typing`          | `wpm` (desc, 높을수록 우수)   | 단문/장문 타자 속도 및 정확도 측정 (한국어 / 영어 지원)      |
+| 게임 ID / Slug  | 타이틀             | 카테고리   | 스코어 단위 / 방향            | unified v1 주요 특징                                                     |
+| :-------------- | :----------------- | :--------- | :---------------------------- | :----------------------------------------------------------------------- |
+| `official-omok` | 오목               | `board`    | 없음                          | 같은 ZIP에서 15×15 local-multi 또는 host-authoritative online Relay 선택 |
+| `reaction-time` | 반응속도 테스트    | `reaction` | `ms` (asc, 낮을수록 우수)     | seed 기반 5/7라운드 신호와 클릭 시점 evidence를 서버가 검증              |
+| `memory-test`   | 순서 기억력 테스트 | `brain`    | `Level` (desc, 높을수록 우수) | 4색 패드, 표준/역순, 보통 8·어려움 12레벨 입력 evidence 검증             |
+| `aim-test`      | 에임 테스트        | `skill`    | `ms` (asc, 낮을수록 우수)     | seed 기반 보통 20·어려움 30개 표적의 좌표·순서·시간 evidence 검증        |
+| `typing-test`   | 타자 속도 테스트   | `typing`   | `WPM` (desc, 높을수록 우수)   | seed가 고른 한국어/영어 문장과 서버 경과 시간으로 WPM·CPM·정확도 재계산  |
 
 ---
 

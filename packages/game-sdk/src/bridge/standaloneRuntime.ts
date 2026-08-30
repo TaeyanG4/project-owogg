@@ -11,8 +11,7 @@ import type { GameResult } from "../contracts/result.js";
  * auth/token/API address ever crosses into a standalone game bundle. `difficultyId` comes from
  * `client.difficultyId` (set from the host's HOST_INIT bootstrap — see protocol.ts's
  * HostInitMessage) when the host sent one, falling back to `fallbackDifficultyId` for a game with
- * no difficulty tiers (memory-test, typing-test both pass "normal", which they never actually
- * read off `runtime.difficultyId`).
+ * no host-selected difficulty tier.
  */
 export function createStandaloneBridgeRuntime(
   client: GameBridgeClient,

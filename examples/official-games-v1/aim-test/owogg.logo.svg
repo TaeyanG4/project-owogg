@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="에임 테스트 로고">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffdd65"/><stop offset=".5" stop-color="#fa4d7a"/><stop offset="1" stop-color="#766cff"/></linearGradient></defs>
+  <rect width="512" height="512" rx="112" fill="#0a1426"/><circle cx="256" cy="256" r="156" fill="none" stroke="url(#g)" stroke-width="40"/><circle cx="256" cy="256" r="78" fill="none" stroke="#f5f7ff" stroke-width="32"/><circle cx="256" cy="256" r="22" fill="#ffdc63"/>
+  <g stroke="#8fa8dc" stroke-width="24" stroke-linecap="round"><path d="M256 54v76M256 382v76M54 256h76M382 256h76"/></g>
+</svg>

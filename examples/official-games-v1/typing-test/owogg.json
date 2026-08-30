@@ -1,0 +1,64 @@
+{
+  "$schema": "https://owogg.com/schemas/manifest/v1.json",
+  "schemaVersion": 1,
+  "game": {
+    "slug": "typing-test",
+    "title": "타자 속도 테스트",
+    "genre": "typing",
+    "mode": "single",
+    "playModes": ["single"],
+    "shortDescription": "서버가 선택한 문장을 입력하고 검증된 WPM과 정확도를 확인하세요.",
+    "description": "난이도와 한국어·영어 모드를 고르면 서버 challenge seed가 문장을 선택합니다. verifier가 제출된 입력과 서버 경과 시간을 대조해 WPM, CPM, 정확도를 계산합니다.",
+    "tags": ["typing", "brain", "verified"]
+  },
+  "input": ["keyboard"],
+  "presentation": { "orientation": "landscape", "aspectRatio": "16:9" },
+  "difficulties": [
+    { "id": "normal", "title": "보통", "default": true },
+    { "id": "hard", "title": "어려움" }
+  ],
+  "playConfig": {
+    "version": 1,
+    "rulesetRevision": 1,
+    "verifierId": "typing-test-v1",
+    "variants": [
+      { "id": "ko", "title": "한국어", "default": true },
+      { "id": "en", "title": "English" }
+    ],
+    "allowedConfigs": [
+      { "difficultyId": "normal", "variantId": "ko", "rewardFactor": 1 },
+      { "difficultyId": "normal", "variantId": "en", "rewardFactor": 1 },
+      { "difficultyId": "hard", "variantId": "ko", "rewardFactor": 1.2 },
+      { "difficultyId": "hard", "variantId": "en", "rewardFactor": 1.2 }
+    ]
+  },
+  "progression": {
+    "type": "stage",
+    "range": { "min": 0, "max": 2000, "outOfRange": "reject" }
+  },
+  "result": {
+    "outcome": { "values": ["success"] },
+    "score": {
+      "unit": "WPM",
+      "direction": "desc",
+      "precision": 0,
+      "range": { "min": 0, "max": 300, "outOfRange": "reject" }
+    },
+    "metrics": {
+      "cpm": {
+        "type": "integer",
+        "range": { "min": 0, "max": 2000, "outOfRange": "reject" }
+      },
+      "accuracy": {
+        "type": "integer",
+        "range": { "min": 0, "max": 100, "outOfRange": "reject" }
+      },
+      "typedChars": {
+        "type": "integer",
+        "range": { "min": 0, "max": 2000, "outOfRange": "reject" }
+      }
+    }
+  },
+  "leaderboard": { "enabled": true },
+  "events": { "completed": { "maxPerAttempt": 1 } }
+}

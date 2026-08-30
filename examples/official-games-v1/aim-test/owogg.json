@@ -1,0 +1,59 @@
+{
+  "$schema": "https://owogg.com/schemas/manifest/v1.json",
+  "schemaVersion": 1,
+  "game": {
+    "slug": "aim-test",
+    "title": "에임 테스트",
+    "genre": "skill",
+    "mode": "single",
+    "playModes": ["single"],
+    "shortDescription": "서버 seed로 생성된 표적을 빠르고 정확하게 클릭하세요.",
+    "description": "OWOGG 서버가 승인한 난이도와 모드, challenge seed로 표적 위치를 결정합니다. 게임은 점수 대신 순차 hit evidence를 제출하고 verifier가 완료 시간을 계산합니다.",
+    "tags": ["aim", "reaction", "verified"]
+  },
+  "input": ["mouse", "touch"],
+  "presentation": { "orientation": "any", "aspectRatio": "1:1" },
+  "difficulties": [
+    { "id": "normal", "title": "보통", "default": true },
+    { "id": "hard", "title": "어려움" }
+  ],
+  "playConfig": {
+    "version": 1,
+    "rulesetRevision": 1,
+    "verifierId": "aim-test-v1",
+    "variants": [
+      { "id": "standard", "title": "표준", "default": true },
+      { "id": "precision", "title": "정밀" }
+    ],
+    "allowedConfigs": [
+      { "difficultyId": "normal", "variantId": "standard", "rewardFactor": 1 },
+      { "difficultyId": "normal", "variantId": "precision", "rewardFactor": 1.1 },
+      { "difficultyId": "hard", "variantId": "standard", "rewardFactor": 1.25 },
+      { "difficultyId": "hard", "variantId": "precision", "rewardFactor": 1.5 }
+    ]
+  },
+  "progression": {
+    "type": "stage",
+    "range": { "min": 0, "max": 30, "outOfRange": "reject" }
+  },
+  "result": {
+    "outcome": { "values": ["success"] },
+    "score": {
+      "unit": "ms",
+      "direction": "asc",
+      "precision": 0,
+      "range": { "min": 500, "max": 120000, "outOfRange": "reject" }
+    },
+    "metrics": {
+      "hits": {
+        "type": "integer",
+        "range": { "min": 0, "max": 30, "outOfRange": "reject" }
+      }
+    }
+  },
+  "leaderboard": { "enabled": true },
+  "events": {
+    "target_hit": { "maxPerAttempt": 30 },
+    "completed": { "maxPerAttempt": 1 }
+  }
+}

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="반응속도 테스트 로고">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#55f0b0"/><stop offset="1" stop-color="#3b68f0"/></linearGradient></defs>
+  <rect width="512" height="512" rx="112" fill="#091526"/><circle cx="256" cy="270" r="146" fill="none" stroke="#294268" stroke-width="38"/><path d="M256 124v58M214 84h84" stroke="#9ab3dc" stroke-width="30" stroke-linecap="round"/>
+  <path d="M256 270l82-88" stroke="url(#g)" stroke-width="38" stroke-linecap="round"/><circle cx="256" cy="270" r="32" fill="#68f0ba"/><path d="M146 366h220" stroke="url(#g)" stroke-width="24" stroke-linecap="round"/>
+</svg>

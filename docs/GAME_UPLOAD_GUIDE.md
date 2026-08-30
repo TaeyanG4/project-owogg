@@ -78,9 +78,10 @@ owogg.logo.<png|jpg|jpeg|webp|svg>
   disabled Relay profile만 만들고 별도 activation 뒤에만 새 방 생성이 허용됩니다. 새 ZIP/version은 이전
   profile 권한을 상속하지 않으며 현재 room policy는 `PRIVATE + OPEN`입니다.
 - `playConfig.verifierId`는 ZIP이 서버 코드를 등록하는 필드가 아닙니다. 서버에 같은 ID의 trusted
-  verifier가 정적으로 설치되지 않은 version은 USER/OWOGG 모두 게시 전에 거부됩니다. 현재 첫 reviewed
-  ID는 `verified-aim-test-v1` 하나이며, 다른 ID와 reference verifier의 intended slug 불일치는 계속
-  fail closed입니다.
+  verifier가 정적으로 설치되지 않은 version은 USER/OWOGG 모두 게시 전에 거부됩니다. 현재 reviewed
+  ID는 reference용 `verified-aim-test-v1`과 공식 재작성 게임용 `reaction-time-v1`, `aim-test-v1`,
+  `typing-test-v1`, `memory-test-v1`입니다. 각 구현은 intended slug, revision, difficulty/variant와
+  evidence shape를 다시 확인하며 다른 ID와 lookalike slug는 계속 fail closed합니다.
 - `$schema`는 공개 schema URL이며, 서버는 JSON Schema 외에 range, 난이도, 도전과제 참조 관계를
   추가로 엄격 검증합니다. 알 수 없는 필드는 거부됩니다.
 - 최대 compressed 20 MiB, extracted 50 MiB, 300 files, path depth 16, logo 2 MiB입니다.

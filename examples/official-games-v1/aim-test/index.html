@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>에임 테스트</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <p class="eyebrow">SERVER VERIFIED</p>
+        <h1>에임 테스트</h1>
+        <p id="status" role="status">서버 실행 환경을 확인하는 중입니다.</p>
+      </header>
+      <section id="setup" class="panel">
+        <div class="config-grid">
+          <label>난이도<select id="difficulty"></select></label
+          ><label>모드<select id="variant"></select></label>
+        </div>
+        <button id="start" class="primary" type="button">서버 승인 후 시작</button>
+      </section>
+      <section id="play" class="hidden">
+        <div class="stats">
+          <span>표적 <strong id="progress">0 / 0</strong></span
+          ><span>시간 <strong id="elapsed">0 ms</strong></span>
+        </div>
+        <div id="arena" class="arena" aria-label="표적 영역">
+          <button id="target" class="target hidden" type="button" aria-label="표적"></button>
+        </div>
+      </section>
+      <section id="finished" class="panel hidden">
+        <h2>완료</h2>
+        <p id="summary"></p>
+        <p>서버가 좌표·순서·시간 evidence를 검증합니다.</p>
+      </section>
+    </main>
+    <script src="./rules.js"></script>
+    <script src="./game.js"></script>
+  </body>
+</html>

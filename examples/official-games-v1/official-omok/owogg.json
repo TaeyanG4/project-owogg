@@ -1,0 +1,32 @@
+{
+  "$schema": "https://owogg.com/schemas/manifest/v1.json",
+  "schemaVersion": 1,
+  "game": {
+    "slug": "official-omok",
+    "title": "오목",
+    "genre": "board",
+    "mode": "multi",
+    "playModes": ["local-multi", "online-multi"],
+    "shortDescription": "한 기기 대전과 온라인 Relay 대전을 한 게임에서 선택하는 15×15 오목",
+    "description": "같은 기기에서는 두 사람이 번갈아 두고, 온라인에서는 방장이 상태를 관리하는 공용 Relay application protocol로 대전합니다. 흑은 정확히 5목, 백은 5목 이상을 연결하면 승리합니다.",
+    "tags": ["omok", "board", "local", "online"]
+  },
+  "input": ["mouse", "touch"],
+  "presentation": { "orientation": "any", "aspectRatio": "1:1" },
+  "progression": { "type": "none" },
+  "result": { "outcome": null, "score": null },
+  "leaderboard": { "enabled": false },
+  "multiplayer": {
+    "version": 1,
+    "transport": { "kind": "websocket", "protocolVersion": 1 },
+    "runtime": { "kind": "relay" },
+    "players": { "min": 2, "max": 2 },
+    "features": {
+      "reconnect": "resume",
+      "directMessages": true,
+      "hostSnapshot": true,
+      "joinInProgress": false,
+      "spectators": false
+    }
+  }
+}

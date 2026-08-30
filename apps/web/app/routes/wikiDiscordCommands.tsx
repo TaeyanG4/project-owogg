@@ -36,7 +36,7 @@ const COMMANDS = [
     name: "/owogg play",
     accountLinkRequired: true,
     guildRequired: true,
-    example: "/owogg play game:reaction-time",
+    example: "/owogg play game:game-slug",
   },
   {
     name: "/owogg rank",

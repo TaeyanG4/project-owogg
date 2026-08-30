@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>반응속도 테스트</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <p class="eyebrow">SERVER VERIFIED</p>
+        <h1>반응속도 테스트</h1>
+        <p id="status" role="status">서버 실행 환경을 확인하는 중입니다.</p>
+      </header>
+      <section id="setup" class="panel">
+        <div class="config-grid">
+          <label>난이도<select id="difficulty"></select></label>
+          <label>모드<select id="variant"></select></label>
+        </div>
+        <button id="start" class="primary" type="button">서버 승인 후 시작</button>
+      </section>
+      <section id="play" class="panel hidden">
+        <div class="stats">
+          <span>라운드 <strong id="round">0 / 0</strong></span
+          ><span>평균 <strong id="average">-</strong></span>
+        </div>
+        <button id="reaction-pad" class="reaction-pad waiting" type="button" disabled>
+          <span id="pad-title">기다리세요</span><small id="pad-note">초록색이 되면 누르세요.</small>
+        </button>
+      </section>
+      <section id="finished" class="panel hidden">
+        <h2>측정 완료</h2>
+        <p id="summary"></p>
+        <p>점수는 OWOGG 서버가 evidence를 검증한 뒤 계산합니다.</p>
+      </section>
+    </main>
+    <script src="./rules.js"></script>
+    <script src="./game.js"></script>
+  </body>
+</html>

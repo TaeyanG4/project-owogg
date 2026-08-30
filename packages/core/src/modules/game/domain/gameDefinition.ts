@@ -73,7 +73,7 @@ export interface GameDefinitionCommon {
    *
    * Uniqueness is global across SYSTEM and CREATOR games, which is what today's schema cannot
    * express: `sandbox_games.slug` is UNIQUE only among sandbox rows, so nothing currently stops an
-   * uploaded game from claiming `reaction-time`. The registry is where that gets enforced.
+   * uploaded game from claiming a platform-owned slug. The registry is where that gets enforced.
    */
   readonly slug: string;
 

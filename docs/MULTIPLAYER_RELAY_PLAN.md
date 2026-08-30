@@ -4,7 +4,7 @@
 
 기준일: 2026-08-30
 
-기준 브랜치: `feature/unified-manifest-play-config` (최종 반영은 Staging-first)
+기준 브랜치: `feature/unified-v1-game-rebuild` (최종 반영은 Staging-first)
 
 이 문서는 OwOGG 온라인 멀티플레이를 게임별 server ruleset/driver 방식에서 공용 WebSocket
 Relay 방식으로 전환하는 유일한 활성 계획입니다. 이전 M1/M2 driver, managed-template, Creator
@@ -213,7 +213,7 @@ brain 정책이 별도로 검증된 뒤 additive feature로 연다.
 
 ### 4.5 삭제하면 안 되는 false positive
 
-- single game인 `reaction-time` asset/tier는 Reaction driver와 무관하다.
+- 경쟁 싱글게임의 reviewed verifier는 leaderboard 신뢰 경계이며 multiplayer driver와 무관하다.
 - `gs2`는 manifest/canonical v2가 아니라 server-verified session token이다.
 - historical migration은 runtime compatibility code가 아니다.
 - applied migration, audit row와 D1/B2 identity는 이름에 legacy가 있어도 소비자를 확인하기 전 삭제하지
@@ -249,7 +249,7 @@ brain 정책이 별도로 검증된 뒤 additive feature로 연다.
 | Phase 4     | Admin/D1 generic profile 전환               |    3 | 완료 | content hash pin과 runtime availability gate      |
 | Phase 5     | driver/template/Omok/legacy naming 정리     |    3 | 완료 | 금지 식별자가 active runtime에서 0건              |
 | Phase 6     | generic fixture/load/Staging E2E            |    6 | 진행 | 코드 변경 없는 임의 ZIP과 두 사용자 E2E           |
-| Phase 7     | 모든 등록 구 게임 v1 ZIP 재작성             |   10 | 대기 | 검증 ZIP과 SHA-256 inventory 전달                 |
+| Phase 7     | 모든 등록 구 게임 v1 ZIP 재작성             |   10 | 진행 | 검증 ZIP과 SHA-256 inventory 전달                 |
 
 Phase 0 시작 전 기준은 80/120점, 67% 완료·33% 남음이었다. Phase 0 완료 기준은 81/120점,
 67.5% 완료·32.5% 남음이다. Phase 1 완료 기준은 85/120점, 70.8% 완료·29.2% 남음이다. 각 Phase가
@@ -422,6 +422,10 @@ Phase 6은 2026-08-30 로컬 검증 슬라이스를 진행 중이다.
   따라 배포 tree에 포함하지 않으며, attachment metadata 과금은 실제 metrics 확인 항목으로 남겼다.
   따라서 Phase 6 점수는 아직 반영하지 않고 104/120점, 86.7% 완료·13.3% 남음으로 유지한다.
 
+사용자 지시에 따라 남은 Phase 6 부하·hibernation 증거보다 Phase 7을 먼저 구현하고, tester scroll 수정과
+Phase 7 변경을 한 번의 Staging 배치로 검증한다. 이는 구현 순서 변경이며 최종 Gate나 Production 승인
+경계를 줄인 것이 아니다.
+
 ### Phase 7 — 등록 구 게임 재작성
 
 1. 시작 시점의 D1/B2 live 게임 목록을 read-only로 동결한다.
@@ -430,6 +434,25 @@ Phase 6은 2026-08-30 로컬 검증 슬라이스를 진행 중이다.
 4. standalone, ZIP layout, strict manifest, production bundle 금지와 authority 테스트를 수행한다.
 5. 등록용 ZIP과 SHA-256 inventory를 전달한다.
 6. live 삭제·재등록은 사용자가 수행하며 에이전트는 별도 승인 없이 D1/B2를 변경하지 않는다.
+
+Phase 7은 2026-08-30 로컬 구현과 산출물 검증을 완료했고 Staging Gate를 진행 중이다.
+
+- Staging 관리자 D1 기반 목록을 새로고침해 GAME 5개 `official-omok`, `reaction-time`, `aim-test`,
+  `typing-test`, `memory-test`와 INTERNAL_TOOL 1개 `relay-protocol-probe`를 동결했다. 내부 도구는
+  삭제·게임 재등록 대상이 아니다.
+- 5개 모두 root 6-file standalone ZIP source와 unified manifest v1로 재작성했다. 오목은 같은 ZIP의
+  `local-multi + online-multi`이며 online application rule/state/win 처리는 ZIP 안에만 있다.
+- 경쟁 싱글 4종은 `reaction-time-v1`, `aim-test-v1`, `typing-test-v1`, `memory-test-v1` reviewed
+  verifier가 seed/config/evidence를 검증하고 서버에서 점수를 계산한다. 이는 Relay driver가 아니라
+  leaderboard 신뢰 경계이며 intended slug/revision 불일치를 fail closed한다.
+- 브라우저 규칙과 서버 verifier parity, manifest, ZIP path/size, 금지 network API, Bridge 호출,
+  deterministic rebuild를 검증했다. 재현 SHA와 bytes는 `examples/official-games-v1/inventory.json`에
+  고정했다.
+- 삭제된 game workspace의 tsconfig/lock importer와 Web의 반응속도 전용 tier 결과 UI를 제거했다.
+  active Relay runtime에는 게임 slug/driver/ruleset 종속이 없다.
+- 루트 `pnpm verify`와 별도 strict ZIP 검증이 모두 통과했다.
+- 남은 Gate는 단일 Staging 배포, 사용자의 5개 identity 삭제·ZIP 재등록, 오목 exact-version profile
+  승인/활성화와 5종 browser acceptance다. 이 Gate 전에는 Phase 7 점수 10점을 완료로 반영하지 않는다.
 
 ---
 

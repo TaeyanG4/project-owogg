@@ -516,7 +516,7 @@ export function MultiplayerIframeRuntime({
           iframeStyle={iframeStyle}
           onFrameLoad={handleFrameLoad}
           showReloadControl={false}
-          disableScrolling={!allowDocumentScrolling}
+          documentScrolling={allowDocumentScrolling ? "enabled" : "disabled"}
         />
         <MultiplayerConnectionOverlay
           state={connectionState}
