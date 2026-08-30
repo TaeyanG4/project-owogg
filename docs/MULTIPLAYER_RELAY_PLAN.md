@@ -145,6 +145,10 @@ Relay runtime은 다음을 모두 만족해야 한다.
 13. 게임 tick/timer를 실행하지 않아 idle DO가 hibernate할 수 있어야 한다.
 14. room expiry/reconnect deadline처럼 플랫폼 lifecycle에 필요한 bounded alarm만 허용한다.
 15. host close/result payload는 UI용 unverified summary일 뿐 영속 경쟁 결과가 아니다.
+16. 참가자별 ping은 parent 전용 auto-response heartbeat로 측정하고 최소 30초 간격의 bounded report만
+    DO에 전달한다. latency control은 게임 iframe과 application sequence/rate 예산에서 분리한다.
+17. application `messagesPerSecond`는 1초 burst capacity의 token bucket으로 적용해 지속 전송률은
+    제한하면서 정상 20Hz timer jitter가 고정 window 경계에서 연결을 닫지 않게 한다.
 
 초기 host departure 정책은 `close`로 고정한다. host migration은 참가자 권위·snapshot 소유권·split
 brain 정책이 별도로 검증된 뒤 additive feature로 연다.

@@ -71,6 +71,9 @@ owogg.logo.<png|jpg|jpeg|webp|svg>
 - 현재 활성 runtime 요청은 `websocket + relay`, 2~8인입니다. `worker`/`container`, join-in-progress와
   spectator 요청은 지원 runtime이 생기기 전까지 fail closed합니다. direct message와 host snapshot은
   manifest 요청과 승인된 profile capability가 모두 허용할 때만 SDK에서 사용할 수 있습니다.
+- 활성 게임의 공용 roster에는 플랫폼이 측정한 참가자별 대략적 ping이 표시됩니다. 첫 표시는 즉시
+  측정하고 공유 갱신은 최소 30초 간격이며, 제작자가 manifest나 application protocol에 ping 필드를
+  추가할 필요가 없습니다.
 - multiplayer 요청은 exact `(gameId, versionId, contentHash)`와 request hash에 저장됩니다. 관리자 심사는
   disabled Relay profile만 만들고 별도 activation 뒤에만 새 방 생성이 허용됩니다. 새 ZIP/version은 이전
   profile 권한을 상속하지 않으며 현재 room policy는 `PRIVATE + OPEN`입니다.

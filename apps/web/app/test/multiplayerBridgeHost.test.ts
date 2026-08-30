@@ -157,12 +157,12 @@ test("Relay bootstrap is credential-free and only strict Relay intents reach the
     clientSeq: 2,
     payload: {},
   });
-  await waitUntil(() => socket.sent.length + drops, 4);
+  await waitUntil(() => socket.sent.length + drops, 5);
 
   assert.equal(readyCalls, 1);
   assert.equal(drops, 2);
   assert.deepEqual(
-    socket.sent.map((value) => JSON.parse(value)),
+    socket.sent.slice(1).map((value) => JSON.parse(value)),
     [
       { type: "MULTI_READY", v: 1, generation: 3 },
       {
@@ -175,6 +175,7 @@ test("Relay bootstrap is credential-free and only strict Relay intents reach the
       },
     ],
   );
+  assert.equal(socket.sent[0], MULTIPLAYER_HEARTBEAT_REQUEST);
   host.close();
   capture.port.close();
 });
@@ -196,7 +197,7 @@ test("connecting sockets queue valid intents and flush them in order", async () 
   assert.equal(socket.sent.length, 0);
   socket.open();
   assert.deepEqual(
-    socket.sent.map((value) => JSON.parse(value)),
+    socket.sent.slice(0, 2).map((value) => JSON.parse(value)),
     [
       { type: "MULTI_READY", v: 1, generation: 3 },
       {
@@ -208,6 +209,7 @@ test("connecting sockets queue valid intents and flush them in order", async () 
       },
     ],
   );
+  assert.equal(socket.sent[2], MULTIPLAYER_HEARTBEAT_REQUEST);
   host.close();
   port.close();
 });
@@ -310,13 +312,99 @@ test("heartbeat is parent-only and stops after an explicit leave", () => {
     },
   );
   const port = iframe.capture().port;
-  tick?.();
   assert.deepEqual(socket.sent, [MULTIPLAYER_HEARTBEAT_REQUEST]);
+  tick?.();
+  assert.deepEqual(socket.sent, [MULTIPLAYER_HEARTBEAT_REQUEST, MULTIPLAYER_HEARTBEAT_REQUEST]);
   assert.equal(host.leave(), true);
   tick?.();
-  assert.equal(socket.sent.length, 2);
-  assert.equal(JSON.parse(socket.sent[1] ?? "null").type, "MULTI_LEAVE");
+  assert.equal(socket.sent.length, 3);
+  assert.equal(JSON.parse(socket.sent[2] ?? "null").type, "MULTI_LEAVE");
   assert.equal(cleared, 1);
+  host.close();
+  port.close();
+});
+
+test("heartbeat RTT is reported outside game traffic and synchronized per participant", async () => {
+  const iframe = createIframeHarness();
+  const socket = createSocketHarness();
+  let nowMs = 10_000;
+  let heartbeatTick: (() => void) | undefined;
+  const samples: Array<readonly { participantId: string; seatIndex: number; rttMs: number }[]> = [];
+  const host = createMultiplayerBridgeHost(
+    iframe.windowLike,
+    socket.socket,
+    BOOTSTRAP,
+    { onLatencySamples: (next) => samples.push(next) },
+    {
+      now: () => nowMs,
+      setInterval: (callback) => {
+        heartbeatTick = callback;
+        return 1 as unknown as ReturnType<typeof setInterval>;
+      },
+      clearInterval: () => undefined,
+    },
+  );
+  const port = iframe.capture().port;
+  const gameMessages: unknown[] = [];
+  port.onmessage = (event) => gameMessages.push(event.data);
+  port.start();
+
+  assert.deepEqual(socket.sent, [MULTIPLAYER_HEARTBEAT_REQUEST]);
+  nowMs += 42;
+  socket.message(MULTIPLAYER_HEARTBEAT_RESPONSE);
+  assert.deepEqual(JSON.parse(socket.sent[1] ?? "null"), {
+    type: "MULTI_LATENCY_REPORT",
+    v: 1,
+    generation: 3,
+    rttMs: 42,
+  });
+  assert.deepEqual(samples[0], [
+    {
+      participantId: "participant_host_0001",
+      seatIndex: 0,
+      rttMs: 42,
+      sampledAt: 10_042,
+    },
+  ]);
+
+  nowMs = 10_100;
+  heartbeatTick?.();
+  nowMs = 10_170;
+  socket.message(MULTIPLAYER_HEARTBEAT_RESPONSE);
+  assert.equal(socket.sent.filter((value) => value.includes("MULTI_LATENCY_REPORT")).length, 1);
+
+  nowMs = 40_100;
+  heartbeatTick?.();
+  nowMs = 40_170;
+  socket.message(MULTIPLAYER_HEARTBEAT_RESPONSE);
+  assert.equal(socket.sent.filter((value) => value.includes("MULTI_LATENCY_REPORT")).length, 2);
+  assert.equal(JSON.parse(socket.sent.at(-1) ?? "null").rttMs, 70);
+
+  socket.message(
+    JSON.stringify({
+      type: "MULTI_LATENCY_SYNC",
+      v: 1,
+      generation: 3,
+      samples: [
+        {
+          participantId: "participant_host_0001",
+          seatIndex: 0,
+          rttMs: 42,
+          sampledAt: 10_042,
+        },
+        {
+          participantId: "participant_player_0001",
+          seatIndex: 1,
+          rttMs: 85,
+          sampledAt: 10_050,
+        },
+      ],
+    }),
+  );
+  await waitUntil(() => samples.at(-1)?.length ?? 0, 2);
+  assert.equal(gameMessages.length, 0);
+  assert.equal(samples.at(-1)?.[1]?.rttMs, 85);
+
   host.close();
   port.close();
 });

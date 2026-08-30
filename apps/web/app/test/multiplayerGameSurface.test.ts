@@ -9,9 +9,21 @@ import {
   stripMultiplayerRoomCredentials,
 } from "../features/game/runtime/MultiplayerGameSurface";
 import {
+  multiplayerPingLabel,
+  multiplayerPingTone,
   multiplayerRoomClipboardValue,
   multiplayerRuntimeInitialRoster,
 } from "../features/game/runtime/MultiplayerIframeRuntime";
+
+test("participant ping labels distinguish measuring, healthy, delayed, and poor links", () => {
+  assert.equal(multiplayerPingLabel(null), "핑 측정 중");
+  assert.equal(multiplayerPingLabel(42), "핑 42ms");
+  assert.equal(multiplayerPingTone(null), "text-text-muted");
+  assert.equal(multiplayerPingTone(80), "text-emerald-400");
+  assert.equal(multiplayerPingTone(81), "text-amber-300");
+  assert.equal(multiplayerPingTone(180), "text-amber-300");
+  assert.equal(multiplayerPingTone(181), "text-red-300");
+});
 
 test("the shared room launcher accepts only an exact available PRIVATE + OPEN profile", () => {
   const available: Extract<MultiplayerGameAvailabilityResponse, { readonly status: "AVAILABLE" }> =

@@ -295,11 +295,22 @@ API로 호출하는 형태입니다. host이고 `capabilities.hostSnapshot`이 t
 `snapshot(payload)`로 bounded reconnect snapshot을 교체할 수 있습니다. 방을 자발적으로 나갈 때는
 `leave()`를 호출하고 더 이상 listener가 필요 없으면 `unsubscribe()`를 호출합니다.
 
+활성 게임 화면의 공용 참가자 카드에는 OWOGG parent가 측정한 대략적인 왕복 ping이 표시됩니다. 첫
+연결에서는 즉시 측정하고 이후 공유 갱신은 최소 30초 간격으로 제한합니다. heartbeat 응답은 Durable
+Object auto-response 경로를 사용하며, bounded latency report는 게임 iframe에 노출되거나 application
+`clientSeq`/`messagesPerSecond` 예산을 소비하지 않습니다. 게임 제작자가 별도 ping 프로토콜이나 UI를
+구현할 필요는 없습니다.
+
 Relay는 sender/seat/role, generation/sequence, target, payload 크기와 전송률을 검증하지만 payload 내부의
 메시지 schema, 게임 규칙, 충돌 해결, 물리, hidden information, 승자를 검증하지 않습니다. 제작자는
 application-level message type/revision, host 권한, 상태 동기화와 충돌 정책을 게임 코드에 구현해야 합니다.
 `local-multi` 실행에는 Relay transport가 열리지 않으므로 같은 ZIP에서도 로컬 상태와 online 상태를
 명시적으로 분리해야 합니다.
+
+profile의 `messagesPerSecond`는 application envelope의 지속 전송률입니다. 서버는 같은 크기의 1초 burst
+capacity를 가진 token bucket으로 제한하므로 정상적인 20Hz 전송이 브라우저 timer나 네트워크 jitter로
+잠깐 뭉쳐도 고정 1초 경계 때문에 연결이 끊기지 않습니다. capacity를 초과하는 즉시 burst는 계속
+거부합니다.
 
 ## 6. 결과 승인
 

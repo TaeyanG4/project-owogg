@@ -7,7 +7,12 @@ import {
 } from "@owogg/game-sdk/bridge";
 import { MULTIPLAYER_WEBSOCKET_PROTOCOL, type MultiplayerJoinTicketClaims } from "@owogg/core";
 import type { D1Database } from "@cloudflare/workers-types";
-import { MULTIPLAYER_HEARTBEAT_REQUEST, MULTIPLAYER_HEARTBEAT_RESPONSE } from "@owogg/contracts";
+import {
+  MULTIPLAYER_HEARTBEAT_REQUEST,
+  MULTIPLAYER_HEARTBEAT_RESPONSE,
+  MultiplayerLatencyReportMessageSchema,
+  type MultiplayerLatencySample,
+} from "@owogg/contracts";
 import { createContainer, type AppContainer } from "../container.js";
 import {
   MULTIPLAYER_INTERNAL_CLAIMS_HEADER,
@@ -34,6 +39,9 @@ const MAX_QUEUED_MESSAGES_PER_OBJECT = 64;
 const FINALIZATION_RETRY_BASE_MS = 2_000;
 const RECONNECT_GRACE_MS = 30_000;
 const RECONNECT_GRACE_SECONDS = RECONNECT_GRACE_MS / 1_000;
+// Shared roster latency is operational telemetry, not gameplay data. Keep reports sparse enough
+// that an otherwise idle multi-seat room can still hibernate between updates.
+const LATENCY_REPORT_MIN_INTERVAL_MS = 30_000;
 const textEncoder = new TextEncoder();
 
 interface MultiplayerDurableObjectEnv {
@@ -283,6 +291,7 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
     try {
       await this.prepareRelayGeneration(attachment.generation, Date.now());
       this.relay.sendReconnectSync(server, attachment);
+      this.relay.sendLatencySync(this.currentLatencySamples(attachment.generation), server);
       const expiresAt = this.relay.nextExpiryAt();
       if (expiresAt !== null) await this.scheduleNextAlarm(expiresAt);
     } catch {
@@ -392,12 +401,16 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       socket.close(POLICY_CLOSE_CODE, "invalid Relay message");
       return;
     }
-    const message = parseGameToHostRelayMessage(decoded);
-    if (!message) {
+    const latencyReport = MultiplayerLatencyReportMessageSchema.safeParse(decoded);
+    const message = latencyReport.success ? null : parseGameToHostRelayMessage(decoded);
+    if (!latencyReport.success && !message) {
       socket.close(POLICY_CLOSE_CODE, "invalid Relay message");
       return;
     }
-    if (message.generation !== attachment.generation) {
+    const messageGeneration = latencyReport.success
+      ? latencyReport.data.generation
+      : message?.generation;
+    if (messageGeneration !== attachment.generation) {
       socket.close(STALE_CONNECTION_CLOSE_CODE, "stale Relay generation");
       return;
     }
@@ -416,6 +429,11 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       socket.close(POLICY_CLOSE_CODE, "invalid Relay authority");
       return;
     }
+    if (latencyReport.success) {
+      this.handleLatencyReport(socket, attachment, latencyReport.data.rttMs, Date.now());
+      return;
+    }
+    if (!message) return;
     if (message.type === "MULTI_READY") {
       await this.handleRelayReady(authority, attachment, socket);
       return;
@@ -446,6 +464,61 @@ export class MultiplayerInstanceObject extends DurableObject<MultiplayerDurableO
       return;
     }
     await this.relay.handleSnapshot(socket, sequencedAttachment, authority, message, rawBytes);
+  }
+
+  private handleLatencyReport(
+    socket: WebSocket,
+    attachment: RelayConnectionAttachment,
+    rttMs: number,
+    nowMs: number,
+  ): void {
+    if (
+      attachment.latencyReportedAt > 0 &&
+      nowMs - attachment.latencyReportedAt < LATENCY_REPORT_MIN_INTERVAL_MS
+    ) {
+      return;
+    }
+    const next: RelayConnectionAttachment = {
+      ...attachment,
+      latencyRttMs: rttMs,
+      latencySampledAt: nowMs,
+      latencyReportedAt: nowMs,
+    };
+    socket.serializeAttachment(next);
+    this.relay.sendLatencySync(this.currentLatencySamples(attachment.generation));
+  }
+
+  private currentLatencySamples(generation: number): readonly MultiplayerLatencySample[] {
+    const samples: MultiplayerLatencySample[] = [];
+    for (const socket of this.state.getWebSockets()) {
+      const attachment = this.readAttachment(socket);
+      if (
+        !attachment ||
+        attachment.generation !== generation ||
+        attachment.latencyRttMs === null ||
+        attachment.latencySampledAt <= 0
+      ) {
+        continue;
+      }
+      const connection = this.currentConnection(attachment.participantId);
+      const authority = this.currentAuthority(attachment.participantId, generation);
+      if (
+        !connection ||
+        !authority ||
+        connection.generation !== generation ||
+        connection.connectionGeneration !== attachment.connectionGeneration ||
+        connection.disconnectedAt !== null
+      ) {
+        continue;
+      }
+      samples.push({
+        participantId: attachment.participantId,
+        seatIndex: authority.seatIndex,
+        rttMs: attachment.latencyRttMs,
+        sampledAt: attachment.latencySampledAt,
+      });
+    }
+    return samples.sort((left, right) => left.seatIndex - right.seatIndex);
   }
 
   private async prepareRelayGeneration(generation: number, nowMs: number): Promise<void> {
