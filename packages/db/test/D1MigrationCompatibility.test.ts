@@ -21,13 +21,14 @@ test("generic production migrations avoid Cloudflare-incompatible TEMP table DDL
     "0044_verified_result_score_semantics.sql",
     "0048_oauth_identity_registration_guard.sql",
     "0049_oauth_identity_owner_immutable.sql",
+    "0050_oauth_identity_release_on_unlink.sql",
   ]) {
     const sql = fs.readFileSync(new URL(`../migrations/${filename}`, import.meta.url), "utf8");
     assert.doesNotMatch(sql, /\bCREATE\s+TEMP(?:ORARY)?\s+TABLE\b/i, filename);
   }
 });
 
-test("full production migration chain applies through 0049 with immutable OAuth ownership", () => {
+test("full production migration chain applies through 0050 with active OAuth ownership guards", () => {
   const { raw } = createSqliteD1("");
   const migrationUrl = new URL("../migrations/", import.meta.url);
   const filenames = fs
@@ -97,6 +98,13 @@ test("full production migration chain applies through 0049 with immutable OAuth 
     raw
       .prepare(
         "SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_oauth_accounts_before_insert_registration_guard'",
+      )
+      .get(),
+  );
+  assert.ok(
+    raw
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_oauth_accounts_after_delete_registration_release'",
       )
       .get(),
   );
@@ -179,13 +187,17 @@ test("full production migration chain applies through 0049 with immutable OAuth 
   );
 });
 
-test("0048 and 0049 backfill OAuth ownership and block reuse or transfer", () => {
+test("0048 through 0050 block active transfer and release ownership on disconnect", () => {
   const registrationMigration = fs.readFileSync(
     new URL("../migrations/0048_oauth_identity_registration_guard.sql", import.meta.url),
     "utf8",
   );
   const ownershipMigration = fs.readFileSync(
     new URL("../migrations/0049_oauth_identity_owner_immutable.sql", import.meta.url),
+    "utf8",
+  );
+  const releaseMigration = fs.readFileSync(
+    new URL("../migrations/0050_oauth_identity_release_on_unlink.sql", import.meta.url),
     "utf8",
   );
   const { raw } = createSqliteD1(`
@@ -220,30 +232,59 @@ test("0048 and 0049 backfill OAuth ownership and block reuse or transfer", () =>
     { provider: "google", provider_user_id: "google-once", registered_user_id: 1 },
   );
 
+  // Simulate a disconnect that happened before 0050. Its historical reservation is stale until
+  // the release migration repairs it.
   raw.prepare("DELETE FROM oauth_accounts WHERE user_id = 1 AND provider = 'google'").run();
-  assert.throws(
-    () =>
-      raw
-        .prepare(
-          `INSERT INTO oauth_accounts
-             (user_id, provider, provider_user_id, created_at)
-           VALUES (2, 'google', 'google-once', 'now')`,
-        )
-        .run(),
-    /OAUTH_IDENTITY_ALREADY_REGISTERED/,
-  );
-  assert.throws(
-    () =>
-      raw
-        .prepare(
-          `INSERT INTO oauth_accounts
-             (user_id, provider, provider_user_id, created_at)
-           VALUES (1, 'google', 'google-second', 'now')`,
-        )
-        .run(),
-    /OAUTH_IDENTITY_ALREADY_REGISTERED/,
+  assert.equal(
+    raw.prepare("SELECT COUNT(*) AS count FROM oauth_identity_registrations").get()?.count,
+    1,
   );
 
+  raw.exec(releaseMigration);
+  assert.equal(
+    raw.prepare("SELECT COUNT(*) AS count FROM oauth_identity_registrations").get()?.count,
+    0,
+  );
+
+  raw
+    .prepare(
+      `INSERT INTO oauth_accounts
+         (user_id, provider, provider_user_id, created_at)
+       VALUES (2, 'google', 'google-once', 'now')`,
+    )
+    .run();
+
+  // An actively connected identity still cannot be copied or transferred in place.
+  assert.throws(
+    () =>
+      raw
+        .prepare(
+          `INSERT INTO oauth_accounts
+             (user_id, provider, provider_user_id, created_at)
+           VALUES (1, 'google', 'google-once', 'now')`,
+        )
+        .run(),
+    /OAUTH_IDENTITY_ALREADY_REGISTERED/,
+  );
+  assert.throws(
+    () =>
+      raw
+        .prepare(
+          `UPDATE oauth_accounts
+           SET user_id = 1
+           WHERE provider = 'google' AND provider_user_id = 'google-once'`,
+        )
+        .run(),
+    /OAUTH_IDENTITY_OWNER_IMMUTABLE/,
+  );
+
+  // Explicit disconnect releases both the active row and its registration reservation, so the
+  // same verified provider identity can then be attached to another OwOGG account.
+  raw.prepare("DELETE FROM oauth_accounts WHERE user_id = 2 AND provider = 'google'").run();
+  assert.equal(
+    raw.prepare("SELECT COUNT(*) AS count FROM oauth_identity_registrations").get()?.count,
+    0,
+  );
   raw
     .prepare(
       `INSERT INTO oauth_accounts
@@ -251,37 +292,19 @@ test("0048 and 0049 backfill OAuth ownership and block reuse or transfer", () =>
        VALUES (1, 'google', 'google-once', 'now')`,
     )
     .run();
-  raw
-    .prepare(
-      `INSERT INTO oauth_accounts
-         (user_id, provider, provider_user_id, created_at)
-       VALUES (2, 'discord', 'discord-secondary', 'now')`,
-    )
-    .run();
-  assert.throws(
-    () =>
-      raw
-        .prepare(
-          `UPDATE oauth_accounts
-           SET user_id = 1
-           WHERE provider = 'discord' AND provider_user_id = 'discord-secondary'`,
-        )
-        .run(),
-    /OAUTH_IDENTITY_OWNER_IMMUTABLE/,
-  );
   assert.equal(
     raw
       .prepare(
         `SELECT registered_user_id
          FROM oauth_identity_registrations
-         WHERE provider = 'discord' AND provider_user_id = 'discord-secondary'`,
+         WHERE provider = 'google' AND provider_user_id = 'google-once'`,
       )
       .get()?.registered_user_id,
-    2,
+    1,
   );
   assert.equal(
     raw.prepare("SELECT COUNT(*) AS count FROM oauth_identity_registrations").get()?.count,
-    2,
+    1,
   );
 });
 

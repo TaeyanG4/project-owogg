@@ -84,6 +84,15 @@ WHEN NEW.registered_user_id <> OLD.registered_user_id
 BEGIN
   SELECT RAISE(ABORT, 'OAUTH_IDENTITY_OWNER_IMMUTABLE');
 END;
+CREATE TRIGGER trg_oauth_accounts_after_delete_registration_release
+AFTER DELETE ON oauth_accounts
+FOR EACH ROW
+BEGIN
+  DELETE FROM oauth_identity_registrations
+  WHERE provider = OLD.provider
+    AND provider_user_id = OLD.provider_user_id
+    AND registered_user_id = OLD.user_id;
+END;
 `;
 
 test("new OAuth users keep a provider-specific avatar and select it by default", async () => {
@@ -153,7 +162,7 @@ test("OAuth refresh updates only that provider candidate until the user selects 
   assert.equal(fallback?.avatar_url, "https://google.example/avatar.png");
 });
 
-test("a disconnected OAuth identity signs back into its original user instead of creating another account", async () => {
+test("a disconnected OAuth identity is released and can create a new account", async () => {
   const { db, raw } = createSqliteD1(PROFILE_IDENTITY_SCHEMA);
   const repo = new D1UserRepository(db);
   const original = await repo.findOrCreateUser({
@@ -174,20 +183,20 @@ test("a disconnected OAuth identity signs back into its original user instead of
     avatarUrl: null,
   });
 
-  assert.equal(signedInAgain.id, original.id);
-  assert.equal(raw.prepare("SELECT COUNT(*) AS count FROM users").get()?.count, 1);
+  assert.notEqual(signedInAgain.id, original.id);
+  assert.equal(raw.prepare("SELECT COUNT(*) AS count FROM users").get()?.count, 2);
   assert.equal(
     raw
       .prepare(
         "SELECT user_id FROM oauth_accounts WHERE provider = 'google' AND provider_user_id = 'google-once'",
       )
       .get()?.user_id,
-    original.id,
+    signedInAgain.id,
   );
 });
 
-test("a registered OAuth identity cannot move to another user after it is disconnected", async () => {
-  const { db } = createSqliteD1(PROFILE_IDENTITY_SCHEMA);
+test("a disconnected OAuth identity can be linked to another user", async () => {
+  const { db, raw } = createSqliteD1(PROFILE_IDENTITY_SCHEMA);
   const repo = new D1UserRepository(db);
   const owner = await repo.findOrCreateUser({
     provider: "google",
@@ -206,12 +215,18 @@ test("a registered OAuth identity cannot move to another user after it is discon
   await repo.linkOAuthAccount(owner.id, "discord", "discord-owner", null, null);
   await repo.unlinkOAuthAccount(owner.id, "google");
 
-  await assert.rejects(
-    () => repo.linkOAuthAccount(other.id, "google", "google-owner", null, null),
-    (error: unknown) =>
-      error instanceof Error &&
-      error.name === "OAuthIdentityConflictError" &&
-      error.message === "ACCOUNT_PREVIOUSLY_REGISTERED",
+  await repo.linkOAuthAccount(other.id, "google", "google-owner", null, null);
+
+  assert.equal((await repo.findOAuthAccount("google", "google-owner"))?.user_id, other.id);
+  assert.equal(
+    raw
+      .prepare(
+        `SELECT registered_user_id
+         FROM oauth_identity_registrations
+         WHERE provider = 'google' AND provider_user_id = 'google-owner'`,
+      )
+      .get()?.registered_user_id,
+    other.id,
   );
 });
 
@@ -244,7 +259,7 @@ test("an active OAuth identity cannot move to another user", async () => {
   assert.equal((await repo.findOAuthAccount("discord", "discord-owner"))?.user_id, owner.id);
 });
 
-test("a user cannot replace its registered identity with a second account from the same provider", async () => {
+test("a user can link a different identity after disconnecting that provider", async () => {
   const { db } = createSqliteD1(PROFILE_IDENTITY_SCHEMA);
   const repo = new D1UserRepository(db);
   const user = await repo.findOrCreateUser({
@@ -257,11 +272,8 @@ test("a user cannot replace its registered identity with a second account from t
   await repo.linkOAuthAccount(user.id, "discord", "discord-backup", null, null);
   await repo.unlinkOAuthAccount(user.id, "google");
 
-  await assert.rejects(
-    () => repo.linkOAuthAccount(user.id, "google", "google-second", null, null),
-    (error: unknown) =>
-      error instanceof Error &&
-      error.name === "OAuthIdentityConflictError" &&
-      error.message === "PROVIDER_ALREADY_LINKED",
-  );
+  await repo.linkOAuthAccount(user.id, "google", "google-second", null, null);
+
+  assert.equal((await repo.findOAuthAccount("google", "google-first"))?.user_id, undefined);
+  assert.equal((await repo.findOAuthAccount("google", "google-second"))?.user_id, user.id);
 });

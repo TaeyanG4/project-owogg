@@ -4,7 +4,7 @@
 
 마지막 검증: 2026-08-31
 
-최신 마이그레이션: `0049_oauth_identity_owner_immutable.sql`
+최신 마이그레이션: `0050_oauth_identity_release_on_unlink.sql`
 
 기준 소스:
 
@@ -16,7 +16,7 @@
 - [`ERD.md`](ERD.md) — 도메인별 관계도와 전체 물리 테이블·호환 뷰 사전
 
 Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 권한 원천입니다. 이 문서는
-현재 `0000_initial_schema.sql`부터 `0049_oauth_identity_owner_immutable.sql`까지의 역할을 설명합니다.
+현재 `0000_initial_schema.sql`부터 `0050_oauth_identity_release_on_unlink.sql`까지의 역할을 설명합니다.
 
 ## 마이그레이션 범위
 
@@ -47,8 +47,9 @@ Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 
 | `0045`        | exact content hash에 묶인 generic Relay profile과 instance authority        |
 | `0046`        | 서버 소유 GAME/INTERNAL_TOOL 분류와 공개 catalog 제외                       |
 | `0047`        | KST 일·주·월 공개 랭킹과 활성 출석 조회용 covering/partial index            |
-| `0048`        | Google/Discord 최초 등록 소유권 원장과 재가입·재연결 DB guard               |
-| `0049`        | OAuth identity 소유자 이전을 금지하는 immutable owner DB guard              |
+| `0048`        | Google/Discord 등록 원장과 identity 중복 연결 DB guard                      |
+| `0049`        | 활성 OAuth identity의 in-place 소유자 이전을 금지하는 DB guard              |
+| `0050`        | 연결 해제 시 OAuth 등록 예약 해제와 기존 고아 예약 정리                     |
 
 기존 migration은 변경, squash, 삭제하지 않습니다. 프로덕션 배포는 API보다 먼저
 `pnpm d1:migrate:prod`를 실행합니다.
@@ -267,12 +268,12 @@ D1 migration이 새 Worker보다 먼저 실행되는 동안 이전 Worker가 깨
   `users.avatar_provider`가 Google/Discord 중 사용자가 선택한 provider를 가리키며,
   `users.avatar_url`은 공개 조회가 사용할 현재 선택 결과입니다. 클라이언트가 임의 이미지 URL을
   제출하지 않고 서버가 연동 계정의 저장된 후보만 선택합니다.
-- `oauth_accounts`는 현재 활성 연결만 나타냅니다. `oauth_identity_registrations`는 최초 등록된
-  `(provider, provider_user_id) ↔ user_id` 소유권을 연결 해제 뒤에도 보존합니다. DB trigger와 두
-  unique key가 같은 Google/Discord identity의 다른 사용자 재가입과 한 사용자의 provider identity
-  교체를 모두 거부합니다. 같은 identity로 다시 로그인하면 새 사용자를 만들지 않고 최초 사용자에
-  재연결합니다. 계정 통합도 OAuth 등록 소유권을 이전할 수 없으며, OAuth identity가 있는 Secondary
-  계정은 병합을 거부합니다.
+- `oauth_accounts`는 현재 활성 연결을 나타냅니다. `oauth_identity_registrations`는 활성
+  `(provider, provider_user_id) ↔ user_id` 예약을 DB trigger로 미러링합니다. 같은 Google/Discord
+  identity를 동시에 여러 사용자에게 연결하거나 활성 row의 소유자를 in-place로 바꾸는 것은
+  거부합니다. 사용자가 provider 연결을 정상 해제하면 활성 row와 예약이 함께 삭제되어, 이후 같은
+  identity를 다른 OwOGG 계정에 연결할 수 있습니다. 계정 통합은 활성 OAuth identity를 이전하지
+  않으며, OAuth identity가 있는 Secondary 계정은 병합을 거부합니다.
 - 점수 row의 nickname/avatar snapshot은 감사·이력용으로 유지하되, 현재 leaderboard는 `users`를
   join하여 최신 별명과 선택 avatar를 표시합니다.
 

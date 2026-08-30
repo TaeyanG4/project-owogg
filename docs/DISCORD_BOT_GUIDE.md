@@ -50,7 +50,7 @@ OwOGG Discord 연동은 상시 구동 WebSocket 데몬(Gateway) 없이 **Discord
   - Developer Portal의 "Interactions Endpoint URL"에 `https://api.owogg.com/api/discord/interactions`가 정확히 저장되어 있는지 확인합니다.
   - 전역 명령어 동기화에는 최대 1시간이 소요될 수 있습니다 (테스트 길드에는 `pnpm discord:commands:register:guild`로 즉시 등록 가능).
 - **계정 연동 오류 (`이미 연동된 계정`)**:
-  - 다른 OwOGG 계정에 이미 해당 Discord 계정이 등록된 경우 발생합니다. 연결을 해제해도 최초 등록 소유권은 유지되므로 다른 계정으로 재등록하거나 계정 통합으로 이전할 수 없습니다. 최초 등록 계정으로 로그인해야 합니다.
+  - 다른 OwOGG 계정에 해당 Discord 계정이 현재 연결된 경우 발생합니다. 기존 계정에서 Discord 연결을 정상 해제한 뒤에는 다른 OwOGG 계정에 다시 연결할 수 있습니다. 활성 연결을 계정 통합으로 직접 이전할 수는 없습니다.
 
 Worker 환경변수, Developer Portal 설정, 명령어 등록/드리프트 점검, 장애 진단을 다루는 검증된
 운영 절차서는 현재 저장소에 없습니다. 실제 자격 증명과 운영 절차는 별도 운영 문서 단계에서

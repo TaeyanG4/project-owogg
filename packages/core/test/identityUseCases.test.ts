@@ -258,6 +258,26 @@ test("unlinkProvider succeeds when another provider remains", async () => {
   );
 });
 
+test("an identity can be linked to another account after the previous account disconnects it", async () => {
+  const repo = new MockUserRepository();
+  const { userA, userB } = await seedTwoAccounts(repo);
+  const useCases = new IdentityUseCases(repo);
+
+  await repo.linkOAuthAccount(userB.id, "google", "google-backup", null, null);
+  const unlink = await useCases.unlinkProvider(userB.id, "discord");
+  assert.deepEqual(unlink, { ok: true, provider: "discord" });
+
+  const link = await useCases.linkProvider(
+    userA.id,
+    "discord",
+    "discord-id-B",
+    "b@example.com",
+    null,
+  );
+  assert.deepEqual(link, { ok: true, provider: "discord", alreadyLinked: false });
+  assert.equal((await repo.findOAuthAccount("discord", "discord-id-B"))?.user_id, userA.id);
+});
+
 test("linkProvider never uses matching email as proof of identity", async () => {
   const repo = new MockUserRepository();
   const { userA, userB } = await seedTwoAccounts(repo);

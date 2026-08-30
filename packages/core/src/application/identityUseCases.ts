@@ -69,14 +69,14 @@ export class IdentityUseCases {
     }
 
     if (existing) {
-      // An active OAuth row is just as permanent as a disconnected registration. Never offer an
-      // account merge here: accepting a second provider proof must not turn into a way to move
-      // an already-registered Google/Discord identity to another OwOGG user.
+      // Never offer an account merge for an actively connected OAuth identity: accepting a second
+      // provider proof must not turn into a way to move it to another OwOGG user. An explicit
+      // disconnect removes this row and releases the identity for a later link.
       return { ok: false, code: "ACCOUNT_PREVIOUSLY_REGISTERED" };
     }
 
-    // The persistence adapter repeats the ownership checks against the durable registration
-    // ledger. That closes the check-then-insert race and also remembers disconnected identities.
+    // The persistence adapter repeats the active ownership checks against D1. That closes the
+    // check-then-insert race; disconnect releases the corresponding registration reservation.
     try {
       await this.userRepo.linkOAuthAccount(
         userId,

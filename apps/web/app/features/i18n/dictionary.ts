@@ -2024,7 +2024,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         calloutCode: "/owogg link",
         calloutSuffix: "를 다시 실행해 새 링크를 받으세요.",
         calloutWarning:
-          "하나의 Discord 계정은 최초 등록된 하나의 OwOGG 계정에만 연결됩니다. 연결을 해제해도 등록 소유권은 유지되며 다른 계정으로 옮길 수 없습니다.",
+          "하나의 Discord 계정은 한 번에 하나의 OwOGG 계정에만 연결됩니다. 기존 연결을 해제하면 다른 OwOGG 계정에 다시 연결할 수 있습니다.",
         footerPrefix: "연결에 실패하나요? ",
         footerLink1: "문제 해결 가이드",
         footerMid: "를 확인하세요. 또는 웹에서 바로 ",
@@ -2178,7 +2178,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         faqAlreadyLinked: {
           question: "계정이 이미 연결되어 있다고 합니다",
           answer:
-            "이 Discord 계정이 이미 다른 OwOGG 계정에 등록되어 있다는 뜻입니다. 하나의 Discord 계정은 최초 등록된 OwOGG 계정에 계속 귀속되며, 연결을 해제해도 다른 계정으로 재등록할 수 없습니다.",
+            "이 Discord 계정이 현재 다른 OwOGG 계정에 연결되어 있다는 뜻입니다. 기존 계정에서 연결을 해제한 뒤 다시 시도하세요.",
         },
         faqServerNotRegistered: {
           question: "/owogg play가 서버 미등록이라고 합니다",
@@ -3345,7 +3345,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         calloutCode: "/owogg link",
         calloutSuffix: " again in Discord to get a new one.",
         calloutWarning:
-          "Each Discord account stays bound to the first OwOGG account that registered it. Unlinking does not release that ownership or allow it to move to another account.",
+          "A Discord account can be linked to only one OwOGG account at a time. Unlink it from the current account before linking it to another one.",
         footerPrefix: "Having trouble linking? Check the ",
         footerLink1: "troubleshooting guide",
         footerMid: ", or open the ",
@@ -3502,7 +3502,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         faqAlreadyLinked: {
           question: "It says my account is already linked",
           answer:
-            "This Discord account is already registered to another OwOGG account. It remains bound to the first OwOGG account even after unlinking and cannot be registered to a different account.",
+            "This Discord account is currently linked to another OwOGG account. Unlink it from that account, then try again.",
         },
         faqServerNotRegistered: {
           question: "/owogg play says the server isn't registered",
@@ -4669,7 +4669,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         calloutCode: "/owogg link",
         calloutSuffix: "を再実行して新しいリンクを取得してください。",
         calloutWarning:
-          "1つのDiscordアカウントは、最初に登録した1つのOwOGGアカウントにのみ紐づきます。連携を解除しても登録上の所有権は維持され、別のアカウントへ移すことはできません。",
+          "1つのDiscordアカウントを同時に連携できるOwOGGアカウントは1つだけです。現在の連携を解除すれば、別のOwOGGアカウントに再連携できます。",
         footerPrefix: "連携に失敗しますか？",
         footerLink1: "トラブルシューティングガイド",
         footerMid: "をご確認ください。または、ウェブから直接",
@@ -4826,7 +4826,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         faqAlreadyLinked: {
           question: "アカウントがすでに連携されていると表示されます",
           answer:
-            "このDiscordアカウントはすでに別のOwOGGアカウントに登録されています。最初に登録したOwOGGアカウントへの紐づきは連携解除後も維持され、別のアカウントへ再登録することはできません。",
+            "このDiscordアカウントは現在、別のOwOGGアカウントに連携されています。既存のアカウントで連携を解除してから、もう一度お試しください。",
         },
         faqServerNotRegistered: {
           question: "/owogg play でサーバーが未登録と表示されます",
@@ -5955,7 +5955,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         calloutCode: "/owogg link",
         calloutSuffix: "以获取新链接。",
         calloutWarning:
-          "一个 Discord 账户只能归属于首次注册它的 OwOGG 账户。即使解除连接，注册归属仍会保留，不能转移到其他账户。",
+          "一个 Discord 账户同一时间只能连接到一个 OwOGG 账户。解除当前连接后，可以重新连接到其他 OwOGG 账户。",
         footerPrefix: "连接失败？请查看",
         footerLink1: "问题排查指南",
         footerMid: "。也可以直接在网页上打开",
@@ -6104,7 +6104,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         faqAlreadyLinked: {
           question: "提示账户已连接",
           answer:
-            "这表示此 Discord 账户已注册到另一个 OwOGG 账户。它会一直归属于首次注册的 OwOGG 账户，即使解除连接也不能重新注册到其他账户。",
+            "这表示此 Discord 账户当前已连接到另一个 OwOGG 账户。请先在原账户中解除连接，然后重试。",
         },
         faqServerNotRegistered: {
           question: "/owogg play 提示服务器未注册",

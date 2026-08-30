@@ -203,9 +203,9 @@ export class D1UserRepository implements UserRepository {
       );
     }
 
-    // A disconnected identity is not a new signup. Reattach it only to its original OwOGG user;
-    // if that user no longer exists, retain the tombstone and fail closed instead of recreating a
-    // second account with the same Google/Discord identity.
+    // A registration without its active oauth_accounts row can only come from a rolling deploy or
+    // inconsistent legacy data. Fail closed until the release migration/trigger reconciles it;
+    // normal disconnects remove both rows atomically at the database boundary.
     const registration = await this.findOAuthIdentityRegistration(
       data.provider,
       data.providerUserId,
@@ -387,9 +387,9 @@ export class D1UserRepository implements UserRepository {
         return new OAuthIdentityConflictError("PROVIDER_ALREADY_LINKED");
       }
       if (exactAccount) {
-        // Active and disconnected OAuth identities have the same immutable ownership rule.
-        // Returning the durable-registration error prevents callers from opening an account
-        // merge flow that could otherwise transfer this identity to another user.
+        // An active OAuth identity cannot move in place or open an account-merge flow. Once its
+        // owner explicitly disconnects it, the delete trigger releases the registration and a
+        // later insert for another user is valid.
         return new OAuthIdentityConflictError(
           "ACCOUNT_PREVIOUSLY_REGISTERED",
           exactAccount.user_id,
