@@ -345,6 +345,19 @@ export class MultiplayerRoomUseCases {
       ) {
         return { ok: false, code: "INSTANCE_NOT_FOUND" };
       }
+      if (instance.status === "ACTIVE") {
+        const participant = await this.dependencies.instances.findParticipant(
+          instance.id,
+          input.userId,
+        );
+        if (!participant || (participant.status !== "JOINED" && participant.status !== "READY")) {
+          return { ok: false, code: "INSTANCE_NOT_JOINABLE" };
+        }
+        // A page reload no longer has the in-memory instance id needed by the ticket endpoint.
+        // Replaying the authenticated participant through the opaque room code restores that
+        // control-plane descriptor without admitting a new player into an active match.
+        return { ok: true, replayed: true, instance, participant };
+      }
       if (instance.status !== "CREATED" && instance.status !== "LOBBY") {
         return { ok: false, code: "INSTANCE_NOT_JOINABLE" };
       }

@@ -463,19 +463,23 @@ multiplayerRouter.post("/instances/join", async (c) => {
   });
   if (!result.ok) return failure(c, result.code);
   const joinedPlayer = publicRoomPlayer(result.participant, authenticated.user);
-  // A successful replay can be a browser refresh or a recovered response whose original signal
-  // was emitted before another participant's socket finished admission. The direct delta is
-  // idempotent on participantId, so repeat it for every successful join instead of waiting for a
-  // later ready mutation to repair an apparently missing player. Read the admission snapshot in
-  // parallel so DO delivery does not add another serial wait to the joining browser.
-  const [players] = await Promise.all([
-    readPublicRoomPlayers(container, result.instance.id, authenticated.user),
-    notifyLobbySignal(c, result.instance.id, result.instance.generation, {
-      kind: "PARTICIPANT_JOINED",
-      player: joinedPlayer,
-      changedAt: result.participant.updatedAt,
-    }),
-  ]);
+  const players =
+    result.instance.status === "ACTIVE"
+      ? await readPublicRoomPlayers(container, result.instance.id, authenticated.user)
+      : (
+          await Promise.all([
+            readPublicRoomPlayers(container, result.instance.id, authenticated.user),
+            // A waiting-room replay can be a recovered response whose original signal was
+            // emitted before another participant's socket finished admission. The direct delta
+            // is idempotent on participantId, so repeat it instead of waiting for a later ready
+            // mutation. Active-room resume deliberately skips the closed lobby signal object.
+            notifyLobbySignal(c, result.instance.id, result.instance.generation, {
+              kind: "PARTICIPANT_JOINED",
+              player: joinedPlayer,
+              changedAt: result.participant.updatedAt,
+            }),
+          ])
+        )[0];
   c.header("Cache-Control", "no-store");
   return c.json(
     MultiplayerRoomAdmissionResponseSchema.parse({

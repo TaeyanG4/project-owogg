@@ -362,6 +362,27 @@ test("participants enter READY while only the host start request creates one ACT
   assert.equal(match?.status, "ACTIVE");
   assert.equal((await matches.listPlayers(match?.id ?? "missing")).length, 2);
 
+  const resumed = await rooms.joinRoom({
+    userId: 2,
+    publicCode: created.instance.publicCode,
+    inviteToken: null,
+  });
+  assert.equal(resumed.ok, true);
+  if (!resumed.ok) return;
+  assert.equal(resumed.replayed, true);
+  assert.equal(resumed.instance.status, "ACTIVE");
+  assert.equal(resumed.participant.id, joined.participant.id);
+  assert.equal(resumed.participant.seatIndex, 1);
+  assert.equal(resumed.participant.status, "READY");
+  assert.deepEqual(
+    await rooms.joinRoom({
+      userId: 3,
+      publicCode: created.instance.publicCode,
+      inviteToken: null,
+    }),
+    { ok: false, code: "INSTANCE_NOT_JOINABLE" },
+  );
+
   const staleWaitingLeave = await rooms.leaveRoom({
     userId: 2,
     instanceId: created.instance.id,
