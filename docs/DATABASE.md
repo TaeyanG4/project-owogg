@@ -4,7 +4,7 @@
 
 마지막 검증: 2026-08-31
 
-최신 마이그레이션: `0048_oauth_identity_registration_guard.sql`
+최신 마이그레이션: `0049_oauth_identity_owner_immutable.sql`
 
 기준 소스:
 
@@ -16,7 +16,7 @@
 - [`ERD.md`](ERD.md) — 도메인별 관계도와 전체 물리 테이블·호환 뷰 사전
 
 Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 권한 원천입니다. 이 문서는
-현재 `0000_initial_schema.sql`부터 `0048_oauth_identity_registration_guard.sql`까지의 역할을 설명합니다.
+현재 `0000_initial_schema.sql`부터 `0049_oauth_identity_owner_immutable.sql`까지의 역할을 설명합니다.
 
 ## 마이그레이션 범위
 
@@ -48,6 +48,7 @@ Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 
 | `0046`        | 서버 소유 GAME/INTERNAL_TOOL 분류와 공개 catalog 제외                       |
 | `0047`        | KST 일·주·월 공개 랭킹과 활성 출석 조회용 covering/partial index            |
 | `0048`        | Google/Discord 최초 등록 소유권 원장과 재가입·재연결 DB guard               |
+| `0049`        | OAuth identity 소유자 이전을 금지하는 immutable owner DB guard              |
 
 기존 migration은 변경, squash, 삭제하지 않습니다. 프로덕션 배포는 API보다 먼저
 `pnpm d1:migrate:prod`를 실행합니다.
@@ -270,7 +271,8 @@ D1 migration이 새 Worker보다 먼저 실행되는 동안 이전 Worker가 깨
   `(provider, provider_user_id) ↔ user_id` 소유권을 연결 해제 뒤에도 보존합니다. DB trigger와 두
   unique key가 같은 Google/Discord identity의 다른 사용자 재가입과 한 사용자의 provider identity
   교체를 모두 거부합니다. 같은 identity로 다시 로그인하면 새 사용자를 만들지 않고 최초 사용자에
-  재연결하며, 명시적 계정 통합만 등록 소유권을 Primary로 함께 이전합니다.
+  재연결합니다. 계정 통합도 OAuth 등록 소유권을 이전할 수 없으며, OAuth identity가 있는 Secondary
+  계정은 병합을 거부합니다.
 - 점수 row의 nickname/avatar snapshot은 감사·이력용으로 유지하되, 현재 leaderboard는 `users`를
   join하여 최신 별명과 선택 avatar를 표시합니다.
 

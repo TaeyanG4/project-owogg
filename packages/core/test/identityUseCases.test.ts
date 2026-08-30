@@ -164,7 +164,7 @@ test("linkProvider linking an identity already on the same account is idempotent
   assert.equal(connected.length, 1);
 });
 
-test("linkProvider returns ACCOUNT_ALREADY_LINKED when the identity belongs to another user", async () => {
+test("linkProvider rejects an active identity that belongs to another user without offering a merge", async () => {
   const repo = new MockUserRepository();
   const { userA, userB } = await seedTwoAccounts(repo);
   const useCases = new IdentityUseCases(repo);
@@ -177,11 +177,7 @@ test("linkProvider returns ACCOUNT_ALREADY_LINKED when the identity belongs to a
     "b@example.com",
     null,
   );
-  assert.equal(result.ok, false);
-  if (!result.ok) {
-    assert.equal(result.code, "ACCOUNT_ALREADY_LINKED");
-    assert.equal(result.conflictUserId, userB.id);
-  }
+  assert.deepEqual(result, { ok: false, code: "ACCOUNT_PREVIOUSLY_REGISTERED" });
 });
 
 test("linkProvider rejects a second provider identity before offering an account merge", async () => {

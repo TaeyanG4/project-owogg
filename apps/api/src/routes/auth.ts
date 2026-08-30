@@ -503,19 +503,10 @@ authRouter.get("/discord/callback", async (c) => {
     );
 
     if (!result.ok) {
-      if (result.code === "ACCOUNT_ALREADY_LINKED") {
-        const { accountMergeUseCases } = createContainer(c.env.DB);
-        const challenge = await accountMergeUseCases.startMergeChallenge(
-          auth.userId,
-          result.conflictUserId,
-          "discord",
-          profile.id,
-        );
-        return c.redirect(
-          `${frontendUrl}/settings?link_status=conflict&provider=discord&challenge=${encodeURIComponent(challenge.challengeId)}`,
-        );
-      }
-      if (result.code === "ACCOUNT_PREVIOUSLY_REGISTERED") {
+      if (
+        result.code === "ACCOUNT_ALREADY_LINKED" ||
+        result.code === "ACCOUNT_PREVIOUSLY_REGISTERED"
+      ) {
         return c.redirect(`${frontendUrl}/settings?link_status=registered&provider=discord`);
       }
       return c.redirect(`${frontendUrl}/settings?link_status=already&provider=discord`);
@@ -691,33 +682,10 @@ authRouter.post("/link/google", async (c) => {
   );
 
   if (!result.ok) {
-    if (result.code === "ACCOUNT_ALREADY_LINKED") {
-      const { accountMergeUseCases } = createContainer(c.env.DB);
-      const challenge = await accountMergeUseCases.startMergeChallenge(
-        auth.userId,
-        result.conflictUserId,
-        "google",
-        profile.sub,
-      );
-      const validated = CreateMergeChallengeResponseSchema.parse({
-        challengeId: challenge.challengeId,
-        expiresAt: challenge.expiresAt,
-        conflictUserId: result.conflictUserId,
-        provider: "google",
-      });
-      return c.json(
-        {
-          error: {
-            code: "ACCOUNT_ALREADY_LINKED",
-            message:
-              "이 Google 계정은 이미 다른 OwOGG 계정으로 사용 중입니다. 계정 통합을 진행할 수 있습니다.",
-          },
-          mergeChallenge: validated,
-        },
-        409,
-      );
-    }
-    if (result.code === "ACCOUNT_PREVIOUSLY_REGISTERED") {
+    if (
+      result.code === "ACCOUNT_ALREADY_LINKED" ||
+      result.code === "ACCOUNT_PREVIOUSLY_REGISTERED"
+    ) {
       return accountError(
         c,
         "ACCOUNT_PREVIOUSLY_REGISTERED",

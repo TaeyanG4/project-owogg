@@ -172,8 +172,16 @@ export class AccountMergeUseCases {
       return { ok: false, code: "MERGE_PROVIDER_CONFLICT" };
     }
 
-    // Atomic Primary-Wins merge: secondary data deleted, secondary OAuth moved to primary,
-    // secondary user deleted. Performed as a single transaction by the repository.
+    // OAuth identities are permanent owner bindings. A merge can only delete a Secondary user
+    // when it has no login identity at all; otherwise the old Primary-Wins implementation would
+    // transfer Google/Discord ownership to a different user. Keep the challenge unconsumed so a
+    // caller cannot turn retries into a state-changing operation.
+    if (secondaryAccounts.length > 0) {
+      return { ok: false, code: "MERGE_PROVIDER_CONFLICT" };
+    }
+
+    // Atomic Primary-Wins merge for an identity-less legacy Secondary user. OAuth ownership is
+    // never transferred; the repository is protected by the same invariant as a backstop.
     await this.mergeRepo.mergeAccounts(primaryId, secondaryId, challengeId);
 
     return { ok: true, primaryId, secondaryId };

@@ -66,6 +66,24 @@ BEGIN
     (provider, provider_user_id, registered_user_id, registered_at)
   VALUES (NEW.provider, NEW.provider_user_id, NEW.user_id, NEW.created_at);
 END;
+CREATE TRIGGER trg_oauth_accounts_before_identity_owner_update_guard
+BEFORE UPDATE OF user_id, provider, provider_user_id ON oauth_accounts
+FOR EACH ROW
+WHEN NEW.user_id <> OLD.user_id
+  OR NEW.provider <> OLD.provider
+  OR NEW.provider_user_id <> OLD.provider_user_id
+BEGIN
+  SELECT RAISE(ABORT, 'OAUTH_IDENTITY_OWNER_IMMUTABLE');
+END;
+CREATE TRIGGER trg_oauth_identity_registrations_before_owner_update_guard
+BEFORE UPDATE OF registered_user_id, provider, provider_user_id ON oauth_identity_registrations
+FOR EACH ROW
+WHEN NEW.registered_user_id <> OLD.registered_user_id
+  OR NEW.provider <> OLD.provider
+  OR NEW.provider_user_id <> OLD.provider_user_id
+BEGIN
+  SELECT RAISE(ABORT, 'OAUTH_IDENTITY_OWNER_IMMUTABLE');
+END;
 `;
 
 test("new OAuth users keep a provider-specific avatar and select it by default", async () => {
@@ -195,6 +213,35 @@ test("a registered OAuth identity cannot move to another user after it is discon
       error.name === "OAuthIdentityConflictError" &&
       error.message === "ACCOUNT_PREVIOUSLY_REGISTERED",
   );
+});
+
+test("an active OAuth identity cannot move to another user", async () => {
+  const { db } = createSqliteD1(PROFILE_IDENTITY_SCHEMA);
+  const repo = new D1UserRepository(db);
+  const owner = await repo.findOrCreateUser({
+    provider: "google",
+    providerUserId: "google-owner",
+    email: null,
+    nickname: "Owner",
+    avatarUrl: null,
+  });
+  const other = await repo.findOrCreateUser({
+    provider: "google",
+    providerUserId: "google-other",
+    email: null,
+    nickname: "Other",
+    avatarUrl: null,
+  });
+  await repo.linkOAuthAccount(owner.id, "discord", "discord-owner", null, null);
+
+  await assert.rejects(
+    () => repo.linkOAuthAccount(other.id, "discord", "discord-owner", null, null),
+    (error: unknown) =>
+      error instanceof Error &&
+      error.name === "OAuthIdentityConflictError" &&
+      error.message === "ACCOUNT_PREVIOUSLY_REGISTERED",
+  );
+  assert.equal((await repo.findOAuthAccount("discord", "discord-owner"))?.user_id, owner.id);
 });
 
 test("a user cannot replace its registered identity with a second account from the same provider", async () => {

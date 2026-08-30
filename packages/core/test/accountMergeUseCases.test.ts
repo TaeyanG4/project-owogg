@@ -339,100 +339,33 @@ async function setupTwoAccounts(): Promise<{
   };
 }
 
-test("confirmMerge keeping A keeps A data, deletes B data and transfers B provider to A", async () => {
+test("confirmMerge never transfers a Secondary OAuth identity to the Primary", async () => {
   const { state, useCases, userA, userB, challengeId } = await setupTwoAccounts();
 
   const result = await useCases.confirmMerge(challengeId, userA.id, userA.id);
-  assert.equal(result.ok, true);
-  if (!result.ok) return;
-  assert.equal(result.primaryId, userA.id);
-  assert.equal(result.secondaryId, userB.id);
+  assert.deepEqual(result, { ok: false, code: "MERGE_PROVIDER_CONFLICT" });
 
-  // A user remains, B user deleted
+  // No user, data, session, or provider ownership changes are allowed.
   assert.ok(state.users.has(userA.id));
-  assert.equal(state.users.has(userB.id), false);
-
-  // A scores/favorites/recent remain
-  assert.equal(
-    state.scores.some((s) => s.userId === userA.id),
-    true,
-  );
-  assert.ok(state.favorites.get(userA.id));
-  assert.ok(state.recentPlays.get(userA.id));
-
-  // B scores/favorites/recent and sessions deleted
-  assert.equal(
-    state.scores.some((s) => s.userId === userB.id),
-    false,
-  );
-  assert.equal(state.favorites.has(userB.id), false);
-  assert.equal(state.recentPlays.has(userB.id), false);
-  assert.equal(state.sessionUser.has("sess-B"), false);
-  // A current session preserved
+  assert.ok(state.users.has(userB.id));
+  assert.equal(state.scores.length, 2);
   assert.equal(state.sessionUser.has("sess-A"), true);
-
-  // Primary XP/progression/achievement totals remain unchanged. Secondary XP is deleted,
-  // and both Guild XP rows derived from it disappear instead of becoming ghost activity.
-  assert.deepEqual(state.progress.get(userA.id), { totalXp: 10, eligibleCompletions: 1 });
-  assert.equal(state.progress.has(userB.id), false);
-  assert.deepEqual(state.achievements.get(userA.id), new Set(["FIRST_PLAY"]));
-  assert.equal(state.achievements.has(userB.id), false);
-  assert.deepEqual(state.guildXpEvents, [
-    { guildId: "guild-a", userId: userA.id, sourceXpEventId: 100 },
-  ]);
-  assert.deepEqual(state.guildManagers, [
-    { guildId: "guild-a", userId: userA.id },
-    { guildId: "guild-b", userId: userA.id },
-  ]);
-  assert.deepEqual(state.guildOwners, [{ guildId: "guild-b", userId: userA.id }]);
-  assert.deepEqual(state.playContexts, [{ discordUserId: "discord-id-B", userId: userA.id }]);
-
-  // B provider (discord) transferred to A
-  const aAccounts = await useCases.findPendingMergeChallenge(userA.id, userB.id);
-  void aAccounts;
-  const oauthAccounts = Array.from(state.oauth.values()).filter((o) => o.user_id === userA.id);
-  const providers = oauthAccounts.map((o) => o.provider).sort();
-  assert.deepEqual(providers, ["discord", "google"]);
+  assert.equal(state.sessionUser.has("sess-B"), true);
+  assert.equal(state.oauth.get("discord:discord-id-B")?.user_id, userB.id);
+  assert.equal(state.challenges.get(challengeId)?.consumedAt, null);
 });
 
-test("confirmMerge keeping B (reverse) keeps B data and deletes A data", async () => {
+test("confirmMerge blocks the reverse direction when it would transfer Google ownership", async () => {
   const { state, useCases, userA, userB, challengeId } = await setupTwoAccounts();
 
   const result = await useCases.confirmMerge(challengeId, userB.id, userA.id);
-  assert.equal(result.ok, true);
-  if (!result.ok) return;
-  assert.equal(result.primaryId, userB.id);
-  assert.equal(result.secondaryId, userA.id);
-
-  // B remains, A deleted
+  assert.deepEqual(result, { ok: false, code: "MERGE_PROVIDER_CONFLICT" });
   assert.ok(state.users.has(userB.id));
-  assert.equal(state.users.has(userA.id), false);
-
-  // B data remain
-  assert.equal(
-    state.scores.some((s) => s.userId === userB.id),
-    true,
-  );
-  assert.ok(state.recentPlays.get(userB.id));
-  // A data deleted
-  assert.equal(
-    state.scores.some((s) => s.userId === userA.id),
-    false,
-  );
-  assert.equal(state.favorites.has(userA.id), false);
-  assert.equal(state.progress.has(userA.id), false);
-  assert.deepEqual(state.progress.get(userB.id), { totalXp: 500, eligibleCompletions: 50 });
-
-  // A session (current) invalidated; B session preserved
-  assert.equal(state.sessionUser.has("sess-A"), false);
+  assert.ok(state.users.has(userA.id));
+  assert.equal(state.oauth.get("google:google-sub-A")?.user_id, userA.id);
+  assert.equal(state.sessionUser.has("sess-A"), true);
   assert.equal(state.sessionUser.has("sess-B"), true);
-
-  // A provider (google) transferred to B, which already has discord
-  const providers = Array.from(state.oauth.values())
-    .filter((o) => o.user_id === userB.id)
-    .map((o) => o.provider)
-    .sort();
-  assert.deepEqual(providers, ["discord", "google"]);
+  assert.equal(state.challenges.get(challengeId)?.consumedAt, null);
 });
 
 test("conflicting Streamer platform ownership blocks merge before destructive work", async () => {
@@ -487,26 +420,26 @@ test("merge is blocked when the Secondary (to-be-deleted) account is an ACTIVE a
   assert.equal(state.challenges.get(challengeId)?.consumedAt, null);
 });
 
-test("merge is allowed when the Secondary account's admin status is DISABLED (not ACTIVE)", async () => {
+test("merge is blocked even when the Secondary administrator record is disabled", async () => {
   const { state, useCases, userA, userB, challengeId } = await setupTwoAccounts();
   state.adminAccounts.set(userB.id, "DISABLED");
 
   const result = await useCases.confirmMerge(challengeId, userA.id, userA.id);
 
-  assert.equal(result.ok, true);
+  assert.deepEqual(result, { ok: false, code: "MERGE_PROVIDER_CONFLICT" });
 });
 
-test("merge is allowed when the PRIMARY (kept) account is the administrator — only Secondary's admin status blocks the merge", async () => {
+test("merge is blocked even when the Primary account is an administrator", async () => {
   const { state, useCases, userA, userB, challengeId } = await setupTwoAccounts();
   // Keeping A means B is Secondary; A being an admin is irrelevant to the Secondary-side check.
   state.adminAccounts.set(userA.id, "ACTIVE");
 
   const result = await useCases.confirmMerge(challengeId, userA.id, userA.id);
 
-  assert.equal(result.ok, true);
+  assert.deepEqual(result, { ok: false, code: "MERGE_PROVIDER_CONFLICT" });
 });
 
-test("conflict-free Streamer ownership transfers with review and audit identity intact", async () => {
+test("OAuth ownership prevents a merge before Streamer ownership can transfer", async () => {
   const { state, useCases, userA, userB, challengeId } = await setupTwoAccounts();
   state.streamerProfileOwner = userB.id;
   state.streamerSettings.set(userA.id, "primary presentation");
@@ -516,15 +449,15 @@ test("conflict-free Streamer ownership transfers with review and audit identity 
 
   const result = await useCases.confirmMerge(challengeId, userA.id, userA.id);
 
-  assert.equal(result.ok, true);
-  assert.equal(state.streamerProfileOwner, userA.id);
+  assert.deepEqual(result, { ok: false, code: "MERGE_PROVIDER_CONFLICT" });
+  assert.equal(state.streamerProfileOwner, userB.id);
   assert.equal(state.streamerSettings.get(userA.id), "primary presentation");
-  assert.equal(state.streamerSettings.has(userB.id), false);
+  assert.equal(state.streamerSettings.get(userB.id), "secondary presentation");
   assert.deepEqual(state.streamerReviewJobAccountIds, [7001]);
   assert.deepEqual(state.streamerAuditAccountIds, [7001]);
 });
 
-test("confirmMerge challenge is consumed after a successful merge", async () => {
+test("confirmMerge leaves an identity-transfer challenge unconsumed", async () => {
   const { useCases, userA, userB, challengeId } = await setupTwoAccounts();
 
   let ch = await useCases.findMergeChallenge(challengeId);
@@ -532,14 +465,10 @@ test("confirmMerge challenge is consumed after a successful merge", async () => 
   assert.equal(ch!.consumedAt, null);
 
   const first = await useCases.confirmMerge(challengeId, userA.id, userA.id);
-  assert.equal(first.ok, true);
+  assert.deepEqual(first, { ok: false, code: "MERGE_PROVIDER_CONFLICT" });
 
   ch = await useCases.findMergeChallenge(challengeId);
-  assert.ok(ch!.consumedAt, "challenge must be marked consumed");
-
-  const second = await useCases.confirmMerge(challengeId, userA.id, userA.id);
-  assert.equal(second.ok, false);
-  if (!second.ok) assert.equal(second.code, "MERGE_CHALLENGE_CONSUMED");
+  assert.equal(ch!.consumedAt, null);
 });
 
 test("confirmMerge rejects an expired challenge", async () => {
@@ -616,6 +545,12 @@ test("confirmMerge blocks same-provider conflict (both accounts have the same pr
 
 test("confirmMerge is atomic: a failure leaves both accounts intact and challenge unconsumed", async () => {
   const { state, useCases, userA, userB, challengeId } = await setupTwoAccounts();
+  // Legacy identity-less secondaries are the only merge candidates left. Move the proof to the
+  // Primary and remove B's OAuth fixture so this test reaches the repository failure path.
+  state.oauth.delete("discord:discord-id-B");
+  const challenge = state.challenges.get(challengeId)!;
+  challenge.provider = "google";
+  challenge.providerUserId = "google-sub-A";
   state.failMerge = true;
 
   await assert.rejects(async () => {

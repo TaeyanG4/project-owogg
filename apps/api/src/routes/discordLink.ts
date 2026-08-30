@@ -5,7 +5,6 @@ import {
   DiscordLinkPreviewResponseSchema,
   ConfirmDiscordLinkRequestSchema,
   ConfirmDiscordLinkResponseSchema,
-  CreateMergeChallengeResponseSchema,
 } from "@owogg/contracts";
 import type { ApiEnv } from "./auth.js";
 import { createContainer } from "../container.js";
@@ -66,9 +65,9 @@ discordLinkRouter.get("/link/preview", async (c) => {
   return c.json(validated, 200);
 });
 
-// POST /api/discord/link/confirm — requires an authenticated OwOGG session. Reuses
-// IdentityUseCases.linkProvider verbatim (same ACCOUNT_ALREADY_LINKED / PROVIDER_ALREADY_LINKED
-// rules and merge-challenge flow as OAuth-based linking) — no parallel merge subsystem.
+// POST /api/discord/link/confirm — requires an authenticated OwOGG session and reuses the
+// canonical OAuth ownership guard. A Discord ID registered to another OwOGG user is rejected;
+// this endpoint must never create a parallel identity-transfer path.
 discordLinkRouter.post("/link/confirm", async (c) => {
   const userId = await getAuthUserId(c);
   if (!userId) {
@@ -84,7 +83,7 @@ discordLinkRouter.post("/link/confirm", async (c) => {
     return linkError(c, "LINK_CHALLENGE_EXPIRED", "유효하지 않은 연동 링크입니다.", 400);
   }
 
-  const { discordLinkUseCases, identityUseCases, accountMergeUseCases } = createContainer(c.env.DB);
+  const { discordLinkUseCases, identityUseCases } = createContainer(c.env.DB);
   const challenge = await discordLinkUseCases.findValidChallenge(parsed.data.token);
   if (!challenge) {
     return linkError(
@@ -105,27 +104,18 @@ discordLinkRouter.post("/link/confirm", async (c) => {
 
   if (!result.ok) {
     if (result.code === "ACCOUNT_ALREADY_LINKED") {
-      const mergeChallenge = await accountMergeUseCases.startMergeChallenge(
-        userId,
-        result.conflictUserId,
-        "discord",
-        challenge.discordUserId,
+      return linkError(
+        c,
+        "ACCOUNT_PREVIOUSLY_REGISTERED",
+        "이 Discord 계정은 이미 다른 OwOGG 계정에 등록되어 다시 연결할 수 없습니다.",
+        409,
       );
-      const validated = CreateMergeChallengeResponseSchema.parse({
-        challengeId: mergeChallenge.challengeId,
-        expiresAt: mergeChallenge.expiresAt,
-        conflictUserId: result.conflictUserId,
-        provider: "discord",
-      });
-      return c.json(
-        {
-          error: {
-            code: "ACCOUNT_ALREADY_LINKED",
-            message:
-              "이 Discord 계정은 이미 다른 OwOGG 계정으로 사용 중입니다. 계정 통합을 진행할 수 있습니다.",
-          },
-          mergeChallenge: validated,
-        },
+    }
+    if (result.code === "ACCOUNT_PREVIOUSLY_REGISTERED") {
+      return linkError(
+        c,
+        "ACCOUNT_PREVIOUSLY_REGISTERED",
+        "이 Discord 계정은 이전에 OwOGG에 등록되어 다른 계정에 다시 연결할 수 없습니다.",
         409,
       );
     }

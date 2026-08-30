@@ -69,7 +69,10 @@ export class IdentityUseCases {
     }
 
     if (existing) {
-      return { ok: false, code: "ACCOUNT_ALREADY_LINKED", conflictUserId: existing.user_id };
+      // An active OAuth row is just as permanent as a disconnected registration. Never offer an
+      // account merge here: accepting a second provider proof must not turn into a way to move
+      // an already-registered Google/Discord identity to another OwOGG user.
+      return { ok: false, code: "ACCOUNT_PREVIOUSLY_REGISTERED" };
     }
 
     // The persistence adapter repeats the ownership checks against the durable registration

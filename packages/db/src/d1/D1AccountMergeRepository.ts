@@ -234,11 +234,20 @@ export class D1AccountMergeRepository implements AccountMergeRepository {
       throw new Error(integrityConflict);
     }
 
+    // Defense in depth for callers that bypass AccountMergeUseCases. `oauth_accounts.user_id`
+    // is immutable, so refuse before scheduling the transactional destructive work below.
+    const secondaryOAuth = await this.db
+      .prepare(`SELECT 1 FROM oauth_accounts WHERE user_id = ? LIMIT 1`)
+      .bind(secondaryId)
+      .first();
+    if (secondaryOAuth) {
+      throw new Error("OAUTH_IDENTITY_OWNER_IMMUTABLE");
+    }
+
     // Primary-Wins atomic merge. D1 batch runs all statements as a single transaction:
     // secondary gameplay/personalization/progression/sessions are deleted (never unioned
-    // into primary), identity-like Discord/Streamer relationships are remapped safely,
-    // secondary OAuth identities are transferred to the primary, and the secondary user is
-    // deleted. The derived Discord guild ledger is explicitly removed before its source XP
+    // into primary), identity-like Discord/Streamer relationships are remapped safely, and the
+    // identity-less secondary user is deleted. The derived Discord guild ledger is explicitly removed before its source XP
     // events so the invariant does not depend only on a database FK pragma being enabled.
     const statements = [
       this.db
@@ -302,9 +311,6 @@ export class D1AccountMergeRepository implements AccountMergeRepository {
              AND NOT EXISTS (SELECT 1 FROM streamer_profiles WHERE user_id = ?)`,
         )
         .bind(primaryId, secondaryId, primaryId),
-      this.db
-        .prepare(`UPDATE oauth_accounts SET user_id = ? WHERE user_id = ?`)
-        .bind(primaryId, secondaryId),
       // Game Creator authority is identity-like. Preserve Secondary's access only when Primary
       // has none, then move every USER-owned game through the legacy control-plane table so its
       // convergence trigger updates generic `games` in the same transaction.

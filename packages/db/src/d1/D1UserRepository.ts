@@ -387,7 +387,13 @@ export class D1UserRepository implements UserRepository {
         return new OAuthIdentityConflictError("PROVIDER_ALREADY_LINKED");
       }
       if (exactAccount) {
-        return new OAuthIdentityConflictError("ACCOUNT_ALREADY_LINKED", exactAccount.user_id);
+        // Active and disconnected OAuth identities have the same immutable ownership rule.
+        // Returning the durable-registration error prevents callers from opening an account
+        // merge flow that could otherwise transfer this identity to another user.
+        return new OAuthIdentityConflictError(
+          "ACCOUNT_PREVIOUSLY_REGISTERED",
+          exactAccount.user_id,
+        );
       }
       if (exactRegistration && exactRegistration.registered_user_id !== userId) {
         return new OAuthIdentityConflictError(

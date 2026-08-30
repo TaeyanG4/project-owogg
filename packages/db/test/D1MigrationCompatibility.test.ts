@@ -20,13 +20,14 @@ test("generic production migrations avoid Cloudflare-incompatible TEMP table DDL
     "0043_game_result_verification_claims.sql",
     "0044_verified_result_score_semantics.sql",
     "0048_oauth_identity_registration_guard.sql",
+    "0049_oauth_identity_owner_immutable.sql",
   ]) {
     const sql = fs.readFileSync(new URL(`../migrations/${filename}`, import.meta.url), "utf8");
     assert.doesNotMatch(sql, /\bCREATE\s+TEMP(?:ORARY)?\s+TABLE\b/i, filename);
   }
 });
 
-test("full production migration chain applies through 0048 with OAuth registration guards", () => {
+test("full production migration chain applies through 0049 with immutable OAuth ownership", () => {
   const { raw } = createSqliteD1("");
   const migrationUrl = new URL("../migrations/", import.meta.url);
   const filenames = fs
@@ -178,9 +179,13 @@ test("full production migration chain applies through 0048 with OAuth registrati
   );
 });
 
-test("0048 backfills OAuth ownership and blocks identity reuse after disconnect", () => {
-  const migration = fs.readFileSync(
+test("0048 and 0049 backfill OAuth ownership and block reuse or transfer", () => {
+  const registrationMigration = fs.readFileSync(
     new URL("../migrations/0048_oauth_identity_registration_guard.sql", import.meta.url),
+    "utf8",
+  );
+  const ownershipMigration = fs.readFileSync(
+    new URL("../migrations/0049_oauth_identity_owner_immutable.sql", import.meta.url),
     "utf8",
   );
   const { raw } = createSqliteD1(`
@@ -201,7 +206,8 @@ test("0048 backfills OAuth ownership and blocks identity reuse after disconnect"
     VALUES (1, 'google', 'google-once', '2026-08-01T00:00:00.000Z');
   `);
 
-  raw.exec(migration);
+  raw.exec(registrationMigration);
+  raw.exec(ownershipMigration);
   assert.deepEqual(
     {
       ...raw
@@ -252,13 +258,17 @@ test("0048 backfills OAuth ownership and blocks identity reuse after disconnect"
        VALUES (2, 'discord', 'discord-secondary', 'now')`,
     )
     .run();
-  raw
-    .prepare(
-      `UPDATE oauth_accounts
-       SET user_id = 1
-       WHERE provider = 'discord' AND provider_user_id = 'discord-secondary'`,
-    )
-    .run();
+  assert.throws(
+    () =>
+      raw
+        .prepare(
+          `UPDATE oauth_accounts
+           SET user_id = 1
+           WHERE provider = 'discord' AND provider_user_id = 'discord-secondary'`,
+        )
+        .run(),
+    /OAUTH_IDENTITY_OWNER_IMMUTABLE/,
+  );
   assert.equal(
     raw
       .prepare(
@@ -267,7 +277,7 @@ test("0048 backfills OAuth ownership and blocks identity reuse after disconnect"
          WHERE provider = 'discord' AND provider_user_id = 'discord-secondary'`,
       )
       .get()?.registered_user_id,
-    1,
+    2,
   );
   assert.equal(
     raw.prepare("SELECT COUNT(*) AS count FROM oauth_identity_registrations").get()?.count,
