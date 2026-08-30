@@ -41,6 +41,16 @@ assert.deepEqual(
 for (const game of officialV1Games) {
   const artifact = inventoryBySlug.get(game.slug);
   assert.ok(artifact, `missing inventory entry: ${game.slug}`);
+  assert.equal(
+    artifact.artifactVersion,
+    game.artifactVersion,
+    `${game.slug}: artifact version drift`,
+  );
+  assert.equal(artifact.filename, `${game.slug}_v${game.artifactVersion}.zip`);
+  assert.equal(
+    artifact.backupRelativePath,
+    `${game.slug}/${game.slug}_v${game.artifactVersion}.zip`,
+  );
   const zipPath = path.join(here, "dist", `${game.slug}.zip`);
   const zipBytes = readFileSync(zipPath);
   assert.ok(zipBytes.length <= SANDBOX_GAME_POLICY.MAX_BUNDLE_BYTES, `${game.slug}: ZIP too large`);

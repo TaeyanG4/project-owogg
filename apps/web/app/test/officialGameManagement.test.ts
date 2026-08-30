@@ -6,6 +6,7 @@ import type { AdminGameListResponse, GameAvailabilityDto } from "@owogg/contract
 import {
   adminGameCatalogBadge,
   hideDeletedAdminGames,
+  uploadOfficialGameBatch,
 } from "../components/admin/OfficialGameManagement";
 
 const managementSource = readFileSync(
@@ -112,4 +113,39 @@ test("Relay operations stay per-game while the removed global review panel stays
   assert.match(relayControlSource, /Relay 활성화/);
   assert.match(relayControlSource, /테스터 열기/);
   assert.match(relayControlSource, /allowDocumentScrolling/);
+});
+
+test("admin batch upload publishes ZIPs serially and isolates a failed file", async () => {
+  const order: string[] = [];
+  let active = 0;
+  let maxActive = 0;
+  const progress: string[][] = [];
+  const results = await uploadOfficialGameBatch(
+    [{ name: "aim.zip" }, { name: "broken.zip" }, { name: "omok.zip" }],
+    async (file) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      order.push(file.name);
+      await Promise.resolve();
+      active -= 1;
+      if (file.name === "broken.zip") throw new Error("manifest invalid");
+      return { slug: file.name.replace(".zip", ""), title: file.name };
+    },
+    (next) => progress.push(next.map((result) => result.status)),
+  );
+
+  assert.deepEqual(order, ["aim.zip", "broken.zip", "omok.zip"]);
+  assert.equal(maxActive, 1);
+  assert.deepEqual(
+    results.map((result) => result.status),
+    ["SUCCESS", "FAILED", "SUCCESS"],
+  );
+  assert.equal(results[1]?.message, "manifest invalid");
+  assert.deepEqual(progress.at(-1), ["SUCCESS", "FAILED", "SUCCESS"]);
+});
+
+test("the shared admin dropzone enables multi-file selection without changing creator uploads", () => {
+  assert.match(managementSource, /multiple/);
+  assert.match(managementSource, /onFiles=\{handleOfficialUploads\}/);
+  assert.match(managementSource, /slug별로 등록·업데이트/);
 });

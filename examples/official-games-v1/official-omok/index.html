@@ -11,11 +11,17 @@
       <header class="game-header">
         <div>
           <p class="eyebrow">OWOGG OFFICIAL</p>
-          <h1>오목</h1>
+          <h1 id="game-name">오목</h1>
         </div>
-        <div id="stone-badge" class="stone-badge hidden" aria-live="polite">
-          <span id="badge-stone" class="stone neutral"></span>
-          <span id="stone-label">돌 확인 중</span>
+        <div class="header-actions">
+          <button id="language-toggle" class="utility" type="button">English</button>
+          <button id="sound-toggle" class="utility" type="button" aria-pressed="true">
+            소리 켬
+          </button>
+          <div id="stone-badge" class="stone-badge hidden" aria-live="polite">
+            <span id="badge-stone" class="stone neutral"></span>
+            <span id="stone-label">돌 확인 중</span>
+          </div>
         </div>
       </header>
 
@@ -40,6 +46,7 @@
           </div>
           <div class="actions">
             <button id="reset" type="button">다시 두기</button>
+            <button id="rematch" class="hidden" type="button">재대결 요청</button>
             <button id="leave" class="danger hidden" type="button">방 나가기</button>
           </div>
         </div>
@@ -48,13 +55,16 @@
           <span id="white-label"><i class="stone white"></i>백</span>
         </div>
         <div class="board-wrap" aria-label="15 곱하기 15 오목판">
-          <div id="board" class="board" role="grid" aria-label="오목판"></div>
+          <div id="board" class="board">
+            <svg id="board-grid" class="board-grid" viewBox="0 0 140 140" aria-hidden="true"></svg>
+            <div id="board-cells" class="board-cells" role="grid" aria-label="오목판"></div>
+          </div>
         </div>
       </section>
 
       <footer>
         <span id="revision-label">플레이 방식 대기 중</span>
-        <span>흑은 정확히 5목 · 백은 5목 이상 연결 시 승리</span>
+        <span id="rule-label">자유 오프닝 · 렌주 금수 · 흑 장목·33·44 · 백은 5목 이상</span>
       </footer>
     </main>
     <script src="./rules.js"></script>

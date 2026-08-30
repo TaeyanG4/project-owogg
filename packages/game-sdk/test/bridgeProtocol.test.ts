@@ -153,6 +153,7 @@ test("parseGameToHostMessage accepts each game->host message type", () => {
     { type: "GAME_SELECT_PLAY_MODE", playMode: "local-multi" },
   );
   assert.deepEqual(parseGameToHostMessage({ type: "GAME_CANCEL" }), { type: "GAME_CANCEL" });
+  assert.deepEqual(parseGameToHostMessage({ type: "GAME_RESTART" }), { type: "GAME_RESTART" });
   assert.deepEqual(parseGameToHostMessage({ type: "GAME_COMPLETE" }), { type: "GAME_COMPLETE" });
   assert.deepEqual(parseGameToHostMessage({ type: "GAME_EVENT", name: "boss_defeated" }), {
     type: "GAME_EVENT",

@@ -148,6 +148,12 @@ export interface GameCancelMessage {
   readonly type: "GAME_CANCEL";
 }
 
+/** Requests a fresh host-owned attempt. The game owns the visible restart control, while the
+ * host remains responsible for rotating attempt/session identity and remounting the iframe. */
+export interface GameRestartMessage {
+  readonly type: "GAME_RESTART";
+}
+
 export interface GameErrorMessage {
   readonly type: "GAME_ERROR";
   readonly message?: string;
@@ -160,6 +166,7 @@ export type GameToHostMessage =
   | GameSelectPlayModeMessage
   | GameEventMessage
   | GameCompleteMessage
+  | GameRestartMessage
   | GameCancelMessage
   | GameErrorMessage;
 
@@ -503,6 +510,7 @@ export function parseGameToHostMessage(data: unknown): GameToHostMessage | null 
   switch (data.type) {
     case "GAME_READY":
     case "GAME_STARTED":
+    case "GAME_RESTART":
     case "GAME_CANCEL":
       return keys.length === 1 ? ({ type: data.type } as GameToHostMessage) : null;
 

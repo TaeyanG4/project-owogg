@@ -3,6 +3,7 @@
 
   const VERIFIER_ID = "memory-test-v1";
   const RULESET_REVISION = 1;
+  const MAX_LEVEL = 9999;
   const MIN_INPUT_INTERVAL_MS = 70;
   const DIFFICULTIES = Object.freeze({
     normal: Object.freeze({ maxLevel: 8, extra: 2, flashMs: 420, gapMs: 180 }),
@@ -54,6 +55,7 @@
   window.OwoggMemoryRules = Object.freeze({
     VERIFIER_ID,
     RULESET_REVISION,
+    MAX_LEVEL,
     MIN_INPUT_INTERVAL_MS,
     createChallenge,
     expectedForLevel,

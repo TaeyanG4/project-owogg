@@ -36,10 +36,10 @@ button {
 }
 
 .shell {
-  width: min(100%, 860px);
+  width: 100%;
   min-height: 100vh;
-  margin: 0 auto;
-  padding: clamp(18px, 4vw, 38px);
+  margin: 0;
+  padding: clamp(14px, 2.2vw, 26px);
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -86,6 +86,30 @@ h2 {
   font-size: 13px;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.utility {
+  min-height: 36px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 999px;
+  padding: 7px 11px;
+  color: #d1d5db;
+  background: rgb(20 22 30 / 82%);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.utility[aria-pressed="false"] {
+  color: #6b7280;
 }
 
 .stone {
@@ -137,15 +161,13 @@ h2 {
 
 .launcher,
 .game {
-  border: 1px solid rgb(255 255 255 / 10%);
-  border-radius: 20px;
-  padding: clamp(16px, 3vw, 24px);
-  background: rgb(20 22 30 / 75%);
-  box-shadow: 0 28px 80px rgb(0 0 0 / 28%);
+  width: 100%;
+  padding: clamp(6px, 1.4vw, 14px);
 }
 
 .launcher {
-  min-height: min(58vh, 470px);
+  flex: 1;
+  min-height: min(64vh, 560px);
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -214,6 +236,10 @@ h2 {
   gap: 16px;
 }
 
+.game {
+  flex: 1;
+}
+
 .actions {
   display: flex;
   gap: 8px;
@@ -265,34 +291,51 @@ h2 {
 }
 
 .board {
-  --board-padding: clamp(12px, 2.6vw, 22px);
-  width: min(100%, 690px, calc(100vh - 260px));
+  --board-padding: clamp(13px, 2.4vw, 22px);
+  --grid-inset: calc(var(--board-padding) + ((100% - (2 * var(--board-padding))) / 30));
+  position: relative;
+  width: min(100%, 700px);
   aspect-ratio: 1;
-  display: grid;
-  grid-template-columns: repeat(15, 1fr);
-  grid-template-rows: repeat(15, 1fr);
-  padding: var(--board-padding);
-  border: 3px solid #8c5c25;
-  border-radius: 20px;
-  background-color: #d89a48;
-  background-image:
-    linear-gradient(rgb(64 37 15 / 65%) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(64 37 15 / 65%) 1px, transparent 1px),
-    radial-gradient(circle at 30% 20%, #f0bd70, transparent 55%);
-  background-size:
-    calc((100% - (2 * var(--board-padding))) / 15) calc((100% - (2 * var(--board-padding))) / 15),
-    calc((100% - (2 * var(--board-padding))) / 15) calc((100% - (2 * var(--board-padding))) / 15),
-    100% 100%;
-  background-position:
-    calc(var(--board-padding) + ((100% - (2 * var(--board-padding))) / 30))
-      calc(var(--board-padding) + ((100% - (2 * var(--board-padding))) / 30)),
-    calc(var(--board-padding) + ((100% - (2 * var(--board-padding))) / 30))
-      calc(var(--board-padding) + ((100% - (2 * var(--board-padding))) / 30)),
-    0 0;
+  border: 4px solid #6f431b;
+  border-radius: 16px;
+  outline: 2px solid #b97a35;
+  outline-offset: -8px;
+  background:
+    radial-gradient(circle at 28% 18%, rgb(255 224 155 / 45%), transparent 44%),
+    linear-gradient(135deg, #e9b566, #c98538);
   box-shadow:
     0 28px 80px rgb(0 0 0 / 46%),
     inset 0 0 28px rgb(91 49 12 / 26%);
   touch-action: manipulation;
+}
+
+.board-grid {
+  position: absolute;
+  z-index: 0;
+  inset: var(--grid-inset);
+  width: calc(100% - (2 * var(--grid-inset)));
+  height: calc(100% - (2 * var(--grid-inset)));
+  overflow: visible;
+  pointer-events: none;
+}
+
+.board-grid line {
+  stroke: rgb(67 39 17 / 82%);
+  stroke-width: 1.15;
+  vector-effect: non-scaling-stroke;
+}
+
+.board-grid circle {
+  fill: #4a2b12;
+}
+
+.board-cells {
+  position: absolute;
+  z-index: 1;
+  inset: var(--board-padding);
+  display: grid;
+  grid-template-columns: repeat(15, 1fr);
+  grid-template-rows: repeat(15, 1fr);
 }
 
 .cell {
@@ -314,11 +357,25 @@ h2 {
 .cell:not(:disabled):hover::before,
 .cell:not(:disabled):focus-visible::before {
   position: absolute;
-  inset: 18%;
-  border: 2px solid rgb(255 255 255 / 70%);
+  inset: 13%;
   border-radius: 50%;
-  background: rgb(255 255 255 / 18%);
   content: "";
+}
+
+.board[data-turn="black"] .cell:not(:disabled):hover::before,
+.board[data-turn="black"] .cell:not(:disabled):focus-visible::before {
+  border: 1px solid rgb(255 255 255 / 30%);
+  background: radial-gradient(circle at 34% 28%, #606674, #090b10 61%, #000);
+  box-shadow: 0 3px 7px rgb(45 24 8 / 34%);
+  opacity: 0.72;
+}
+
+.board[data-turn="white"] .cell:not(:disabled):hover::before,
+.board[data-turn="white"] .cell:not(:disabled):focus-visible::before {
+  border: 1px solid rgb(255 255 255 / 88%);
+  background: radial-gradient(circle at 34% 26%, #fff, #e7e9ed 62%, #aeb4bd);
+  box-shadow: 0 3px 7px rgb(45 24 8 / 34%);
+  opacity: 0.82;
 }
 
 .cell:focus-visible {
@@ -397,7 +454,11 @@ footer {
   }
 
   .board {
-    width: min(100%, calc(100vh - 305px));
+    width: min(100%, 700px);
     min-width: 290px;
+  }
+
+  .header-actions {
+    max-width: 72%;
   }
 }

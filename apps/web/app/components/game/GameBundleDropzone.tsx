@@ -5,6 +5,8 @@ interface GameBundleDropzoneProps {
   busy: boolean;
   title: ReactNode;
   onFile: (file: File) => void | Promise<void>;
+  onFiles?: ((files: readonly File[]) => void | Promise<void>) | undefined;
+  multiple?: boolean | undefined;
   actionLabel?: string;
 }
 
@@ -18,19 +20,28 @@ export function GameBundleDropzone({
   busy,
   title,
   onFile,
+  onFiles,
+  multiple = false,
   actionLabel = "또는 파일 선택",
 }: GameBundleDropzoneProps) {
   const [dragActive, setDragActive] = useState(false);
 
-  const submit = (file: File | undefined) => {
-    if (!file || busy) return;
-    void onFile(file);
+  const submit = (files: FileList | readonly File[]) => {
+    if (busy) return;
+    const selected = Array.from(files);
+    if (selected.length === 0) return;
+    if (multiple && onFiles) {
+      void onFiles(selected);
+      return;
+    }
+    const first = selected[0];
+    if (first) void onFile(first);
   };
 
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setDragActive(false);
-    submit(event.dataTransfer.files[0]);
+    submit(event.dataTransfer.files);
   };
 
   return (
@@ -56,12 +67,13 @@ export function GameBundleDropzone({
         <input
           type="file"
           accept=".zip,application/zip"
+          multiple={multiple}
           className="hidden"
           disabled={busy}
           onChange={(event) => {
-            const file = event.target.files?.[0];
+            const files = event.target.files;
             event.target.value = "";
-            submit(file);
+            if (files) submit(files);
           }}
         />
       </label>

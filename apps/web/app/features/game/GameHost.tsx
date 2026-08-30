@@ -244,7 +244,7 @@ export function buildGameResultFromBridgeComplete(
 // presentationLayoutResolver.ts's own doc comment): the exact `frameClassName` restored in #44,
 // unchanged. Kept as a named constant rather than inlined so the one call site building the
 // iframe's actual layout props (below) can't drift from it by accident.
-const LEGACY_IFRAME_FRAME_CLASS_NAME = "h-[70vh] min-h-[480px] max-h-[720px] w-full";
+const LEGACY_IFRAME_FRAME_CLASS_NAME = "h-[82vh] min-h-[520px] max-h-[900px] w-full";
 
 /**
  * Measures a DOM element's content box, live across resizes. The one piece of DOM measurement
@@ -283,23 +283,29 @@ function useElementSize(): [
   return [setNode, size];
 }
 
-// The #44 fallback's own UX target, reused (not re-derived) as the platform height constraint
-// for a presentation-active game — see useViewportHeight's own doc comment for why this can't
-// just be "whatever the iframe area's box measures". No min-height floor here on purpose: unlike
-// the legacy CSS (`min-h-[480px]`), forcing a floor on `available.height` is exactly what would
-// let a genuinely short viewport be overridden and overflow the page — a presentation-active game
-// simply gets what 70vh/720px actually allows, same as resolvePresentationLayout's own "available
-// always wins" rule for width.
-const PLATFORM_HEIGHT_TARGET_RATIO = 0.7;
-const PLATFORM_HEIGHT_CAP_PX = 720;
+// The viewport target remains the default platform constraint. A responsive game's declared
+// preferredHeight may make the player surface taller than the visible viewport so the *host page*
+// scrolls instead of clipping a `scrolling="no"` iframe. This is capped: manifests express a
+// preference, never an unbounded page-height instruction.
+const PLATFORM_HEIGHT_TARGET_RATIO = 0.82;
+const PLATFORM_HEIGHT_CAP_PX = 900;
+const DECLARED_HEIGHT_CAP_PX = 1100;
 
 /** Exported for direct unit testing (apps/web/app/test/gameHostPlatformHeight.test.ts) — the
- * pure half of the height-independence fix this PR makes: target ~70% of the actual viewport
- * height, capped at 720px, with deliberately no floor (unlike the legacy CSS's
- * `min-h-[480px]`) — see PLATFORM_HEIGHT_TARGET_RATIO's own doc comment for why forcing one here
- * would be exactly the bug this function exists to avoid. */
-export function computePlatformHeight(viewportHeight: number): number {
-  return Math.min(viewportHeight * PLATFORM_HEIGHT_TARGET_RATIO, PLATFORM_HEIGHT_CAP_PX);
+ * pure half of the height-independence fix this PR makes. Without a declared preferred height it
+ * preserves the existing ~82%/900px behavior. Responsive games can request a taller document via
+ * manifest presentation data; the host caps that request at 1100px and lets the outer page scroll
+ * rather than adding an iframe scrollbar. */
+export function computePlatformHeight(
+  viewportHeight: number,
+  preferredHeight?: number | undefined,
+): number {
+  const viewportTarget = Math.min(
+    viewportHeight * PLATFORM_HEIGHT_TARGET_RATIO,
+    PLATFORM_HEIGHT_CAP_PX,
+  );
+  if (preferredHeight === undefined) return viewportTarget;
+  return Math.max(viewportTarget, Math.min(preferredHeight, DECLARED_HEIGHT_CAP_PX));
 }
 
 /**
@@ -523,6 +529,8 @@ export function GameHost({ slug }: GameHostProps) {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [result, setResult] = useState<GameResult | null>(null);
+  const [isResultOverlayOpen, setIsResultOverlayOpen] = useState(false);
+  const previousResultRef = useRef<GameResult | null>(null);
   const [authoritativePlayConfig, setAuthoritativePlayConfig] = useState<{
     readonly difficultyId: string;
     readonly variantId: string;
@@ -541,6 +549,14 @@ export function GameHost({ slug }: GameHostProps) {
   // Result-screen leaderboard preview — only fetched for games that opt in
   // (game.policy.leaderboard), so casual games where rank doesn't matter can skip it.
   const [resultLeaderboard, setResultLeaderboard] = useState<LeaderRecord[] | null>(null);
+
+  // Open the platform summary once when a round first completes. Authoritative score replacement
+  // must not reopen it after the player has returned to the game's own result/restart UI.
+  useEffect(() => {
+    if (result && !previousResultRef.current) setIsResultOverlayOpen(true);
+    if (!result) setIsResultOverlayOpen(false);
+    previousResultRef.current = result;
+  }, [result]);
 
   const [game, setGame] = useState<PublicGame | null>(null);
   const [multiplayerRuntimeResolution, setMultiplayerRuntimeResolution] = useState<{
@@ -612,7 +628,12 @@ export function GameHost({ slug }: GameHostProps) {
     viewportHeight !== null
       ? isFullscreen
         ? Math.max(240, viewportHeight - 72)
-        : computePlatformHeight(viewportHeight)
+        : computePlatformHeight(
+            viewportHeight,
+            presentation?.viewport.mode === "responsive"
+              ? presentation.viewport.preferredHeight
+              : undefined,
+          )
       : null;
 
   // `available` is `null` until both an independent width and height measurement exist —
@@ -1353,236 +1374,239 @@ export function GameHost({ slug }: GameHostProps) {
   // when it fits, and the retry/back-to-list buttons no longer clipping off the bottom edge when
   // the content (card + status + leaderboard + share row) is taller than the viewport —
   // previously there was nowhere for that overflow to go.
-  const resultOverlay = result ? (
-    <div className="absolute inset-0 z-50 overflow-y-auto bg-black/90">
-      <div className="flex min-h-full flex-col items-center justify-center gap-6 p-6 text-center md:p-8">
-        <h3 className="text-3xl font-extrabold text-white">{dict.gamePlay.resultTitle}</h3>
+  const resultOverlay =
+    result && isResultOverlayOpen ? (
+      <div className="absolute inset-0 z-50 overflow-y-auto bg-black/90">
+        <div className="flex min-h-full flex-col items-center justify-center gap-6 p-6 text-center md:p-8">
+          <h3 className="text-3xl font-extrabold text-white">{dict.gamePlay.resultTitle}</h3>
 
-        {/* The score card is now its own self-contained box — everything inside this
+          {/* The score card is now its own self-contained box — everything inside this
             ref is what handleCopyScreenshot captures, and owogg.com is genuinely its
             last/bottom element now that submission status, leaderboard, and share
             buttons live in a separate section below instead of the same bordered box. */}
-        <div
-          ref={shareCardRef}
-          className="w-full max-w-md rounded-2xl border border-border bg-surface-raised p-6"
-        >
-          <div className="mb-3 flex items-center justify-center gap-2">
-            <GameThumbnail
-              thumbnail={game?.mediaUrl ?? ""}
-              title={localizedTitle ?? ""}
-              accent={publicGameAccent(game)}
-              className="h-6 w-6"
-              rounded="rounded-md"
-            />
-            <span className="text-sm font-bold text-text-secondary">{localizedTitle}</span>
-          </div>
-          {result.score !== undefined ? (
-            <>
-              <p className="text-text-secondary text-sm mb-1">
-                {isAuthenticated ? dict.gamePlay.finalScoreLabel : dict.gamePlay.deviceBestLabel}
+          <div
+            ref={shareCardRef}
+            className="w-full max-w-md rounded-2xl border border-border bg-surface-raised p-6"
+          >
+            <div className="mb-3 flex items-center justify-center gap-2">
+              <GameThumbnail
+                thumbnail={game?.mediaUrl ?? ""}
+                title={localizedTitle ?? ""}
+                accent={publicGameAccent(game)}
+                className="h-6 w-6"
+                rounded="rounded-md"
+              />
+              <span className="text-sm font-bold text-text-secondary">{localizedTitle}</span>
+            </div>
+            {result.score !== undefined ? (
+              <>
+                <p className="text-text-secondary text-sm mb-1">
+                  {isAuthenticated ? dict.gamePlay.finalScoreLabel : dict.gamePlay.deviceBestLabel}
+                </p>
+                <p className="text-5xl font-black text-brand mb-1">
+                  {formatScore(result.score, scoreConfig)}
+                </p>
+              </>
+            ) : (
+              <p className="text-2xl font-black text-brand mb-1">
+                {result.outcome ?? dict.gamePlay.resultTitle}
               </p>
-              <p className="text-5xl font-black text-brand mb-1">
-                {formatScore(result.score, scoreConfig)}
-              </p>
-            </>
-          ) : (
-            <p className="text-2xl font-black text-brand mb-1">
-              {result.outcome ?? dict.gamePlay.resultTitle}
+            )}
+
+            {authoritativeDifficultyLabel && authoritativeVariantLabel && (
+              <div
+                data-testid="authoritative-play-config"
+                className="mt-3 flex items-center justify-center gap-2 text-xs font-bold text-text-secondary"
+              >
+                <span className="rounded-full border border-border bg-surface px-2.5 py-1">
+                  {authoritativeDifficultyLabel}
+                </span>
+                <span className="rounded-full border border-border bg-surface px-2.5 py-1">
+                  {dict.ranking.modeHeader}: {authoritativeVariantLabel}
+                </span>
+              </div>
+            )}
+
+            {/* Metadata Formatters */}
+            {result.metadata && Object.entries(result.metadata).length > 0 && (
+              <div className="grid grid-cols-2 gap-4 mt-6 pt-6 border-t border-border/80">
+                {Object.entries(result.metadata).map(([key, value]) => (
+                  <div key={key} className="bg-surface/50 p-2.5 rounded-xl border border-border/40">
+                    <p className="text-xs text-text-muted font-bold mb-0.5">
+                      {formatMetadataKey(key, dict.gamePlay)}
+                    </p>
+                    <p className="font-extrabold text-text-primary text-sm">
+                      {formatMetadataValue(key, value)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <p className="mt-6 text-[10px] font-bold uppercase tracking-wider text-text-muted">
+              owogg.com
             </p>
-          )}
+          </div>
 
-          {authoritativeDifficultyLabel && authoritativeVariantLabel && (
-            <div
-              data-testid="authoritative-play-config"
-              className="mt-3 flex items-center justify-center gap-2 text-xs font-bold text-text-secondary"
-            >
-              <span className="rounded-full border border-border bg-surface px-2.5 py-1">
-                {authoritativeDifficultyLabel}
-              </span>
-              <span className="rounded-full border border-border bg-surface px-2.5 py-1">
-                {dict.ranking.modeHeader}: {authoritativeVariantLabel}
-              </span>
-            </div>
-          )}
-
-          {/* Metadata Formatters */}
-          {result.metadata && Object.entries(result.metadata).length > 0 && (
-            <div className="grid grid-cols-2 gap-4 mt-6 pt-6 border-t border-border/80">
-              {Object.entries(result.metadata).map(([key, value]) => (
-                <div key={key} className="bg-surface/50 p-2.5 rounded-xl border border-border/40">
-                  <p className="text-xs text-text-muted font-bold mb-0.5">
-                    {formatMetadataKey(key, dict.gamePlay)}
-                  </p>
-                  <p className="font-extrabold text-text-primary text-sm">
-                    {formatMetadataValue(key, value)}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <p className="mt-6 text-[10px] font-bold uppercase tracking-wider text-text-muted">
-            owogg.com
-          </p>
-        </div>
-
-        {/* Everything below is deliberately outside shareCardRef (not part of the
+          {/* Everything below is deliberately outside shareCardRef (not part of the
             screenshot) — submission status, leaderboard, share actions. Only shown to
             guests (submissionState only ever becomes "guest" when signed out — see
             runtime.complete), so an already-logged-in player never sees it. */}
-        <div className="w-full max-w-md flex flex-col gap-4">
-          {submissionState === "guest" && (
-            <div className="flex flex-col items-center gap-1.5">
-              <span className="text-xs font-bold text-text-secondary">
-                {dict.gamePlay.guestNoticeTitle}
+          <div className="w-full max-w-md flex flex-col gap-4">
+            {submissionState === "guest" && (
+              <div className="flex flex-col items-center gap-1.5">
+                <span className="text-xs font-bold text-text-secondary">
+                  {dict.gamePlay.guestNoticeTitle}
+                </span>
+                <span className="text-[11px] text-text-muted">{dict.gamePlay.guestNoticeBody}</span>
+                <button
+                  type="button"
+                  onClick={openLoginModal}
+                  className="mt-1 px-4 py-1.5 bg-brand/10 hover:bg-brand/20 text-brand text-xs font-extrabold rounded-xl transition-colors cursor-pointer"
+                >
+                  {dict.gamePlay.guestLoginCta}
+                </button>
+              </div>
+            )}
+            {submissionState === "submitting" && (
+              <span className="inline-flex items-center justify-center gap-2 text-xs font-bold text-brand animate-pulse">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                {dict.gamePlay.submittingLabel}
               </span>
-              <span className="text-[11px] text-text-muted">{dict.gamePlay.guestNoticeBody}</span>
-              <button
-                type="button"
-                onClick={openLoginModal}
-                className="mt-1 px-4 py-1.5 bg-brand/10 hover:bg-brand/20 text-brand text-xs font-extrabold rounded-xl transition-colors cursor-pointer"
-              >
-                {dict.gamePlay.guestLoginCta}
-              </button>
-            </div>
-          )}
-          {submissionState === "submitting" && (
-            <span className="inline-flex items-center justify-center gap-2 text-xs font-bold text-brand animate-pulse">
-              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              {dict.gamePlay.submittingLabel}
-            </span>
-          )}
-          {submissionState === "success" && (
-            <span className="inline-flex items-center justify-center gap-2 text-xs font-bold text-emerald-400">
-              <CheckCircle2 className="w-4 h-4" />
-              {dict.gamePlay.successLabel}
-            </span>
-          )}
-          {submissionState === "error" && (
-            <div className="flex flex-col items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 text-xs font-bold text-rose-400">
-                <AlertCircle className="w-4 h-4" />
-                {submissionError || dict.gamePlay.errorSubmitFallback}
+            )}
+            {submissionState === "success" && (
+              <span className="inline-flex items-center justify-center gap-2 text-xs font-bold text-emerald-400">
+                <CheckCircle2 className="w-4 h-4" />
+                {dict.gamePlay.successLabel}
               </span>
-            </div>
-          )}
+            )}
+            {submissionState === "error" && (
+              <div className="flex flex-col items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-rose-400">
+                  <AlertCircle className="w-4 h-4" />
+                  {submissionError || dict.gamePlay.errorSubmitFallback}
+                </span>
+              </div>
+            )}
 
-          {/* Leaderboard preview — skipped for games with supportsLeaderboard: false */}
-          {game?.policy.leaderboard && resultLeaderboard && (
-            <div className="rounded-2xl border border-border bg-surface-raised p-4 text-left">
-              <p className="mb-2 flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider text-text-muted">
-                <Trophy className="h-3.5 w-3.5 text-accent-yellow" />
-                {dict.gamePlay.leaderboardTitle}
-              </p>
-              {resultLeaderboard.length === 0 ? (
-                <p className="py-3 text-center text-xs text-text-muted">
-                  {dict.gamePlay.leaderboardEmpty}
+            {/* Leaderboard preview — skipped for games with supportsLeaderboard: false */}
+            {game?.policy.leaderboard && resultLeaderboard && (
+              <div className="rounded-2xl border border-border bg-surface-raised p-4 text-left">
+                <p className="mb-2 flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider text-text-muted">
+                  <Trophy className="h-3.5 w-3.5 text-accent-yellow" />
+                  {dict.gamePlay.leaderboardTitle}
                 </p>
-              ) : (
-                <ol className="space-y-1">
-                  {resultLeaderboard.map((record, i) => (
-                    <li
-                      key={record.id}
-                      className="flex items-center justify-between gap-2 rounded-lg bg-surface px-3 py-1.5 text-xs"
-                    >
-                      {record.userId !== null && record.userId !== undefined ? (
-                        <Link
-                          to={`/users/${record.userId}`}
-                          className="flex items-center gap-2 truncate font-semibold text-brand-light hover:underline"
-                        >
-                          <span className="w-4 shrink-0 text-text-muted">#{i + 1}</span>
-                          <span className="truncate">{record.playerName}</span>
-                        </Link>
-                      ) : (
-                        <span className="flex items-center gap-2 truncate font-semibold text-text-secondary">
-                          <span className="w-4 shrink-0 text-text-muted">#{i + 1}</span>
-                          <span className="truncate">{record.playerName}</span>
+                {resultLeaderboard.length === 0 ? (
+                  <p className="py-3 text-center text-xs text-text-muted">
+                    {dict.gamePlay.leaderboardEmpty}
+                  </p>
+                ) : (
+                  <ol className="space-y-1">
+                    {resultLeaderboard.map((record, i) => (
+                      <li
+                        key={record.id}
+                        className="flex items-center justify-between gap-2 rounded-lg bg-surface px-3 py-1.5 text-xs"
+                      >
+                        {record.userId !== null && record.userId !== undefined ? (
+                          <Link
+                            to={`/users/${record.userId}`}
+                            className="flex items-center gap-2 truncate font-semibold text-brand-light hover:underline"
+                          >
+                            <span className="w-4 shrink-0 text-text-muted">#{i + 1}</span>
+                            <span className="truncate">{record.playerName}</span>
+                          </Link>
+                        ) : (
+                          <span className="flex items-center gap-2 truncate font-semibold text-text-secondary">
+                            <span className="w-4 shrink-0 text-text-muted">#{i + 1}</span>
+                            <span className="truncate">{record.playerName}</span>
+                          </span>
+                        )}
+                        <span className="flex shrink-0 items-center gap-2">
+                          <span className="text-[10px] font-bold text-text-muted">
+                            {leaderboardVariantLabel(game, record.variantId)}
+                          </span>
+                          <span className="font-black text-brand-light">
+                            {record.formattedScore}
+                          </span>
                         </span>
-                      )}
-                      <span className="flex shrink-0 items-center gap-2">
-                        <span className="text-[10px] font-bold text-text-muted">
-                          {leaderboardVariantLabel(game, record.variantId)}
-                        </span>
-                        <span className="font-black text-brand-light">{record.formattedScore}</span>
-                      </span>
-                    </li>
-                  ))}
-                </ol>
-              )}
-              <Link
-                to={`/games/${slug}/ranking`}
-                className="mt-2 inline-block text-[11px] font-bold text-brand-light hover:underline"
-              >
-                {dict.gamePlay.viewFullRanking}
-              </Link>
-            </div>
-          )}
+                      </li>
+                    ))}
+                  </ol>
+                )}
+                <Link
+                  to={`/games/${slug}/ranking`}
+                  className="mt-2 inline-block text-[11px] font-bold text-brand-light hover:underline"
+                >
+                  {dict.gamePlay.viewFullRanking}
+                </Link>
+              </div>
+            )}
 
-          {/* Share row — icon-only (X's official wordmark, a plain copy icon for the
+            {/* Share row — icon-only (X's official wordmark, a plain copy icon for the
               screenshot+text action) with a native title tooltip standing in for the
               text labels these used to carry. A brief checkmark swap is the only
               per-button feedback now that there's no label text to change; the X
               button additionally gets a one-line hint below the row since "screenshot
               copied, paste it yourself" needs actual explaining. */}
-          <div className="flex items-center justify-center gap-3">
+            <div className="flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => void handleShareX()}
+                title={dict.gamePlay.shareXCta}
+                aria-label={dict.gamePlay.shareXCta}
+                className="flex h-12 w-12 items-center justify-center rounded-full border border-border bg-surface text-text-secondary transition-colors hover:bg-surface-overlay hover:text-text-primary cursor-pointer"
+              >
+                {xShareState === "shared" ? (
+                  <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+                ) : (
+                  <XIcon className="h-5 w-5" />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleCopyScreenshot()}
+                disabled={screenshotState === "copying"}
+                title={dict.gamePlay.screenshotCopyCta}
+                aria-label={dict.gamePlay.screenshotCopyCta}
+                className="flex h-12 w-12 items-center justify-center rounded-full border border-border bg-surface text-text-secondary transition-colors hover:bg-surface-overlay hover:text-text-primary cursor-pointer disabled:opacity-50"
+              >
+                {screenshotState === "copying" ? (
+                  <RefreshCw className="h-5 w-5 animate-spin" />
+                ) : screenshotState === "copied" || screenshotState === "downloaded" ? (
+                  <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+                ) : screenshotState === "error" ? (
+                  <AlertCircle className="h-5 w-5 text-rose-400" />
+                ) : (
+                  <Copy className="h-5 w-5" />
+                )}
+              </button>
+            </div>
+            {xShareState === "shared" && (
+              <p className="-mt-2 text-[11px] font-semibold text-text-muted">
+                {dict.gamePlay.shareXScreenshotHint}
+              </p>
+            )}
+          </div>
+
+          <div className="flex gap-4">
             <button
               type="button"
-              onClick={() => void handleShareX()}
-              title={dict.gamePlay.shareXCta}
-              aria-label={dict.gamePlay.shareXCta}
-              className="flex h-12 w-12 items-center justify-center rounded-full border border-border bg-surface text-text-secondary transition-colors hover:bg-surface-overlay hover:text-text-primary cursor-pointer"
+              onClick={() => setIsResultOverlayOpen(false)}
+              className="px-8 py-3 bg-brand text-white rounded-xl font-extrabold hover:bg-brand-light shadow-lg shadow-brand/25 transition-all cursor-pointer"
             >
-              {xShareState === "shared" ? (
-                <CheckCircle2 className="h-5 w-5 text-emerald-400" />
-              ) : (
-                <XIcon className="h-5 w-5" />
-              )}
+              {dict.gamePlay.returnToGameCta}
             </button>
             <button
               type="button"
-              onClick={() => void handleCopyScreenshot()}
-              disabled={screenshotState === "copying"}
-              title={dict.gamePlay.screenshotCopyCta}
-              aria-label={dict.gamePlay.screenshotCopyCta}
-              className="flex h-12 w-12 items-center justify-center rounded-full border border-border bg-surface text-text-secondary transition-colors hover:bg-surface-overlay hover:text-text-primary cursor-pointer disabled:opacity-50"
+              onClick={() => void navigate("/games")}
+              className="px-8 py-3 bg-surface text-text-primary border border-border rounded-xl font-extrabold hover:bg-surface-raised transition-colors cursor-pointer"
             >
-              {screenshotState === "copying" ? (
-                <RefreshCw className="h-5 w-5 animate-spin" />
-              ) : screenshotState === "copied" || screenshotState === "downloaded" ? (
-                <CheckCircle2 className="h-5 w-5 text-emerald-400" />
-              ) : screenshotState === "error" ? (
-                <AlertCircle className="h-5 w-5 text-rose-400" />
-              ) : (
-                <Copy className="h-5 w-5" />
-              )}
+              {dict.gamePlay.backToListResult}
             </button>
           </div>
-          {xShareState === "shared" && (
-            <p className="-mt-2 text-[11px] font-semibold text-text-muted">
-              {dict.gamePlay.shareXScreenshotHint}
-            </p>
-          )}
-        </div>
-
-        <div className="flex gap-4">
-          <button
-            type="button"
-            onClick={handleRetryGame}
-            className="px-8 py-3 bg-brand text-white rounded-xl font-extrabold hover:bg-brand-light shadow-lg shadow-brand/25 transition-all cursor-pointer"
-          >
-            {dict.gamePlay.retryGameCta}
-          </button>
-          <button
-            type="button"
-            onClick={() => void navigate("/games")}
-            className="px-8 py-3 bg-surface text-text-primary border border-border rounded-xl font-extrabold hover:bg-surface-raised transition-colors cursor-pointer"
-          >
-            {dict.gamePlay.backToListResult}
-          </button>
         </div>
       </div>
-    </div>
-  ) : null;
+    ) : null;
 
   if (error) {
     return (
@@ -1654,14 +1678,14 @@ export function GameHost({ slug }: GameHostProps) {
               <div className="relative flex w-full items-center justify-center overflow-hidden bg-black">
                 {resultOverlay}
                 {isLoading ? (
-                  <div className="flex h-[70vh] min-h-[480px] max-h-[720px] w-full flex-col items-center justify-center gap-4">
+                  <div className="flex h-[82vh] min-h-[520px] max-h-[900px] w-full flex-col items-center justify-center gap-4">
                     <div className="h-10 w-10 animate-spin rounded-full border-4 border-brand/30 border-t-brand" />
                     <p className="font-medium text-text-secondary animate-pulse">
                       {dict.gamePlay.loadingBody}
                     </p>
                   </div>
                 ) : isAuthBlocked ? (
-                  <div className="flex h-[70vh] min-h-[480px] max-h-[720px] w-full items-center justify-center p-6">
+                  <div className="flex h-[82vh] min-h-[520px] max-h-[900px] w-full items-center justify-center p-6">
                     <div className="flex w-full max-w-md flex-col items-center gap-4 rounded-3xl border border-border bg-surface-raised p-8 text-center shadow-2xl">
                       <div className="flex h-14 w-14 items-center justify-center rounded-full bg-brand/10 text-brand">
                         <UserCheck className="h-7 w-7" />
@@ -1736,6 +1760,7 @@ export function GameHost({ slug }: GameHostProps) {
                             onStarted={handleIframeStarted}
                             onEvent={handleIframeEvent}
                             onComplete={handleIframeComplete}
+                            onRestart={handleRetryGame}
                             onCancel={runtime.cancel}
                             onError={handleIframeError}
                           />
@@ -1765,6 +1790,7 @@ export function GameHost({ slug }: GameHostProps) {
                         onStarted={handleIframeStarted}
                         onEvent={handleIframeEvent}
                         onComplete={handleIframeComplete}
+                        onRestart={handleRetryGame}
                         onCancel={runtime.cancel}
                         onError={handleIframeError}
                       />

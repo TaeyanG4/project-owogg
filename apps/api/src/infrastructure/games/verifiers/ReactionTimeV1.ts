@@ -9,8 +9,8 @@ import {
 
 export const REACTION_TIME_SLUG = "reaction-time";
 export const REACTION_TIME_VERIFIER_ID = "reaction-time-v1";
-export const REACTION_TIME_RULESET_REVISION = 1;
-export const REACTION_TIME_BREAK_MS = 450;
+export const REACTION_TIME_RULESET_REVISION = 2;
+export const REACTION_TIME_BREAK_MS = 1_400;
 
 type DifficultyId = "normal" | "hard";
 type VariantId = "standard" | "focus";
@@ -32,8 +32,8 @@ const DIFFICULTIES = Object.freeze({
   hard: Object.freeze({ rounds: 7 }),
 });
 const VARIANTS = Object.freeze({
-  standard: Object.freeze({ waitMin: 900, waitRange: 1_100 }),
-  focus: Object.freeze({ waitMin: 1_400, waitRange: 1_500 }),
+  standard: Object.freeze({ waitMin: 1_800, waitRange: 1_800 }),
+  focus: Object.freeze({ waitMin: 2_400, waitRange: 2_200 }),
 });
 
 export const REACTION_TIME_TIMING = Object.freeze({

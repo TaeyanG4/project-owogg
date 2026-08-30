@@ -2,11 +2,11 @@
   "use strict";
 
   const VERIFIER_ID = "aim-test-v1";
-  const RULESET_REVISION = 1;
+  const RULESET_REVISION = 2;
   const TIMING = Object.freeze({ minFirstHitMs: 120, minHitIntervalMs: 60 });
   const DIFFICULTIES = Object.freeze({
     normal: Object.freeze({ targetCount: 20, radiusScale: 1 }),
-    hard: Object.freeze({ targetCount: 30, radiusScale: 0.82 }),
+    hard: Object.freeze({ targetCount: 30, radiusScale: 0.6 }),
   });
   const VARIANTS = Object.freeze({
     standard: Object.freeze({ baseRadius: 0.065 }),

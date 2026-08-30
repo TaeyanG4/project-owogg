@@ -200,6 +200,8 @@ export interface OwoggBrowserApi {
   start(): void;
   event(name: string, data?: unknown): void;
   complete(result?: OwoggCompletionPayload & { readonly evidence?: JsonSafeValue }): void;
+  /** Requests a fresh host-owned attempt. Games keep their restart control inside the iframe. */
+  restart(): void;
   cancel(): void;
   /** Stable managed-online API. It remains inert for single/local game sessions. */
   readonly multiplayer: OwoggMultiplayerBrowserApi;

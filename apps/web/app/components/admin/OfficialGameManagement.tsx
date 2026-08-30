@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  CheckCircle2,
   ChevronDown,
+  CircleAlert,
   FileArchive,
   FileJson,
   FlaskConical,
@@ -39,6 +41,49 @@ import {
   type AdminGamePageSize,
 } from "./AdminGamePagination";
 import { ManagedRelayProfileControl } from "./ManagedRelayProfileControl";
+
+export interface OfficialGameBatchUploadResult {
+  readonly fileName: string;
+  readonly status: "PENDING" | "SUCCESS" | "FAILED";
+  readonly message: string;
+  readonly slug?: string | undefined;
+}
+
+/** Publishes admin-selected ZIPs serially so each D1/B2 publication finishes before the next one.
+ * A bad archive is isolated to its own row and never prevents the remaining files from running. */
+export async function uploadOfficialGameBatch<TFile extends { readonly name: string }>(
+  files: readonly TFile[],
+  publish: (file: TFile) => Promise<{ readonly slug: string; readonly title: string }>,
+  onProgress?: ((results: readonly OfficialGameBatchUploadResult[]) => void) | undefined,
+): Promise<readonly OfficialGameBatchUploadResult[]> {
+  const results: OfficialGameBatchUploadResult[] = files.map((file) => ({
+    fileName: file.name,
+    status: "PENDING",
+    message: "게시 대기 중",
+  }));
+  onProgress?.([...results]);
+
+  for (const [index, file] of files.entries()) {
+    try {
+      const published = await publish(file);
+      results[index] = {
+        fileName: file.name,
+        status: "SUCCESS",
+        message: `${published.title} (${published.slug}) 게시 완료`,
+        slug: published.slug,
+      };
+    } catch (error) {
+      results[index] = {
+        fileName: file.name,
+        status: "FAILED",
+        message: error instanceof Error ? error.message : "공식 게임을 게시하지 못했습니다.",
+      };
+    }
+    onProgress?.([...results]);
+  }
+
+  return results;
+}
 
 /** Keeps a successful destructive mutation visible even if an older in-flight list request or a
  * briefly stale edge response arrives afterwards. The total is adjusted only when the returned
@@ -120,6 +165,7 @@ export function OfficialGameManagement() {
   const [busyGameId, setBusyGameId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+  const [uploadResults, setUploadResults] = useState<readonly OfficialGameBatchUploadResult[]>([]);
   const [partBusy, setPartBusy] = useState<string | null>(null);
   const [expandedGameId, setExpandedGameId] = useState<string | null>(null);
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
@@ -178,17 +224,25 @@ export function OfficialGameManagement() {
     }
   };
 
-  const handleOfficialUpload = async (file: File) => {
+  const handleOfficialUploads = async (files: readonly File[]) => {
+    if (files.length === 0 || uploading) return;
     setUploading(true);
     setError(null);
-    setUploadMessage(null);
+    setUploadMessage(`${files.length}개 ZIP 게시를 시작합니다.`);
+    setUploadResults([]);
     try {
-      const result = await uploadOfficialGame(file);
-      deletedGameIdsRef.current.delete(result.slug);
-      setUploadMessage(`${result.title} (${result.slug})을 OWOGG 공식 게임으로 게시했습니다.`);
-      await loadGames(page, pageSize, catalogRole);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "공식 게임을 게시하지 못했습니다.");
+      const results = await uploadOfficialGameBatch(files, uploadOfficialGame, setUploadResults);
+      const succeeded = results.filter((result) => result.status === "SUCCESS");
+      const failed = results.length - succeeded.length;
+      succeeded.forEach((result) => {
+        if (result.slug) deletedGameIdsRef.current.delete(result.slug);
+      });
+      setUploadMessage(
+        failed === 0
+          ? `${succeeded.length}개 게임을 모두 게시했습니다.`
+          : `${succeeded.length}개 게시 완료 · ${failed}개 실패 — 파일별 결과를 확인해 주세요.`,
+      );
+      if (succeeded.length > 0) await loadGames(page, pageSize, catalogRole);
     } finally {
       setUploading(false);
     }
@@ -304,14 +358,48 @@ export function OfficialGameManagement() {
 
       <GameBundleDropzone
         busy={uploading}
-        title="owogg.json이 포함된 ZIP을 여기로 끌어다 놓으면 OWOGG 공식 게임으로 게시됩니다"
-        onFile={handleOfficialUpload}
+        title="owogg.json이 포함된 ZIP 하나 또는 여러 개를 끌어다 놓으면 slug별로 등록·업데이트됩니다"
+        actionLabel="또는 ZIP 여러 개 선택"
+        multiple
+        onFile={(file) => handleOfficialUploads([file])}
+        onFiles={handleOfficialUploads}
       />
 
       {uploadMessage && (
         <p className="rounded-xl border border-accent-green/30 bg-accent-green/10 px-3 py-2 text-xs font-semibold text-accent-green">
           {uploadMessage}
         </p>
+      )}
+      {uploadResults.length > 0 && (
+        <ul
+          className="grid gap-2 rounded-xl border border-border bg-surface p-3"
+          aria-live="polite"
+        >
+          {uploadResults.map((result, index) => (
+            <li
+              key={`${result.fileName}:${index}`}
+              className="flex min-w-0 items-start gap-2 text-xs"
+            >
+              {result.status === "PENDING" ? (
+                <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-brand" />
+              ) : result.status === "SUCCESS" ? (
+                <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent-green" />
+              ) : (
+                <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent-red" />
+              )}
+              <span className="min-w-0">
+                <strong className="break-all text-text-primary">{result.fileName}</strong>
+                <span
+                  className={`ml-2 ${
+                    result.status === "FAILED" ? "text-accent-red" : "text-text-muted"
+                  }`}
+                >
+                  {result.message}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
       {error && (
         <p className="rounded-xl border border-accent-red/30 bg-accent-red/10 px-3 py-2 text-xs text-accent-red">

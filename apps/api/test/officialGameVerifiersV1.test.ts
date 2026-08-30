@@ -159,8 +159,8 @@ test("aim-test verifier checks every seeded target and rejects a fabricated hit"
 test("typing-test verifier selects the seed-bound passage and computes WPM", async () => {
   const challenge = createTypingTestChallenge({
     challengeSeed: CHALLENGE_SEED,
-    difficultyId: "hard",
-    variantId: "ko",
+    difficultyId: "normal",
+    variantId: "zh",
   });
   const evidence = {
     version: 1,
@@ -171,7 +171,7 @@ test("typing-test verifier selects the seed-bound passage and computes WPM", asy
   const verifierInput = input(
     TYPING_TEST_SLUG,
     TYPING_TEST_RULESET_REVISION,
-    { difficultyId: "hard", variantId: "ko" },
+    { difficultyId: "normal", variantId: "zh" },
     evidence,
   );
   const result = await typingTestV1.verify(verifierInput);
@@ -187,6 +187,18 @@ test("typing-test verifier selects the seed-bound passage and computes WPM", asy
     }),
     "TYPING_TEXT_MISMATCH",
   );
+});
+
+test("typing-test exposes long seed-bound passages for all four language variants", () => {
+  for (const variantId of ["ko", "en", "ja", "zh"] as const) {
+    const challenge = createTypingTestChallenge({
+      challengeSeed: CHALLENGE_SEED,
+      difficultyId: "normal",
+      variantId,
+    });
+    assert.ok(Array.from(challenge.text).length >= 150, variantId);
+    assert.ok(challenge.source.length > 0, variantId);
+  }
 });
 
 function successfulMemoryEvidence() {

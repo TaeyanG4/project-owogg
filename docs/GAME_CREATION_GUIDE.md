@@ -45,7 +45,7 @@ D1의 서버 관리 관계만 사용하며 canonical/manifest 입력으로 판�
 - 게임 결과는 자동 주입되는 `window.OWOGG` API로 host에 전달합니다.
 - 게임은 difficulty 외의 사용자/session/token/API 정보를 받거나 직접 만들지 않습니다.
 
-게임이 사용하는 공개 API는 네 개뿐입니다.
+게임이 사용하는 기본 lifecycle API는 다음과 같습니다.
 
 ```js
 OWOGG.start();
@@ -56,6 +56,8 @@ OWOGG.complete({
   progression: { value: 7 },
   metrics: { kills: 32 },
 });
+// 화면의 재시작 버튼은 게임 안에 두고, 새 verifier/session 시도는 Host에 요청합니다.
+OWOGG.restart();
 OWOGG.cancel();
 ```
 
@@ -327,6 +329,10 @@ signed one-use `gs1` session을 발급합니다. PlayConfig 게임은 사용자�
 복제하지 않습니다. `owogg.json`에서 생략한 difficulty는 내부 canonical에서 `normal` 한 개로
 정규화되므로 게임에는 난이도 선택기를 표시하지 않습니다.
 
+모든 게임은 게임 내부에서 한국어와 영어 UI를 전환할 수 있어야 합니다. 이 언어 선택은 플레이 규칙이나
+경쟁 점수를 바꾸는 PlayConfig 축이 아니므로 `difficulty`/`variant`에 넣지 않으며, ZIP이 번역 문자열과
+전환 UI를 직접 소유합니다. 소리와 재시작 설정도 같은 원칙으로 게임 내부에 둡니다.
+
 `owogg.json`은 선택지의 ID·표시명·기본값·허용 조합에 대한 단일 선언 권한이지 실행 가능한 게임 규칙은
 아닙니다. 새 difficulty/variant ID가 실제 동작하려면 ZIP의 게임 로직이 그 ID의 플레이 규칙을 구현해야
 하고, 경쟁 결과를 쓰는 PlayConfig 게임은 선택한 `verifierId`의 서버 verifier도 같은 ID와 evidence를
@@ -387,6 +393,8 @@ ID가 바뀌지 않으면 초기화하지 않습니다. 공개 리더보드의 e
 - `OWOGG.start/event/complete/cancel`을 선언된 fact와 일치하게 호출함
 - retry에서 상태가 정상 초기화됨
 - difficulty가 host 초기값과 일치함
+- 게임 내부 한국어·영어 전환으로 핵심 설명, 설정, 진행 상태, 결과, 접근성 label이 함께 바뀜
+- 소리 켜기/끄기와 재시작을 게임 내부에서 조작할 수 있음
 - ZIP root와 필수 등록 파일이 올바름
 - compressed/extracted/file/logo 제한 이내임
 

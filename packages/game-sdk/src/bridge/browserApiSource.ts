@@ -533,6 +533,7 @@ export const OWOGG_BROWSER_API_SOURCE = String.raw`(function () {
       completed = true;
       sendGeneric(message);
     },
+    restart: function () { sendGeneric({ type: "GAME_RESTART" }); },
     cancel: function () { sendGeneric({ type: "GAME_CANCEL" }); },
     multiplayer: multiplayerApi
   };

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { zipSync } from "fflate";
@@ -9,8 +9,12 @@ import { officialV1Games } from "./games.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const outputDirectory = path.join(here, "dist");
+const backupRoot = path.resolve(
+  process.env.OWOGG_GAMES_BACKUP_DIR || path.join(here, "..", "..", "..", "project-owogg-games"),
+);
 rmSync(outputDirectory, { recursive: true, force: true });
 mkdirSync(outputDirectory, { recursive: true });
+mkdirSync(backupRoot, { recursive: true });
 
 for (const game of officialV1Games) {
   const gameDirectory = path.join(here, game.slug);
@@ -21,5 +25,18 @@ for (const game of officialV1Games) {
   const outputPath = path.join(outputDirectory, `${game.slug}.zip`);
   writeFileSync(outputPath, bytes);
   const sha256 = createHash("sha256").update(bytes).digest("hex");
-  console.log(`${game.slug}: ${bytes.length} bytes sha256:${sha256}`);
+  const backupDirectory = path.join(backupRoot, game.slug);
+  const backupPath = path.join(backupDirectory, `${game.slug}_v${game.artifactVersion}.zip`);
+  mkdirSync(backupDirectory, { recursive: true });
+  if (existsSync(backupPath)) {
+    const existingHash = createHash("sha256").update(readFileSync(backupPath)).digest("hex");
+    if (existingHash !== sha256) {
+      throw new Error(
+        `${backupPath} already exists with different content; increment artifactVersion before rebuilding`,
+      );
+    }
+  } else {
+    writeFileSync(backupPath, bytes);
+  }
+  console.log(`${game.slug}: ${bytes.length} bytes sha256:${sha256} backup:${backupPath}`);
 }

@@ -8,7 +8,7 @@
     "mode": "single",
     "playModes": ["single"],
     "shortDescription": "서버 seed로 정해진 색상 순서를 기억하고 그대로 입력하세요.",
-    "description": "점점 길어지는 색상 패턴을 같은 순서로 재현합니다. verifier가 seed로 정답을 재생성하고 완료 레벨을 계산합니다.",
+    "description": "한국어·영어 UI에서 점점 길어지는 색상 패턴을 같은 순서로 재현합니다. 패드는 켜질 때 위치나 크기가 변하지 않으며 게임 안에서 소리와 재시작을 제어합니다. verifier가 seed로 정답을 재생성하고 완료 레벨을 계산하며 레벨 표시는 9999를 안전 상한으로 둡니다.",
     "tags": ["memory", "pattern", "brain", "verified"]
   },
   "input": ["mouse", "touch", "keyboard"],

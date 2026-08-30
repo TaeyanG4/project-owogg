@@ -1010,6 +1010,7 @@ export interface Dictionary {
     /** Marks the current player's own row in GameHost's leaderboard preview. */
     leaderboardYou: string;
     retryGameCta: string;
+    returnToGameCta: string;
     backToListResult: string;
     /** Generic difficulty tier labels, reused across every difficulty-supporting game (rather
      * than per-game localized content) since "normal"/"hard" are the same concept everywhere. */
@@ -2346,6 +2347,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       retrySubmitCta: "점수 다시 제출",
       leaderboardYou: "나",
       retryGameCta: "🔄 다시 하기",
+      returnToGameCta: "게임 화면으로 돌아가기",
       backToListResult: "목록으로",
       difficultyNormal: "보통",
       difficultyHard: "어려움",
@@ -3663,6 +3665,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       retrySubmitCta: "Resubmit score",
       leaderboardYou: "You",
       retryGameCta: "🔄 Play again",
+      returnToGameCta: "Return to game",
       backToListResult: "Back to list",
       difficultyNormal: "Normal",
       difficultyHard: "Hard",
@@ -4979,6 +4982,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       retrySubmitCta: "スコアを再送信",
       leaderboardYou: "自分",
       retryGameCta: "🔄 もう一度プレイ",
+      returnToGameCta: "ゲーム画面に戻る",
       backToListResult: "リストに戻る",
       difficultyNormal: "ノーマル",
       difficultyHard: "ハード",
@@ -6245,6 +6249,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       retrySubmitCta: "重新提交分数",
       leaderboardYou: "我",
       retryGameCta: "🔄 再玩一次",
+      returnToGameCta: "返回游戏画面",
       backToListResult: "返回列表",
       difficultyNormal: "普通",
       difficultyHard: "困难",

@@ -10,21 +10,30 @@ import { computePlatformHeight } from "../features/game/GameHost";
  * GameHost itself renders (that would be a feedback loop, not a platform constraint).
  */
 
-test("targets roughly 70% of the actual viewport height", () => {
-  assert.equal(computePlatformHeight(1000), 700);
+test("targets roughly 82% of the actual viewport height", () => {
+  assert.equal(computePlatformHeight(1000), 820);
 });
 
-test("caps at 720px even on a very tall viewport — same upper bound the #44 legacy CSS uses", () => {
-  assert.equal(computePlatformHeight(2000), 720);
+test("caps at 900px even on a very tall viewport — same upper bound the legacy CSS uses", () => {
+  assert.equal(computePlatformHeight(2000), 900);
 });
 
 test("has no floor: a small viewport is not forced up to any minimum, unlike the legacy CSS's min-h-[480px]", () => {
   // The exact case called out by name: a short viewport (e.g. a landscape phone) must get
-  // whatever 70% actually is, not be pushed past the real viewport and overflow the page.
-  assert.equal(computePlatformHeight(300), 210);
+  // whatever 82% actually is, not be pushed past the real viewport and overflow the page.
+  assert.ok(Math.abs(computePlatformHeight(300) - 246) < Number.EPSILON * 256);
   assert.ok(computePlatformHeight(300) < 480, "must not be forced up to the legacy 480px floor");
 });
 
 test("stays monotonically increasing below the cap — a taller viewport never gets a smaller platform height", () => {
   assert.ok(computePlatformHeight(500) < computePlatformHeight(900));
+});
+
+test("a responsive manifest preferred height can extend the surface so the host page scrolls instead of clipping the iframe", () => {
+  assert.equal(computePlatformHeight(900, 1600), 1100);
+  assert.equal(computePlatformHeight(500, 900), 900);
+});
+
+test("manifest preferred height is capped and cannot create an unbounded page", () => {
+  assert.equal(computePlatformHeight(900, 100_000), 1100);
 });

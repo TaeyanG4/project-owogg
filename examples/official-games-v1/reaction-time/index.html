@@ -10,7 +10,13 @@
     <main class="shell">
       <header class="round-header">
         <span id="round">반응속도 테스트</span>
-        <span id="average" aria-live="polite"></span>
+        <div class="round-actions">
+          <span id="average" aria-live="polite"></span>
+          <button id="language-toggle" class="sound-toggle" type="button">English</button>
+          <button id="sound-toggle" class="sound-toggle" type="button" aria-pressed="true">
+            소리 켬
+          </button>
+        </div>
       </header>
 
       <section id="config-panel" class="config-panel hidden" aria-label="게임 설정">

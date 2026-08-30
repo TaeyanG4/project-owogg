@@ -2,7 +2,7 @@
 
 상태: 가이드
 
-마지막 검증: 2026-08-29
+마지막 검증: 2026-08-31
 
 기준 소스:
 
@@ -97,6 +97,14 @@ owogg.logo.<png|jpg|jpeg|webp|svg>
 
 `READY`가 화면에 보이더라도 관리자 승인을 뜻하지 않습니다.
 
+### 3.1 OWOGG 관리자 다중 게시
+
+`/admin/games`의 OWOGG 공식 업로드 영역은 ZIP 여러 개를 한 번에 선택하거나 끌어다 놓을 수 있습니다.
+서버가 각 manifest의 slug를 권위로 삼아 새 identity를 등록하거나 같은 slug의 새 버전을 게시합니다.
+브라우저는 D1/B2 게시가 겹치지 않도록 파일을 순서대로 처리하고, 한 파일이 실패해도 나머지를 계속
+진행한 뒤 파일별 성공·실패 사유를 표시합니다. 이는 관리자 전용 편의 기능이며 Game Creator 업로드의
+단일 ZIP·소유권·심사 slot 정책은 바꾸지 않습니다.
+
 ## 4. 새 버전 업로드
 
 기존 본인 게임의 상세 화면에서 새 standalone ZIP을 올립니다. API는
@@ -168,10 +176,15 @@ READY != APPROVED
 ```
 
 게임은 먼저 `await OWOGG.whenReady()`로 host 초기화를 기다린 뒤 `OWOGG.start()`,
-`OWOGG.event()`, `OWOGG.complete()`, `OWOGG.cancel()`을 호출합니다. PlayConfig 게임의 난이도·모드
+`OWOGG.event()`, `OWOGG.complete()`, `OWOGG.restart()`, `OWOGG.cancel()`을 호출합니다. 화면의
+재시작 컨트롤은 게임 안에 두며 `restart()`가 Host의 새 attempt/session과 iframe remount를 요청합니다.
+PlayConfig 게임의 난이도·모드
 선택기는 게임 내부에서 공개 `difficulties`, `variants`, `allowedConfigs`만으로 만들며, 항목이 하나인
 축은 숨기고 기본값을 사용합니다. 선택지와 허용 조합을 플랫폼 UI나 slug별 코드에 별도로 복제하지
 않습니다.
+모든 게임은 ZIP 안의 게임 UI에서 한국어·영어 전환을 제공해야 하며, 핵심 안내·설정·진행·결과와
+접근성 label까지 함께 번역해야 합니다. 언어는 점수 규칙이 아니므로 PlayConfig 축으로 선언하지
+않습니다. 소리 설정과 재시작도 외부 플레이어 chrome이 아니라 게임 내부에서 제공합니다.
 bundle URL은 version-scoped immutable 경로입니다. `/official-games/*`, release map,
 과거 Game Creator 전용 런타임 이름인 `CreatorGameHost`, `transitionalCreatorGameResolver`를 요구하는
 가이드는 현재 구현과 맞지 않습니다.

@@ -18,15 +18,14 @@
 
 html,
 body {
+  width: 100%;
   min-height: 100%;
   margin: 0;
 }
 
 body {
   min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: clamp(0.8rem, 3vw, 1.5rem);
+  padding: clamp(0.6rem, 1.6vw, 1.25rem);
   background: radial-gradient(circle at 80% 10%, rgb(99 102 241 / 16%), transparent 28rem), #0b0d14;
 }
 
@@ -35,7 +34,10 @@ button {
 }
 
 .shell {
-  width: min(100%, 56rem);
+  width: 100%;
+  min-height: calc(100vh - clamp(1.2rem, 3.2vw, 2.5rem));
+  display: flex;
+  flex-direction: column;
   text-align: center;
   user-select: none;
 }
@@ -55,6 +57,28 @@ button {
 #average {
   color: #818cf8;
   font-variant-numeric: tabular-nums;
+}
+
+.round-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.sound-toggle {
+  min-height: 2rem;
+  border: 1px solid #334155;
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  color: #cbd5e1;
+  background: #111827;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.sound-toggle[aria-pressed="false"] {
+  color: #64748b;
 }
 
 .config-panel {
@@ -107,7 +131,8 @@ button {
 
 .reaction-pad {
   width: 100%;
-  min-height: min(62vh, 31rem);
+  flex: 1;
+  min-height: 30rem;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -205,12 +230,8 @@ button {
 }
 
 @media (max-width: 560px) {
-  body {
-    align-items: start;
-  }
-
   .reaction-pad {
-    min-height: 27rem;
+    min-height: max(25rem, calc(100vh - 10rem));
   }
 
   .config-axis {
