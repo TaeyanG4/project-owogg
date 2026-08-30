@@ -2,9 +2,9 @@
 
 상태: 기준 문서
 
-마지막 검증: 2026-08-30
+마지막 검증: 2026-08-31
 
-최신 마이그레이션: `0046_internal_game_tools.sql`
+최신 마이그레이션: `0047_public_ranking_period_indexes.sql`
 
 스키마 요약: 물리 테이블 `57`, 롤링 배포 호환 뷰 `4`
 
@@ -15,7 +15,7 @@
 - `apps/api/src/container.ts`
 - [데이터베이스 기준 문서](DATABASE.md)
 
-이 문서는 `0000_initial_schema.sql`부터 `0046_internal_game_tools.sql`까지를 빈 SQLite에
+이 문서는 `0000_initial_schema.sql`부터 `0047_public_ranking_period_indexes.sql`까지를 빈 SQLite에
 순서대로 적용한 **최종 D1 schema**를 기준으로 합니다. migration SQL이 유일한 schema 권한
 원천이며, 이 문서는 관계 탐색과 운영 이해를 위한 투영입니다.
 

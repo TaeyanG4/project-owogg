@@ -29,6 +29,7 @@ import {
   D1OfficialGameLifecycleRepository,
   D1AdminGameCatalogRepository,
   D1PublicGameMetricsRepository,
+  D1PublicRankingRepository,
   D1MultiplayerProfileRepository,
   D1MultiplayerProfileRequestRepository,
   D1MultiplayerInstanceRepository,
@@ -70,6 +71,7 @@ import {
   ComposedRuntimeGameRegistry,
   AvailableRuntimeGameCatalog,
   PublicGameMetricsUseCases,
+  PublicRankingUseCases,
   RuntimeGameAvailability,
   MultiplayerAdmissionUseCases,
   ManagedMultiplayerProfileReviewUseCases,
@@ -107,6 +109,7 @@ import {
   type GameVerifierRegistry,
   type RuntimeGameRegistry,
   type PublicGameCatalog,
+  type PublicRankingRepository,
   type MultiplayerProfileRepository,
   type MultiplayerProfileRequestRepository,
   type MultiplayerInstanceRepository,
@@ -169,6 +172,8 @@ export interface AppContainer {
   multiplayerRoomUseCases: MultiplayerRoomUseCases;
   selectedTopologyAuthorityGate: SelectedTopologyAuthorityGate;
   publicGameMetricsUseCases: PublicGameMetricsUseCases;
+  publicRankingRepo: PublicRankingRepository;
+  publicRankingUseCases: PublicRankingUseCases;
   scoreReadUseCases: GenericScoreReadUseCases;
   personalizationUseCases: PersonalizationUseCases;
   identityUseCases: IdentityUseCases;
@@ -227,6 +232,7 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
   const gameSettingsRepo = new D1GameSettingsRepository(db);
   const adminGameCatalogRepo = new D1AdminGameCatalogRepository(db);
   const publicGameMetricsRepo = new D1PublicGameMetricsRepository(db);
+  const publicRankingRepo = new D1PublicRankingRepository(db);
   const multiplayerProfileRepo = new D1MultiplayerProfileRepository(db);
   const multiplayerProfileRequestRepo = new D1MultiplayerProfileRequestRepository(db);
   const multiplayerInstanceRepo = new D1MultiplayerInstanceRepository(db);
@@ -285,6 +291,7 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     runtimeGameAvailability,
   );
   const publicGameMetricsUseCases = new PublicGameMetricsUseCases(publicGameMetricsRepo);
+  const publicRankingUseCases = new PublicRankingUseCases(publicRankingRepo);
 
   const scoreReadUseCases = new GenericScoreReadUseCases(scoreRepo, runtimeGameRegistry);
   const personalizationUseCases = new PersonalizationUseCases(
@@ -432,6 +439,8 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     multiplayerRoomUseCases,
     selectedTopologyAuthorityGate,
     publicGameMetricsUseCases,
+    publicRankingRepo,
+    publicRankingUseCases,
     scoreReadUseCases,
     personalizationUseCases,
     identityUseCases,

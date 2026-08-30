@@ -178,6 +178,11 @@ difficulty binding, 현재 availability, canonical score policy를 다시 검증
 - `/games/:slug`는 이미 명시적인 플레이 의도를 나타내는 전용 화면이므로 catalog 확인 뒤 iframe을
   자동 마운트합니다. `GameFrame` 루트는 flex/grid 배치에서도 항상 가용 너비 전체를 소유해야 하며,
   로딩 화면 뒤 검은 부모 배경만 남는 0폭 축소를 렌더링 단위 테스트와 브라우저 E2E로 방지합니다.
+- manifest의 선호 너비·높이는 뷰포트의 82%/최대 900px 플랫폼 박스 안에 `contain`합니다.
+  화면 비율이 다른 게임도 외부 페이지를 세로로 늘리지 않고 두 축을 함께 축소합니다. 해당 크기에서도
+  문서 콘텐츠가 더 길면 일반 게임 iframe의 내부 scroll surface가 담당하고 OwOGG 외부 플레이
+  페이지는 늘어나지 않습니다. viewport-fit 관리형 multiplayer는 내부 스크롤을 꺼고 Relay test
+  tool만 명시적으로 켭니다.
 
 현재 저장소 결정은 **B2 유지**입니다. B2의 저장 단가가 R2보다 낮고 Cloudflare를 통한 partner egress가
 무료인 반면, R2는 저장 단가와 Class A/B operation 비용이 더 큽니다. 위 구조에서는 versioned asset의

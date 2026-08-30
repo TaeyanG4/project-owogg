@@ -1,15 +1,10 @@
-// Pure UTC-calendar-day "consecutive active days" streak math. No I/O — callers (the D1
+// Pure OwOGG service-calendar-day (Asia/Seoul) "consecutive active days" streak math. No I/O — callers (the D1
 // session adapter) own reading the previous state and persisting the result.
 
-/** Returns today's date as a UTC "YYYY-MM-DD" string. */
-export function todayUtcDateString(now: Date = new Date()): string {
-  return now.toISOString().slice(0, 10);
-}
+import { previousServiceDateString, serviceDateString } from "./publicRanking.js";
 
-function previousUtcDateString(dateString: string): string {
-  const asUtcMidnight = new Date(`${dateString}T00:00:00.000Z`).getTime();
-  return new Date(asUtcMidnight - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
+/** Returns today's service date as a "YYYY-MM-DD" string. */
+export const todayServiceDateString = serviceDateString;
 
 export interface StreakState {
   currentStreak: number;
@@ -23,7 +18,7 @@ export interface StreakUpdateResult extends StreakState {
 }
 
 /**
- * Given the user's previously recorded streak state and today's UTC date, returns the next
+ * Given the user's previously recorded streak state and today's service date, returns the next
  * state. Same-day repeat visits are a no-op (`changed: false`). A visit on the day right
  * after `lastActiveDate` extends the streak; any bigger gap (or no prior activity) resets it
  * to 1 — today itself always counts as an active day once this runs.
@@ -34,7 +29,8 @@ export function nextStreakState(previous: StreakState, today: string): StreakUpd
   }
 
   const wasConsecutive =
-    previous.lastActiveDate !== null && previous.lastActiveDate === previousUtcDateString(today);
+    previous.lastActiveDate !== null &&
+    previous.lastActiveDate === previousServiceDateString(today);
   const currentStreak = wasConsecutive ? previous.currentStreak + 1 : 1;
   const longestStreak = Math.max(previous.longestStreak, currentStreak);
 

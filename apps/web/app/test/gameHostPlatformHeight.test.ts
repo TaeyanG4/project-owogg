@@ -29,11 +29,7 @@ test("stays monotonically increasing below the cap — a taller viewport never g
   assert.ok(computePlatformHeight(500) < computePlatformHeight(900));
 });
 
-test("a responsive manifest preferred height can extend the surface so the host page scrolls instead of clipping the iframe", () => {
-  assert.equal(computePlatformHeight(900, 1600), 1100);
-  assert.equal(computePlatformHeight(500, 900), 900);
-});
-
-test("manifest preferred height is capped and cannot create an unbounded page", () => {
-  assert.equal(computePlatformHeight(900, 100_000), 1100);
+test("manifest dimensions cannot extend the host page beyond the viewport target", () => {
+  assert.equal(computePlatformHeight(900), 738);
+  assert.equal(computePlatformHeight(500), 410);
 });

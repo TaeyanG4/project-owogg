@@ -109,6 +109,9 @@ CREATE TABLE users (
   email TEXT,
   avatar_url TEXT,
   country TEXT,
+  current_streak INTEGER NOT NULL DEFAULT 0,
+  longest_streak INTEGER NOT NULL DEFAULT 0,
+  last_active_date TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -178,6 +181,18 @@ CREATE TABLE user_progress (
   total_xp INTEGER NOT NULL DEFAULT 0,
   eligible_completions INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE xp_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  amount INTEGER NOT NULL,
+  reason TEXT NOT NULL DEFAULT 'GAME_COMPLETION',
+  source_type TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  game_id TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE(source_type, source_id)
 );
 `;
 

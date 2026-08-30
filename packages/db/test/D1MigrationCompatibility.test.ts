@@ -25,7 +25,7 @@ test("generic production migrations avoid Cloudflare-incompatible TEMP table DDL
   }
 });
 
-test("full production migration chain applies through 0046 with internal tool separation", () => {
+test("full production migration chain applies through 0047 with period ranking indexes", () => {
   const { raw } = createSqliteD1("");
   const migrationUrl = new URL("../migrations/", import.meta.url);
   const filenames = fs
@@ -60,6 +60,16 @@ test("full production migration chain applies through 0046 with internal tool se
       )
       .get(),
   );
+  for (const indexName of [
+    "idx_scores_period_ranking",
+    "idx_xp_events_period_ranking",
+    "idx_users_active_streak_ranking",
+  ]) {
+    assert.ok(
+      raw.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?").get(indexName),
+      indexName,
+    );
+  }
   for (const name of [
     "competitive_score",
     "variant_id",

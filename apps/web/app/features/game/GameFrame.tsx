@@ -142,7 +142,7 @@ export function GameFrame({
         <iframe
           ref={iframeRef}
           className={`block h-full w-full ${
-            documentScrolling === "enabled" ? "overflow-auto" : "overflow-hidden"
+            documentScrolling === "disabled" ? "overflow-hidden" : "overflow-auto"
           }`}
           style={iframeStyle}
           src={src}

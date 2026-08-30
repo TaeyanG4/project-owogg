@@ -57,7 +57,8 @@ test("GameFrame keeps auto scrolling implicit and honors explicit enabled or dis
   );
 
   assert.doesNotMatch(automatic, /scrolling=/);
-  assert.match(automatic, /overflow-hidden/);
+  assert.match(automatic, /overflow-auto/);
+  assert.doesNotMatch(automatic, /scrolling=/);
   assert.match(scrollable, /scrolling="yes"/);
   assert.match(scrollable, /<iframe class="[^"]*overflow-auto[^"]*"/);
   assert.doesNotMatch(scrollable, /<iframe class="[^"]*overflow-hidden[^"]*"/);
