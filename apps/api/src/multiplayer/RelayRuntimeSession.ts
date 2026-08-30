@@ -9,6 +9,7 @@ import {
   parseMultiplayerRelayTicketRuntimeV1,
   type MultiplayerRelayTicketRuntimeV1,
 } from "@owogg/core";
+import type { MultiplayerLatencySample } from "@owogg/contracts";
 
 const RELAY_SLOW_CONSUMER_BYTES = 32 * 1024;
 const RELAY_RATE_WINDOW_MS = 1_000;
@@ -28,8 +29,13 @@ export interface RelayConnectionAttachment {
   readonly connectionGeneration: number;
   readonly runtime: "relay";
   readonly lastClientSeq: number;
-  readonly rateWindowStartedAt: number;
-  readonly rateMessageCount: number;
+  /** Integer milli-token balance. One application envelope costs 1,000 tokens and the profile's
+   * messages-per-second value replenishes that many tokens per millisecond. */
+  readonly rateTokenBalance: number;
+  readonly rateRefilledAt: number;
+  readonly latencyRttMs: number | null;
+  readonly latencySampledAt: number;
+  readonly latencyReportedAt: number;
 }
 
 export interface RelayParticipantAuthority {
@@ -85,16 +91,23 @@ export function parseRelayConnectionAttachment(value: unknown): RelayConnectionA
       "connectionGeneration",
       "runtime",
       "lastClientSeq",
-      "rateWindowStartedAt",
-      "rateMessageCount",
+      "rateTokenBalance",
+      "rateRefilledAt",
+      "latencyRttMs",
+      "latencySampledAt",
+      "latencyReportedAt",
     ]) ||
     !isOpaqueId(source.participantId) ||
     !isPositiveInteger(source.generation) ||
     !isPositiveInteger(source.connectionGeneration) ||
     source.runtime !== "relay" ||
     !isNonNegativeInteger(source.lastClientSeq) ||
-    !isNonNegativeInteger(source.rateWindowStartedAt) ||
-    !isNonNegativeInteger(source.rateMessageCount)
+    !isNonNegativeInteger(source.rateTokenBalance) ||
+    !isNonNegativeInteger(source.rateRefilledAt) ||
+    (source.latencyRttMs !== null && !isNonNegativeInteger(source.latencyRttMs)) ||
+    (typeof source.latencyRttMs === "number" && source.latencyRttMs > 60_000) ||
+    !isNonNegativeInteger(source.latencySampledAt) ||
+    !isNonNegativeInteger(source.latencyReportedAt)
   ) {
     return null;
   }
@@ -104,8 +117,11 @@ export function parseRelayConnectionAttachment(value: unknown): RelayConnectionA
     connectionGeneration: source.connectionGeneration,
     runtime: "relay",
     lastClientSeq: source.lastClientSeq,
-    rateWindowStartedAt: source.rateWindowStartedAt,
-    rateMessageCount: source.rateMessageCount,
+    rateTokenBalance: source.rateTokenBalance,
+    rateRefilledAt: source.rateRefilledAt,
+    latencyRttMs: source.latencyRttMs,
+    latencySampledAt: source.latencySampledAt,
+    latencyReportedAt: source.latencyReportedAt,
   };
 }
 
@@ -120,8 +136,11 @@ export function createRelayConnectionAttachment(input: {
     connectionGeneration: input.connectionGeneration,
     runtime: "relay",
     lastClientSeq: 0,
-    rateWindowStartedAt: 0,
-    rateMessageCount: 0,
+    rateTokenBalance: 0,
+    rateRefilledAt: 0,
+    latencyRttMs: null,
+    latencySampledAt: 0,
+    latencyReportedAt: 0,
   };
 }
 
@@ -541,6 +560,28 @@ export class RelayRuntimeSession {
     }
   }
 
+  sendLatencySync(samples: readonly MultiplayerLatencySample[], target?: WebSocket): void {
+    const runtime = this.readRuntime();
+    if (!runtime || runtime.lifecycle === "CLOSED") return;
+    const outbound = JSON.stringify({
+      type: "MULTI_LATENCY_SYNC",
+      v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
+      generation: runtime.generation,
+      samples,
+    });
+    if (target) {
+      if (target.readyState === 1 && this.isRelaySocket(target, runtime.generation)) {
+        this.sendBounded(target, outbound);
+      }
+      return;
+    }
+    for (const socket of this.state.getWebSockets()) {
+      if (socket.readyState === 1 && this.isRelaySocket(socket, runtime.generation)) {
+        this.sendBounded(socket, outbound);
+      }
+    }
+  }
+
   close(code: MultiplayerRelayCloseCode): void {
     const runtime = this.readRuntime();
     if (!runtime || runtime.lifecycle === "CLOSED") return;
@@ -696,14 +737,19 @@ export function consumeRelayConnectionEnvelope(
   nowMs: number,
 ): RelayConnectionAttachment | null {
   if (clientSeq !== attachment.lastClientSeq + 1) return null;
-  const reset = nowMs - attachment.rateWindowStartedAt >= RELAY_RATE_WINDOW_MS;
-  const rateMessageCount = (reset ? 0 : attachment.rateMessageCount) + 1;
-  if (rateMessageCount > messagesPerSecond) return null;
+  const tokenCost = RELAY_RATE_WINDOW_MS;
+  const tokenCapacity = messagesPerSecond * RELAY_RATE_WINDOW_MS;
+  const firstEnvelope = attachment.lastClientSeq === 0 && attachment.rateRefilledAt === 0;
+  const elapsedMs = firstEnvelope ? 0 : Math.max(0, nowMs - attachment.rateRefilledAt);
+  const availableTokens = firstEnvelope
+    ? tokenCapacity
+    : Math.min(tokenCapacity, attachment.rateTokenBalance + elapsedMs * messagesPerSecond);
+  if (availableTokens < tokenCost) return null;
   const next: RelayConnectionAttachment = {
     ...attachment,
     lastClientSeq: clientSeq,
-    rateWindowStartedAt: reset ? nowMs : attachment.rateWindowStartedAt,
-    rateMessageCount,
+    rateTokenBalance: availableTokens - tokenCost,
+    rateRefilledAt: nowMs,
   };
   socket.serializeAttachment(next);
   return next;

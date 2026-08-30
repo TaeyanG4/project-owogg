@@ -10,10 +10,16 @@
 p95/p99 지연을 집계합니다. 60초 idle/wake 시험은 application message가 없는 구간 뒤 첫 broadcast와
 server sequence 연속성을 확인합니다.
 
+공용 게임 화면의 참가자 카드에는 플랫폼 parent가 측정한 대략적인 ping이 표시됩니다. 첫 측정은 즉시
+수행하고 공유 갱신은 DO hibernation 비용을 피하기 위해 최소 30초 간격으로 제한합니다. 이 값은 Probe의
+application payload나 부하 집계에 포함되지 않습니다.
+
 - `256B`는 정상 부하와 지연 측정용입니다.
 - `3072B` 다인원 20Hz는 방 전체 byte 상한을 의도적으로 넘길 수 있는 보호 동작 시험입니다.
 - 각 좌석은 서로 다른 정상 사용자 계정이어야 하며, 같은 계정으로 여러 좌석을 만들거나 자동화 계정
   권한을 우회하지 않습니다.
+- `messagesPerSecond`는 1초 burst capacity가 있는 지속 전송률입니다. 따라서 정상 20Hz의 작은 timer
+  jitter는 허용하지만 capacity를 넘는 즉시 burst는 보호 동작으로 거부합니다.
 
 ```bash
 node examples/relay-protocol-probe/build.mjs

@@ -18,9 +18,11 @@ import { fetchMultiplayerRoomRoster, leaveMultiplayerRoom } from "./multiplayerR
 function PlayerRosterCard({
   player,
   selfParticipantId,
+  pingMs,
 }: {
   readonly player: MultiplayerRoomPlayer;
   readonly selfParticipantId: string;
+  readonly pingMs: number | null;
 }) {
   const isSelf = player.participantId === selfParticipantId;
   const participantLabel = player.role === "HOST" ? "방장" : "플레이어";
@@ -47,10 +49,24 @@ function PlayerRosterCard({
         </span>
         <span className="block text-xs font-bold text-text-muted">
           {`슬롯 ${player.seatIndex + 1} · ${participantLabel}${isSelf ? " · 나" : ""}`}
+          <span
+            className={multiplayerPingTone(pingMs)}
+          >{` · ${multiplayerPingLabel(pingMs)}`}</span>
         </span>
       </span>
     </div>
   );
+}
+
+export function multiplayerPingLabel(pingMs: number | null): string {
+  return pingMs === null ? "핑 측정 중" : `핑 ${pingMs}ms`;
+}
+
+export function multiplayerPingTone(pingMs: number | null): string {
+  if (pingMs === null) return "text-text-muted";
+  if (pingMs <= 80) return "text-emerald-400";
+  if (pingMs <= 180) return "text-amber-300";
+  return "text-red-300";
 }
 
 export function multiplayerRoomClipboardValue(
@@ -135,6 +151,7 @@ export function MultiplayerIframeRuntime({
   const [players, setPlayers] = useState<readonly MultiplayerRoomPlayer[]>(
     () => multiplayerRuntimeInitialRoster(room, initialPlayers) ?? [],
   );
+  const [latencies, setLatencies] = useState<ReadonlyMap<string, number>>(() => new Map());
   const bridgeRef = useRef<MultiplayerBridgeHost | null>(null);
   const transportRef = useRef<MultiplayerParentTransport | null>(null);
   const openAttemptRef = useRef(0);
@@ -187,6 +204,7 @@ export function MultiplayerIframeRuntime({
     setRetryKey(0);
     const rosterSeed = multiplayerRuntimeInitialRoster(room, initialPlayers);
     setPlayers(rosterSeed ?? []);
+    setLatencies(new Map());
     if (rosterSeed) rosterRequestRef.current += 1;
     else refreshRoster();
   }, [
@@ -225,6 +243,17 @@ export function MultiplayerIframeRuntime({
     [closeCurrent],
   );
 
+  const handleLatencySamples = useCallback(
+    (samples: readonly { readonly participantId: string; readonly rttMs: number }[]) => {
+      setLatencies((current) => {
+        const next = new Map(current);
+        for (const sample of samples) next.set(sample.participantId, sample.rttMs);
+        return next;
+      });
+    },
+    [],
+  );
+
   const handleFrameLoad = useCallback(
     (iframe: HTMLIFrameElement) => {
       const contentWindow = iframe.contentWindow;
@@ -253,7 +282,10 @@ export function MultiplayerIframeRuntime({
             contentWindow,
             transport.socket,
             transport.bootstrap,
-            { onConnectionState: handleConnectionState },
+            {
+              onConnectionState: handleConnectionState,
+              onLatencySamples: handleLatencySamples,
+            },
           );
         })
         .catch((error: unknown) => {
@@ -271,6 +303,7 @@ export function MultiplayerIframeRuntime({
       closeCurrent,
       connectionGeneration,
       handleConnectionState,
+      handleLatencySamples,
       room.instance.contentHash,
       room.instance.gameVersionId,
       room.instance.generation,
@@ -399,6 +432,7 @@ export function MultiplayerIframeRuntime({
               key={player.participantId}
               player={player}
               selfParticipantId={room.participant.id}
+              pingMs={latencies.get(player.participantId) ?? null}
             />
           ))}
           {orderedPlayers.length === 0 && (

@@ -20,6 +20,39 @@ const IdempotencyKeySchema = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/);
 const PublicRoomCodeSchema = z.string().regex(/^[A-Za-z0-9_-]{12,64}$/);
 const InviteTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{32,128}$/);
 
+/** Parent-owned Relay transport telemetry. Games cannot emit or consume these envelopes. The
+ * heartbeat itself remains a Durable Object auto-response; only bounded, infrequent RTT reports
+ * reach the object so latency UI does not turn an otherwise hibernating room into a timer loop. */
+export const MultiplayerLatencyReportMessageSchema = z
+  .object({
+    type: z.literal("MULTI_LATENCY_REPORT"),
+    v: z.literal(1),
+    generation: z.number().int().positive(),
+    rttMs: z.number().int().min(0).max(60_000),
+  })
+  .strict();
+export type MultiplayerLatencyReportMessage = z.infer<typeof MultiplayerLatencyReportMessageSchema>;
+
+export const MultiplayerLatencySampleSchema = z
+  .object({
+    participantId: OpaqueIdSchema,
+    seatIndex: z.number().int().min(0).max(7),
+    rttMs: z.number().int().min(0).max(60_000),
+    sampledAt: z.number().int().positive(),
+  })
+  .strict();
+export type MultiplayerLatencySample = z.infer<typeof MultiplayerLatencySampleSchema>;
+
+export const MultiplayerLatencySyncMessageSchema = z
+  .object({
+    type: z.literal("MULTI_LATENCY_SYNC"),
+    v: z.literal(1),
+    generation: z.number().int().positive(),
+    samples: z.array(MultiplayerLatencySampleSchema).max(8),
+  })
+  .strict();
+export type MultiplayerLatencySyncMessage = z.infer<typeof MultiplayerLatencySyncMessageSchema>;
+
 export const MultiplayerRoomPlayerSchema = z
   .object({
     participantId: OpaqueIdSchema,

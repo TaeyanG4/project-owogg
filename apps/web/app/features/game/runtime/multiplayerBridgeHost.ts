@@ -8,7 +8,12 @@ import {
   type MultiplayerDisconnectCode,
   type MultiplayerRelayCloseCode,
 } from "@owogg/game-sdk/bridge";
-import { MULTIPLAYER_HEARTBEAT_REQUEST, MULTIPLAYER_HEARTBEAT_RESPONSE } from "@owogg/contracts";
+import {
+  MULTIPLAYER_HEARTBEAT_REQUEST,
+  MULTIPLAYER_HEARTBEAT_RESPONSE,
+  MultiplayerLatencySyncMessageSchema,
+  type MultiplayerLatencySample,
+} from "@owogg/contracts";
 
 export interface MultiplayerBridgeIframeWindowLike {
   postMessage(message: unknown, targetOrigin: string, transfer: Transferable[]): void;
@@ -62,6 +67,7 @@ export interface MultiplayerBridgeHostCallbacks {
   onReady?: () => void;
   onLeave?: () => void;
   onConnectionState?: (state: MultiplayerParentConnectionState) => void;
+  onLatencySamples?: (samples: readonly MultiplayerLatencySample[]) => void;
   onProtocolDrop?: (direction: "GAME_TO_HOST" | "SERVER_TO_HOST") => void;
 }
 
@@ -78,12 +84,18 @@ export interface MultiplayerBridgeHostDependencies {
     intervalMs: number,
   ) => ReturnType<typeof setInterval>;
   readonly clearInterval?: (handle: ReturnType<typeof setInterval>) => void;
+  readonly now?: () => number;
 }
 
 const SOCKET_CONNECTING = 0;
 const SOCKET_OPEN = 1;
 const MAX_QUEUED_GAME_MESSAGES = 32;
+// The heartbeat is answered by the DO auto-response path and does not wake the object. Reporting
+// the resulting RTT does, so shared roster updates are intentionally no more frequent than this.
 const HEARTBEAT_INTERVAL_MS = 30_000;
+const LATENCY_REPORT_MIN_INTERVAL_MS = 30_000;
+const LATENCY_REPORT_CHANGE_MS = 20;
+const LATENCY_REPORT_REFRESH_MS = 5 * 60_000;
 const textEncoder = new TextEncoder();
 
 function hasServerSequence(
@@ -128,6 +140,7 @@ export function createMultiplayerBridgeHost(
   let lastConnectionGeneration = 0;
   const scheduleInterval = dependencies.setInterval ?? setInterval;
   const cancelInterval = dependencies.clearInterval ?? clearInterval;
+  const now = dependencies.now ?? Date.now;
 
   function notifyDrop(direction: "GAME_TO_HOST" | "SERVER_TO_HOST") {
     callbacks.onProtocolDrop?.(direction);
@@ -166,19 +179,25 @@ export function createMultiplayerBridgeHost(
   }
 
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  let heartbeatSentAt: number | null = null;
+  let lastReportedLatency: number | null = null;
+  let lastLatencyReportAt = 0;
   const stopHeartbeat = () => {
     if (heartbeatTimer === undefined) return;
     cancelInterval(heartbeatTimer);
     heartbeatTimer = undefined;
   };
-  heartbeatTimer = scheduleInterval(() => {
+
+  const sendHeartbeat = () => {
     if (closed || runtimeClosed || left || socket.readyState !== SOCKET_OPEN) return;
     try {
+      heartbeatSentAt = now();
       socket.send(MULTIPLAYER_HEARTBEAT_REQUEST);
     } catch {
+      heartbeatSentAt = null;
       notifyDrop("GAME_TO_HOST");
     }
-  }, HEARTBEAT_INTERVAL_MS);
+  };
 
   channel.port1.onmessage = (event: MessageEvent) => {
     if (closed) return;
@@ -212,7 +231,10 @@ export function createMultiplayerBridgeHost(
   };
   channel.port1.start();
 
-  const onOpen = () => flushQueuedGameMessages();
+  const onOpen = () => {
+    flushQueuedGameMessages();
+    sendHeartbeat();
+  };
   const onMessage = (event: SocketMessageEventLike) => {
     if (closed || typeof event.data !== "string") {
       if (!closed) notifyDrop("SERVER_TO_HOST");
@@ -222,12 +244,52 @@ export function createMultiplayerBridgeHost(
       notifyDrop("SERVER_TO_HOST");
       return;
     }
-    if (event.data === MULTIPLAYER_HEARTBEAT_RESPONSE) return;
+    if (event.data === MULTIPLAYER_HEARTBEAT_RESPONSE) {
+      if (heartbeatSentAt === null) return;
+      const sampledAt = now();
+      const rttMs = Math.min(60_000, Math.max(0, Math.round(sampledAt - heartbeatSentAt)));
+      heartbeatSentAt = null;
+      callbacks.onLatencySamples?.([
+        {
+          participantId: bootstrap.self.participantId,
+          seatIndex: bootstrap.self.seatIndex,
+          rttMs,
+          sampledAt,
+        },
+      ]);
+      const mayReport =
+        lastReportedLatency === null ||
+        sampledAt - lastLatencyReportAt >= LATENCY_REPORT_MIN_INTERVAL_MS;
+      const shouldReport =
+        lastReportedLatency === null ||
+        Math.abs(lastReportedLatency - rttMs) >= LATENCY_REPORT_CHANGE_MS ||
+        sampledAt - lastLatencyReportAt >= LATENCY_REPORT_REFRESH_MS;
+      if (mayReport && shouldReport) {
+        sendToSocket({
+          type: "MULTI_LATENCY_REPORT",
+          v: MULTIPLAYER_BRIDGE_PROTOCOL_VERSION,
+          generation: bootstrap.generation,
+          rttMs,
+        });
+        lastReportedLatency = rttMs;
+        lastLatencyReportAt = sampledAt;
+      }
+      return;
+    }
     let decoded: unknown;
     try {
       decoded = JSON.parse(event.data);
     } catch {
       notifyDrop("SERVER_TO_HOST");
+      return;
+    }
+    const latencySync = MultiplayerLatencySyncMessageSchema.safeParse(decoded);
+    if (latencySync.success) {
+      if (latencySync.data.generation !== bootstrap.generation) {
+        notifyDrop("SERVER_TO_HOST");
+        return;
+      }
+      callbacks.onLatencySamples?.(latencySync.data.samples);
       return;
     }
     const message = parseHostToGameMultiplayerMessage(decoded);
@@ -282,6 +344,8 @@ export function createMultiplayerBridgeHost(
   socket.addEventListener("message", onMessage);
   socket.addEventListener("close", onClose);
   socket.addEventListener("error", onError);
+  heartbeatTimer = scheduleInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
+  if (socket.readyState === SOCKET_OPEN) sendHeartbeat();
   callbacks.onConnectionState?.({ status: "CONNECTING" });
   iframeWindow.postMessage(bootstrap, "*", [channel.port2]);
 

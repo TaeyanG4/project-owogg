@@ -32,7 +32,11 @@ import {
   decodeVerifiedMultiplayerClaims,
   encodeVerifiedMultiplayerClaims,
 } from "../src/multiplayer/internalProtocol.js";
-import { classifyRelayDeliveryBackpressure } from "../src/multiplayer/RelayRuntimeSession.js";
+import {
+  classifyRelayDeliveryBackpressure,
+  consumeRelayConnectionEnvelope,
+  createRelayConnectionAttachment,
+} from "../src/multiplayer/RelayRuntimeSession.js";
 
 const GAME_ID = 81_001;
 const GAME_VERSION_ID = 81_002;
@@ -51,6 +55,51 @@ test("Relay delivery backpressure closes bounded and pathological consumers", ({
   expect(classifyRelayDeliveryBackpressure(32 * 1024 - 1)).toBe("send");
   expect(classifyRelayDeliveryBackpressure(32 * 1024)).toBe("close");
   expect(classifyRelayDeliveryBackpressure(Number.NaN)).toBe("close");
+});
+
+test("Relay token bucket sustains 20Hz jitter while retaining a bounded burst", ({ expect }) => {
+  let serialized: unknown;
+  const socket = {
+    serializeAttachment(value: unknown) {
+      serialized = value;
+    },
+  } as unknown as WebSocket;
+  let attachment = createRelayConnectionAttachment({
+    participantId: "participant_rate_0001",
+    generation: 1,
+    connectionGeneration: 1,
+  });
+  let nowMs = 10_000;
+  for (let clientSeq = 1; clientSeq <= 200; clientSeq += 1) {
+    const next = consumeRelayConnectionEnvelope(socket, attachment, clientSeq, 20, nowMs);
+    expect(next).not.toBeNull();
+    attachment = next!;
+    // Sustained 20Hz with only +/-1ms timer jitter can place 21 messages inside the fixed window
+    // that begins with the first message. A token bucket accepts this while preserving 20Hz long
+    // term: each 40-interval cycle remains exactly two seconds.
+    nowMs += (clientSeq - 1) % 40 < 20 ? 49 : 51;
+  }
+  const cooldownControl = consumeRelayConnectionEnvelope(
+    socket,
+    attachment,
+    201,
+    20,
+    nowMs + 1_500,
+  );
+  expect(cooldownControl).not.toBeNull();
+  expect(serialized).toEqual(cooldownControl);
+
+  let burstAttachment = createRelayConnectionAttachment({
+    participantId: "participant_burst_0001",
+    generation: 1,
+    connectionGeneration: 1,
+  });
+  for (let clientSeq = 1; clientSeq <= 20; clientSeq += 1) {
+    const next = consumeRelayConnectionEnvelope(socket, burstAttachment, clientSeq, 20, 20_000);
+    expect(next).not.toBeNull();
+    burstAttachment = next!;
+  }
+  expect(consumeRelayConnectionEnvelope(socket, burstAttachment, 21, 20, 20_000)).toBeNull();
 });
 
 beforeAll(async () => {
@@ -1184,6 +1233,95 @@ test("generic Relay broadcasts and directs server-attributed payloads without a 
     expect(relayAuthority?.count).toBe(1);
     expect("deadlineTimer" in instance).toBe(false);
     expect("continuousTimer" in instance).toBe(false);
+  });
+});
+
+test("parent-only latency reports synchronize every connected seat outside application rate", async ({
+  expect,
+}) => {
+  const room = await createConnectedRelayRoom("latency_sync", { messagesPerSecond: 1 });
+  const hostFirst = nextMessageWhere(
+    room.hostSocket,
+    "host latency sync",
+    (message) => message.type === "MULTI_LATENCY_SYNC" && Array.isArray(message.samples),
+  );
+  const playerFirst = nextMessageWhere(
+    room.playerSocket,
+    "player latency sync",
+    (message) => message.type === "MULTI_LATENCY_SYNC" && Array.isArray(message.samples),
+  );
+  room.hostSocket.send(
+    JSON.stringify({
+      type: "MULTI_LATENCY_REPORT",
+      v: 1,
+      generation: 1,
+      rttMs: 42,
+    }),
+  );
+  for (const sync of await Promise.all([hostFirst, playerFirst])) {
+    expect(sync).toMatchObject({
+      type: "MULTI_LATENCY_SYNC",
+      generation: 1,
+      samples: [
+        {
+          participantId: room.hostClaims.participantId,
+          seatIndex: 0,
+          rttMs: 42,
+        },
+      ],
+    });
+  }
+
+  room.hostSocket.send(
+    JSON.stringify({
+      type: "MULTI_LATENCY_REPORT",
+      v: 1,
+      generation: 1,
+      rttMs: 99,
+    }),
+  );
+  const hostDelivery = nextMessageWhere(
+    room.hostSocket,
+    "application message after latency control",
+    (message) => message.type === "RELAY_MESSAGE",
+  );
+  room.hostSocket.send(
+    JSON.stringify({
+      type: "RELAY_SEND",
+      v: 1,
+      generation: 1,
+      clientSeq: 1,
+      delivery: "broadcast",
+      payload: { stillFirstApplicationSequence: true },
+    }),
+  );
+  expect(await hostDelivery).toMatchObject({
+    type: "RELAY_MESSAGE",
+    serverSeq: 1,
+    payload: { stillFirstApplicationSequence: true },
+  });
+
+  const bothSeats = nextMessageWhere(
+    room.hostSocket,
+    "two-seat latency sync",
+    (message) =>
+      message.type === "MULTI_LATENCY_SYNC" &&
+      Array.isArray(message.samples) &&
+      message.samples.length === 2,
+  );
+  room.playerSocket.send(
+    JSON.stringify({
+      type: "MULTI_LATENCY_REPORT",
+      v: 1,
+      generation: 1,
+      rttMs: 85,
+    }),
+  );
+  expect(await bothSeats).toMatchObject({
+    samples: [
+      { participantId: room.hostClaims.participantId, seatIndex: 0, rttMs: 42 },
+      { participantId: room.playerClaims.participantId, seatIndex: 1, rttMs: 85 },
+    ],
   });
 });
 
