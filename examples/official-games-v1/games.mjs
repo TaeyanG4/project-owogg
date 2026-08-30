@@ -1,7 +1,7 @@
 export const officialV1Games = Object.freeze([
   Object.freeze({
     slug: "official-omok",
-    artifactVersion: "1.0.0",
+    artifactVersion: "1.0.1",
     files: Object.freeze([
       "index.html",
       "style.css",
@@ -11,10 +11,15 @@ export const officialV1Games = Object.freeze([
       "owogg.logo.svg",
     ]),
   }),
-  ...["reaction-time", "aim-test", "typing-test", "memory-test"].map((slug) =>
+  ...[
+    ["reaction-time", "1.0.0"],
+    ["aim-test", "1.0.1"],
+    ["typing-test", "1.0.0"],
+    ["memory-test", "1.0.1"],
+  ].map(([slug, artifactVersion]) =>
     Object.freeze({
       slug,
-      artifactVersion: "1.0.0",
+      artifactVersion,
       files: Object.freeze([
         "index.html",
         "style.css",

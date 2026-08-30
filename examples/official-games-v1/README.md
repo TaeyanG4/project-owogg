@@ -34,6 +34,10 @@ pnpm exec tsx examples/official-games-v1/verify-all.mjs
 leaderboard를 선언하지 않습니다. 싱글 게임의 재시작 버튼은 ZIP UI가 소유하고 `OWOGG.restart()`로
 Host의 새 검증 시도를 요청합니다.
 
+공식 5종은 모두 `presentation.aspectRatio: "16:9"`를 선언합니다. 에임·기억력·오목은
+`v1.0.1`에서 1:1 선언과 세로 누적 배치를 제거했고, iframe viewport 안에서 줄어드는 내부 레이아웃으로
+전환했습니다. 반응속도·타자는 기존 `v1.0.0`부터 16:9이므로 내용이 바뀌지 않은 백업을 그대로 둡니다.
+
 온라인 오목의 payload 규칙과 상태 권위는 ZIP 안의 host-authoritative application protocol이
 소유합니다. 플랫폼 서버에는 오목 driver/ruleset이 없습니다. 반대로 싱글 경쟁 결과 verifier는
 leaderboard 보안을 위한 검토 완료 서버 코드이므로 Relay 게임 규칙과 다른 경계입니다.

@@ -8,11 +8,11 @@
   "games": [
     {
       "slug": "official-omok",
-      "filename": "official-omok_v1.0.0.zip",
-      "artifactVersion": "1.0.0",
-      "backupRelativePath": "official-omok/official-omok_v1.0.0.zip",
-      "bytes": 16254,
-      "sha256": "00f4e59c25357602fd601803a444542bec41326414f7018fd04d656c160d19f3",
+      "filename": "official-omok_v1.0.1.zip",
+      "artifactVersion": "1.0.1",
+      "backupRelativePath": "official-omok/official-omok_v1.0.1.zip",
+      "bytes": 16520,
+      "sha256": "85439fe79cf5a67f63a5ea37ad686fd86420b96266a2f6eb662036be06a07e3f",
       "playModes": ["local-multi", "online-multi"],
       "verifierId": null
     },
@@ -28,11 +28,11 @@
     },
     {
       "slug": "aim-test",
-      "filename": "aim-test_v1.0.0.zip",
-      "artifactVersion": "1.0.0",
-      "backupRelativePath": "aim-test/aim-test_v1.0.0.zip",
-      "bytes": 9676,
-      "sha256": "0624288fdecd289e84dea273d4db2d0acd4c5ee188e57a27859c44b74d61e4af",
+      "filename": "aim-test_v1.0.1.zip",
+      "artifactVersion": "1.0.1",
+      "backupRelativePath": "aim-test/aim-test_v1.0.1.zip",
+      "bytes": 9735,
+      "sha256": "f8f52af5a71b622cfe80c698eea188d523f85bcff4ff4ede363359c6e4841f97",
       "playModes": ["single"],
       "verifierId": "aim-test-v1"
     },
@@ -48,11 +48,11 @@
     },
     {
       "slug": "memory-test",
-      "filename": "memory-test_v1.0.0.zip",
-      "artifactVersion": "1.0.0",
-      "backupRelativePath": "memory-test/memory-test_v1.0.0.zip",
-      "bytes": 10947,
-      "sha256": "03f850b2ed3ba5e9b60f7997f73521bcb9969c8ab02e2ef72628c2e9f7709a8d",
+      "filename": "memory-test_v1.0.1.zip",
+      "artifactVersion": "1.0.1",
+      "backupRelativePath": "memory-test/memory-test_v1.0.1.zip",
+      "bytes": 11033,
+      "sha256": "8bc06f8c23d87bb4bd361608389be873447e604278b86726f2b8ce49941e7759",
       "playModes": ["single"],
       "verifierId": "memory-test-v1"
     }

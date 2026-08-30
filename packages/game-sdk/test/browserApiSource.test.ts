@@ -163,6 +163,23 @@ test("generic calls expose no host session state", () => {
   assert.deepEqual(plain(api.playModes), []);
 });
 
+test("restart remains available after complete so the Host can rotate the attempt", () => {
+  const { api, connectGeneric } = loadBrowserApi();
+  const messages: unknown[] = [];
+  connectGeneric({ postMessage: (message) => messages.push(message) });
+
+  api.complete({ outcome: "success", score: 42 });
+  api.event("should_not_escape");
+  api.cancel();
+  api.restart();
+
+  assert.deepEqual(plain(messages), [
+    { type: "GAME_READY" },
+    { type: "GAME_COMPLETE", outcome: "success", score: 42 },
+    { type: "GAME_RESTART" },
+  ]);
+});
+
 test("whenReady waits for generic bootstrap and exposes the populated PlayConfig", async () => {
   const { api, connectGeneric } = loadBrowserApi();
   let resolved = false;

@@ -12,7 +12,7 @@
     "tags": ["memory", "pattern", "brain", "verified"]
   },
   "input": ["mouse", "touch", "keyboard"],
-  "presentation": { "orientation": "any", "aspectRatio": "1:1" },
+  "presentation": { "orientation": "landscape", "aspectRatio": "16:9" },
   "playConfig": {
     "version": 1,
     "rulesetRevision": 1,

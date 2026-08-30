@@ -22,6 +22,13 @@ const frozenGameSlugs = [
   "reaction-time",
   "typing-test",
 ];
+const expectedArtifactVersions = new Map([
+  ["aim-test", "1.0.1"],
+  ["memory-test", "1.0.1"],
+  ["official-omok", "1.0.1"],
+  ["reaction-time", "1.0.0"],
+  ["typing-test", "1.0.0"],
+]);
 
 function read(relativePath: string): string {
   return fs.readFileSync(path.join(root, relativePath), "utf8");
@@ -44,7 +51,11 @@ test("Phase 7 source covers exactly every frozen Staging GAME identity", () => {
   assert.match(buildSource, /already exists with different content/);
   assert.match(buildSource, /artifactVersion/);
   for (const game of officialV1Games) {
-    assert.equal(game.artifactVersion, "1.0.0", `${game.slug}: artifact version`);
+    assert.equal(
+      game.artifactVersion,
+      expectedArtifactVersions.get(game.slug),
+      `${game.slug}: artifact version`,
+    );
     assert.match(game.artifactVersion, /^\d+\.\d+\.\d+$/, `${game.slug}: artifact SemVer`);
     const directory = path.join(fixtureRoot, game.slug);
     assert.deepEqual(
@@ -57,6 +68,7 @@ test("Phase 7 source covers exactly every frozen Staging GAME identity", () => {
     );
     assert.equal(manifest.schemaVersion, 1);
     assert.equal(manifest.game.slug, game.slug);
+    assert.equal(manifest.presentation?.aspectRatio, "16:9", `${game.slug}: 16:9 viewport`);
   }
 });
 

@@ -19,13 +19,13 @@
 html,
 body {
   width: 100%;
-  min-height: 100%;
+  height: 100%;
   margin: 0;
-  overflow-x: hidden;
+  overflow: hidden;
 }
 
 body {
-  min-height: 100vh;
+  height: 100vh;
   background:
     radial-gradient(circle at 15% 10%, rgb(124 58 237 / 20%), transparent 34rem),
     radial-gradient(circle at 90% 80%, rgb(14 165 233 / 13%), transparent 30rem), #08090d;
@@ -37,11 +37,13 @@ button {
 
 .shell {
   width: 100%;
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
   margin: 0;
   padding: clamp(14px, 2.2vw, 26px);
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(210px, 0.34fr) minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 16px;
 }
 
@@ -51,6 +53,14 @@ footer {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+
+.game-header {
+  grid-column: 1;
+  grid-row: 1;
+  align-items: flex-start;
+  flex-direction: column;
+  justify-content: flex-start;
 }
 
 .eyebrow {
@@ -91,7 +101,7 @@ h2 {
 .header-actions {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   flex-wrap: wrap;
   gap: 8px;
 }
@@ -136,10 +146,11 @@ h2 {
 }
 
 .status-card {
+  grid-column: 1;
+  grid-row: 2;
   min-height: 54px;
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  display: grid;
+  align-content: center;
   gap: 14px;
   padding: 13px 16px;
   border: 1px solid rgb(255 255 255 / 10%);
@@ -156,18 +167,19 @@ h2 {
 .status-card span {
   color: #9ca3af;
   font-size: 12px;
-  text-align: right;
+  text-align: left;
 }
 
 .launcher,
 .game {
+  grid-column: 2;
+  grid-row: 1 / -1;
   width: 100%;
+  min-height: 0;
   padding: clamp(6px, 1.4vw, 14px);
 }
 
 .launcher {
-  flex: 1;
-  min-height: min(64vh, 560px);
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -230,18 +242,25 @@ h2 {
 }
 
 .game-heading {
+  grid-column: 1;
+  grid-row: 1;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  align-items: stretch;
+  flex-direction: column;
+  justify-content: flex-start;
   gap: 16px;
 }
 
 .game {
-  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(150px, 0.32fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: clamp(10px, 1.5vw, 20px);
 }
 
 .actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -259,10 +278,13 @@ h2 {
 }
 
 .turns {
+  grid-column: 1;
+  grid-row: 2;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
+  align-content: start;
   gap: 9px;
-  margin: 14px 0;
+  margin: 0;
 }
 
 .turns span {
@@ -285,7 +307,11 @@ h2 {
 }
 
 .board-wrap {
+  grid-column: 2;
+  grid-row: 1 / -1;
   width: 100%;
+  height: 100%;
+  min-height: 0;
   display: grid;
   place-items: center;
 }
@@ -294,7 +320,7 @@ h2 {
   --board-padding: clamp(13px, 2.4vw, 22px);
   --grid-inset: calc(var(--board-padding) + ((100% - (2 * var(--board-padding))) / 30));
   position: relative;
-  width: min(100%, 700px);
+  width: min(100%, calc(100vh - clamp(40px, 6vw, 72px)), 700px);
   aspect-ratio: 1;
   border: 4px solid #6f431b;
   border-radius: 16px;
@@ -411,6 +437,11 @@ h2 {
 }
 
 footer {
+  grid-column: 1;
+  grid-row: 4;
+  align-items: flex-start;
+  flex-direction: column;
+  justify-content: flex-end;
   color: #717887;
   font-size: 11px;
 }
@@ -419,46 +450,100 @@ footer {
   display: none !important;
 }
 
-@media (max-width: 620px) {
+@media (max-width: 760px) {
   .shell {
-    padding: 14px;
-    gap: 11px;
+    grid-template-columns: minmax(170px, 0.38fr) minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px;
   }
 
-  .game-header,
-  .status-card,
-  footer {
-    align-items: flex-start;
+  h1 {
+    font-size: 22px;
+  }
+
+  h2 {
+    font-size: 18px;
+  }
+
+  .utility,
+  .stone-badge {
+    min-height: 30px;
+    padding: 5px 8px;
+    font-size: 10px;
   }
 
   .status-card {
-    flex-direction: column;
+    min-height: 46px;
     gap: 3px;
+    padding: 9px 10px;
   }
 
-  .status-card span {
-    text-align: left;
+  .game {
+    grid-template-columns: minmax(124px, 0.32fr) minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .actions button {
+    min-height: 34px;
+    padding: 6px 8px;
+    font-size: 10px;
+  }
+
+  .turns {
+    gap: 6px;
+  }
+
+  .turns span {
+    padding: 7px 8px;
+    font-size: 10px;
   }
 
   .mode-grid {
-    grid-template-columns: 1fr;
+    gap: 8px;
   }
 
-  .game-heading {
-    align-items: flex-start;
+  .mode-grid button {
+    min-height: 82px;
+    padding: 12px;
+  }
+}
+
+@media (max-height: 430px) {
+  .shell {
+    grid-template-rows: auto auto minmax(0, 1fr);
+    gap: 7px;
+    padding: 7px;
   }
 
-  .actions,
+  .game-header {
+    gap: 7px;
+  }
+
+  .eyebrow {
+    margin-bottom: 2px;
+    font-size: 9px;
+  }
+
+  .status-card {
+    min-height: 40px;
+    padding: 6px 8px;
+  }
+
   footer {
-    flex-direction: column;
+    display: none;
+  }
+
+  .game,
+  .launcher {
+    grid-row: 1 / -1;
+    padding: 3px;
+  }
+
+  .game {
+    grid-template-columns: minmax(118px, 0.3fr) minmax(0, 1fr);
   }
 
   .board {
-    width: min(100%, 700px);
-    min-width: 290px;
-  }
-
-  .header-actions {
-    max-width: 72%;
+    width: min(100%, calc(100vh - 18px), 700px);
   }
 }

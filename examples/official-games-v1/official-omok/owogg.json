@@ -12,7 +12,7 @@
     "tags": ["omok", "board", "local", "online"]
   },
   "input": ["mouse", "touch"],
-  "presentation": { "orientation": "any", "aspectRatio": "1:1" },
+  "presentation": { "orientation": "landscape", "aspectRatio": "16:9" },
   "progression": { "type": "none" },
   "result": { "outcome": null, "score": null },
   "leaderboard": { "enabled": false },
