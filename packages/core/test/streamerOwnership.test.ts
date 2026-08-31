@@ -116,6 +116,13 @@ class MemoryStreamerRepo implements StreamerRepository {
       audienceCount: input.audienceCount ?? null,
       channelCreatedAt: input.channelCreatedAt ?? null,
       metricsSyncedAt: now,
+      ...(input.resetApprovalForOwnershipReview && existing?.approvalStatus !== "REJECTED"
+        ? {
+            approvalStatus: "PENDING" as const,
+            approvalReasonCode: null,
+            approvedAt: null,
+          }
+        : {}),
       rowVersion: (existing?.rowVersion ?? -1) + 1,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
@@ -124,6 +131,27 @@ class MemoryStreamerRepo implements StreamerRepository {
       this.platformAccounts[this.platformAccounts.indexOf(existing)] = next;
     } else {
       this.platformAccounts.push(next);
+    }
+    if (input.resetApprovalForOwnershipReview) {
+      const profile = this.profiles.get(input.streamerId);
+      if (profile && profile.status !== "SUSPENDED") {
+        const hasApprovedPlatform = this.platformAccounts.some(
+          (account) =>
+            account.streamerId === profile.id &&
+            account.approvalStatus === "APPROVED" &&
+            account.verificationStatus === "VERIFIED" &&
+            Boolean(
+              account.ownershipExpiresAt &&
+              new Date(account.ownershipExpiresAt).getTime() > new Date(now).getTime(),
+            ),
+        );
+        this.profiles.set(profile.id, {
+          ...profile,
+          status: hasApprovedPlatform ? "VERIFIED" : "UNVERIFIED",
+          rowVersion: profile.rowVersion + 1,
+          updatedAt: now,
+        });
+      }
     }
     return next;
   }
@@ -164,13 +192,15 @@ class MemoryReviewRepo implements StreamerReviewRepository {
     );
   }
 
-  async createInitialReview(input: Parameters<StreamerReviewRepository["createInitialReview"]>[0]) {
+  async createOwnershipReview(
+    input: Parameters<StreamerReviewRepository["createOwnershipReview"]>[0],
+  ) {
     const existing = await this.findActiveJobByAccountId(input.streamerPlatformAccountId);
     if (existing) return existing;
     const review: StreamerReviewJob = {
       id: this.reviews.length + 1,
       streamerPlatformAccountId: input.streamerPlatformAccountId,
-      reviewType: "INITIAL",
+      reviewType: input.reviewType,
       status: "QUEUED",
       dueAt: input.dueAt,
       policyVersion: input.policyVersion,
@@ -326,6 +356,98 @@ test("re-verifying a rejected channel cannot bypass the reconsideration workflow
   assert.equal(retried.platformAccount.approvalStatus, "REJECTED");
   assert.equal(retried.review, null);
   assert.equal(reviews.reviews.length, 1);
+});
+
+test("expired approved ownership returns to pending and creates an ownership re-verification review", async () => {
+  const repo = new MemoryStreamerRepo();
+  const reviews = new MemoryReviewRepo();
+  const service = useCases(repo, reviews);
+  const first = await service.verifyChannelOwnership(
+    8,
+    youtube,
+    new Date("2026-08-01T00:00:00.000Z"),
+  );
+  assert.equal(first.ok, true);
+  if (!first.ok) return;
+
+  repo.profiles.set(first.profile.id, { ...first.profile, status: "VERIFIED" });
+  repo.platformAccounts[0] = {
+    ...first.platformAccount,
+    approvalStatus: "APPROVED",
+    approvalReasonCode: "MANUAL_APPROVAL",
+    approvedAt: "2026-08-01T01:00:00.000Z",
+    ownershipExpiresAt: "2026-08-30T00:00:00.000Z",
+  };
+  reviews.reviews[0] = {
+    ...reviews.reviews[0],
+    status: "APPROVED",
+    completedAt: "2026-08-01T01:00:00.000Z",
+  };
+
+  const reverified = await service.verifyChannelOwnership(
+    8,
+    { ...youtube, channelName: "Reverified channel" },
+    new Date("2026-08-31T00:00:00.000Z"),
+  );
+
+  assert.equal(reverified.ok, true);
+  if (!reverified.ok) return;
+  assert.equal(reverified.platformAccount.approvalStatus, "PENDING");
+  assert.equal(reverified.platformAccount.approvalReasonCode, null);
+  assert.equal(reverified.platformAccount.approvedAt, null);
+  assert.equal(reverified.review?.reviewType, "OWNERSHIP_REVERIFY");
+  assert.equal(reverified.profile.status, "UNVERIFIED");
+  assert.equal(reviews.reviews.length, 2);
+});
+
+test("ownership re-verification keeps the aggregate Streamer status when another platform is approved", async () => {
+  const repo = new MemoryStreamerRepo();
+  const reviews = new MemoryReviewRepo();
+  const service = useCases(repo, reviews);
+  const first = await service.verifyChannelOwnership(
+    10,
+    youtube,
+    new Date("2026-08-01T00:00:00.000Z"),
+  );
+  assert.equal(first.ok, true);
+  if (!first.ok) return;
+
+  repo.profiles.set(first.profile.id, { ...first.profile, status: "VERIFIED" });
+  repo.platformAccounts[0] = {
+    ...first.platformAccount,
+    approvalStatus: "APPROVED",
+    approvalReasonCode: "MANUAL_APPROVAL",
+    approvedAt: "2026-08-01T01:00:00.000Z",
+    ownershipExpiresAt: "2026-08-30T00:00:00.000Z",
+  };
+  reviews.reviews[0] = {
+    ...reviews.reviews[0],
+    status: "APPROVED",
+    completedAt: "2026-08-01T01:00:00.000Z",
+  };
+  repo.platformAccounts.push({
+    ...first.platformAccount,
+    id: 2,
+    platform: "TWITCH",
+    platformUserId: "twitch-approved",
+    channelName: "Approved Twitch channel",
+    channelHandle: "@approved",
+    channelUrl: "https://twitch.tv/approved",
+    ownershipExpiresAt: "2027-08-31T00:00:00.000Z",
+    approvalStatus: "APPROVED",
+  });
+
+  const reverified = await service.verifyChannelOwnership(
+    10,
+    youtube,
+    new Date("2026-08-31T00:00:00.000Z"),
+  );
+
+  assert.equal(reverified.ok, true);
+  if (!reverified.ok) return;
+  assert.equal(reverified.platformAccount.approvalStatus, "PENDING");
+  assert.equal(reverified.review?.reviewType, "OWNERSHIP_REVERIFY");
+  assert.equal(reverified.profile.status, "VERIFIED");
 });
 
 test("one user receives an independent review for every connected platform", async () => {

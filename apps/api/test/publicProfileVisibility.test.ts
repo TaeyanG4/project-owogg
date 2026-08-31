@@ -196,3 +196,32 @@ test("public streamer badges require approved, current ownership on a verified p
     assert.deepEqual(data?.streamerBadges, [], label);
   }
 });
+
+test("public streamer badges never expose the reserved SOOP platform", async () => {
+  const youtubeAccount = streamerProfile().platformAccounts[0];
+  const data = await getPublicProfileData(
+    fakeContainer(
+      baseUser(),
+      streamerProfile({
+        platformAccounts: [
+          youtubeAccount,
+          {
+            ...youtubeAccount,
+            id: 24,
+            platform: "SOOP",
+            platformUserId: "soop-owner",
+            channelName: "Reserved channel",
+            channelUrl: "https://example.com/soop-owner",
+          },
+        ],
+      }),
+    ),
+    7,
+    null,
+  );
+
+  assert.deepEqual(
+    data?.streamerBadges.map((badge) => badge.platform),
+    ["YOUTUBE"],
+  );
+});

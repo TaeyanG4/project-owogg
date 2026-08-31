@@ -27,7 +27,9 @@ OwOGG에는 하나의 **Streamer** 상태만 존재합니다. 별도의 등급·
 | `VERIFIED`   | 소유권이 유효하고 Streamer 승인을 받은 플랫폼이 하나 이상 |
 | `SUSPENDED`  | 운영자가 Streamer 프로그램 노출을 일시 또는 무기한 중단   |
 
-`SUSPENDED` 해제 시 승인된 플랫폼이 남아 있으면 `VERIFIED`, 없으면 `UNVERIFIED`로 돌아갑니다.
+`SUSPENDED` 해제 시 승인된 플랫폼이 남아 있으면 `VERIFIED`, 없으면 `UNVERIFIED`로 돌아갑니다. 종료
+시각이 있는 일시 중단은 그 시각이 지나면 같은 규칙으로 즉시 해석하며, 별도 예약 작업이나 자동 심사를
+필요로 하지 않습니다. 종료 시각이 없거나 올바르게 해석할 수 없으면 안전하게 무기한 중단으로 취급합니다.
 
 ### 2.2 플랫폼 계정 단위
 
@@ -88,6 +90,9 @@ OwOGG에는 하나의 **Streamer** 상태만 존재합니다. 별도의 등급·
 - 보류 종료 시각은 요청값 또는 active policy의 기본 보류시간을 사용합니다.
 - 재심은 active job이 없고 cooldown이 지난 플랫폼에 새 row로 생성합니다.
 - 재인증 요청은 소유권을 승인으로 추정하지 않으며, 사용자가 다시 공식 연결을 완료해야 합니다.
+- 승인된 플랫폼의 소유권이 만료되었거나 재인증 요청을 받은 뒤 공식 연결을 완료하면 기존 승인을
+  `PENDING`으로 되돌리고 별도의 `OWNERSHIP_REVERIFY` 심사를 생성합니다. 다른 플랫폼의 유효한 승인은
+  유지합니다.
 - 거절된 플랫폼의 OAuth를 다시 실행하는 것만으로는 새 심사를 만들지 않으며 정식 재심 흐름을 거칩니다.
 
 ## 4. 정책
@@ -163,6 +168,8 @@ OwOGG에는 하나의 **Streamer** 상태만 존재합니다. 별도의 등급·
 - 허용 page size: `10 | 20 | 30 | 50`
 - 운영 개요 심사 목록, 스트리머 목록, 심사 작업함, 정책 history, 감사 이력에 동일하게 적용합니다.
 - 검색·플랫폼·승인 상태·담당자·작업 상태·감사 대상 필터는 page slice 전에 서버에서 적용합니다.
+- 내부 호환용 SOOP row도 count와 page slice 전에 제외하며, 숨겨진 ID를 직접 사용한 관리 action은
+  `NOT_FOUND`로 실패합니다.
 - page 변경과 page size 변경은 bounded `LIMIT/OFFSET` query만 실행합니다.
 - page size 변경 시 page를 1로 되돌립니다.
 
@@ -199,6 +206,8 @@ OwOGG에는 하나의 **Streamer** 상태만 존재합니다. 별도의 등급·
 
 - 공개 프로필과 Streamer 랭킹은 사용자 상태가 `VERIFIED`이고, 소유권과 Streamer 승인이 모두 유효한
   플랫폼 계정만 사용합니다.
+- 사용자 집계 상태는 현재 유효한 플랫폼 승인과 활동 중단 시각으로 읽을 때 재계산합니다. 따라서 소유권
+  만료나 기간제 중단 만료가 예약 작업 없이도 설정·관리자 화면·공개 프로필·랭킹에 같은 결과로 반영됩니다.
 - 계층형 배지나 등급 필터는 제공하지 않습니다.
 - 사용자 자신의 `/api/streamers/me`에는 연결 플랫폼별 소유권과 승인 상태를 표시합니다.
 - 승인되지 않은 플랫폼은 공개 프로필과 랭킹에 노출하지 않습니다.
@@ -306,6 +315,9 @@ callback은 provider 콘솔과 GitHub Variable에 정확히 같은 값을 등록
 - canonical 채널 재할당 방지, 정책 constraint, 심사 정책 pin, callback pause 테스트 통과
 - OAuth 사용자·session·platform 결박, state 만료·재사용, 타 사용자 canonical 채널 탈취 방지 테스트 통과
 - YouTube·Twitch·CHZZK token-bound canonical identity adapter 테스트 통과; SOOP fail-closed 보류 테스트 통과
+- 재인증 시 기존 승인을 `PENDING`으로 되돌리고 `OWNERSHIP_REVERIFY` 심사를 별도로 생성하는 테스트 통과
+- SOOP legacy row의 관리자 count/pagination/action과 공개 프로필·랭킹 노출 차단 테스트 통과
+- 기간제 프로그램 중단 만료 후 상태·관리자 집계·공개/전용 랭킹 복구 및 재중단 테스트 통과
 - 전체 `pnpm verify` 통과
 - 스트리머 인증 Wiki의 데스크톱·390px 모바일 렌더와 브라우저 오류 없음 확인
 
@@ -354,4 +366,9 @@ Production provider 등록이나 preflight 구현 완료는 Production 배포 �
   `채널 정보 조회`와 `유저 조회` scope로 등록했습니다. GitHub의 Staging Environment 설정과 Production
   Repository variables/secrets 등록도 완료했습니다. 실제 provider 계정 OAuth 왕복과 인증된
   설정·관리자 화면의 브라우저 acceptance를 환경별로 진행합니다.
-- Staging이나 Production에는 아직 반영하지 않았습니다.
+- Staging은 `2aada87d20b99d34ca9129a94134eea04ea7f91d` tree까지 배포되어 provider readiness를 확인할 수
+  있습니다. 이 문서와 함께 추가한 재인증·SOOP pagination/action·기간제 중단 보완은 아직 로컬 작업
+  브랜치에만 있으며 Staging 재배포 전입니다.
+- Production에는 Streamer 기능을 아직 승격하지 않았으며 이번 작업에서도 변경하지 않습니다.
+- 남은 acceptance는 Staging에 같은 tree를 반영한 뒤 사용자가 실제 YouTube·Twitch·CHZZK 계정으로 OAuth
+  왕복, 플랫폼별 독립 심사, 수동 지표 갱신과 기간제 중단 표시를 확인하는 단계입니다.

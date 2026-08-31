@@ -37,14 +37,15 @@ test("initial review creation is idempotent for one platform account", async () 
   const repository = new D1StreamerReviewRepository(db);
   const input = {
     streamerPlatformAccountId: 11,
+    reviewType: "INITIAL" as const,
     dueAt: "2026-09-01T00:00:00.000Z",
     policyVersion: 3,
     evidenceJson: '{"policyVersion":3}',
     nowIso: "2026-08-31T00:00:00.000Z",
   };
 
-  const first = await repository.createInitialReview(input);
-  const replay = await repository.createInitialReview(input);
+  const first = await repository.createOwnershipReview(input);
+  const replay = await repository.createOwnershipReview(input);
 
   assert.equal(first.id, replay.id);
   assert.equal(first.status, "QUEUED");
@@ -64,15 +65,38 @@ test("different platform accounts always receive separate reviews", async () => 
     evidenceJson: "{}",
     nowIso: "2026-08-31T00:00:00.000Z",
   };
-  const youtube = await repository.createInitialReview({
+  const youtube = await repository.createOwnershipReview({
     ...common,
     streamerPlatformAccountId: 11,
+    reviewType: "INITIAL",
   });
-  const twitch = await repository.createInitialReview({
+  const twitch = await repository.createOwnershipReview({
     ...common,
     streamerPlatformAccountId: 12,
+    reviewType: "INITIAL",
   });
 
   assert.notEqual(youtube.id, twitch.id);
   assert.notEqual(youtube.streamerPlatformAccountId, twitch.streamerPlatformAccountId);
+});
+
+test("ownership re-verification is recorded as a separate review type", async () => {
+  const { db, raw } = createSqliteD1(SCHEMA);
+  const repository = new D1StreamerReviewRepository(db);
+
+  const review = await repository.createOwnershipReview({
+    streamerPlatformAccountId: 21,
+    reviewType: "OWNERSHIP_REVERIFY",
+    dueAt: "2026-09-02T00:00:00.000Z",
+    policyVersion: 4,
+    evidenceJson: '{"policyVersion":4}',
+    nowIso: "2026-09-01T00:00:00.000Z",
+  });
+
+  assert.equal(review.reviewType, "OWNERSHIP_REVERIFY");
+  assert.equal(
+    raw.prepare("SELECT review_type FROM streamer_platform_reviews WHERE id = ?").get(review.id)
+      ?.review_type,
+    "OWNERSHIP_REVERIFY",
+  );
 });

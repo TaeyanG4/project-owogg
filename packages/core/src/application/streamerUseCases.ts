@@ -220,7 +220,16 @@ export class StreamerUseCases {
 
     const nowMs = now.getTime();
     const nowIso = now.toISOString();
-    const profile = await this.streamerRepo.upsertProfile({ userId, status: "UNVERIFIED" });
+    const ownershipWasCurrent = Boolean(
+      existingAccount?.verificationStatus === "VERIFIED" &&
+      existingAccount.ownershipExpiresAt &&
+      new Date(existingAccount.ownershipExpiresAt).getTime() > nowMs,
+    );
+    const ownershipReverifyRequired = Boolean(
+      existingAccount && existingAccount.approvalStatus !== "REJECTED" && !ownershipWasCurrent,
+    );
+    const profile =
+      userProfile ?? (await this.streamerRepo.upsertProfile({ userId, status: "UNVERIFIED" }));
     const platformAccount = await this.streamerRepo.upsertPlatformAccount({
       streamerId: profile.id,
       platform: channelInfo.platform,
@@ -237,6 +246,7 @@ export class StreamerUseCases {
       ownershipExpiresAt: new Date(
         nowMs + policy.values.ownershipValidityDays * DAY_MS,
       ).toISOString(),
+      resetApprovalForOwnershipReview: ownershipReverifyRequired,
     });
     if (platformAccount.streamerId !== profile.id) {
       return {
@@ -248,8 +258,9 @@ export class StreamerUseCases {
 
     const review =
       platformAccount.approvalStatus === "PENDING"
-        ? await this.reviewRepo.createInitialReview({
+        ? await this.reviewRepo.createOwnershipReview({
             streamerPlatformAccountId: platformAccount.id,
+            reviewType: ownershipReverifyRequired ? "OWNERSHIP_REVERIFY" : "INITIAL",
             dueAt: new Date(nowMs + policy.values.reviewSlaHours * HOUR_MS).toISOString(),
             policyVersion: policy.version,
             evidenceJson: JSON.stringify(initialEvidence(platformAccount, policy, nowIso)),
@@ -257,6 +268,9 @@ export class StreamerUseCases {
           })
         : null;
 
-    return { ok: true, profile, platformAccount, review };
+    const currentProfile = ownershipReverifyRequired
+      ? ((await this.streamerRepo.findProfileById(profile.id)) ?? profile)
+      : profile;
+    return { ok: true, profile: currentProfile, platformAccount, review };
   }
 }

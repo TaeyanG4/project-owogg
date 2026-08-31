@@ -20,7 +20,7 @@ function seedUser(raw: import("node:sqlite").DatabaseSync, nickname: string): nu
 function seedStreamerProfile(
   raw: import("node:sqlite").DatabaseSync,
   userId: number,
-  status: "VERIFIED" | "UNVERIFIED" = "VERIFIED",
+  status: "VERIFIED" | "UNVERIFIED" | "SUSPENDED" = "VERIFIED",
 ): number {
   const now = new Date().toISOString();
   const info = raw
@@ -31,6 +31,54 @@ function seedStreamerProfile(
     .run(userId, status, now, now);
   return Number(info.lastInsertRowid);
 }
+
+test("an expired program suspension restores effective profile and ranking eligibility", async () => {
+  const { db, raw } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);
+  const expiredUserId = seedUser(raw, "expired-suspension");
+  const expiredStreamerId = seedStreamerProfile(raw, expiredUserId, "SUSPENDED");
+  addPlatformAccount(raw, expiredStreamerId, "YOUTUBE", "yt-expired-suspension");
+  raw
+    .prepare("UPDATE streamer_profiles SET suspended_until = ? WHERE id = ?")
+    .run("2020-01-01T00:00:00.000Z", expiredStreamerId);
+  seedScore(raw, expiredUserId, 700);
+  seedXp(raw, expiredUserId, 700);
+
+  const activeUserId = seedUser(raw, "active-suspension");
+  const activeStreamerId = seedStreamerProfile(raw, activeUserId, "SUSPENDED");
+  addPlatformAccount(raw, activeStreamerId, "TWITCH", "tw-active-suspension");
+  raw
+    .prepare("UPDATE streamer_profiles SET suspended_until = ? WHERE id = ?")
+    .run("2030-01-01T00:00:00.000Z", activeStreamerId);
+  seedScore(raw, activeUserId, 900);
+  seedXp(raw, activeUserId, 900);
+
+  const indefiniteUserId = seedUser(raw, "indefinite-suspension");
+  const indefiniteStreamerId = seedStreamerProfile(raw, indefiniteUserId, "SUSPENDED");
+  addPlatformAccount(raw, indefiniteStreamerId, "CHZZK", "cz-indefinite-suspension");
+  seedScore(raw, indefiniteUserId, 1_000);
+  seedXp(raw, indefiniteUserId, 1_000);
+
+  const repo = new D1StreamerRepository(db);
+  const [expiredProfile, activeProfile, scoreRanking, xpRanking] = await Promise.all([
+    repo.findProfileByUserId(expiredUserId),
+    repo.findProfileByUserId(activeUserId),
+    repo.getStreamerRankings({ mode: "score", gameId: "reaction-time" }),
+    repo.getStreamerRankings({ mode: "xp" }),
+  ]);
+
+  assert.equal(expiredProfile?.status, "VERIFIED");
+  assert.equal(expiredProfile?.suspendedUntil, null);
+  assert.equal(activeProfile?.status, "SUSPENDED");
+  assert.equal(activeProfile?.suspendedUntil, "2030-01-01T00:00:00.000Z");
+  assert.deepEqual(
+    scoreRanking.entries.map((entry) => entry.userId),
+    [expiredUserId],
+  );
+  assert.deepEqual(
+    xpRanking.entries.map((entry) => entry.userId),
+    [expiredUserId],
+  );
+});
 
 function addPlatformAccount(
   raw: import("node:sqlite").DatabaseSync,
@@ -170,10 +218,31 @@ for (const ownershipExpiry of [null, "2020-01-01T00:00:00.000Z"] as const) {
 
     const repo = new D1StreamerRepository(db);
     const result = await repo.getStreamerRankings({ mode: "score", gameId: "reaction-time" });
+    const profile = await repo.findProfileByUserId(userId);
     assert.equal(result.total, 0);
     assert.equal(result.entries.length, 0);
+    assert.equal(profile?.status, "UNVERIFIED");
   });
 }
+
+test("current platform approval repairs a stale aggregate profile status at read time", async () => {
+  const { db, raw } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);
+  const userId = seedUser(raw, "stale-aggregate");
+  const streamerId = seedStreamerProfile(raw, userId, "UNVERIFIED");
+  addPlatformAccount(raw, streamerId, "YOUTUBE", "yt-stale-aggregate", "VERIFIED");
+  seedScore(raw, userId, 650);
+
+  const repo = new D1StreamerRepository(db);
+  const [profile, ranking] = await Promise.all([
+    repo.findProfileByUserId(userId),
+    repo.getStreamerRankings({ mode: "score", gameId: "reaction-time" }),
+  ]);
+  assert.equal(profile?.status, "VERIFIED");
+  assert.deepEqual(
+    ranking.entries.map((entry) => entry.userId),
+    [userId],
+  );
+});
 
 test("streamer ranking: one verified + one pending account exposes only the verified platform badge", async () => {
   const { db, raw } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);

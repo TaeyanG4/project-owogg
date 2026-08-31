@@ -37,6 +37,45 @@ function mapPlatformAccountRow(r: Record<string, unknown>): StreamerPlatformAcco
   };
 }
 
+const MANAGED_STREAMER_PLATFORMS = new Set<StreamerPlatformType>(["YOUTUBE", "CHZZK", "TWITCH"]);
+
+function effectiveProfileState(
+  row: Record<string, unknown>,
+  platformAccounts: StreamerPlatformAccount[],
+  nowIso: string,
+): Pick<StreamerProfile, "status" | "suspendedUntil"> {
+  const storedStatus = String(row.status) as StreamerStatusType;
+  const storedSuspendedUntil = row.suspended_until ? String(row.suspended_until) : null;
+  const nowMs = Date.parse(nowIso);
+  const suspendedUntilMs = storedSuspendedUntil ? Date.parse(storedSuspendedUntil) : Number.NaN;
+  const suspensionIsActive =
+    storedStatus === "SUSPENDED" &&
+    (storedSuspendedUntil === null ||
+      !Number.isFinite(suspendedUntilMs) ||
+      suspendedUntilMs > nowMs);
+  if (suspensionIsActive) {
+    return { status: "SUSPENDED", suspendedUntil: storedSuspendedUntil };
+  }
+
+  const hasCurrentApproval = platformAccounts.some((account) => {
+    if (
+      !MANAGED_STREAMER_PLATFORMS.has(account.platform) ||
+      account.verificationStatus !== "VERIFIED" ||
+      account.approvalStatus !== "APPROVED" ||
+      !account.ownershipExpiresAt
+    ) {
+      return false;
+    }
+    const ownershipExpiresAtMs = Date.parse(account.ownershipExpiresAt);
+    return Number.isFinite(ownershipExpiresAtMs) && ownershipExpiresAtMs > nowMs;
+  });
+
+  return {
+    status: hasCurrentApproval ? "VERIFIED" : "UNVERIFIED",
+    suspendedUntil: null,
+  };
+}
+
 export class D1StreamerRepository implements StreamerRepository {
   constructor(private db: D1Database) {}
 
@@ -50,24 +89,25 @@ export class D1StreamerRepository implements StreamerRepository {
 
     if (!row) return null;
 
-    const profile: StreamerProfile = {
-      id: Number(row.id),
-      userId: Number(row.user_id),
-      status: String(row.status) as StreamerStatusType,
-      suspendedUntil: row.suspended_until ? String(row.suspended_until) : null,
-      rowVersion: Number(row.row_version ?? 0),
-      createdAt: String(row.created_at),
-      updatedAt: String(row.updated_at),
-    };
+    const profileId = Number(row.id);
 
     const accRes = await this.db
       .prepare(`SELECT * FROM streamer_platform_accounts WHERE streamer_id = ? ORDER BY id ASC`)
-      .bind(profile.id)
+      .bind(profileId)
       .all<Record<string, unknown>>();
 
     const platformAccounts: StreamerPlatformAccount[] = (accRes.results || []).map(
       mapPlatformAccountRow,
     );
+    const effectiveState = effectiveProfileState(row, platformAccounts, new Date().toISOString());
+    const profile: StreamerProfile = {
+      id: profileId,
+      userId: Number(row.user_id),
+      ...effectiveState,
+      rowVersion: Number(row.row_version ?? 0),
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    };
 
     return { ...profile, platformAccounts };
   }
@@ -82,16 +122,6 @@ export class D1StreamerRepository implements StreamerRepository {
 
     if (!row) return null;
 
-    const profile: StreamerProfile = {
-      id: Number(row.id),
-      userId: Number(row.user_id),
-      status: String(row.status) as StreamerStatusType,
-      suspendedUntil: row.suspended_until ? String(row.suspended_until) : null,
-      rowVersion: Number(row.row_version ?? 0),
-      createdAt: String(row.created_at),
-      updatedAt: String(row.updated_at),
-    };
-
     const accRes = await this.db
       .prepare(`SELECT * FROM streamer_platform_accounts WHERE streamer_id = ? ORDER BY id ASC`)
       .bind(streamerId)
@@ -100,6 +130,15 @@ export class D1StreamerRepository implements StreamerRepository {
     const platformAccounts: StreamerPlatformAccount[] = (accRes.results || []).map(
       mapPlatformAccountRow,
     );
+    const effectiveState = effectiveProfileState(row, platformAccounts, new Date().toISOString());
+    const profile: StreamerProfile = {
+      id: Number(row.id),
+      userId: Number(row.user_id),
+      ...effectiveState,
+      rowVersion: Number(row.row_version ?? 0),
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    };
 
     return { ...profile, platformAccounts };
   }
@@ -244,6 +283,7 @@ export class D1StreamerRepository implements StreamerRepository {
     audienceCount?: number;
     channelCreatedAt?: string | null;
     ownershipExpiresAt?: string | null;
+    resetApprovalForOwnershipReview?: boolean;
   }): Promise<StreamerPlatformAccount> {
     const now = new Date().toISOString();
     const verStatus = input.verificationStatus ?? "VERIFIED";
@@ -256,12 +296,24 @@ export class D1StreamerRepository implements StreamerRepository {
     const audienceValue = audienceKnown ? (input.audienceCount as number) : null;
 
     if (existing) {
-      await this.db
+      const update = await this.db
         .prepare(
           `UPDATE streamer_platform_accounts
            SET streamer_id = ?, channel_name = ?, channel_handle = ?, channel_url = ?, avatar_url = ?,
                verification_status = ?, verified_at = ?, audience_count = ?, audience_count_known = ?,
                channel_created_at = ?, metrics_synced_at = ?, ownership_expires_at = ?,
+               approval_status = CASE
+                 WHEN ? = 1 AND approval_status <> 'REJECTED' THEN 'PENDING'
+                 ELSE approval_status END,
+               approval_reason_code = CASE
+                 WHEN ? = 1 AND approval_status <> 'REJECTED' THEN NULL
+                 ELSE approval_reason_code END,
+               approved_at = CASE
+                 WHEN ? = 1 AND approval_status <> 'REJECTED' THEN NULL
+                 ELSE approved_at END,
+               approved_by_user_id = CASE
+                 WHEN ? = 1 AND approval_status <> 'REJECTED' THEN NULL
+                 ELSE approved_by_user_id END,
                updated_at = ?, row_version = row_version + 1
            WHERE platform = ? AND platform_user_id = ? AND streamer_id = ?`,
         )
@@ -278,12 +330,43 @@ export class D1StreamerRepository implements StreamerRepository {
           input.channelCreatedAt ?? existing.channelCreatedAt ?? null,
           now,
           input.ownershipExpiresAt ?? existing.ownershipExpiresAt,
+          input.resetApprovalForOwnershipReview ? 1 : 0,
+          input.resetApprovalForOwnershipReview ? 1 : 0,
+          input.resetApprovalForOwnershipReview ? 1 : 0,
+          input.resetApprovalForOwnershipReview ? 1 : 0,
           now,
           input.platform,
           input.platformUserId,
           input.streamerId,
         )
         .run();
+
+      if (input.resetApprovalForOwnershipReview && Number(update.meta?.changes ?? 0) > 0) {
+        await this.db
+          .prepare(
+            `UPDATE streamer_profiles
+             SET status = CASE
+                   WHEN status = 'SUSPENDED'
+                     AND (suspended_until IS NULL OR datetime(suspended_until) IS NULL
+                       OR datetime(suspended_until) > datetime(?))
+                     THEN status
+                   WHEN EXISTS (
+                     SELECT 1 FROM streamer_platform_accounts approved
+                     WHERE approved.streamer_id = streamer_profiles.id
+                       AND approved.platform IN ('YOUTUBE', 'CHZZK', 'TWITCH')
+                       AND approved.approval_status = 'APPROVED'
+                       AND approved.verification_status = 'VERIFIED'
+                       AND approved.ownership_expires_at IS NOT NULL
+                       AND datetime(approved.ownership_expires_at) > datetime(?)
+                   ) THEN 'VERIFIED'
+                   ELSE 'UNVERIFIED'
+                 END,
+                 updated_at = ?, row_version = row_version + 1
+             WHERE id = ?`,
+          )
+          .bind(now, now, now, input.streamerId)
+          .run();
+      }
 
       const updated = await this.findPlatformAccount(input.platform, input.platformUserId);
       if (updated) return updated;
@@ -376,7 +459,13 @@ export class D1StreamerRepository implements StreamerRepository {
           JOIN games g ON g.slug = s.game_id
             AND g.deleted_at IS NULL
             AND g.leaderboard_generation = s.leaderboard_generation
-          WHERE cp.status = 'VERIFIED' AND s.deleted_at IS NULL ${gameFilterClause} ${platformFilterClause}
+          WHERE (
+              cp.status <> 'SUSPENDED'
+              OR (cp.suspended_until IS NOT NULL
+                AND datetime(cp.suspended_until) IS NOT NULL
+                AND datetime(cp.suspended_until) <= datetime('now'))
+            )
+            AND s.deleted_at IS NULL ${gameFilterClause} ${platformFilterClause}
         ),
         pb AS (
           SELECT *, ROW_NUMBER() OVER (
@@ -444,7 +533,12 @@ export class D1StreamerRepository implements StreamerRepository {
         SELECT COUNT(DISTINCT cp.user_id) as total
         FROM streamer_profiles cp
         JOIN user_progress up ON up.user_id = cp.user_id
-        WHERE cp.status = 'VERIFIED' ${platformFilterClause}
+        WHERE (
+          cp.status <> 'SUSPENDED'
+          OR (cp.suspended_until IS NOT NULL
+            AND datetime(cp.suspended_until) IS NOT NULL
+            AND datetime(cp.suspended_until) <= datetime('now'))
+        ) ${platformFilterClause}
       `;
 
       const countStmt = options.platform
@@ -460,7 +554,12 @@ export class D1StreamerRepository implements StreamerRepository {
         FROM streamer_profiles cp
         JOIN users u ON u.id = cp.user_id
         JOIN user_progress up ON up.user_id = cp.user_id
-        WHERE cp.status = 'VERIFIED' ${platformFilterClause}
+        WHERE (
+          cp.status <> 'SUSPENDED'
+          OR (cp.suspended_until IS NOT NULL
+            AND datetime(cp.suspended_until) IS NOT NULL
+            AND datetime(cp.suspended_until) <= datetime('now'))
+        ) ${platformFilterClause}
         ORDER BY up.total_xp DESC, cp.user_id ASC
         LIMIT ? OFFSET ?
       `;

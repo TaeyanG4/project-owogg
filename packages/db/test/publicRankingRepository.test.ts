@@ -226,6 +226,62 @@ test("public streamer ranking excludes SOOP eligibility and channel badges", asy
   assert.deepEqual(soop, []);
 });
 
+test("public streamer ranking restores an expired suspension but excludes active suspension", async () => {
+  const { db, raw } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);
+  const expiredUser = seedUser(raw, "Expired suspension");
+  const activeUser = seedUser(raw, "Active suspension");
+  const expiredStreamerId = seedStreamer(raw, expiredUser, "YOUTUBE");
+  const activeStreamerId = seedStreamer(raw, activeUser, "TWITCH");
+  raw
+    .prepare("UPDATE streamer_profiles SET status = 'SUSPENDED', suspended_until = ? WHERE id = ?")
+    .run("2020-01-01T00:00:00.000Z", expiredStreamerId);
+  raw
+    .prepare("UPDATE streamer_profiles SET status = 'SUSPENDED', suspended_until = ? WHERE id = ?")
+    .run("2030-01-01T00:00:00.000Z", activeStreamerId);
+  seedScore(raw, expiredUser, 100, "2026-08-30T16:00:00.000Z");
+  seedScore(raw, activeUser, 999, "2026-08-30T16:00:00.000Z");
+
+  const rows = await new D1PublicRankingRepository(db).getScoreRanking({
+    scope: "streamer",
+    gameId: "aim-test",
+    difficulty: "normal",
+    rulesetRevision: 2,
+    direction: "desc",
+    startAt: "2026-08-30T15:00:00.000Z",
+    endAt: "2026-08-31T15:00:00.000Z",
+    limit: 20,
+  });
+
+  assert.deepEqual(
+    rows.map((row) => row.userId),
+    [expiredUser],
+  );
+});
+
+test("public streamer ranking derives eligibility from current platform approval", async () => {
+  const { db, raw } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);
+  const userId = seedUser(raw, "Stale aggregate status");
+  const streamerId = seedStreamer(raw, userId, "CHZZK");
+  raw.prepare("UPDATE streamer_profiles SET status = 'UNVERIFIED' WHERE id = ?").run(streamerId);
+  seedScore(raw, userId, 120, "2026-08-30T16:00:00.000Z");
+
+  const rows = await new D1PublicRankingRepository(db).getScoreRanking({
+    scope: "streamer",
+    gameId: "aim-test",
+    difficulty: "normal",
+    rulesetRevision: 2,
+    direction: "desc",
+    startAt: "2026-08-30T15:00:00.000Z",
+    endAt: "2026-08-31T15:00:00.000Z",
+    limit: 20,
+  });
+
+  assert.deepEqual(
+    rows.map((row) => row.userId),
+    [userId],
+  );
+});
+
 test("streamer scope uses the same XP and active-streak calculations as general rankings", async () => {
   const { db, raw } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);
   const streamer = seedUser(raw, "Streamer", "KR");

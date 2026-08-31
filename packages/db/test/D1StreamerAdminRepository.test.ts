@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { D1StreamerAdminRepository } from "../src/d1/D1StreamerAdminRepository.js";
 import { D1StreamerRepository } from "../src/d1/D1StreamerRepository.js";
-import type { StreamerAdminWorkspaceQuery } from "@owogg/core";
+import type { StreamerAdminActionInput, StreamerAdminWorkspaceQuery } from "@owogg/core";
 import { createSqliteD1 } from "./helpers/sqliteD1.js";
 
 function migratedDb() {
@@ -46,7 +46,7 @@ function query(overrides: Partial<StreamerAdminWorkspaceQuery> = {}): StreamerAd
 function seedApplicant(
   raw: import("node:sqlite").DatabaseSync,
   suffix: string,
-  platforms: Array<"YOUTUBE" | "TWITCH"> = ["YOUTUBE"],
+  platforms: Array<"YOUTUBE" | "CHZZK" | "SOOP" | "TWITCH"> = ["YOUTUBE"],
 ) {
   const now = "2026-08-31T00:00:00.000Z";
   const user = raw.prepare("INSERT INTO users (nickname) VALUES (?)").run(`applicant-${suffix}`);
@@ -98,11 +98,100 @@ function seedApplicant(
   return { userId, streamerId, accountIds, reviewIds };
 }
 
+test("workspace excludes reserved SOOP data before counts and pagination", async () => {
+  const { db, raw } = migratedDb();
+  raw.prepare("INSERT INTO users (id, nickname) VALUES (1, 'operator')").run();
+  for (let index = 0; index < 12; index += 1) {
+    seedApplicant(raw, `visible-${index}`);
+    seedApplicant(raw, `reserved-${index}`, ["SOOP"]);
+  }
+  const mixed = seedApplicant(raw, "mixed", ["YOUTUBE", "SOOP"]);
+  const reservedAction = seedApplicant(raw, "reserved-action", ["SOOP"]);
+  raw
+    .prepare(
+      `INSERT INTO streamer_admin_audit_log
+         (actor_user_id, action, target_type, target_id, target_label, public_reason_code,
+          internal_note, change_summary, policy_version, correlation_id, created_at)
+       VALUES
+         (1, 'PAUSE_PROVIDER_CONNECTIONS', 'PROVIDER', 'SOOP', 'SOOP', 'reserved audit',
+          NULL, 'SOOP connection paused', NULL, 'reserved-audit', '2026-08-31T02:00:00.000Z'),
+         (1, 'PAUSE_PROVIDER_CONNECTIONS', 'PROVIDER', 'YOUTUBE', 'YOUTUBE', 'visible audit',
+          NULL, 'YouTube connection paused', NULL, 'visible-audit', '2026-08-31T02:01:00.000Z')`,
+    )
+    .run();
+
+  const repository = new D1StreamerAdminRepository(db);
+  const workspace = await repository.getWorkspace(
+    query({
+      overviewPageSize: 10,
+      rosterPageSize: 10,
+      reviewPageSize: 10,
+      auditPageSize: 10,
+    }),
+    1,
+  );
+
+  assert.equal(workspace.overview.totalApplicants, 13);
+  assert.equal(workspace.overview.connectedPlatforms, 13);
+  assert.equal(workspace.overview.pendingPlatformReviews, 13);
+  assert.equal(workspace.overviewQueue.total, 13);
+  assert.equal(workspace.overviewQueue.items.length, 10);
+  assert.equal(workspace.roster.total, 13);
+  assert.equal(workspace.roster.items.length, 10);
+  assert.equal(workspace.reviews.total, 13);
+  assert.equal(workspace.reviews.items.length, 10);
+  assert.equal(workspace.audits.total, 1);
+  assert.equal(workspace.audits.items[0]?.correlationId, "visible-audit");
+  assert.deepEqual(
+    workspace.providerSettings.map((provider) => provider.platform),
+    ["CHZZK", "TWITCH", "YOUTUBE"],
+  );
+  assert.equal(
+    [workspace.overviewQueue.items, workspace.reviews.items]
+      .flat()
+      .some((review) => review.platformAccount.platform === "SOOP"),
+    false,
+  );
+
+  const mixedRosterItem = (
+    await repository.getWorkspace(query({ rosterQuery: String(mixed.userId) }), 1)
+  ).roster.items[0];
+  assert.ok(mixedRosterItem);
+  assert.deepEqual(
+    mixedRosterItem.platformAccounts.map((account) => account.platform),
+    ["YOUTUBE"],
+  );
+
+  const directSoopFilter = await repository.getWorkspace(query({ rosterPlatform: "SOOP" }), 1);
+  assert.equal(directSoopFilter.roster.total, 0);
+  assert.deepEqual(directSoopFilter.roster.items, []);
+
+  assert.deepEqual(
+    await repository.applyAction(
+      actionInput("APPROVE_STREAMER", reservedAction.reviewIds[0]!, "reserved-review-action"),
+    ),
+    { applied: false, code: "NOT_FOUND", rowVersion: null },
+  );
+  assert.deepEqual(
+    await repository.applyAction(
+      actionInput("SUSPEND_STREAMER", reservedAction.streamerId, "reserved-profile-action"),
+    ),
+    { applied: false, code: "NOT_FOUND", rowVersion: null },
+  );
+  assert.deepEqual(
+    await repository.applyAction(
+      actionInput("PAUSE_PROVIDER_CONNECTIONS", "SOOP", "reserved-provider-action"),
+    ),
+    { applied: false, code: "NOT_FOUND", rowVersion: null },
+  );
+});
+
 function actionInput(
-  action: "APPROVE_STREAMER" | "REJECT_STREAMER" | "CLAIM_REVIEW",
-  targetId: number,
+  action: StreamerAdminActionInput["action"],
+  targetId: number | string,
   correlationId: string,
-) {
+  overrides: Partial<StreamerAdminActionInput> = {},
+): StreamerAdminActionInput {
   return {
     action,
     targetId: String(targetId),
@@ -114,7 +203,8 @@ function actionInput(
     policyValues: null,
     correlationId,
     nowIso: "2026-08-31T01:00:00.000Z",
-  } as const;
+    ...overrides,
+  };
 }
 
 test("workspace pagination supports 10, 20, 30, and 50 without client-side slicing", async () => {
@@ -213,6 +303,305 @@ test("review claims use row-version compare-and-swap", async () => {
     },
     { work_state: "APPROVED", claimed_by_user_id: null, claim_expires_at: null },
   );
+});
+
+test("manual queue controls claim, release, hold, and cancel with immutable audits", async () => {
+  const { db, raw } = migratedDb();
+  raw.prepare("INSERT INTO users (id, nickname) VALUES (1, 'operator')").run();
+  const applicant = seedApplicant(raw, "queue-controls");
+  const repository = new D1StreamerAdminRepository(db);
+  const reviewId = applicant.reviewIds[0]!;
+
+  assert.equal(
+    (await repository.applyAction(actionInput("CLAIM_REVIEW", reviewId, "queue-claim"))).applied,
+    true,
+  );
+  assert.equal(
+    (
+      await repository.applyAction(
+        actionInput("RELEASE_REVIEW", reviewId, "queue-release", { expectedVersion: 1 }),
+      )
+    ).applied,
+    true,
+  );
+  assert.equal(
+    (
+      await repository.applyAction(
+        actionInput("HOLD_REVIEW", reviewId, "queue-hold", { expectedVersion: 2 }),
+      )
+    ).applied,
+    true,
+  );
+  assert.deepEqual(
+    {
+      ...raw
+        .prepare(
+          `SELECT work_state, hold_until, claimed_by_user_id, row_version
+           FROM streamer_platform_reviews WHERE id = ?`,
+        )
+        .get(reviewId),
+    },
+    {
+      work_state: "ON_HOLD",
+      hold_until: "2026-09-01T01:00:00.000Z",
+      claimed_by_user_id: null,
+      row_version: 3,
+    },
+  );
+  assert.equal(
+    (
+      await repository.applyAction(
+        actionInput("CANCEL_REVIEW", reviewId, "queue-cancel", { expectedVersion: 3 }),
+      )
+    ).applied,
+    true,
+  );
+  assert.deepEqual(
+    raw
+      .prepare("SELECT action FROM streamer_admin_audit_log ORDER BY id ASC")
+      .all()
+      .map((row) => row.action),
+    ["CLAIM_REVIEW", "RELEASE_REVIEW", "HOLD_REVIEW", "CANCEL_REVIEW"],
+  );
+});
+
+test("cancelled reviews can be recreated while duplicate active reviews remain blocked", async () => {
+  const { db, raw } = migratedDb();
+  raw.prepare("INSERT INTO users (id, nickname) VALUES (1, 'operator')").run();
+  const applicant = seedApplicant(raw, "recreate");
+  const repository = new D1StreamerAdminRepository(db);
+
+  const duplicate = await repository.applyAction(
+    actionInput("CREATE_REVIEW", applicant.accountIds[0]!, "duplicate-active"),
+  );
+  assert.deepEqual(duplicate, {
+    applied: false,
+    code: "ACTIVE_REVIEW_EXISTS",
+    rowVersion: null,
+  });
+
+  const cancelled = await repository.applyAction(
+    actionInput("CANCEL_REVIEW", applicant.reviewIds[0]!, "cancel-before-recreate"),
+  );
+  assert.equal(cancelled.applied, true);
+  const recreated = await repository.applyAction(
+    actionInput("CREATE_REVIEW", applicant.accountIds[0]!, "recreate-after-cancel"),
+  );
+  assert.equal(recreated.applied, true);
+  assert.deepEqual(
+    raw
+      .prepare(
+        `SELECT review_type, requested_by, work_state
+         FROM streamer_platform_reviews WHERE streamer_platform_account_id = ? ORDER BY id ASC`,
+      )
+      .all(applicant.accountIds[0])
+      .map((row) => ({ ...row })),
+    [
+      { review_type: "INITIAL", requested_by: "USER", work_state: "CANCELLED" },
+      { review_type: "INITIAL", requested_by: "ADMIN", work_state: "QUEUED" },
+    ],
+  );
+});
+
+test("reconsideration enforces cooldown and links a new review to the rejected decision", async () => {
+  const { db, raw } = migratedDb();
+  raw.prepare("INSERT INTO users (id, nickname) VALUES (1, 'operator')").run();
+  const applicant = seedApplicant(raw, "reconsideration");
+  const repository = new D1StreamerAdminRepository(db);
+  const reviewId = applicant.reviewIds[0]!;
+
+  const rejected = await repository.applyAction(
+    actionInput("REJECT_STREAMER", reviewId, "reject-before-reconsideration"),
+  );
+  assert.equal(rejected.applied, true);
+  const tooSoon = await repository.applyAction(
+    actionInput("CREATE_RECONSIDERATION", reviewId, "reconsider-too-soon", {
+      expectedVersion: 1,
+    }),
+  );
+  assert.deepEqual(tooSoon, { applied: false, code: "CONFLICT", rowVersion: null });
+
+  const afterCooldown = await repository.applyAction(
+    actionInput("CREATE_RECONSIDERATION", reviewId, "reconsider-after-cooldown", {
+      expectedVersion: 1,
+      nowIso: "2026-09-08T01:00:01.000Z",
+    }),
+  );
+  assert.equal(afterCooldown.applied, true);
+  assert.deepEqual(
+    {
+      ...raw
+        .prepare(
+          `SELECT parent_review_id, review_type, requested_by, work_state
+           FROM streamer_platform_reviews WHERE id <> ? ORDER BY id DESC LIMIT 1`,
+        )
+        .get(reviewId),
+    },
+    {
+      parent_review_id: reviewId,
+      review_type: "RECONSIDERATION",
+      requested_by: "ADMIN",
+      work_state: "QUEUED",
+    },
+  );
+});
+
+test("platform lifecycle actions never remove another platform approval", async () => {
+  const { db, raw } = migratedDb();
+  raw.prepare("INSERT INTO users (id, nickname) VALUES (1, 'operator')").run();
+  const applicant = seedApplicant(raw, "platform-lifecycle", ["YOUTUBE", "TWITCH"]);
+  const repository = new D1StreamerAdminRepository(db);
+
+  assert.equal(
+    (
+      await repository.applyAction(
+        actionInput("APPROVE_STREAMER", applicant.reviewIds[0]!, "approve-first-platform"),
+      )
+    ).applied,
+    true,
+  );
+  assert.equal(
+    (
+      await repository.applyAction(
+        actionInput("APPROVE_STREAMER", applicant.reviewIds[1]!, "approve-second-platform"),
+      )
+    ).applied,
+    true,
+  );
+  assert.equal(
+    (
+      await repository.applyAction(
+        actionInput("REVOKE_STREAMER_APPROVAL", applicant.accountIds[0]!, "revoke-first", {
+          expectedVersion: 1,
+        }),
+      )
+    ).applied,
+    true,
+  );
+  assert.equal(
+    raw.prepare("SELECT status FROM streamer_profiles WHERE id = ?").get(applicant.streamerId)
+      ?.status,
+    "VERIFIED",
+  );
+  assert.equal(
+    (
+      await repository.applyAction(
+        actionInput("INVALIDATE_OWNERSHIP", applicant.accountIds[1]!, "invalidate-second", {
+          expectedVersion: 1,
+        }),
+      )
+    ).applied,
+    true,
+  );
+  assert.equal(
+    raw.prepare("SELECT status FROM streamer_profiles WHERE id = ?").get(applicant.streamerId)
+      ?.status,
+    "UNVERIFIED",
+  );
+  assert.deepEqual(
+    raw
+      .prepare(
+        `SELECT platform, approval_status, verification_status
+         FROM streamer_platform_accounts WHERE streamer_id = ? ORDER BY platform ASC`,
+      )
+      .all(applicant.streamerId)
+      .map((row) => ({ ...row })),
+    [
+      { platform: "TWITCH", approval_status: "REJECTED", verification_status: "REJECTED" },
+      { platform: "YOUTUBE", approval_status: "REJECTED", verification_status: "VERIFIED" },
+    ],
+  );
+});
+
+test("program suspension and provider pause are reversible compare-and-swap operations", async () => {
+  const { db, raw } = migratedDb();
+  raw.prepare("INSERT INTO users (id, nickname) VALUES (1, 'operator')").run();
+  const applicant = seedApplicant(raw, "operations");
+  const repository = new D1StreamerAdminRepository(db);
+  await repository.applyAction(
+    actionInput("APPROVE_STREAMER", applicant.reviewIds[0]!, "approve-before-suspend"),
+  );
+
+  const suspended = await repository.applyAction(
+    actionInput("SUSPEND_STREAMER", applicant.streamerId, "suspend-program", {
+      expectedVersion: 1,
+      effectiveAt: "2026-09-30T00:00:00.000Z",
+    }),
+  );
+  assert.equal(suspended.applied, true);
+  assert.deepEqual(
+    {
+      ...raw
+        .prepare("SELECT status, suspended_until FROM streamer_profiles WHERE id = ?")
+        .get(applicant.streamerId),
+    },
+    { status: "SUSPENDED", suspended_until: "2026-09-30T00:00:00.000Z" },
+  );
+  const restored = await repository.applyAction(
+    actionInput("RESTORE_STREAMER", applicant.streamerId, "restore-program", {
+      expectedVersion: 2,
+    }),
+  );
+  assert.equal(restored.applied, true);
+  assert.equal(
+    raw.prepare("SELECT status FROM streamer_profiles WHERE id = ?").get(applicant.streamerId)
+      ?.status,
+    "VERIFIED",
+  );
+
+  const paused = await repository.applyAction(
+    actionInput("PAUSE_PROVIDER_CONNECTIONS", "YOUTUBE", "pause-youtube"),
+  );
+  assert.equal(paused.applied, true);
+  assert.equal(await repository.isProviderConnectionPaused("YOUTUBE"), true);
+  const resumed = await repository.applyAction(
+    actionInput("RESUME_PROVIDER_CONNECTIONS", "YOUTUBE", "resume-youtube", {
+      expectedVersion: 1,
+    }),
+  );
+  assert.equal(resumed.applied, true);
+  assert.equal(await repository.isProviderConnectionPaused("YOUTUBE"), false);
+});
+
+test("expired program suspension is effective immediately and can be suspended again", async () => {
+  const { db, raw } = migratedDb();
+  raw.prepare("INSERT INTO users (id, nickname) VALUES (1, 'operator')").run();
+  const applicant = seedApplicant(raw, "expired-program-suspension");
+  const repository = new D1StreamerAdminRepository(db);
+  await repository.applyAction(
+    actionInput("APPROVE_STREAMER", applicant.reviewIds[0]!, "approve-before-expiry"),
+  );
+  raw
+    .prepare(
+      `UPDATE streamer_profiles
+       SET status = 'SUSPENDED', suspended_until = '2020-01-01T00:00:00.000Z', row_version = 2
+       WHERE id = ?`,
+    )
+    .run(applicant.streamerId);
+
+  const workspace = await repository.getWorkspace(query(), 1);
+  assert.equal(workspace.overview.approvedStreamers, 1);
+  assert.equal(workspace.overview.suspendedStreamers, 0);
+  assert.equal(workspace.roster.items[0]?.programStatus, "VERIFIED");
+  assert.equal(workspace.roster.items[0]?.suspendedUntil, null);
+
+  const profile = await new D1StreamerRepository(db).findProfileById(applicant.streamerId);
+  assert.equal(profile?.status, "VERIFIED");
+  assert.equal(profile?.suspendedUntil, null);
+
+  const suspendedAgain = await repository.applyAction(
+    actionInput("SUSPEND_STREAMER", applicant.streamerId, "suspend-after-expiry", {
+      expectedVersion: 2,
+      effectiveAt: "2030-01-01T00:00:00.000Z",
+    }),
+  );
+  assert.deepEqual(suspendedAgain, { applied: true, rowVersion: 3 });
+
+  const suspendedWorkspace = await repository.getWorkspace(query(), 1);
+  assert.equal(suspendedWorkspace.overview.approvedStreamers, 0);
+  assert.equal(suspendedWorkspace.overview.suspendedStreamers, 1);
+  assert.equal(suspendedWorkspace.roster.items[0]?.programStatus, "SUSPENDED");
+  assert.equal(suspendedWorkspace.roster.items[0]?.suspendedUntil, "2030-01-01T00:00:00.000Z");
 });
 
 test("policy changes are versioned, audited, and activated with compare-and-swap", async () => {

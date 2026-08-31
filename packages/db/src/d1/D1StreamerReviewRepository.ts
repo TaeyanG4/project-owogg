@@ -45,8 +45,9 @@ export class D1StreamerReviewRepository implements StreamerReviewRepository {
     return row ? mapReviewRow(row) : null;
   }
 
-  async createInitialReview(input: {
+  async createOwnershipReview(input: {
     streamerPlatformAccountId: number;
+    reviewType: "INITIAL" | "OWNERSHIP_REVERIFY";
     dueAt: string;
     policyVersion: number;
     evidenceJson: string;
@@ -62,7 +63,7 @@ export class D1StreamerReviewRepository implements StreamerReviewRepository {
             work_state, decision_code, priority, due_at, claimed_by_user_id, claim_expires_at,
             hold_until, public_reason_code, internal_note, policy_version, evidence_json,
             created_at, updated_at, completed_at, row_version, last_correlation_id)
-         SELECT ?, NULL, 'INITIAL', 'USER', 'QUEUED', NULL, 'NORMAL', ?, NULL, NULL, NULL,
+         SELECT ?, NULL, ?, 'USER', 'QUEUED', NULL, 'NORMAL', ?, NULL, NULL, NULL,
                 NULL, NULL, ?, ?, ?, ?, NULL, 0, NULL
          WHERE NOT EXISTS (
            SELECT 1 FROM streamer_platform_reviews
@@ -72,6 +73,7 @@ export class D1StreamerReviewRepository implements StreamerReviewRepository {
       )
       .bind(
         input.streamerPlatformAccountId,
+        input.reviewType,
         input.dueAt,
         input.policyVersion,
         input.evidenceJson,

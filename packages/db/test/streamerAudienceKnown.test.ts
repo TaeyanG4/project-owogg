@@ -94,6 +94,86 @@ test("a fresh re-verification snapshot with no audience value downgrades a previ
   assert.equal(reVerified.audienceCount, null);
 });
 
+test("ownership re-verification resets a non-rejected approval and recalculates the profile", async () => {
+  const { db, raw } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);
+  const repo = new D1StreamerRepository(db);
+  const profile = await seedStreamer(repo, 1);
+  const account = await repo.upsertPlatformAccount({
+    streamerId: profile.id,
+    platform: "YOUTUBE",
+    platformUserId: "UC-REVERIFY",
+    channelName: "Approved channel",
+    channelUrl: "https://youtube.com/channel/UC-REVERIFY",
+    verificationStatus: "VERIFIED",
+    ownershipExpiresAt: "2026-08-30T00:00:00.000Z",
+  });
+  raw
+    .prepare(
+      `UPDATE streamer_platform_accounts
+       SET approval_status = 'APPROVED', approval_reason_code = 'MANUAL_APPROVAL',
+           approved_at = '2026-08-01T00:00:00.000Z', approved_by_user_id = 9
+       WHERE id = ?`,
+    )
+    .run(account.id);
+
+  const reverified = await repo.upsertPlatformAccount({
+    streamerId: profile.id,
+    platform: "YOUTUBE",
+    platformUserId: "UC-REVERIFY",
+    channelName: "Approved channel",
+    channelUrl: "https://youtube.com/channel/UC-REVERIFY",
+    verificationStatus: "VERIFIED",
+    ownershipExpiresAt: "2027-02-27T00:00:00.000Z",
+    resetApprovalForOwnershipReview: true,
+  });
+
+  assert.equal(reverified.approvalStatus, "PENDING");
+  assert.equal(reverified.approvalReasonCode, null);
+  assert.equal(reverified.approvedAt, null);
+  assert.equal(
+    raw
+      .prepare("SELECT approved_by_user_id FROM streamer_platform_accounts WHERE id = ?")
+      .get(account.id)?.approved_by_user_id,
+    null,
+  );
+  assert.equal((await repo.findProfileById(profile.id))?.status, "UNVERIFIED");
+});
+
+test("ownership re-verification preserves an explicit rejection", async () => {
+  const { db, raw } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);
+  const repo = new D1StreamerRepository(db);
+  const profile = await seedStreamer(repo, 1);
+  const account = await repo.upsertPlatformAccount({
+    streamerId: profile.id,
+    platform: "YOUTUBE",
+    platformUserId: "UC-REJECTED",
+    channelName: "Rejected channel",
+    channelUrl: "https://youtube.com/channel/UC-REJECTED",
+    verificationStatus: "REJECTED",
+  });
+  raw
+    .prepare(
+      `UPDATE streamer_platform_accounts
+       SET approval_status = 'REJECTED', approval_reason_code = 'MANUAL_REJECTION'
+       WHERE id = ?`,
+    )
+    .run(account.id);
+
+  const reverified = await repo.upsertPlatformAccount({
+    streamerId: profile.id,
+    platform: "YOUTUBE",
+    platformUserId: "UC-REJECTED",
+    channelName: "Rejected channel",
+    channelUrl: "https://youtube.com/channel/UC-REJECTED",
+    verificationStatus: "VERIFIED",
+    ownershipExpiresAt: "2027-02-27T00:00:00.000Z",
+    resetApprovalForOwnershipReview: true,
+  });
+
+  assert.equal(reverified.approvalStatus, "REJECTED");
+  assert.equal(reverified.approvalReasonCode, "MANUAL_REJECTION");
+});
+
 test("upsertPlatformAccount never reassigns a canonical channel to another Streamer profile", async () => {
   const { db } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);
   const repo = new D1StreamerRepository(db);
