@@ -1,5 +1,9 @@
 import { Hono } from "hono";
-import { AdminOverviewResponseSchema, AdminMonitoringResponseSchema } from "@owogg/contracts";
+import {
+  AdminOverviewResponseSchema,
+  AdminMonitoringResponseSchema,
+  DEFAULT_STREAMER_ADMIN_WORKSPACE_QUERY,
+} from "@owogg/contracts";
 import { createContainer } from "../container.js";
 import { getStreamerProviderAdapters } from "../infrastructure/streamers/index.js";
 import { isTrustedAdminOrigin } from "../auth/admin.js";
@@ -38,17 +42,17 @@ adminRouter.get("/overview", async (c) => {
   if (denied) return denied;
 
   const container = createContainer(c.env.DB);
-  const [reviewData, activeGuildCount] = await Promise.all([
-    container.streamerUseCases.listManualStreamerReviews({ limit: 1, offset: 0 }),
+  const [streamerWorkspace, activeGuildCount] = await Promise.all([
+    container.streamerAdminRepo.getWorkspace(DEFAULT_STREAMER_ADMIN_WORKSPACE_QUERY, admin.userId),
     container.discordGuildRepo.getActiveGuildCount(),
   ]);
   const adapters = getStreamerProviderAdapters(c.env);
 
   const response = AdminOverviewResponseSchema.parse({
-    pendingStreamerReviews: reviewData.total,
-    recentAudits: reviewData.audits.entries.slice(0, 5).map((audit) => ({
+    pendingStreamerReviews: streamerWorkspace.overview.pendingPlatformReviews,
+    recentAudits: streamerWorkspace.audits.items.slice(0, 5).map((audit) => ({
       action: audit.action,
-      platform: audit.platform ?? null,
+      platform: null,
       createdAt: audit.createdAt,
     })),
     discord: {

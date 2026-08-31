@@ -72,7 +72,11 @@ games.moderate
 sandbox_games.review
 sandbox_games.delete
 game_creators.manage
+streamers.view
 streamers.review
+streamers.manage
+streamers.policy.manage
+streamers.operations.manage
 system.monitor
 system.dev.access
 roles.manage
@@ -88,6 +92,10 @@ roles.manage
 | `sandbox_games.delete`                |   yes    |    no     |        no        |
 | `game_creators.manage`                |   yes    |    no     |        no        |
 | `streamers.review`                    |   yes    |    yes    |        no        |
+| `streamers.view`                      |   yes    |    yes    |        no        |
+| `streamers.manage`                    |   yes    |    no     |        no        |
+| `streamers.policy.manage`             |   yes    |    no     |        no        |
+| `streamers.operations.manage`         |   yes    |    no     |        no        |
 | `system.monitor`                      |   yes    |    no     |       yes        |
 | `system.dev.access`                   |    no    |    no     |       yes        |
 
@@ -97,6 +105,11 @@ roles.manage
 임시정지 기간과 만료 시각은 append-only `user_moderation_audit_log`에 기록됩니다. 계정 정지/밴과
 `users.score_moderation`의 점수 제출 차단은 서로 독립된 상태이므로 한 조치가 다른 조치를 임의로
 해제하지 않습니다. 만료된 임시정지는 로그인과 관리자 조회에서 `ACTIVE`로 해석합니다.
+
+Streamer 관리 API는 위 다섯 permission을 실제 서버 경계로 사용합니다. `OPERATOR`는 조회·심사·상태
+관리·정책·Provider 운영을 수행하고, `MODERATOR`는 조회와 플랫폼별 수동 심사만 수행합니다.
+`SYSTEM_DEVELOPER`에는 Streamer 권한을 자동 부여하지 않습니다. `ADMIN`은 catalog 전체를 암묵적으로
+보유합니다. 상세 action 경계는 [`STREAMER_SYSTEM.md`](STREAMER_SYSTEM.md)를 따릅니다.
 
 ADMIN은 역할 정책을 쓰지 않고 `PERMISSIONS` 전체를 보유합니다. `roles.manage`도 ADMIN의
 암묵적 권한으로만 성립합니다. 역할 정책 조회·수정 API는 활성 managed ADMIN만 사용할 수 있고,
@@ -162,9 +175,9 @@ OWO_PLUS gate가 아닙니다.
 
 ## STREAMER 프로그램
 
-채널 소유권과 Featured 심사를 다루는 streamer system은 GAME_CREATOR upload entitlement와
-다릅니다. 한 사용자가 둘 다 가질 수 있지만 하나가 다른 하나를 암묵적으로 부여하지 않습니다.
-[Streamer System](STREAMER_SYSTEM.md)이 채널 검증의 세부 문서입니다.
+채널 소유권과 플랫폼별 Streamer 수동 심사를 다루는 streamer system은 GAME_CREATOR upload
+entitlement와 다릅니다. 한 사용자가 둘 다 가질 수 있지만 하나가 다른 하나를 암묵적으로 부여하지
+않습니다. [Streamer System](STREAMER_SYSTEM.md)이 채널 검증과 운영 관리의 세부 문서입니다.
 
 ## 구독
 

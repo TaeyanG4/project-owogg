@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { generateKeyPairSync, createSign, type KeyObject } from "node:crypto";
 import { app } from "../src/app.js";
 import { clearGoogleJwksCache } from "../src/infrastructure/oauth/google.ts";
@@ -221,7 +222,7 @@ CREATE TABLE streamer_profiles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER UNIQUE NOT NULL,
   status TEXT NOT NULL DEFAULT 'UNVERIFIED',
-  featured_status TEXT NOT NULL DEFAULT 'NONE',
+  featured_status TEXT NOT NULL DEFAULT 'NOT_FEATURED',
   featured_reason TEXT,
   featured_since TEXT,
   created_at TEXT NOT NULL,
@@ -248,28 +249,28 @@ CREATE TABLE streamer_platform_accounts (
 CREATE TABLE streamer_review_jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   streamer_platform_account_id INTEGER NOT NULL,
-  review_type TEXT NOT NULL DEFAULT 'ACQUISITION',
-  status TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'AUTO_REVIEW_PENDING',
   initial_audience INTEGER,
   initial_channel_created_at TEXT,
   next_check_at TEXT NOT NULL,
   attempt_count INTEGER NOT NULL DEFAULT 0,
   last_error TEXT,
-  review_reason TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  completed_at TEXT
+  completed_at TEXT,
+  review_type TEXT NOT NULL DEFAULT 'ACQUISITION',
+  review_reason TEXT
 );
 CREATE TABLE streamer_review_audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   streamer_platform_account_id INTEGER NOT NULL,
-  review_job_id INTEGER,
+  streamer_review_job_id INTEGER,
   reviewer_user_id INTEGER NOT NULL,
   action TEXT NOT NULL,
   reason TEXT NOT NULL,
   previous_status TEXT NOT NULL,
   new_status TEXT NOT NULL,
-  metric_snapshot TEXT,
+  metric_snapshot_json TEXT,
   created_at TEXT NOT NULL
 );
 `;
@@ -304,6 +305,15 @@ function extractCookie(res: Response, name: string): string | null {
 
 async function setup() {
   const { db, raw } = createSqliteD1(FULL_SCHEMA);
+  raw.exec(
+    fs.readFileSync(
+      new URL(
+        "../../../packages/db/migrations/0051_streamer_manual_management.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
   await seedFixtures(raw);
   const { hashAdminPassword } = await import("../src/auth/adminPassword.js");
   const passwordRecord = await hashAdminPassword(ADMIN_PASSWORD, 1000);

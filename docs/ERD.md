@@ -2,11 +2,11 @@
 
 상태: 기준 문서
 
-마지막 검증: 2026-08-31
+마지막 검증: 2026-09-01
 
-최신 마이그레이션: `0050_oauth_identity_release_on_unlink.sql`
+최신 마이그레이션: `0051_streamer_manual_management.sql`
 
-스키마 요약: 물리 테이블 `58`, 롤링 배포 호환 뷰 `4`
+스키마 요약: 물리 테이블 `66`, 롤링 배포 호환 뷰 `0`
 
 기준 소스:
 
@@ -15,7 +15,7 @@
 - `apps/api/src/container.ts`
 - [데이터베이스 기준 문서](DATABASE.md)
 
-이 문서는 `0000_initial_schema.sql`부터 `0050_oauth_identity_release_on_unlink.sql`까지를 빈 SQLite에
+이 문서는 `0000_initial_schema.sql`부터 `0051_streamer_manual_management.sql`까지를 빈 SQLite에
 순서대로 적용한 **최종 D1 schema**를 기준으로 합니다. migration SQL이 유일한 schema 권한
 원천이며, 이 문서는 관계 탐색과 운영 이해를 위한 투영입니다.
 
@@ -27,8 +27,8 @@
 - `||`, `o|`, `|{`, `o{`: 각각 정확히 1, 0 또는 1, 1 이상, 0 이상 cardinality입니다.
 - diagram에는 관계를 이해하는 데 필요한 key만 표시합니다. 전체 column, check, index와 trigger는
   migration SQL을 확인합니다.
-- `creator_*`는 Game Creator 테이블이 아닙니다. `0039` 이전 Streamer 명칭을 위한 호환 뷰만
-  별도로 남아 있습니다.
+- `0051`에서 `0039` 이전 Streamer 명칭용 `creator_*` 호환 뷰를 제거했습니다. Game Creator는
+  별도의 generic game authority를 사용합니다.
 
 ## 1. 사용자, 인증, 관리자와 제재
 
@@ -555,7 +555,8 @@ erDiagram
     INTEGER id PK
     INTEGER user_id FK, UK
     TEXT status
-    TEXT featured_status
+    TEXT suspended_until
+    INTEGER row_version
   }
   streamer_platform_accounts {
     INTEGER id PK
@@ -563,31 +564,75 @@ erDiagram
     TEXT platform
     TEXT platform_user_id
     TEXT verification_status
+    TEXT ownership_expires_at
+    TEXT approval_status
+    INTEGER row_version
   }
-  streamer_review_jobs {
+  streamer_verification_intents {
+    TEXT state_hash PK
+    INTEGER user_id FK
+    TEXT session_token_hash
+    TEXT platform
+    TEXT expires_at
+  }
+  streamer_platform_reviews {
     INTEGER id PK
     INTEGER streamer_platform_account_id FK
-    TEXT status
     TEXT review_type
+    TEXT work_state
+    TEXT decision_code
+    INTEGER policy_version FK
+    INTEGER row_version
   }
-  streamer_review_audit_log {
+  streamer_policy_versions {
+    INTEGER version PK
+    TEXT values_json
+    INTEGER updated_by_user_id FK
+  }
+  streamer_policy_state {
+    INTEGER singleton_id PK
+    INTEGER active_version FK
+    INTEGER row_version
+  }
+  streamer_policy_constraints {
+    TEXT field PK
+    TEXT unit
+    INTEGER minimum
+    INTEGER maximum
+    INTEGER step
+  }
+  streamer_provider_settings {
+    TEXT platform PK
+    INTEGER new_connections_paused
+    INTEGER row_version
+  }
+  streamer_admin_audit_log {
     INTEGER id PK
-    INTEGER streamer_platform_account_id
-    INTEGER streamer_review_job_id
-    INTEGER reviewer_user_id
+    INTEGER actor_user_id FK
+    TEXT target_type
+    TEXT target_id
+    TEXT correlation_id UK
   }
 
   users ||--o| streamer_profiles : owns
+  users ||--o{ streamer_verification_intents : starts_oauth
   streamer_profiles ||--o{ streamer_platform_accounts : links
-  streamer_platform_accounts ||--o{ streamer_review_jobs : schedules
-  streamer_platform_accounts ||..o{ streamer_review_audit_log : audited_account
-  streamer_review_jobs o|..o{ streamer_review_audit_log : audited_job
-  users ||..o{ streamer_review_audit_log : reviewer
+  streamer_platform_accounts ||--o{ streamer_platform_reviews : reviewed_independently
+  streamer_policy_versions ||--o{ streamer_platform_reviews : fixes_policy
+  streamer_policy_versions ||--o| streamer_policy_state : active_pointer
+  users ||..o{ streamer_platform_reviews : claims
+  users ||..o{ streamer_policy_versions : updates
+  users ||..o{ streamer_admin_audit_log : acts
 ```
 
-Streamer 감사 원장은 append-only이며 reviewer/account/job 삭제나 정리와 독립적으로 보존하기 위해
-논리 참조를 사용합니다. `creator_profiles`, `creator_platform_accounts`, `creator_review_jobs`,
-`creator_review_audit_log`는 이 네 물리 테이블을 가리키는 롤링 배포 호환 뷰입니다.
+각 플랫폼 계정은 별도의 `streamer_platform_reviews` row로 같은 수동 심사를 받습니다. 정책 수치는
+불변 version과 active pointer로 관리하고, Provider 연결 중단 상태도 D1에서 버전 충돌을 검사합니다.
+`streamer_verification_intents`는 YouTube·Twitch·CHZZK OAuth 요청의 raw credential이 아닌
+state/session SHA-256 hash만 저장하며 user·session·platform·만료시각 일치 시 한 번만 소비됩니다.
+SOOP은 안전한 callback 결박 계약이 없어 이 table을 사용하는 연결 경로 자체가 보류 상태입니다.
+`streamer_admin_audit_log`는 append-only이며 대상 삭제와 독립적으로 보존하도록 논리 target을
+사용합니다. 이전 등급값과 자동 심사 이력은 `streamer_legacy_*` archive table에만 보존되고 현재
+runtime authority나 관리자 조회 대상이 아닙니다.
 
 ## 7. USER 게임 롤링 배포 호환 미러
 
@@ -664,66 +709,74 @@ D1 콘솔에서 직접 수정하면 감사 로그와 두 저장소의 일관성�
 
 <!-- ERD_TABLE_CATALOG_START -->
 
-| 테이블                                   | 도메인          | 역할 / 주요 권한 원천                                      |
-| ---------------------------------------- | --------------- | ---------------------------------------------------------- |
-| `account_merge_challenges`               | Identity        | 두 OwOGG 계정 병합 확인 challenge                          |
-| `admin_account_audit_log`                | Admin           | 관리자 계정 역할·상태·세션 변경 감사 원장                  |
-| `admin_accounts`                         | Admin           | Google step-up 뒤 사용하는 관리형 관리자 계정과 역할       |
-| `admin_login_attempts`                   | Admin Auth      | 관리자 로그인 성공/실패 기록과 rate-limit 근거             |
-| `admin_permission_grants`                | Authorization   | 관리자 계정별 추가 기능 권한                               |
-| `admin_role_permissions`                 | Authorization   | OPERATOR/MODERATOR/SYSTEM_DEVELOPER 역할별 기능 정책       |
-| `admin_sessions`                         | Admin Auth      | 일반 사용자 session에 결합된 elevated 관리자 session       |
-| `admin_step_up_challenges`               | Admin Auth      | Google 재인증과 관리자 로그인 사이의 단기 challenge        |
-| `discord_guild_managers`                 | Discord         | 길드별 OwOGG 관리자 사용자와 역할                          |
-| `discord_guild_xp_events`                | Discord         | XP 원장을 특정 길드에 한 번만 귀속하는 ledger              |
-| `discord_guilds`                         | Discord         | 등록 길드, slug, 공개·활성 상태                            |
-| `discord_link_challenges`                | Discord         | Discord에서 시작한 계정 연결 challenge                     |
-| `discord_play_contexts`                  | Discord         | 길드에서 발급한 단기 게임 실행 context                     |
-| `discord_server_registration_challenges` | Discord         | 사용자가 관리 가능한 길드 등록 challenge                   |
-| `game_assets`                            | Game Platform   | 게임별 B2 자산 pointer; 현재 `LOGO` 사용                   |
-| `game_attempt_consumptions`              | Game Platform   | user/game/version에 고정된 일회성 attempt 소비             |
-| `game_creator_access`                    | Game Creator    | 사용자별 게임 업로드 자격의 현재 상태                      |
-| `game_creator_access_audit_log`          | Game Creator    | 자격 부여·회수·복원 감사 원장                              |
-| `game_creator_applications`              | Game Creator    | 자격 신청과 관리자 심사 결과                               |
-| `game_result_verification_claims`        | Result          | gs2 first-evidence hash와 단일 terminal 검증 상태          |
-| `game_results`                           | Result          | 완료 facts와 gs2 세 점수·verifier provenance 원장          |
-| `game_settings`                          | Operations      | TEXT slug 기반 safety override 및 서버 소유 catalog role   |
-| `game_slug_reservations`                 | Game Platform   | USER 호환 identity의 slug 선점 불변식                      |
-| `game_version_leases`                    | Multiplayer     | active instance의 exact bundle version 보존 lease          |
-| `game_versions`                          | Game Platform   | 공통 immutable bundle version과 publish/review 상태        |
-| `games`                                  | Game Platform   | OWOGG/USER 공통 identity, 소유권, visibility, live pointer |
-| `multiplayer_instances`                  | Multiplayer     | exact profile/version instance와 lifecycle generation      |
-| `multiplayer_instance_admin_actions`     | Multiplayer     | 멱등 관리자 강제 종료 append-only 감사 원장                |
-| `multiplayer_invites`                    | Multiplayer     | 원문 없이 hash만 저장하는 제한 사용 invite                 |
-| `multiplayer_match_actions`              | Multiplayer     | client action ID/payload hash 기반 멱등 action 원장        |
-| `multiplayer_match_players`              | Multiplayer     | match별 canonical 참가자 결과와 reward eligibility         |
-| `multiplayer_matches`                    | Multiplayer     | generation별 authoritative finalization 상태               |
-| `multiplayer_participants`               | Multiplayer     | instance membership, seat, role와 connection generation    |
-| `multiplayer_rematch_requests`           | Multiplayer     | historical server-ruleset 재대결 row, 현재 consumer 없음   |
-| `multiplayer_profile_requests`           | Multiplayer     | Creator exact-version 요청과 관리자 심사 결정              |
-| `multiplayer_profiles`                   | Multiplayer     | 서버 승인 immutable runtime profile revision               |
-| `multiplayer_reward_outbox`              | Multiplayer     | committed 결과 기반 exactly-once reward 전달 원장          |
-| `oauth_accounts`                         | Identity        | Google/Discord provider identity와 avatar 후보             |
-| `oauth_identity_registrations`           | Identity        | 활성 provider identity의 단일 사용자 연결 예약             |
-| `official_game_deletion_audit_log`       | Operations      | 부모 삭제 뒤에도 남는 OWOGG 완전 삭제 감사 원장            |
-| `sandbox_game_review_audit_log`          | Compatibility   | 직전 USER 게임 심사 계약의 append-only 호환 감사           |
-| `sandbox_game_versions`                  | Compatibility   | 직전 Worker용 USER version 호환 미러                       |
-| `sandbox_games`                          | Compatibility   | 직전 Worker용 USER game identity/metadata 호환 미러        |
-| `scores`                                 | Ranking         | 경쟁 점수의 generation·difficulty·revision별 projection    |
-| `sessions`                               | Auth            | 일반 OwOGG 로그인 session                                  |
-| `streamer_platform_accounts`             | Streamer        | 플랫폼 채널 identity, 소유권 검증, metrics                 |
-| `streamer_profiles`                      | Streamer        | 사용자별 Streamer 및 Featured 상태                         |
-| `streamer_review_audit_log`              | Streamer        | 자동/수동 심사 결정 append-only 원장                       |
-| `streamer_review_jobs`                   | Streamer        | 재검증·자격 심사 예약 작업                                 |
-| `user_achievements`                      | Progression     | 플랫폼 공통 achievement 해금                               |
-| `user_favorites`                         | Personalization | 사용자별 즐겨찾기 game slug                                |
-| `user_game_achievements`                 | Game Result     | manifest가 선언한 게임별 achievement 해금                  |
-| `user_moderation`                        | Moderation      | 임시정지·영구 밴·점수 제출 차단 현재 상태                  |
-| `user_moderation_audit_log`              | Moderation      | 모든 사용자 제재 조치 append-only 원장                     |
-| `user_progress`                          | Progression     | XP 원장에서 파생된 사용자별 빠른 집계                      |
-| `user_recent_plays`                      | Personalization | 사용자별 최근 실행 game slug와 시각                        |
-| `users`                                  | Identity        | OwOGG 공개 identity와 profile 설정의 루트                  |
-| `xp_events`                              | Progression     | 멱등 XP 사건의 서버 권한 원장                              |
+| 테이블                                       | 도메인          | 역할 / 주요 권한 원천                                      |
+| -------------------------------------------- | --------------- | ---------------------------------------------------------- |
+| `account_merge_challenges`                   | Identity        | 두 OwOGG 계정 병합 확인 challenge                          |
+| `admin_account_audit_log`                    | Admin           | 관리자 계정 역할·상태·세션 변경 감사 원장                  |
+| `admin_accounts`                             | Admin           | Google step-up 뒤 사용하는 관리형 관리자 계정과 역할       |
+| `admin_login_attempts`                       | Admin Auth      | 관리자 로그인 성공/실패 기록과 rate-limit 근거             |
+| `admin_permission_grants`                    | Authorization   | 관리자 계정별 추가 기능 권한                               |
+| `admin_role_permissions`                     | Authorization   | OPERATOR/MODERATOR/SYSTEM_DEVELOPER 역할별 기능 정책       |
+| `admin_sessions`                             | Admin Auth      | 일반 사용자 session에 결합된 elevated 관리자 session       |
+| `admin_step_up_challenges`                   | Admin Auth      | Google 재인증과 관리자 로그인 사이의 단기 challenge        |
+| `discord_guild_managers`                     | Discord         | 길드별 OwOGG 관리자 사용자와 역할                          |
+| `discord_guild_xp_events`                    | Discord         | XP 원장을 특정 길드에 한 번만 귀속하는 ledger              |
+| `discord_guilds`                             | Discord         | 등록 길드, slug, 공개·활성 상태                            |
+| `discord_link_challenges`                    | Discord         | Discord에서 시작한 계정 연결 challenge                     |
+| `discord_play_contexts`                      | Discord         | 길드에서 발급한 단기 게임 실행 context                     |
+| `discord_server_registration_challenges`     | Discord         | 사용자가 관리 가능한 길드 등록 challenge                   |
+| `game_assets`                                | Game Platform   | 게임별 B2 자산 pointer; 현재 `LOGO` 사용                   |
+| `game_attempt_consumptions`                  | Game Platform   | user/game/version에 고정된 일회성 attempt 소비             |
+| `game_creator_access`                        | Game Creator    | 사용자별 게임 업로드 자격의 현재 상태                      |
+| `game_creator_access_audit_log`              | Game Creator    | 자격 부여·회수·복원 감사 원장                              |
+| `game_creator_applications`                  | Game Creator    | 자격 신청과 관리자 심사 결과                               |
+| `game_result_verification_claims`            | Result          | gs2 first-evidence hash와 단일 terminal 검증 상태          |
+| `game_results`                               | Result          | 완료 facts와 gs2 세 점수·verifier provenance 원장          |
+| `game_settings`                              | Operations      | TEXT slug 기반 safety override 및 서버 소유 catalog role   |
+| `game_slug_reservations`                     | Game Platform   | USER 호환 identity의 slug 선점 불변식                      |
+| `game_version_leases`                        | Multiplayer     | active instance의 exact bundle version 보존 lease          |
+| `game_versions`                              | Game Platform   | 공통 immutable bundle version과 publish/review 상태        |
+| `games`                                      | Game Platform   | OWOGG/USER 공통 identity, 소유권, visibility, live pointer |
+| `multiplayer_instances`                      | Multiplayer     | exact profile/version instance와 lifecycle generation      |
+| `multiplayer_instance_admin_actions`         | Multiplayer     | 멱등 관리자 강제 종료 append-only 감사 원장                |
+| `multiplayer_invites`                        | Multiplayer     | 원문 없이 hash만 저장하는 제한 사용 invite                 |
+| `multiplayer_match_actions`                  | Multiplayer     | client action ID/payload hash 기반 멱등 action 원장        |
+| `multiplayer_match_players`                  | Multiplayer     | match별 canonical 참가자 결과와 reward eligibility         |
+| `multiplayer_matches`                        | Multiplayer     | generation별 authoritative finalization 상태               |
+| `multiplayer_participants`                   | Multiplayer     | instance membership, seat, role와 connection generation    |
+| `multiplayer_rematch_requests`               | Multiplayer     | historical server-ruleset 재대결 row, 현재 consumer 없음   |
+| `multiplayer_profile_requests`               | Multiplayer     | Creator exact-version 요청과 관리자 심사 결정              |
+| `multiplayer_profiles`                       | Multiplayer     | 서버 승인 immutable runtime profile revision               |
+| `multiplayer_reward_outbox`                  | Multiplayer     | committed 결과 기반 exactly-once reward 전달 원장          |
+| `oauth_accounts`                             | Identity        | Google/Discord provider identity와 avatar 후보             |
+| `oauth_identity_registrations`               | Identity        | 활성 provider identity의 단일 사용자 연결 예약             |
+| `official_game_deletion_audit_log`           | Operations      | 부모 삭제 뒤에도 남는 OWOGG 완전 삭제 감사 원장            |
+| `sandbox_game_review_audit_log`              | Compatibility   | 직전 USER 게임 심사 계약의 append-only 호환 감사           |
+| `sandbox_game_versions`                      | Compatibility   | 직전 Worker용 USER version 호환 미러                       |
+| `sandbox_games`                              | Compatibility   | 직전 Worker용 USER game identity/metadata 호환 미러        |
+| `scores`                                     | Ranking         | 경쟁 점수의 generation·difficulty·revision별 projection    |
+| `sessions`                                   | Auth            | 일반 OwOGG 로그인 session                                  |
+| `streamer_admin_audit_log`                   | Streamer        | 관리자 변경의 append-only 감사 원장                        |
+| `streamer_legacy_automated_review_audit_log` | Archive         | 폐기된 자동 심사의 변경 불가 과거 감사 row                 |
+| `streamer_legacy_automated_review_jobs`      | Archive         | 폐기된 자동 심사의 과거 작업 row                           |
+| `streamer_legacy_tier_state_archive`         | Archive         | 제거된 과거 등급 컬럼의 보존 snapshot                      |
+| `streamer_platform_accounts`                 | Streamer        | 플랫폼 채널 identity, 소유권·승인 상태·metrics             |
+| `streamer_verification_intents`              | Streamer        | 해시된 OAuth state/session의 단기·일회성 결박              |
+| `streamer_platform_reviews`                  | Streamer        | 플랫폼별 독립 수동 심사 작업과 결정                        |
+| `streamer_policy_constraints`                | Streamer        | 변경 가능한 정책값의 단위·최솟값·최댓값·step               |
+| `streamer_policy_state`                      | Streamer        | 활성 정책 version과 optimistic row version                 |
+| `streamer_policy_versions`                   | Streamer        | 불변 수동 심사 정책 이력                                   |
+| `streamer_profiles`                          | Streamer        | 사용자별 단일 Streamer 프로그램 상태                       |
+| `streamer_provider_settings`                 | Streamer        | 플랫폼별 신규 연결 pause와 row version                     |
+| `user_achievements`                          | Progression     | 플랫폼 공통 achievement 해금                               |
+| `user_favorites`                             | Personalization | 사용자별 즐겨찾기 game slug                                |
+| `user_game_achievements`                     | Game Result     | manifest가 선언한 게임별 achievement 해금                  |
+| `user_moderation`                            | Moderation      | 임시정지·영구 밴·점수 제출 차단 현재 상태                  |
+| `user_moderation_audit_log`                  | Moderation      | 모든 사용자 제재 조치 append-only 원장                     |
+| `user_progress`                              | Progression     | XP 원장에서 파생된 사용자별 빠른 집계                      |
+| `user_recent_plays`                          | Personalization | 사용자별 최근 실행 game slug와 시각                        |
+| `users`                                      | Identity        | OwOGG 공개 identity와 profile 설정의 루트                  |
+| `xp_events`                                  | Progression     | 멱등 XP 사건의 서버 권한 원장                              |
 
 <!-- ERD_TABLE_CATALOG_END -->
 
@@ -731,12 +784,7 @@ D1 콘솔에서 직접 수정하면 감사 로그와 두 저장소의 일관성�
 
 <!-- ERD_VIEW_CATALOG_START -->
 
-| 뷰                          | 실제 테이블                  | 제거 조건                                                     |
-| --------------------------- | ---------------------------- | ------------------------------------------------------------- |
-| `creator_platform_accounts` | `streamer_platform_accounts` | `0039` 이전 Worker rollback window 종료 뒤 contract migration |
-| `creator_profiles`          | `streamer_profiles`          | `0039` 이전 Worker rollback window 종료 뒤 contract migration |
-| `creator_review_audit_log`  | `streamer_review_audit_log`  | `0039` 이전 Worker rollback window 종료 뒤 contract migration |
-| `creator_review_jobs`       | `streamer_review_jobs`       | `0039` 이전 Worker rollback window 종료 뒤 contract migration |
+최종 schema에 롤링 배포 호환 뷰가 없습니다.
 
 <!-- ERD_VIEW_CATALOG_END -->
 

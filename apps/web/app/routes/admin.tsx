@@ -865,7 +865,7 @@ function AdminDashboard({
                   <p className="text-xs font-bold uppercase tracking-[0.15em] text-accent-yellow">
                     STREAMER
                   </p>
-                  <h2 className="mt-1 text-xl font-black text-text-primary">Featured 수동 심사</h2>
+                  <h2 className="mt-1 text-xl font-black text-text-primary">플랫폼별 수동 심사</h2>
                   <p className="mt-2 text-sm leading-relaxed text-text-muted">
                     공식 소유권과 자격 지표만 확인하고, 모든 결정은 append-only 감사 원장에
                     남깁니다.

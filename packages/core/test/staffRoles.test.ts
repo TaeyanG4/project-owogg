@@ -46,6 +46,22 @@ test("SYSTEM_DEVELOPER initially enters the unified admin center", () => {
   assert.equal(hasPermission("SYSTEM_DEVELOPER", policy, [], "system.monitor"), true);
 });
 
+test("initial Streamer permissions match the forward D1 role policy", () => {
+  const managementPermissions = [
+    "streamers.view",
+    "streamers.manage",
+    "streamers.policy.manage",
+    "streamers.operations.manage",
+  ] as const;
+  for (const permission of managementPermissions) {
+    assert.equal(hasPermission("ADMIN", [], [], permission), true);
+    assert.equal(INITIAL_ROLE_PERMISSIONS.OPERATOR.includes(permission), true);
+  }
+  assert.equal(INITIAL_ROLE_PERMISSIONS.MODERATOR.includes("streamers.view"), true);
+  assert.equal(INITIAL_ROLE_PERMISSIONS.MODERATOR.includes("streamers.manage"), false);
+  assert.equal(INITIAL_ROLE_PERMISSIONS.SYSTEM_DEVELOPER.includes("streamers.view"), false);
+});
+
 test("a null Staff Role never receives permissions, even from stray rows", () => {
   for (const permission of PERMISSIONS) {
     assert.equal(hasPermission(null, PERMISSIONS, PERMISSIONS, permission), false);

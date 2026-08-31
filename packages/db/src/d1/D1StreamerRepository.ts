@@ -5,7 +5,6 @@ import type {
   StreamerRankEntry,
   StreamerPlatformType,
   StreamerStatusType,
-  FeaturedStatusType,
 } from "@owogg/core";
 import type { D1Database } from "./D1UserRepository.js";
 
@@ -21,11 +20,18 @@ function mapPlatformAccountRow(r: Record<string, unknown>): StreamerPlatformAcco
     avatarUrl: r.avatar_url ? String(r.avatar_url) : null,
     verificationStatus: String(r.verification_status),
     verifiedAt: r.verified_at ? String(r.verified_at) : null,
+    ownershipExpiresAt: r.ownership_expires_at ? String(r.ownership_expires_at) : null,
+    approvalStatus: String(
+      r.approval_status ?? "PENDING",
+    ) as StreamerPlatformAccount["approvalStatus"],
+    approvalReasonCode: r.approval_reason_code ? String(r.approval_reason_code) : null,
+    approvedAt: r.approved_at ? String(r.approved_at) : null,
     // audience_count_known distinguishes "official API confirmed zero" from "never obtained" —
     // never coerce an unknown value to 0.
     audienceCount: Number(r.audience_count_known) === 1 ? Number(r.audience_count ?? 0) : null,
     channelCreatedAt: r.channel_created_at ? String(r.channel_created_at) : null,
     metricsSyncedAt: r.metrics_synced_at ? String(r.metrics_synced_at) : null,
+    rowVersion: Number(r.row_version ?? 0),
     createdAt: String(r.created_at),
     updatedAt: String(r.updated_at),
   };
@@ -48,9 +54,8 @@ export class D1StreamerRepository implements StreamerRepository {
       id: Number(row.id),
       userId: Number(row.user_id),
       status: String(row.status) as StreamerStatusType,
-      featuredStatus: String(row.featured_status) as FeaturedStatusType,
-      featuredReason: row.featured_reason ? String(row.featured_reason) : null,
-      featuredSince: row.featured_since ? String(row.featured_since) : null,
+      suspendedUntil: row.suspended_until ? String(row.suspended_until) : null,
+      rowVersion: Number(row.row_version ?? 0),
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
     };
@@ -81,9 +86,8 @@ export class D1StreamerRepository implements StreamerRepository {
       id: Number(row.id),
       userId: Number(row.user_id),
       status: String(row.status) as StreamerStatusType,
-      featuredStatus: String(row.featured_status) as FeaturedStatusType,
-      featuredReason: row.featured_reason ? String(row.featured_reason) : null,
-      featuredSince: row.featured_since ? String(row.featured_since) : null,
+      suspendedUntil: row.suspended_until ? String(row.suspended_until) : null,
+      rowVersion: Number(row.row_version ?? 0),
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
     };
@@ -138,7 +142,8 @@ export class D1StreamerRepository implements StreamerRepository {
     await this.db
       .prepare(
         `UPDATE streamer_platform_accounts
-         SET audience_count = ?, audience_count_known = ?, channel_created_at = ?, metrics_synced_at = ?, updated_at = ?
+         SET audience_count = ?, audience_count_known = ?, channel_created_at = ?, metrics_synced_at = ?,
+             updated_at = ?, row_version = row_version + 1
          WHERE id = ?`,
       )
       .bind(
@@ -159,67 +164,44 @@ export class D1StreamerRepository implements StreamerRepository {
   async upsertProfile(input: {
     userId: number;
     status: StreamerStatusType;
-    featuredStatus?: FeaturedStatusType;
-    featuredReason?: string | null;
   }): Promise<StreamerProfile> {
     const now = new Date().toISOString();
     const existing = await this.findProfileByUserId(input.userId);
 
     if (existing) {
-      const featStatus = input.featuredStatus ?? existing.featuredStatus;
-      const featSince =
-        featStatus === "NONE"
-          ? null
-          : existing.featuredStatus === "NONE"
-            ? now
-            : existing.featuredSince;
+      const nextStatus =
+        existing.status === "SUSPENDED"
+          ? "SUSPENDED"
+          : existing.status === "VERIFIED" && input.status === "UNVERIFIED"
+            ? "VERIFIED"
+            : input.status;
 
       await this.db
         .prepare(
           `UPDATE streamer_profiles
-           SET status = ?, featured_status = ?, featured_reason = ?, featured_since = ?, updated_at = ?
+           SET status = ?, updated_at = ?, row_version = row_version + 1
            WHERE user_id = ?`,
         )
-        .bind(
-          input.status,
-          featStatus,
-          input.featuredReason !== undefined ? input.featuredReason : existing.featuredReason,
-          featSince,
-          now,
-          input.userId,
-        )
+        .bind(nextStatus, now, input.userId)
         .run();
 
       return {
         id: existing.id,
         userId: input.userId,
-        status: input.status,
-        featuredStatus: featStatus,
-        featuredReason:
-          input.featuredReason !== undefined ? input.featuredReason : existing.featuredReason,
-        featuredSince: featSince,
+        status: nextStatus,
+        suspendedUntil: existing.suspendedUntil,
+        rowVersion: existing.rowVersion + 1,
         createdAt: existing.createdAt,
         updatedAt: now,
       };
     }
 
-    const featStatus = input.featuredStatus ?? "NONE";
-    const featSince = featStatus !== "NONE" ? now : null;
-
     await this.db
       .prepare(
-        `INSERT INTO streamer_profiles (user_id, status, featured_status, featured_reason, featured_since, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO streamer_profiles (user_id, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?)`,
       )
-      .bind(
-        input.userId,
-        input.status,
-        featStatus,
-        input.featuredReason ?? null,
-        featSince,
-        now,
-        now,
-      )
+      .bind(input.userId, input.status, now, now)
       .run();
 
     const row = await this.db
@@ -230,9 +212,8 @@ export class D1StreamerRepository implements StreamerRepository {
       id: Number(row?.id ?? 0),
       userId: input.userId,
       status: input.status,
-      featuredStatus: featStatus,
-      featuredReason: input.featuredReason ?? null,
-      featuredSince: featSince,
+      suspendedUntil: null,
+      rowVersion: 0,
       createdAt: now,
       updatedAt: now,
     };
@@ -262,6 +243,7 @@ export class D1StreamerRepository implements StreamerRepository {
     verificationStatus?: string;
     audienceCount?: number;
     channelCreatedAt?: string | null;
+    ownershipExpiresAt?: string | null;
   }): Promise<StreamerPlatformAccount> {
     const now = new Date().toISOString();
     const verStatus = input.verificationStatus ?? "VERIFIED";
@@ -279,8 +261,9 @@ export class D1StreamerRepository implements StreamerRepository {
           `UPDATE streamer_platform_accounts
            SET streamer_id = ?, channel_name = ?, channel_handle = ?, channel_url = ?, avatar_url = ?,
                verification_status = ?, verified_at = ?, audience_count = ?, audience_count_known = ?,
-               channel_created_at = ?, metrics_synced_at = ?, updated_at = ?
-           WHERE platform = ? AND platform_user_id = ?`,
+               channel_created_at = ?, metrics_synced_at = ?, ownership_expires_at = ?,
+               updated_at = ?, row_version = row_version + 1
+           WHERE platform = ? AND platform_user_id = ? AND streamer_id = ?`,
         )
         .bind(
           input.streamerId,
@@ -294,9 +277,11 @@ export class D1StreamerRepository implements StreamerRepository {
           audienceKnown ? 1 : 0,
           input.channelCreatedAt ?? existing.channelCreatedAt ?? null,
           now,
+          input.ownershipExpiresAt ?? existing.ownershipExpiresAt,
           now,
           input.platform,
           input.platformUserId,
+          input.streamerId,
         )
         .run();
 
@@ -307,8 +292,11 @@ export class D1StreamerRepository implements StreamerRepository {
     await this.db
       .prepare(
         `INSERT INTO streamer_platform_accounts
-         (streamer_id, platform, platform_user_id, channel_name, channel_handle, channel_url, avatar_url, verification_status, verified_at, audience_count, audience_count_known, channel_created_at, metrics_synced_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (streamer_id, platform, platform_user_id, channel_name, channel_handle, channel_url,
+          avatar_url, verification_status, verified_at, audience_count, audience_count_known,
+          channel_created_at, metrics_synced_at, ownership_expires_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(platform, platform_user_id) DO NOTHING`,
       )
       .bind(
         input.streamerId,
@@ -324,16 +312,11 @@ export class D1StreamerRepository implements StreamerRepository {
         audienceKnown ? 1 : 0,
         input.channelCreatedAt ?? null,
         now,
+        input.ownershipExpiresAt ?? null,
         now,
         now,
       )
       .run();
-
-    const row = await this.db
-      .prepare(`SELECT * FROM streamer_platform_accounts WHERE rowid = last_insert_rowid()`)
-      .first<Record<string, unknown>>();
-
-    if (row) return mapPlatformAccountRow(row);
 
     const created = await this.findPlatformAccount(input.platform, input.platformUserId);
     if (created) return created;
@@ -356,19 +339,22 @@ export class D1StreamerRepository implements StreamerRepository {
     // EXISTS avoids joining streamer_platform_accounts directly onto the ranked row set, which
     // would duplicate a streamer's PB row once per matching platform account.
     //
-    // Streamer ranking rule: a streamer qualifies once they have AT LEAST ONE ownership-VERIFIED
-    // account on any supported platform (not all four). `cp.status = 'VERIFIED'` alone is never
-    // trusted as the sole source of truth here — it can only ever legitimately be VERIFIED
-    // because some platform account was verified, but this EXISTS check is what actually
-    // guarantees it, defending against any future drift between the two.
+    // Streamer ranking rule: a user qualifies once at least one platform has both current
+    // ownership and an independent staff approval. Each platform decision remains independent.
     const platformFilterClause = options.platform
       ? `AND EXISTS (
            SELECT 1 FROM streamer_platform_accounts cpa
-           WHERE cpa.streamer_id = cp.id AND cpa.platform = ? AND cpa.verification_status = 'VERIFIED'
+           WHERE cpa.streamer_id = cp.id AND cpa.platform = ?
+             AND cpa.verification_status = 'VERIFIED' AND cpa.approval_status = 'APPROVED'
+             AND cpa.ownership_expires_at IS NOT NULL
+             AND datetime(cpa.ownership_expires_at) > datetime('now')
          )`
       : `AND EXISTS (
            SELECT 1 FROM streamer_platform_accounts cpa
            WHERE cpa.streamer_id = cp.id AND cpa.verification_status = 'VERIFIED'
+             AND cpa.approval_status = 'APPROVED'
+             AND cpa.ownership_expires_at IS NOT NULL
+             AND datetime(cpa.ownership_expires_at) > datetime('now')
              AND cpa.platform IN ('YOUTUBE', 'CHZZK', 'SOOP', 'TWITCH')
          )`;
 
@@ -383,7 +369,7 @@ export class D1StreamerRepository implements StreamerRepository {
       // then earliest created_at, then row id.
       const rankedCte = `
         WITH eligible AS (
-          SELECT s.id, s.user_id, s.game_id, s.score, s.created_at, cp.id AS streamer_id, cp.featured_status
+          SELECT s.id, s.user_id, s.game_id, s.score, s.created_at, cp.id AS streamer_id
           FROM scores s
           JOIN streamer_profiles cp ON cp.user_id = s.user_id
           JOIN games g ON g.slug = s.game_id
@@ -443,7 +429,6 @@ export class D1StreamerRepository implements StreamerRepository {
           avatarUrl: profile?.avatarUrl ?? null,
           country: profile?.country ?? null,
           streamerId: Number(row.streamer_id),
-          featuredStatus: String(row.featured_status) as FeaturedStatusType,
           platformAccounts: platformMap.get(Number(row.streamer_id)) || [],
           score: Number(row.score),
           gameId: gId,
@@ -470,7 +455,7 @@ export class D1StreamerRepository implements StreamerRepository {
 
       const dataQuery = `
         SELECT cp.user_id, u.nickname, u.avatar_url, u.country, up.total_xp,
-               cp.id as streamer_id, cp.featured_status
+               cp.id as streamer_id
         FROM streamer_profiles cp
         JOIN users u ON u.id = cp.user_id
         JOIN user_progress up ON up.user_id = cp.user_id
@@ -499,7 +484,6 @@ export class D1StreamerRepository implements StreamerRepository {
           avatarUrl: item.avatar_url ? String(item.avatar_url) : null,
           country: item.country ? String(item.country) : null,
           streamerId: Number(item.streamer_id),
-          featuredStatus: String(item.featured_status) as FeaturedStatusType,
           platformAccounts: platformMap.get(Number(item.streamer_id)) || [],
           totalXp,
           rank: offset + idx + 1,
@@ -537,7 +521,10 @@ export class D1StreamerRepository implements StreamerRepository {
     const query = `
       SELECT streamer_id, platform, channel_name, channel_url, avatar_url
       FROM streamer_platform_accounts
-      WHERE verification_status = 'VERIFIED' AND streamer_id IN (${placeholders})
+      WHERE verification_status = 'VERIFIED' AND approval_status = 'APPROVED'
+        AND ownership_expires_at IS NOT NULL
+        AND datetime(ownership_expires_at) > datetime('now')
+        AND streamer_id IN (${placeholders})
       ORDER BY id ASC
     `;
 

@@ -21,16 +21,18 @@ function seedVerifiedStreamer(
   const now = new Date().toISOString();
   const info = raw
     .prepare(
-      `INSERT INTO streamer_profiles (user_id, status, featured_status, created_at, updated_at)
-       VALUES (?, 'VERIFIED', 'NONE', ?, ?)`,
+      `INSERT INTO streamer_profiles (user_id, status, created_at, updated_at)
+       VALUES (?, 'VERIFIED', ?, ?)`,
     )
     .run(userId, now, now);
   const streamerId = Number(info.lastInsertRowid);
   raw
     .prepare(
       `INSERT INTO streamer_platform_accounts
-         (streamer_id, platform, platform_user_id, channel_name, channel_url, verification_status, created_at, updated_at)
-       VALUES (?, ?, ?, 'ch', 'https://example.com', 'VERIFIED', ?, ?)`,
+         (streamer_id, platform, platform_user_id, channel_name, channel_url,
+          verification_status, approval_status, ownership_expires_at, created_at, updated_at)
+       VALUES (?, ?, ?, 'ch', 'https://example.com', 'VERIFIED', 'APPROVED',
+               '2030-01-01T00:00:00.000Z', ?, ?)`,
     )
     .run(streamerId, platform, platformUserId, now, now);
   return streamerId;

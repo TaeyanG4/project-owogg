@@ -20,7 +20,7 @@ import type { GameCreatorFailureStatus } from "./gameCreatorErrors.js";
 import type { ApiEnv } from "./auth.js";
 
 // Admin/operator management of the Game Creator program — both the admin-direct grant/revoke
-// path (predates the application flow, still works for inviting a known partner directly) and
+// path (predates the application flow, still works for inviting a known creator directly) and
 // reviewing self-serve applications (POST /api/game-creator/apply, see gameCreatorProgram.ts).
 // See docs/AUTHORIZATION.md and docs/GAME_CREATION_GUIDE.md §3.6.
 export const adminGameCreatorsRouter = new Hono<ApiEnv>();

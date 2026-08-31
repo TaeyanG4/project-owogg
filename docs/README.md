@@ -46,7 +46,7 @@
 
 ## 스트리머
 
-- [스트리머 시스템](STREAMER_SYSTEM.md) — **기준 문서/가이드**, 채널 소유권 검증과 Featured
+- [스트리머 시스템](STREAMER_SYSTEM.md) — **단일 기준 문서/가이드**, 채널 소유권 검증과 플랫폼별 수동 심사·관리
 
 `Streamer System`의 스트리머/채널 인증과 `Authorization`의 GAME_CREATOR 업로드 자격은 서로 다른
 프로그램입니다.

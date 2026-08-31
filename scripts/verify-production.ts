@@ -211,7 +211,7 @@ async function verifyStreamerProviders(): Promise<boolean> {
 
     if (isEnabled && !configured) {
       console.error(
-        `❌ ${platform} is declared in STREAMER_ENABLED_PROVIDERS but is not configured in production.`,
+        `❌ ${platform} is declared in STREAMER_ENABLED_PROVIDERS but is not configured in this deployment.`,
       );
       allRequiredConfigured = false;
     }

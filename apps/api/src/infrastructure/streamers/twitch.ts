@@ -11,6 +11,7 @@ interface TwitchAppTokenCache {
 
 export class TwitchStreamerProvider implements StreamerProviderAdapter {
   public platform = "TWITCH" as const;
+  public verificationMethod = "OAUTH_REDIRECT" as const;
 
   private appTokenCache: TwitchAppTokenCache | null = null;
 
@@ -29,19 +30,26 @@ export class TwitchStreamerProvider implements StreamerProviderAdapter {
       client_id: this.clientId,
       redirect_uri: redirectUri,
       response_type: "code",
-      scope: "user:read:email",
+      // GET /helix/users needs no user permission scope for the token owner. Keep the required
+      // OAuth parameter empty rather than requesting the unrelated verified-email field.
+      scope: "",
       state,
     });
     return `https://id.twitch.tv/oauth2/authorize?${params.toString()}`;
   }
 
-  async verifyOwnershipCode(code: string, redirectUri: string): Promise<StreamerChannelInfo> {
+  async verifyOwnershipCode(
+    code: string,
+    redirectUri: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<StreamerChannelInfo> {
     if (!this.clientId || !this.clientSecret) {
       throw new Error("Twitch OAuth credentials not configured");
     }
 
     const tokenRes = await fetch("https://id.twitch.tv/oauth2/token", {
       method: "POST",
+      ...(options?.signal ? { signal: options.signal } : {}),
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         client_id: this.clientId,
@@ -53,8 +61,7 @@ export class TwitchStreamerProvider implements StreamerProviderAdapter {
     });
 
     if (!tokenRes.ok) {
-      const errText = await tokenRes.text();
-      throw new Error(`Twitch token exchange failed: ${tokenRes.status} ${errText}`);
+      throw new Error(`Twitch token exchange failed with HTTP ${tokenRes.status}`);
     }
 
     const tokenData = (await tokenRes.json()) as { access_token?: string };
@@ -64,6 +71,7 @@ export class TwitchStreamerProvider implements StreamerProviderAdapter {
     }
 
     const userRes = await fetch("https://api.twitch.tv/helix/users", {
+      ...(options?.signal ? { signal: options.signal } : {}),
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "Client-Id": this.clientId,
@@ -71,8 +79,7 @@ export class TwitchStreamerProvider implements StreamerProviderAdapter {
     });
 
     if (!userRes.ok) {
-      const errText = await userRes.text();
-      throw new Error(`Twitch Helix API call failed: ${userRes.status} ${errText}`);
+      throw new Error(`Twitch Helix API call failed with HTTP ${userRes.status}`);
     }
 
     const userData = (await userRes.json()) as {
@@ -115,11 +122,11 @@ export class TwitchStreamerProvider implements StreamerProviderAdapter {
    * - 팔로워 수: GET /helix/channels/followers?broadcaster_id=... (app token은 total만 반환,
    *   전체 목록은 broadcaster/moderator 사용자 스코프 필요 — 우리는 total만 사용)
    */
-  supportsAutomaticMetricRefresh(): boolean {
+  supportsMetricRefresh(): boolean {
     return Boolean(this.clientId && this.clientSecret);
   }
 
-  private async getAppAccessToken(): Promise<string> {
+  private async getAppAccessToken(signal?: AbortSignal): Promise<string> {
     if (this.appTokenCache && this.appTokenCache.expiresAt > Date.now()) {
       return this.appTokenCache.token;
     }
@@ -129,6 +136,7 @@ export class TwitchStreamerProvider implements StreamerProviderAdapter {
 
     const res = await fetch("https://id.twitch.tv/oauth2/token", {
       method: "POST",
+      ...(signal ? { signal } : {}),
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         client_id: this.clientId,
@@ -138,8 +146,7 @@ export class TwitchStreamerProvider implements StreamerProviderAdapter {
     });
 
     if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`Twitch app token exchange failed: ${res.status} ${errText}`);
+      throw new Error(`Twitch app token exchange failed with HTTP ${res.status}`);
     }
 
     const data = (await res.json()) as { access_token?: string; expires_in?: number };
@@ -162,23 +169,28 @@ export class TwitchStreamerProvider implements StreamerProviderAdapter {
     };
   }
 
-  async fetchChannelMetrics(platformUserId: string): Promise<StreamerChannelMetrics> {
+  async fetchChannelMetrics(
+    platformUserId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<StreamerChannelMetrics> {
     if (!this.clientId || !this.clientSecret) {
       throw new Error("Twitch OAuth credentials not configured");
     }
 
-    const appToken = await this.getAppAccessToken();
+    const appToken = await this.getAppAccessToken(options?.signal);
 
     const userRes = await fetch(
       `https://api.twitch.tv/helix/users?id=${encodeURIComponent(platformUserId)}`,
-      { headers: this.helixHeaders(appToken) },
+      {
+        headers: this.helixHeaders(appToken),
+        ...(options?.signal ? { signal: options.signal } : {}),
+      },
     );
     if (!userRes.ok) {
       if (userRes.status === 404) {
         return { audienceCount: null, channelCreatedAt: null, channelState: "NOT_FOUND" };
       }
-      const errText = await userRes.text();
-      throw new Error(`Twitch users API (metric refresh) failed: ${userRes.status} ${errText}`);
+      throw new Error(`Twitch users API (metric refresh) failed with HTTP ${userRes.status}`);
     }
     const userData = (await userRes.json()) as {
       data?: Array<{ created_at?: string }>;
@@ -193,15 +205,17 @@ export class TwitchStreamerProvider implements StreamerProviderAdapter {
       `https://api.twitch.tv/helix/channels/followers?broadcaster_id=${encodeURIComponent(
         platformUserId,
       )}&first=1`,
-      { headers: this.helixHeaders(appToken) },
+      {
+        headers: this.helixHeaders(appToken),
+        ...(options?.signal ? { signal: options.signal } : {}),
+      },
     );
     if (!followersRes.ok) {
       if (followersRes.status === 404) {
         return { audienceCount: null, channelCreatedAt, channelState: "NOT_FOUND" };
       }
-      const errText = await followersRes.text();
       throw new Error(
-        `Twitch channels/followers API (metric refresh) failed: ${followersRes.status} ${errText}`,
+        `Twitch channels/followers API (metric refresh) failed with HTTP ${followersRes.status}`,
       );
     }
     const followersData = (await followersRes.json()) as { total?: number };

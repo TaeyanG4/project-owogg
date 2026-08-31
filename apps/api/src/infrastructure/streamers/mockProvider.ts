@@ -6,19 +6,23 @@ import type {
 } from "@owogg/core";
 
 export class MockStreamerProvider implements StreamerProviderAdapter {
+  public verificationMethod: "OAUTH_REDIRECT" | "UNAVAILABLE";
+
   constructor(
     public platform: StreamerPlatformType,
     private configured = true,
     private mockResult?: StreamerChannelInfo,
     private mockError?: string,
     private metricsOverride?: StreamerChannelMetrics,
-  ) {}
+  ) {
+    this.verificationMethod = platform === "SOOP" ? "UNAVAILABLE" : "OAUTH_REDIRECT";
+  }
 
   isConfigured(): boolean {
     return this.configured;
   }
 
-  /** 테스트 전용: 자동 재심사 지원 여부를 오버라이드합니다. */
+  /** 테스트 전용: 운영자 수동 지표 갱신 지원 여부를 오버라이드합니다. */
   setMetricsRefreshSupported(supported: boolean): void {
     this.metricsRefreshSupported = supported;
   }
@@ -33,7 +37,7 @@ export class MockStreamerProvider implements StreamerProviderAdapter {
     return `https://mock.owogg.dev/auth/${this.platform}?${params.toString()}`;
   }
 
-  async verifyOwnershipCode(code: string, _redirectUri: string): Promise<StreamerChannelInfo> {
+  async verifyOwnershipCode(code: string): Promise<StreamerChannelInfo> {
     if (this.mockError) {
       throw new Error(this.mockError);
     }
@@ -56,11 +60,11 @@ export class MockStreamerProvider implements StreamerProviderAdapter {
     };
   }
 
-  supportsAutomaticMetricRefresh(): boolean {
+  supportsMetricRefresh(): boolean {
     return this.configured && this.metricsRefreshSupported;
   }
 
-  async fetchChannelMetrics(_platformUserId: string): Promise<StreamerChannelMetrics> {
+  async fetchChannelMetrics(): Promise<StreamerChannelMetrics> {
     if (this.metricsOverride) {
       return this.metricsOverride;
     }

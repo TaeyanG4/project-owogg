@@ -1,3 +1,6 @@
+import { validateStreamerOAuthEnvironment } from "./streamer-provider-contract.js";
+import { validateMultiplayerDeploymentEnvironment } from "./multiplayer-deployment-contract.js";
+
 export const PRODUCTION = {
   frontendUrl: "https://owogg.com",
   apiUrl: "https://api.owogg.com",
@@ -329,9 +332,6 @@ export function validateStagingEnvironment(env: Environment): string[] {
   const discordTestGuildId = required(env, "DISCORD_TEST_GUILD_ID", errors);
   const discordInstallUrl = required(env, "DISCORD_INSTALL_URL", errors);
   const d1Id = required(env, "STAGING_D1_DATABASE_ID", errors);
-  const multiplayerTicketKeyId = required(env, "MULTIPLAYER_TICKET_KEY_ID", errors);
-  const multiplayerTicketSecret = required(env, "MULTIPLAYER_TICKET_SECRET", errors);
-  const multiplayerEnabled = (env.STAGING_MULTIPLAYER_ENABLED ?? "false").trim();
   const adminSessionTtlSeconds = (env.STAGING_ADMIN_SESSION_TTL_SECONDS ?? "").trim();
 
   if (frontendUrl !== STAGING.frontendUrl)
@@ -367,41 +367,24 @@ export function validateStagingEnvironment(env: Environment): string[] {
   }
   if (d1Id === PRODUCTION.d1Id) errors.push("Staging D1 ID must not equal Production D1 ID");
 
-  if (!/^[A-Za-z0-9_-]{1,32}$/.test(multiplayerTicketKeyId)) {
-    errors.push("MULTIPLAYER_TICKET_KEY_ID must be 1-32 URL-safe characters");
-  }
-  if (!["true", "false"].includes(multiplayerEnabled)) {
-    errors.push("STAGING_MULTIPLAYER_ENABLED must be true or false");
-  }
   if (adminSessionTtlSeconds !== "43200") {
     errors.push("STAGING_ADMIN_SESSION_TTL_SECONDS must be exactly 43200");
   }
-  if (env.MULTIPLAYER_TICKET_SECRET !== multiplayerTicketSecret) {
-    errors.push("MULTIPLAYER_TICKET_SECRET must not have surrounding whitespace");
-  }
-  if (new TextEncoder().encode(multiplayerTicketSecret).byteLength < 32) {
-    errors.push("MULTIPLAYER_TICKET_SECRET must be at least 32 UTF-8 bytes");
-  }
 
-  const previousTicketKeyId = env.MULTIPLAYER_TICKET_PREVIOUS_KEY_ID?.trim() ?? "";
-  const previousTicketSecret = env.MULTIPLAYER_TICKET_PREVIOUS_SECRET?.trim() ?? "";
-  if (Boolean(previousTicketKeyId) !== Boolean(previousTicketSecret)) {
-    errors.push(
-      "MULTIPLAYER_TICKET_PREVIOUS_KEY_ID and MULTIPLAYER_TICKET_PREVIOUS_SECRET must be configured together",
-    );
-  }
-  if (previousTicketKeyId && !/^[A-Za-z0-9_-]{1,32}$/.test(previousTicketKeyId)) {
-    errors.push("MULTIPLAYER_TICKET_PREVIOUS_KEY_ID must be 1-32 URL-safe characters");
-  }
-  if (previousTicketSecret && env.MULTIPLAYER_TICKET_PREVIOUS_SECRET !== previousTicketSecret) {
-    errors.push("MULTIPLAYER_TICKET_PREVIOUS_SECRET must not have surrounding whitespace");
-  }
-  if (previousTicketSecret && new TextEncoder().encode(previousTicketSecret).byteLength < 32) {
-    errors.push("MULTIPLAYER_TICKET_PREVIOUS_SECRET must be at least 32 UTF-8 bytes");
-  }
-  if (previousTicketKeyId && previousTicketKeyId === multiplayerTicketKeyId) {
-    errors.push("active and previous multiplayer ticket key IDs must differ");
-  }
+  errors.push(
+    ...validateMultiplayerDeploymentEnvironment(env, {
+      deploymentLabel: "Staging",
+      variablePrefix: "STAGING_",
+    }),
+  );
+
+  errors.push(
+    ...validateStreamerOAuthEnvironment(env, {
+      deploymentLabel: "Staging",
+      apiUrl: STAGING.apiUrl,
+      variablePrefix: "STAGING_",
+    }),
+  );
 
   const adminIds = env.STAGING_ADMIN_USER_IDS?.trim() ?? "";
   if (adminIds && !adminIds.split(",").every((id) => /^[1-9]\d*$/.test(id.trim()))) {

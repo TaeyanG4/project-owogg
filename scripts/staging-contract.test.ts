@@ -46,6 +46,17 @@ function validStagingEnvironment(): Record<string, string> {
     DISCORD_PUBLIC_KEY: "a".repeat(64),
     DISCORD_REDIRECT_URI: `${STAGING.apiUrl}/api/auth/discord/callback`,
     DISCORD_TEST_GUILD_ID: "987654321098765432",
+    STAGING_STREAMER_ENABLED_PROVIDERS: "YOUTUBE,TWITCH,CHZZK",
+    STAGING_YOUTUBE_CLIENT_ID: "staging-youtube-client",
+    STAGING_YOUTUBE_CLIENT_SECRET: "staging-youtube-secret",
+    STAGING_YOUTUBE_API_KEY: "staging-youtube-api-key",
+    STAGING_YOUTUBE_REDIRECT_URI: `${STAGING.apiUrl}/api/streamers/verify/youtube/callback`,
+    STAGING_TWITCH_CLIENT_ID: "staging-twitch-client",
+    STAGING_TWITCH_CLIENT_SECRET: "staging-twitch-secret",
+    STAGING_TWITCH_REDIRECT_URI: `${STAGING.apiUrl}/api/streamers/verify/twitch/callback`,
+    STAGING_CHZZK_CLIENT_ID: "staging-chzzk-client",
+    STAGING_CHZZK_CLIENT_SECRET: "staging-chzzk-secret",
+    STAGING_CHZZK_REDIRECT_URI: `${STAGING.apiUrl}/api/streamers/verify/chzzk/callback`,
     STAGING_ADMIN_USER_IDS: "",
     STAGING_ADMIN_SESSION_TTL_SECONDS: "43200",
     STAGING_D1_DATABASE_ID: STAGING_D1_ID,
@@ -61,8 +72,8 @@ function validStagingEnvironment(): Record<string, string> {
     DISCORD_BOT_TOKEN: "bot-token",
     DISCORD_CLIENT_SECRET: "discord-secret",
     GAME_SESSION_SECRET: "session-secret",
-    MULTIPLAYER_TICKET_KEY_ID: "staging_2026_08_a",
-    MULTIPLAYER_TICKET_SECRET: "m".repeat(32),
+    STAGING_MULTIPLAYER_TICKET_KEY_ID: "staging_2026_08_a",
+    STAGING_MULTIPLAYER_TICKET_SECRET: "m".repeat(32),
   };
 }
 
@@ -119,40 +130,122 @@ test("Staging Google code exchange requires a non-blank, whitespace-safe server 
   );
 });
 
+test("Staging Streamer OAuth requires an explicit supported provider set", () => {
+  const missingProviders = validStagingEnvironment();
+  delete missingProviders.STAGING_STREAMER_ENABLED_PROVIDERS;
+  assert.match(
+    validateStagingEnvironment(missingProviders).join("\n"),
+    /STAGING_STREAMER_ENABLED_PROVIDERS is required/,
+  );
+
+  assert.match(
+    validateStagingEnvironment({
+      ...validStagingEnvironment(),
+      STAGING_STREAMER_ENABLED_PROVIDERS: "YOUTUBE,SOOP",
+    }).join("\n"),
+    /SOOP must not be enabled in Staging/,
+  );
+  assert.match(
+    validateStagingEnvironment({
+      ...validStagingEnvironment(),
+      STAGING_STREAMER_ENABLED_PROVIDERS: "YOUTUBE,YOUTUBE",
+    }).join("\n"),
+    /contains duplicate YOUTUBE/,
+  );
+  assert.match(
+    validateStagingEnvironment({
+      ...validStagingEnvironment(),
+      STAGING_STREAMER_ENABLED_PROVIDERS: "YOUTUBE,UNKNOWN",
+    }).join("\n"),
+    /Unsupported Staging Streamer provider UNKNOWN/,
+  );
+});
+
+test("each enabled Staging Streamer provider requires isolated exact credentials and callback", () => {
+  const youtubeOnly: Record<string, string> = {
+    ...validStagingEnvironment(),
+    STAGING_STREAMER_ENABLED_PROVIDERS: "YOUTUBE",
+  };
+  delete youtubeOnly.STAGING_TWITCH_CLIENT_ID;
+  delete youtubeOnly.STAGING_TWITCH_CLIENT_SECRET;
+  delete youtubeOnly.STAGING_TWITCH_REDIRECT_URI;
+  delete youtubeOnly.STAGING_CHZZK_CLIENT_ID;
+  delete youtubeOnly.STAGING_CHZZK_CLIENT_SECRET;
+  delete youtubeOnly.STAGING_CHZZK_REDIRECT_URI;
+  assert.deepEqual(validateStagingEnvironment(youtubeOnly), []);
+
+  assert.match(
+    validateStagingEnvironment({
+      ...youtubeOnly,
+      STAGING_TWITCH_CLIENT_ID: "unexpected-disabled-client",
+    }).join("\n"),
+    /STAGING_TWITCH_CLIENT_ID must be empty unless TWITCH is listed/,
+  );
+
+  const missingYoutubeApiKey = { ...youtubeOnly };
+  delete missingYoutubeApiKey.STAGING_YOUTUBE_API_KEY;
+  assert.match(
+    validateStagingEnvironment(missingYoutubeApiKey).join("\n"),
+    /STAGING_YOUTUBE_API_KEY is required/,
+  );
+
+  assert.match(
+    validateStagingEnvironment({
+      ...youtubeOnly,
+      STAGING_YOUTUBE_CLIENT_SECRET: " staging-youtube-secret ",
+      STAGING_YOUTUBE_REDIRECT_URI: "https://api.owogg.com/api/streamers/verify/youtube/callback",
+    }).join("\n"),
+    /STAGING_YOUTUBE_CLIENT_SECRET must not have surrounding whitespace/,
+  );
+  assert.match(
+    validateStagingEnvironment({
+      ...youtubeOnly,
+      STAGING_YOUTUBE_REDIRECT_URI: "https://api.owogg.com/api/streamers/verify/youtube/callback",
+    }).join("\n"),
+    /STAGING_YOUTUBE_REDIRECT_URI must equal https:\/\/api-stg\.owogg\.com/,
+  );
+});
+
 test("Staging multiplayer ticket keys are strong, paired and rotation-safe", () => {
   assert.match(
     validateStagingEnvironment({
       ...validStagingEnvironment(),
-      MULTIPLAYER_TICKET_SECRET: "too-short",
+      STAGING_MULTIPLAYER_TICKET_SECRET: "too-short",
     }).join("\n"),
     /at least 32 UTF-8 bytes/,
   );
   assert.match(
     validateStagingEnvironment({
       ...validStagingEnvironment(),
-      MULTIPLAYER_TICKET_PREVIOUS_KEY_ID: "staging_2026_07_z",
+      STAGING_MULTIPLAYER_TICKET_PREVIOUS_KEY_ID: "staging_2026_07_z",
     }).join("\n"),
     /must be configured together/,
   );
   assert.deepEqual(
     validateStagingEnvironment({
       ...validStagingEnvironment(),
-      MULTIPLAYER_TICKET_PREVIOUS_KEY_ID: "staging_2026_07_z",
-      MULTIPLAYER_TICKET_PREVIOUS_SECRET: "p".repeat(32),
+      STAGING_MULTIPLAYER_TICKET_PREVIOUS_KEY_ID: "staging_2026_07_z",
+      STAGING_MULTIPLAYER_TICKET_PREVIOUS_SECRET: "p".repeat(32),
     }),
     [],
   );
   assert.match(
     validateStagingEnvironment({
       ...validStagingEnvironment(),
-      MULTIPLAYER_TICKET_PREVIOUS_KEY_ID: "staging_2026_08_a",
-      MULTIPLAYER_TICKET_PREVIOUS_SECRET: "p".repeat(32),
+      STAGING_MULTIPLAYER_TICKET_PREVIOUS_KEY_ID: "staging_2026_08_a",
+      STAGING_MULTIPLAYER_TICKET_PREVIOUS_SECRET: "p".repeat(32),
     }).join("\n"),
     /key IDs must differ/,
   );
 });
 
 test("Staging multiplayer activation is explicit and boolean", () => {
+  const missing = validStagingEnvironment();
+  delete missing.STAGING_MULTIPLAYER_ENABLED;
+  assert.match(
+    validateStagingEnvironment(missing).join("\n"),
+    /STAGING_MULTIPLAYER_ENABLED is required/,
+  );
   assert.deepEqual(
     validateStagingEnvironment({
       ...validStagingEnvironment(),
@@ -166,6 +259,13 @@ test("Staging multiplayer activation is explicit and boolean", () => {
       STAGING_MULTIPLAYER_ENABLED: "enabled",
     }).join("\n"),
     /STAGING_MULTIPLAYER_ENABLED must be true or false/,
+  );
+  assert.match(
+    validateStagingEnvironment({
+      ...validStagingEnvironment(),
+      STAGING_MULTIPLAYER_TICKET_KEY_ID: "production_2026_09_a",
+    }).join("\n"),
+    /STAGING_MULTIPLAYER_TICKET_KEY_ID must start with staging_/,
   );
 });
 
@@ -287,8 +387,11 @@ test("Staging workflow is push-after-CI only and contains no Production variable
   // Staging uses its explicitly scoped name and maps it only at the Worker boundary below.
   assert.doesNotMatch(deploy, /vars\.ADMIN_USER_IDS/);
   assert.doesNotMatch(deploy, /vars\.MULTIPLAYER_ENABLED/);
+  assert.doesNotMatch(deploy, /vars\.MULTIPLAYER_TICKET/);
+  assert.doesNotMatch(deploy, /secrets\.MULTIPLAYER_TICKET/);
   assert.doesNotMatch(deploy, /^\s+ADMIN_USER_IDS:\s*\$\{\{ vars\.ADMIN_USER_IDS/gm);
   assert.doesNotMatch(deploy, /vars\.(?:YOUTUBE|TWITCH|CHZZK|SOOP)_/);
+  assert.doesNotMatch(deploy, /secrets\.(?:YOUTUBE|TWITCH|CHZZK|SOOP)_/);
   assert.doesNotMatch(deploy, /publish:official-games/);
   assert.doesNotMatch(deploy, /bootstrap:official-games/);
   assert.doesNotMatch(deploy, /pnpm discord:commands:register(?:\s|$)/m);
@@ -301,17 +404,61 @@ test("Staging workflow is push-after-CI only and contains no Production variable
   assert.match(deploy, /STAGING_ADMIN_SESSION_TTL_SECONDS: "43200"/);
   assert.match(deploy, /ADMIN_SESSION_TTL_SECONDS:43200/);
   assert.doesNotMatch(productionDeploy, /ADMIN_SESSION_TTL_SECONDS/);
+  assert.match(deploy, /MULTIPLAYER_ENABLED:\$\{\{ vars\.STAGING_MULTIPLAYER_ENABLED \}\}/);
+  assert.match(deploy, /MULTIPLAYER_SOCKET_ORIGIN:https:\/\/api-stg\.owogg\.com/);
   assert.match(
     deploy,
-    /MULTIPLAYER_ENABLED:\$\{\{ vars\.STAGING_MULTIPLAYER_ENABLED \|\| 'false' \}\}/,
+    /MULTIPLAYER_TICKET_KEY_ID:\$\{\{ vars\.STAGING_MULTIPLAYER_TICKET_KEY_ID \}\}/,
   );
-  assert.match(deploy, /MULTIPLAYER_SOCKET_ORIGIN:https:\/\/api-stg\.owogg\.com/);
-  assert.match(deploy, /MULTIPLAYER_TICKET_KEY_ID:\$\{\{ vars\.MULTIPLAYER_TICKET_KEY_ID \}\}/);
+  assert.match(
+    deploy,
+    /STAGING_MULTIPLAYER_TICKET_SECRET: \$\{\{ secrets\.STAGING_MULTIPLAYER_TICKET_SECRET \}\}/,
+  );
   assert.match(deploy, /GOOGLE_CLIENT_SECRET: \$\{\{ secrets\.GOOGLE_CLIENT_SECRET \}\}/);
   assert.match(deploy, /put_secret GOOGLE_CLIENT_SECRET/);
-  assert.match(deploy, /put_secret MULTIPLAYER_TICKET_SECRET/);
-  assert.match(deploy, /put_optional_secret MULTIPLAYER_TICKET_PREVIOUS_SECRET/);
+  assert.match(
+    deploy,
+    /STAGING_STREAMER_ENABLED_PROVIDERS: \$\{\{ vars\.STAGING_STREAMER_ENABLED_PROVIDERS \}\}/,
+  );
+  assert.match(
+    deploy,
+    /STREAMER_ENABLED_PROVIDERS:\$\{\{ vars\.STAGING_STREAMER_ENABLED_PROVIDERS \}\}/,
+  );
+  for (const platform of ["YOUTUBE", "TWITCH", "CHZZK"]) {
+    assert.match(
+      deploy,
+      new RegExp(`${platform}_CLIENT_ID:\\\$\\{\\{ vars\\.STAGING_${platform}_CLIENT_ID \\}\\}`),
+    );
+    assert.match(
+      deploy,
+      new RegExp(
+        `${platform}_REDIRECT_URI:\\\$\\{\\{ vars\\.STAGING_${platform}_REDIRECT_URI \\}\\}`,
+      ),
+    );
+    assert.match(
+      deploy,
+      new RegExp(
+        `STAGING_${platform}_CLIENT_SECRET: \\\$\\{\\{ secrets\\.STAGING_${platform}_CLIENT_SECRET \\}\\}`,
+      ),
+    );
+    assert.match(deploy, new RegExp(`put_optional_secret ${platform}_CLIENT_SECRET`));
+  }
+  assert.match(deploy, /STAGING_YOUTUBE_API_KEY: \$\{\{ secrets\.STAGING_YOUTUBE_API_KEY \}\}/);
+  assert.match(deploy, /put_optional_secret YOUTUBE_API_KEY/);
+  assert.doesNotMatch(deploy, /STAGING_SOOP_/);
+  assert.match(
+    deploy,
+    /put_secret MULTIPLAYER_TICKET_SECRET "\$STAGING_MULTIPLAYER_TICKET_SECRET"/,
+  );
+  assert.match(
+    deploy,
+    /put_optional_secret MULTIPLAYER_TICKET_PREVIOUS_SECRET "\$STAGING_MULTIPLAYER_TICKET_PREVIOUS_SECRET"/,
+  );
   assert.match(deploy, /smoke:prod --api-only --allow-empty-catalog/);
+  assert.match(
+    deploy,
+    /STREAMER_ENABLED_PROVIDERS: \$\{\{ vars\.STAGING_STREAMER_ENABLED_PROVIDERS \}\}/,
+  );
   assert.match(deploy, /smoke:prod --web-only --allow-empty-catalog/);
   assert.doesNotMatch(productionDeploy, /allow-empty-catalog/);
 });

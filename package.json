@@ -16,6 +16,7 @@
     "typecheck:scripts": "tsc -p tsconfig.scripts.json",
     "smoke:prod": "tsx scripts/verify-production.ts",
     "auth:prod:check": "tsx scripts/check-auth-readiness.ts",
+    "production:preflight": "tsx scripts/production-deployment-preflight.ts",
     "discord:commands:register": "tsx scripts/register-discord-commands.ts",
     "discord:commands:register:guild": "tsx scripts/register-discord-commands-guild.ts",
     "discord:commands:check": "tsx scripts/discord-commands-check.ts",
@@ -30,7 +31,7 @@
     "verify": "pnpm install --frozen-lockfile && pnpm format:check && pnpm docs:check && pnpm architecture:check && pnpm lint && pnpm typecheck && pnpm typecheck:scripts && pnpm test && pnpm test:scripts && pnpm build",
     "deploy": "pnpm --filter @owogg/api deploy && pnpm --filter @owogg/web deploy",
     "d1:migrate": "pnpm exec wrangler d1 migrations apply DB --local --config apps/api/wrangler.jsonc",
-    "d1:migrate:prod": "pnpm exec wrangler d1 migrations apply DB --remote --config apps/api/wrangler.jsonc",
+    "d1:migrate:prod": "pnpm exec wrangler d1 migrations apply DB --remote --env=\"\" --config apps/api/wrangler.jsonc",
     "d1:migrate:staging": "pnpm exec wrangler d1 migrations apply owogg-d1-staging --remote --env staging --config apps/api/wrangler.staging.generated.jsonc --x-provision=false --x-auto-create=false",
     "format": "prettier --write .",
     "format:check": "prettier --check ."

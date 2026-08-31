@@ -150,9 +150,12 @@ CREATE TABLE streamer_profiles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER UNIQUE NOT NULL,
   status TEXT NOT NULL DEFAULT 'UNVERIFIED',
-  featured_status TEXT NOT NULL DEFAULT 'NONE',
-  featured_reason TEXT,
-  featured_since TEXT,
+  suspended_at TEXT,
+  suspended_by_user_id INTEGER,
+  suspended_until TEXT,
+  suspension_reason_code TEXT,
+  row_version INTEGER NOT NULL DEFAULT 0,
+  last_correlation_id TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -172,8 +175,16 @@ CREATE TABLE streamer_platform_accounts (
   audience_count_known INTEGER NOT NULL DEFAULT 0,
   channel_created_at TEXT,
   metrics_synced_at TEXT,
+  ownership_expires_at TEXT,
+  approval_status TEXT NOT NULL DEFAULT 'PENDING',
+  approval_reason_code TEXT,
+  approved_at TEXT,
+  approved_by_user_id INTEGER,
+  row_version INTEGER NOT NULL DEFAULT 0,
+  last_correlation_id TEXT,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  UNIQUE(platform, platform_user_id)
 );
 
 CREATE TABLE user_progress (

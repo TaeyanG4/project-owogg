@@ -201,17 +201,21 @@ publisher authority는 서로 다른 개념입니다. 상세 모델은 [Authoriz
 `.github/workflows/deploy.yml`은 검증된 정확한 SHA를 대상으로 다음 순서를 사용합니다.
 
 ```text
-D1 migrations
+read-only Production D1 name/UUID 조회
+→ Repository-scoped Production D1·multiplayer·Streamer preflight
+→ D1 migrations
 → API Worker deploy
+→ runtime secret upload
 → API health/provenance
-→ OWOGG generic game bootstrap
 → Web build/deploy
 → Web smoke/provenance
 → optional Discord command sync
 ```
 
-bootstrap이 Web build보다 먼저 실행되므로 배포된 카탈로그와 bundle이 generic runtime authority에
-준비된 뒤 Web이 공개됩니다.
+Production preflight는 `PRODUCTION_D1_DATABASE_ID`를 원격 `owogg-d1`과 committed Wrangler binding에
+대조하고, `PRODUCTION_MULTIPLAYER_*`와 `PRODUCTION_STREAMER_*`의 완전성을 확인한 뒤에만 첫 mutation인
+D1 migration으로 진행합니다. GitHub 이름은 환경 접두사를 유지하고 Worker에는 generic runtime binding
+이름으로 매핑합니다.
 
 ## 자동 경계 검증
 

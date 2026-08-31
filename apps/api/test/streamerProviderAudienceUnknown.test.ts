@@ -1,17 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { YouTubeStreamerProvider } from "../src/infrastructure/streamers/youtube.js";
+import { TwitchStreamerProvider } from "../src/infrastructure/streamers/twitch.js";
 import { ChzzkStreamerProvider } from "../src/infrastructure/streamers/chzzk.js";
 import { SoopStreamerProvider } from "../src/infrastructure/streamers/soop.js";
 
-// UNKNOWN vs known-zero audience must be distinguished at initial channel-ownership
-// verification, not just at the 6-hour metric-refresh path (which already handled this
-// correctly). A provider omitting the audience field must never be coerced to 0.
+// UNKNOWN vs known-zero audience must be distinguished in both ownership verification and
+// manual metric refresh. A provider omitting the audience field must never be coerced to 0.
 
-function withMockFetch(handler: (url: string) => Response, fn: () => Promise<void>) {
+function withMockFetch(
+  handler: (url: string, init?: RequestInit) => Response | Promise<Response>,
+  fn: () => Promise<void>,
+) {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async (input: URL | RequestInfo | string) => {
-    return handler(String(input));
+  globalThis.fetch = (async (input: URL | RequestInfo | string, init?: RequestInit) => {
+    return handler(String(input), init);
   }) as unknown as typeof fetch;
   return fn().finally(() => {
     globalThis.fetch = originalFetch;
@@ -35,6 +38,40 @@ test("YouTube: channel hiding subscriberCount leaves audienceCount undefined (UN
       const provider = new YouTubeStreamerProvider("id", "secret", "apikey");
       const info = await provider.verifyOwnershipCode("code", "redirect");
       assert.equal(info.audienceCount, undefined);
+      assert.equal(info.platformUserId, "UC1");
+    },
+  );
+});
+
+test("Twitch: canonical identity comes from the user bound to the exchanged access token", async () => {
+  const provider = new TwitchStreamerProvider("id", "secret");
+  const authorizeUrl = new URL(provider.getAuthorizeUrl("nonce", "https://app.test/callback"));
+  assert.equal(authorizeUrl.searchParams.get("scope"), "");
+  assert.equal(authorizeUrl.searchParams.has("state"), true);
+
+  await withMockFetch(
+    (url) => {
+      if (url.includes("id.twitch.tv/oauth2/token")) {
+        return Response.json({ access_token: "user-token" });
+      }
+      if (url.includes("api.twitch.tv/helix/users")) {
+        return Response.json({
+          data: [
+            {
+              id: "canonical-twitch-id",
+              login: "owner_login",
+              display_name: "Owner",
+              created_at: "2020-01-01T00:00:00Z",
+            },
+          ],
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const info = await provider.verifyOwnershipCode("one-time-code", "redirect");
+      assert.equal(info.platformUserId, "canonical-twitch-id");
+      assert.equal(info.channelHandle, "@owner_login");
     },
   );
 });
@@ -66,11 +103,23 @@ test("YouTube: explicit subscriberCount of 0 is a known zero", async () => {
   );
 });
 
-test("CHZZK: missing followerCount leaves audienceCount undefined (UNKNOWN)", async () => {
+test("CHZZK: current OAuth contract returns canonical channel with UNKNOWN audience", async () => {
+  const provider = new ChzzkStreamerProvider("id", "secret");
+  const authorizeUrl = new URL(provider.getAuthorizeUrl("nonce", "https://app.test/callback"));
+  assert.equal(
+    authorizeUrl.origin + authorizeUrl.pathname,
+    "https://chzzk.naver.com/account-interlock",
+  );
+  assert.equal(authorizeUrl.searchParams.get("clientId"), "id");
+  assert.equal(authorizeUrl.searchParams.get("redirectUri"), "https://app.test/callback");
+  assert.equal(authorizeUrl.searchParams.get("state"), "nonce");
+
+  let tokenRequest: RequestInit | undefined;
   await withMockFetch(
-    (url) => {
-      if (url.includes("nid.naver.com/oauth2.0/token")) {
-        return Response.json({ access_token: "tok" });
+    (url, init) => {
+      if (url.includes("openapi.chzzk.naver.com/auth/v1/token")) {
+        tokenRequest = init;
+        return Response.json({ content: { accessToken: "tok" } });
       }
       if (url.includes("openapi.chzzk.naver.com/open/v1/users/me")) {
         return Response.json({ content: { channelId: "abc123", channelName: "Ch" } });
@@ -78,68 +127,51 @@ test("CHZZK: missing followerCount leaves audienceCount undefined (UNKNOWN)", as
       throw new Error(`unexpected fetch: ${url}`);
     },
     async () => {
-      const provider = new ChzzkStreamerProvider("id", "secret");
-      const info = await provider.verifyOwnershipCode("code", "redirect");
+      const info = await provider.verifyOwnershipCode("code", "redirect", { state: "nonce" });
       assert.equal(info.audienceCount, undefined);
+      assert.equal(info.platformUserId, "abc123");
     },
   );
+
+  assert.equal(
+    tokenRequest?.headers && new Headers(tokenRequest.headers).get("Content-Type"),
+    "application/json",
+  );
+  assert.deepEqual(JSON.parse(String(tokenRequest?.body)), {
+    grantType: "authorization_code",
+    clientId: "id",
+    clientSecret: "secret",
+    code: "code",
+    state: "nonce",
+  });
 });
 
-test("CHZZK: explicit followerCount of 0 is a known zero", async () => {
+test("CHZZK: metric refresh preserves an explicit followerCount of 0", async () => {
   await withMockFetch(
     (url) => {
-      if (url.includes("nid.naver.com/oauth2.0/token")) {
-        return Response.json({ access_token: "tok" });
-      }
-      if (url.includes("openapi.chzzk.naver.com/open/v1/users/me")) {
-        return Response.json({
-          content: { channelId: "abc123", channelName: "Ch", followerCount: 0 },
-        });
+      if (url.includes("openapi.chzzk.naver.com/open/v1/channels")) {
+        return Response.json({ content: { data: [{ followerCount: 0 }] } });
       }
       throw new Error(`unexpected fetch: ${url}`);
     },
     async () => {
       const provider = new ChzzkStreamerProvider("id", "secret");
-      const info = await provider.verifyOwnershipCode("code", "redirect");
-      assert.equal(info.audienceCount, 0);
+      const metrics = await provider.fetchChannelMetrics("abc123");
+      assert.equal(metrics.audienceCount, 0);
     },
   );
 });
 
-test("SOOP: missing fan_count leaves audienceCount undefined (UNKNOWN)", async () => {
-  await withMockFetch(
-    (url) => {
-      if (url.includes("openapi.sooplive.co.kr/auth/token")) {
-        return Response.json({ access_token: "tok" });
-      }
-      if (url.includes("openapi.sooplive.co.kr/user/me")) {
-        return Response.json({ user_id: "streamer1" });
-      }
-      throw new Error(`unexpected fetch: ${url}`);
-    },
-    async () => {
-      const provider = new SoopStreamerProvider("id", "secret");
-      const info = await provider.verifyOwnershipCode("code", "redirect");
-      assert.equal(info.audienceCount, undefined);
-    },
+test("SOOP: browser ownership verification stays fail-closed while callback binding is unavailable", async () => {
+  const provider = new SoopStreamerProvider("id", "secret");
+  assert.equal(provider.isConfigured(), true);
+  assert.equal(provider.verificationMethod, "UNAVAILABLE");
+  assert.throws(
+    () => provider.getAuthorizeUrl("nonce", "https://app.test/callback"),
+    /not safely supported/,
   );
-});
-
-test("SOOP: explicit fan_count of 0 is a known zero", async () => {
-  await withMockFetch(
-    (url) => {
-      if (url.includes("openapi.sooplive.co.kr/auth/token")) {
-        return Response.json({ access_token: "tok" });
-      }
-      if (url.includes("openapi.sooplive.co.kr/user/me")) {
-        return Response.json({ user_id: "streamer1", fan_count: 0 });
-      }
-      throw new Error(`unexpected fetch: ${url}`);
-    },
-    async () => {
-      const provider = new SoopStreamerProvider("id", "secret");
-      const info = await provider.verifyOwnershipCode("code", "redirect");
-      assert.equal(info.audienceCount, 0);
-    },
+  await assert.rejects(
+    () => provider.verifyOwnershipCode("code", "https://app.test/callback"),
+    /deferred/,
   );
 });

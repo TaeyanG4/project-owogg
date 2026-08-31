@@ -37,6 +37,25 @@ test("admin navigation filters sections by effective permissions", () => {
   assert.equal(ids.includes("monitoring"), false);
 });
 
+test("any Streamer workspace permission exposes the unified management entry", () => {
+  for (const permission of [
+    "streamers.view",
+    "streamers.review",
+    "streamers.manage",
+    "streamers.policy.manage",
+    "streamers.operations.manage",
+  ] as const) {
+    const ids = flattenIds(
+      getVisibleAdminNavigation({
+        elevated: true,
+        role: "OPERATOR",
+        permissions: ["admin.center.access", permission],
+      }),
+    );
+    assert.ok(ids.includes("streamer-reviews"), permission);
+  }
+});
+
 test("non-elevated visitors only see the dashboard entry", () => {
   const ids = flattenIds(
     getVisibleAdminNavigation({ elevated: false, role: null, permissions: [] }),

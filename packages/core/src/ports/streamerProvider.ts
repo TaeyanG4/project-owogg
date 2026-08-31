@@ -1,5 +1,6 @@
-import type { StreamerChannelState } from "../domain/featuredPolicy.js";
 import type { StreamerPlatformType } from "./repositories.js";
+
+export type StreamerChannelState = "ACTIVE" | "NOT_FOUND" | "REVOKED";
 
 export interface StreamerChannelInfo {
   platform: StreamerPlatformType;
@@ -12,30 +13,57 @@ export interface StreamerChannelInfo {
   channelCreatedAt?: string;
 }
 
-/**
- * 6시간 자동 재심사용 공식 지표.
- * 플랫폼이 제공하지 않는 필드는 null(UNKNOWN)로 명시하고, 절대 추정값을 만들어 내지 않습니다.
- */
+/** 수동 운영자가 새로고침할 때 사용하는 공식 지표 스냅샷입니다. */
 export interface StreamerChannelMetrics {
   /** 공식 구독자/팔로워 수. 공식 지표를 얻을 수 없으면 null */
   audienceCount: number | null;
   /** 공식 채널/계정 생성 타임스탬프. 플랫폼이 미제공이면 null */
   channelCreatedAt: string | null;
-  /** 공식 API가 채널의 삭제/철회를 확정한 경우에만 ACTIVE 이외의 값을 사용합니다. */
+  /** 공식 API가 확정한 채널 상태입니다. 수동 심사 증거로만 사용합니다. */
   channelState?: StreamerChannelState;
+}
+
+/**
+ * OAuth redirect providers and SOOP's official mobile certification-number flow have different
+ * trust boundaries. Callers must never guess which flow a provider supports.
+ */
+export type StreamerOwnershipVerificationMethod = "OAUTH_REDIRECT" | "UNAVAILABLE";
+
+export interface StreamerVerificationIntentRepository {
+  /** Store only hashes of the browser-visible state and OwOGG session token. */
+  create(input: {
+    state: string;
+    userId: number;
+    sessionToken: string;
+    platform: StreamerPlatformType;
+    createdAt: string;
+    expiresAt: string;
+  }): Promise<void>;
+  /** Atomically consumes one matching, unexpired intent. A failed match remains unconsumed. */
+  consume(input: {
+    state: string;
+    userId: number;
+    sessionToken: string;
+    platform: StreamerPlatformType;
+    consumedAt: string;
+  }): Promise<boolean>;
 }
 
 export interface StreamerProviderAdapter {
   platform: StreamerPlatformType;
+  verificationMethod: StreamerOwnershipVerificationMethod;
   isConfigured(): boolean;
   getAuthorizeUrl(state: string, redirectUri: string): string;
-  verifyOwnershipCode(code: string, redirectUri: string): Promise<StreamerChannelInfo>;
-  /**
-   * 사용자 OAuth 토큰을 영속하지 않고 공식 app-level / 공개 API만으로
-   * 신선한 지표를 재조회할 수 있는지 여부.
-   * false이면 자동 재심사 대신 MANUAL_REVIEW로 안전하게 라우팅합니다.
-   */
-  supportsAutomaticMetricRefresh(): boolean;
-  /** canonical platformUserId로 신선한 공식 지표를 조회합니다. (사용자 토큰 저장 없음) */
-  fetchChannelMetrics(platformUserId: string): Promise<StreamerChannelMetrics>;
+  verifyOwnershipCode(
+    code: string,
+    redirectUri: string,
+    options?: { state?: string; signal?: AbortSignal },
+  ): Promise<StreamerChannelInfo>;
+  /** 공식 app-level/public API로 운영자 요청 시 지표를 새로고침할 수 있는지 여부. */
+  supportsMetricRefresh(): boolean;
+  /** canonical platformUserId로 운영자 요청 시 공식 지표를 조회합니다. */
+  fetchChannelMetrics(
+    platformUserId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<StreamerChannelMetrics>;
 }

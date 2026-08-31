@@ -4,7 +4,8 @@ const LEGACY_STREAMER_ROUTE_TARGETS: Readonly<Record<string, string>> = {
   "/admin/creators": "/admin/streamers",
   "/wiki/creator": "/wiki/streamer",
   "/wiki/creator/verification": "/wiki/streamer/verification",
-  "/wiki/creator/featured": "/wiki/streamer/featured",
+  "/wiki/streamer/featured": "/wiki/streamer",
+  "/wiki/creator/featured": "/wiki/streamer",
 };
 
 export function legacyStreamerRedirectTarget(pathname: string): string {

@@ -26,8 +26,6 @@ import { gamesRouter } from "./routes/games.js";
 import { renderRouter } from "./routes/render.js";
 import { multiplayerRouter } from "./routes/multiplayer.js";
 import { createContainer } from "./container.js";
-import { getStreamerProviderAdapters } from "./infrastructure/streamers/index.js";
-import { FEATURED_POLICY } from "@owogg/core";
 import type { ApiEnv } from "./routes/auth.js";
 
 /**
@@ -216,43 +214,14 @@ app.onError((err, c) => {
   return c.json({ error: "Internal server error" }, 500);
 });
 
-/**
- * Phase E2A/E2B: Featured Streamer 취득 심사(6시간)와 기존 Featured 재검증(14일) 스케줄러.
- * - 취득 심사와 재검증 잡을 서로 다른 repository query로 바운디드 처리.
- * - 단일 잡/프로바이더 실패가 배치 전체를 막지 않음 (잡 단위 FAILED_RETRYABLE 처리).
- * - 사용자 OAuth 토큰은 저장하지 않으며, 공식 app-level/공개 API만 사용합니다.
- */
+/** Streamer 심사는 관리자 수동 작업으로만 진행하며, 이 Cron은 기존 정리 작업만 수행합니다. */
 export async function scheduledHandler(
   _controller: ScheduledController,
   env: ApiEnv["Bindings"],
   ctx: ExecutionContext,
 ): Promise<void> {
-  const adapters = getStreamerProviderAdapters(env);
-  const { streamerUseCases, adminAuthUseCases, multiplayerInstanceRepo } = createContainer(env.DB);
+  const { adminAuthUseCases, multiplayerInstanceRepo } = createContainer(env.DB);
   const scheduledAt = new Date();
-
-  const task = (async () => {
-    const now = scheduledAt;
-    await streamerUseCases.ensureFeaturedRevalidationJobs({
-      now,
-      batchSize: FEATURED_POLICY.DEFAULT_BATCH_SIZE,
-    });
-    const acquisition = await streamerUseCases.runDueFeaturedReviews({
-      adapters,
-      now,
-      batchSize: FEATURED_POLICY.DEFAULT_BATCH_SIZE,
-    });
-    const revalidation = await streamerUseCases.runDueFeaturedRevalidations({
-      adapters,
-      now,
-      batchSize: FEATURED_POLICY.DEFAULT_BATCH_SIZE,
-    });
-    console.log(
-      `[streamer-review] scheduled run done: acquisitionProcessed=${acquisition.processed} acquisitionFeatured=${acquisition.featured} acquisitionNotEligible=${acquisition.notEligible} acquisitionManualReview=${acquisition.manualReview} acquisitionFailed=${acquisition.failed} revalidationProcessed=${revalidation.processed} retained=${revalidation.retained} revoked=${revalidation.revoked} revalidationManualReview=${revalidation.manualReview} revalidationFailed=${revalidation.failed}`,
-    );
-  })().catch((err) => {
-    console.error("[streamer-review] scheduled run crashed:", err);
-  });
 
   // Bounded, opportunistic cleanup of expired admin step-up challenges/sessions/login-attempt
   // rows — reuses this existing 6-hour Cron instead of a new background service.
@@ -272,7 +241,7 @@ export async function scheduledHandler(
     })
     .catch((err) => console.error("[multiplayer] expiry cleanup crashed:", err));
 
-  ctx.waitUntil(Promise.all([task, adminCleanupTask, multiplayerCleanupTask]));
+  ctx.waitUntil(Promise.all([adminCleanupTask, multiplayerCleanupTask]));
 }
 
 export { app };

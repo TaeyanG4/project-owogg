@@ -201,6 +201,7 @@ export interface Dictionary {
     linkError: string;
     streamerVerifySuccess: string;
     streamerVerifyConflict: string;
+    streamerVerifyPlatformConflict: string;
     streamerVerifyUnconfigured: string;
     streamerVerifyUnauthorized: string;
     streamerVerifyError: string;
@@ -261,21 +262,16 @@ export interface Dictionary {
     metricsSyncedPrefix: string;
     verifyChannelCta: string;
     verifyUnavailable: string;
-    featuredReviewStatusTitle: string;
-    featuredStreamerLabel: string;
-    featuredSelectedSuffix: string;
-    featuredHint: string;
+    streamerApprovalPending: string;
+    streamerApproved: string;
+    streamerRejected: string;
+    streamerApprovalHint: string;
+    streamerVerifyPaused: string;
+    streamerVerifyDeferred: string;
     achievedSuffix: string;
     myGameRecordsTitle: string;
     challengeSuffix: string;
     viewFullRankingArrow: string;
-    reviewNotStarted: string;
-    autoReviewPending: string;
-    nextReviewPrefix: string;
-    notEligible: string;
-    manualReviewNeeded: string;
-    autoReviewFailed: string;
-    nextRetryPrefix: string;
   };
   discord: {
     heroTitle1: string;
@@ -531,7 +527,6 @@ export interface Dictionary {
     navGamesDevelopment: string;
     navStreamerOverview: string;
     navStreamerVerification: string;
-    navStreamerFeatured: string;
     navSupport: string;
     catSupportDesc: string;
     tocAriaLabel: string;
@@ -559,8 +554,6 @@ export interface Dictionary {
       intro: string;
       cardVerification: string;
       cardVerificationDesc: string;
-      cardFeatured: string;
-      cardFeaturedDesc: string;
       profileHint: string;
       profileLink: string;
     };
@@ -568,6 +561,8 @@ export interface Dictionary {
       title: string;
       description: string;
       platformsHeading: string;
+      platformAvailable: string;
+      platformDeferred: string;
       conditionsHeading: string;
       condOnePrefix: string;
       condOneStrong: string;
@@ -588,21 +583,6 @@ export interface Dictionary {
       footerMid: string;
       footerLink: string;
       footerSuffix: string;
-    };
-    streamerFeatured: {
-      title: string;
-      description: string;
-      conceptHeading: string;
-      conceptStreamerTerm: string;
-      conceptStreamerDesc: string;
-      conceptFeaturedTerm: string;
-      conceptFeaturedDesc: string;
-      reviewHeading: string;
-      reviewBody: string;
-      calloutNoRankImpactStrong: string;
-      calloutNoRankImpactBody: string;
-      calloutTestingPhase: string;
-      footerNote: string;
     };
     account: {
       title: string;
@@ -690,7 +670,6 @@ export interface Dictionary {
       streamerLinkPrefix: string;
       streamerLink: string;
       streamerLinkSuffix: string;
-      calloutFeatured: string;
       footerPrefix: string;
       footerLink: string;
       footerSuffix: string;
@@ -1367,6 +1346,8 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       linkError: "로그인 수단 연결 중 오류가 발생했습니다.",
       streamerVerifySuccess: "스트리머 채널 소유권 인증이 완료되었습니다.",
       streamerVerifyConflict: "이 채널은 이미 다른 OwOGG 스트리머 계정에 연동되어 있습니다.",
+      streamerVerifyPlatformConflict:
+        "이 플랫폼에는 이미 소유권이 확인된 다른 채널이 연결되어 있습니다. 기존 연결을 먼저 정리해주세요.",
       streamerVerifyUnconfigured: "현재 해당 플랫폼 인증을 사용할 수 없습니다.",
       streamerVerifyUnauthorized: "로그인이 만료되었습니다. 다시 로그인 해주세요.",
       streamerVerifyError: "스트리머 채널 인증 중 오류가 발생했습니다.",
@@ -1420,7 +1401,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       linkButton: "연결",
       streamerVerificationTitle: "스트리머 채널 소유권 인증",
       streamerVerificationSubtitle:
-        "공식 OAuth / API를 통해 해당 채널을 직접 소유하고 있음을 검증합니다. (셀프 텍스트 입력 및 웹 스크래핑 금지)",
+        "공식 OAuth/API로 채널 소유권을 확인한 뒤, 연결한 플랫폼마다 운영진이 같은 기준으로 독립 심사합니다.",
       ownershipVerified: "소유권 인증됨",
       unverified: "미인증",
       verifiedConfirmedText: "✓ OwOGG가 해당 사용자의 채널 소유권을 공식 API로 확인했습니다.",
@@ -1429,22 +1410,18 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       metricsSyncedPrefix: "· 지표 동기화",
       verifyChannelCta: "채널 소유권 인증",
       verifyUnavailable: "현재 인증을 사용할 수 없습니다",
-      featuredReviewStatusTitle: "Featured 심사 상태",
-      featuredStreamerLabel: "★ Featured Streamer",
-      featuredSelectedSuffix: "선정",
-      featuredHint:
-        "Featured는 공식 채널 지표 기반 자격(구독자/팔로워 12,000+ · 채널 120일+)이며 게임 점수·XP·랭킹 순위에는 영향을 주지 않습니다.",
+      streamerApprovalPending: "플랫폼 수동 심사 대기",
+      streamerApproved: "스트리머 승인됨",
+      streamerRejected: "스트리머 심사 거절",
+      streamerApprovalHint:
+        "모든 승인 대상은 스트리머로 통일됩니다. 여러 플랫폼을 연결하면 각 플랫폼을 같은 기준으로 별도 심사합니다.",
+      streamerVerifyPaused: "운영자가 이 플랫폼의 신규 채널 연결을 일시 중지했습니다.",
+      streamerVerifyDeferred:
+        "안전한 플랫폼 OAuth 연동을 지원할 때까지 이 플랫폼 인증은 보류됩니다.",
       achievedSuffix: "달성",
       myGameRecordsTitle: "내 게임별 최고 기록",
       challengeSuffix: "도전",
       viewFullRankingArrow: "전체 랭킹 보기 →",
-      reviewNotStarted: "채널 소유권 인증 완료 후 자동 심사가 시작됩니다. (약 6시간 후 첫 심사)",
-      autoReviewPending: "자동 심사 대기 중",
-      nextReviewPrefix: "(다음 심사",
-      notEligible: "현재 기준 미달",
-      manualReviewNeeded: "추가 확인 필요",
-      autoReviewFailed: "자동 심사 일시 실패 (재시도 대기)",
-      nextRetryPrefix: "— 다음 재시도",
     },
     discord: {
       heroTitle1: "친구들과 게임 기록을",
@@ -1725,7 +1702,6 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       navGamesDevelopment: "게임 개발 및 등록",
       navStreamerOverview: "Streamer 개요",
       navStreamerVerification: "채널 소유권 인증",
-      navStreamerFeatured: "Featured Streamer",
       navSupport: "지원",
       catSupportDesc: "문의, 신고, 버그 제보 채널 안내",
       tocAriaLabel: "Wiki 목차",
@@ -1739,7 +1715,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       catGettingStartedDesc: "OwOGG 계정 만들기부터 첫 게임까지, 가장 빠른 시작 경로.",
       catAccountDesc: "로그인 방식, 프로필 설정, 여러 계정을 하나로 합치는 계정 통합.",
       catGamesDesc: "게임 카탈로그, 순위 계산 방식, 경험치(XP)와 레벨.",
-      catStreamerDesc: "채널 소유권 인증, 스트리머 랭킹 자격, Featured Streamer 기준.",
+      catStreamerDesc: "채널 소유권 인증, 플랫폼별 수동 심사, 스트리머 랭킹 자격.",
       catPolicyTitle: "정책",
       catPolicyDesc: "이용약관과 개인정보 처리방침을 확인하세요.",
     },
@@ -1747,13 +1723,11 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       streamer: {
         title: "Streamer 개요",
         description:
-          "공식 OAuth/API로 채널 소유권을 검증한 스트리머/유튜버를 OwOGG Streamer로 인정합니다.",
+          "공식 OAuth/API로 채널 소유권을 확인하고 플랫폼별 수동 심사를 통과한 사용자를 OwOGG Streamer로 인정합니다.",
         intro:
-          "Streamer 인증은 게임 점수나 XP에 어떤 가산점도 주지 않습니다. 대신 명예의 전당의 스트리머 랭킹 탭 노출, 내 프로필의 검증 배지와 공식 채널 링크 표시라는 혜택을 제공합니다.",
+          "Streamer 승인은 게임 점수나 XP에 가산점을 주지 않습니다. 승인된 플랫폼은 스트리머 랭킹과 프로필의 공식 채널 링크에 사용됩니다.",
         cardVerification: "채널 소유권 인증 →",
-        cardVerificationDesc: "지원 플랫폼과 인증 방법",
-        cardFeatured: "Featured Streamer →",
-        cardFeaturedDesc: "Featured 자격 기준",
+        cardVerificationDesc: "지원 플랫폼, 인증과 수동 심사 방법",
         profileHint: "인증은 내 프로필 페이지에서 시작할 수 있습니다.",
         profileLink: "내 프로필로 이동",
       },
@@ -1762,52 +1736,34 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         description:
           "공식 OAuth와 API만으로 소유권을 검증합니다. 텍스트 입력이나 스크래핑은 절대 사용하지 않습니다.",
         platformsHeading: "지원 플랫폼",
+        platformAvailable: "OAuth 지원",
+        platformDeferred: "인증 보류",
         conditionsHeading: "인증 조건",
-        condOnePrefix: "위 4개 플랫폼(YouTube · CHZZK · SOOP · Twitch) 중 ",
-        condOneStrong: "단 하나만",
+        condOnePrefix: "현재 OAuth 인증이 열린 YouTube · CHZZK · Twitch 중 ",
+        condOneStrong: "하나 이상에서 소유권 인증과 수동 심사를 통과하면",
         condOneSuffix:
-          " 인증에 성공하면 OwOGG Streamer로 인정되며, 4개를 모두 인증할 필요는 없습니다.",
+          " OwOGG Streamer로 인정됩니다. 여러 플랫폼을 연결하면 각 플랫폼을 같은 기준으로 별도 심사합니다.",
         condNoMinimum:
-          "현재 구독자/팔로워 수나 채널 개설 기간에 대한 최소 기준은 요구하지 않습니다. 채널 소유권만 공식 OAuth로 확인되면 됩니다.",
+          "구독자/팔로워 수와 채널 운영 기간 기준은 서버의 버전된 정책으로 관리되며 운영자가 변경할 수 있습니다. 소스 코드에 고정된 수치를 사용하지 않습니다.",
         condOauthOnly:
-          "소유권 인증은 항상 각 플랫폼의 공식 OAuth 로그인 화면을 통해서만 이루어지며, 채널 URL이나 닉네임을 직접 입력하는 방식은 지원하지 않습니다.",
+          "소유권 인증은 항상 각 플랫폼의 공식 OAuth 로그인 화면을 통해서만 이루어지며, 채널 URL이나 닉네임을 직접 입력하는 방식은 지원하지 않습니다. SOOP은 안전한 callback 결박을 공식 지원할 때까지 보류합니다.",
         condOneChannelOneAccount:
           "하나의 외부 채널은 한 OwOGG 계정에만 연동할 수 있습니다(1채널 = 1계정).",
         methodHeading: "인증 방법",
         step1: "내 프로필 페이지의 [스트리머 채널 소유권 인증] 섹션으로 이동합니다.",
         step2: "인증하려는 플랫폼의 [채널 소유권 인증] 버튼을 클릭합니다.",
         step3: "해당 플랫폼의 공식 로그인 화면에서 본인 계정으로 로그인·승인합니다.",
-        step4: "OwOGG로 돌아오면 채널 정보가 자동으로 확인되어 표시됩니다.",
+        step4: "OwOGG로 돌아오면 채널 정보가 표시되고 해당 플랫폼의 수동 심사 작업이 생성됩니다.",
         calloutLoginStrong: "OwOGG 로그인과 채널 인증은 별개입니다.",
         calloutLoginBody:
           " Google로 로그인했다고 해서 자동으로 YouTube 채널이 연동되지 않습니다 — 명시적인 인증 절차를 거쳐야 합니다.",
         calloutDuplicate:
           "하나의 외부 채널은 한 OwOGG 계정에만 연동될 수 있습니다. 이미 다른 사용자가 인증한 채널은 다시 인증할 수 없습니다.",
-        footerPrefix: "스트리머 랭킹에 노출되려면 위 4개 플랫폼 중 ",
-        footerStrong: "하나만",
-        footerMid: " 인증하면 충분합니다. 자세한 자격 조건은 ",
+        footerPrefix: "스트리머 랭킹에 노출되려면 현재 인증 가능한 세 플랫폼 중 ",
+        footerStrong: "하나 이상",
+        footerMid: "에서 소유권 인증과 운영진 승인을 모두 받아야 합니다. 자세한 조건은 ",
         footerLink: "랭킹 문서",
         footerSuffix: "를 참고하세요.",
-      },
-      streamerFeatured: {
-        title: "Featured Streamer",
-        description: "Featured는 OwOGG 기준 공개 채널 지표로 심사하는 표시·필터링 전용 배지입니다.",
-        conceptHeading: "개념 구분",
-        conceptStreamerTerm: "Streamer",
-        conceptStreamerDesc: " — 공식 OAuth/API로 채널 소유권이 검증된 상태.",
-        conceptFeaturedTerm: "Featured Streamer",
-        conceptFeaturedDesc:
-          " — Streamer 중에서 OwOGG 기준(구독자/팔로워, 채널 개설 기간 등 공개 지표)을 충족해 자동/수동 심사를 통과한 상태.",
-        reviewHeading: "심사 방식",
-        reviewBody:
-          "채널 소유권 인증 직후에는 Featured가 즉시 부여되지 않습니다. 일정 시간 뒤 신선한 공식 지표로 자동 재심사가 이루어지며, 지표가 모호하거나 플랫폼이 공식 API로 지표를 제공하지 않으면 운영진 수동 심사로 안전하게 넘어갑니다. Featured로 인정된 이후에도 주기적으로 재검증합니다.",
-        calloutNoRankImpactStrong: "Featured는 점수·XP·랭킹 순위에 영향을 주지 않습니다.",
-        calloutNoRankImpactBody:
-          " 표시 전용 배지이며, Featured 여부와 무관하게 스트리머 랭킹은 채널 소유권 인증만으로 노출됩니다.",
-        calloutTestingPhase:
-          "현재는 서비스 검증 단계라 Featured가 자동으로 부여되지 않고, 채널 소유권이 인증된 모든 Streamer가 운영진 수동 심사 대기 상태를 거칩니다. 스트리머 랭킹에는 Featured 여부와 무관하게 동일하게 노출되며, Featured 배지도 아직 공개적으로 표시하지 않습니다.",
-        footerNote:
-          "운영진의 심사 기준과 절차는 내부 운영 문서로 별도 관리되며, 특정 수치를 공개하지 않습니다 — 심사는 항상 공식 API로 확인 가능한 지표만 사용합니다.",
       },
       account: {
         title: "계정 개요",
@@ -1909,12 +1865,10 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         streamerBodyPrefix: "YouTube / CHZZK / SOOP / Twitch 중 ",
         streamerBodyStrong: "하나 이상",
         streamerBodySuffix:
-          "의 플랫폼에서 공식 채널 소유권 인증을 완료한 사용자만 노출됩니다. 게임 기록·XP·연속 출석은 일반 랭킹과 동일한 계산식과 UI를 사용하며, 인증 플랫폼 수는 순위에 영향을 주지 않습니다.",
+          "의 플랫폼에서 소유권 인증과 운영진 승인을 모두 받은 사용자만 노출됩니다. 게임 기록·XP·연속 출석은 일반 랭킹과 동일한 계산식과 UI를 사용하며, 승인 플랫폼 수는 순위에 영향을 주지 않습니다.",
         streamerLinkPrefix: "자세한 인증 방법은 ",
         streamerLink: "Streamer 채널 소유권 인증",
         streamerLinkSuffix: " 문서를 참고하세요.",
-        calloutFeatured:
-          "Featured Streamer 표시는 랭킹 순위나 XP 계산에 어떠한 영향도 주지 않는 표시 전용 배지입니다.",
         footerPrefix: "Discord 서버 단위 랭킹은 ",
         footerLink: "Discord 서버 XP 문서",
         footerSuffix: "를 참고하세요.",
@@ -2670,6 +2624,8 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       streamerVerifySuccess: "Streamer channel ownership verification is complete.",
       streamerVerifyConflict:
         "This channel is already linked to a different OwOGG streamer account.",
+      streamerVerifyPlatformConflict:
+        "A different verified channel is already connected for this platform. Remove the existing connection first.",
       streamerVerifyUnconfigured: "Verification for this platform isn't available right now.",
       streamerVerifyUnauthorized: "Your login has expired. Please log in again.",
       streamerVerifyError: "An error occurred while verifying your streamer channel.",
@@ -2723,7 +2679,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       linkButton: "Link",
       streamerVerificationTitle: "Streamer Channel Ownership Verification",
       streamerVerificationSubtitle:
-        "Verified directly via official OAuth/API that you own the channel. (No self-reported text entry or web scraping.)",
+        "After official OAuth/API confirms ownership, staff independently review every connected platform against the same criteria.",
       ownershipVerified: "Ownership verified",
       unverified: "Unverified",
       verifiedConfirmedText:
@@ -2733,23 +2689,18 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       metricsSyncedPrefix: "· Metrics synced",
       verifyChannelCta: "Verify channel ownership",
       verifyUnavailable: "Verification isn't available right now",
-      featuredReviewStatusTitle: "Featured Review Status",
-      featuredStreamerLabel: "★ Featured Streamer",
-      featuredSelectedSuffix: "selected",
-      featuredHint:
-        "Featured status is based on official channel metrics (12,000+ subscribers/followers · channel 120+ days old) and has no effect on game scores, XP, or ranking.",
+      streamerApprovalPending: "Platform review pending",
+      streamerApproved: "Streamer approved",
+      streamerRejected: "Streamer review rejected",
+      streamerApprovalHint:
+        "Every approved account is simply a Streamer. Multiple platforms are reviewed separately under the same criteria.",
+      streamerVerifyPaused: "New channel connections for this platform are temporarily paused.",
+      streamerVerifyDeferred:
+        "Verification is deferred until this platform supports a securely bound OAuth flow.",
       achievedSuffix: "unlocked",
       myGameRecordsTitle: "My Best Records by Game",
       challengeSuffix: "attempted",
       viewFullRankingArrow: "View full ranking →",
-      reviewNotStarted:
-        "Automatic review begins once channel ownership verification is complete. (First review in about 6 hours)",
-      autoReviewPending: "Automatic review pending",
-      nextReviewPrefix: "(next review",
-      notEligible: "Not currently eligible",
-      manualReviewNeeded: "Manual review needed",
-      autoReviewFailed: "Automatic review temporarily failed (waiting to retry)",
-      nextRetryPrefix: "— next retry",
     },
     discord: {
       heroTitle1: "Compete and connect with",
@@ -3033,7 +2984,6 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       navGamesDevelopment: "게임 개발 및 등록",
       navStreamerOverview: "Streamer Overview",
       navStreamerVerification: "Channel Ownership Verification",
-      navStreamerFeatured: "Featured Streamer",
       navSupport: "Support",
       catSupportDesc: "Contact, report, and bug report channels",
       tocAriaLabel: "Wiki table of contents",
@@ -3049,7 +2999,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       catAccountDesc: "Login methods, profile settings, and merging multiple accounts into one.",
       catGamesDesc: "The game catalog, how rankings are calculated, and XP & levels.",
       catStreamerDesc:
-        "Channel ownership verification, streamer ranking eligibility, and Featured Streamer criteria.",
+        "Channel ownership verification, per-platform manual review, and streamer ranking eligibility.",
       catPolicyTitle: "Policies",
       catPolicyDesc: "Check the Terms of Service and Privacy Policy.",
     },
@@ -3057,13 +3007,11 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       streamer: {
         title: "Streamer Overview",
         description:
-          "Streamers and YouTubers whose channel ownership is verified through official OAuth/APIs are recognized as OwOGG Streamers.",
+          "Users whose channel ownership is confirmed through official OAuth/APIs and whose platform review is approved are recognized as OwOGG Streamers.",
         intro:
-          "Streamer verification gives no bonus whatsoever to game scores or XP. Instead it unlocks visibility in the Hall of Fame's streamer ranking tab, plus a verified badge and official channel links on your profile.",
+          "Streamer approval gives no bonus to game scores or XP. Approved platforms are used for streamer ranking eligibility and official channel links on profiles.",
         cardVerification: "Channel Ownership Verification →",
-        cardVerificationDesc: "Supported platforms and how to verify",
-        cardFeatured: "Featured Streamer →",
-        cardFeaturedDesc: "Featured eligibility criteria",
+        cardVerificationDesc: "Supported platforms, ownership, and manual review",
         profileHint: "You can start verification from your profile page.",
         profileLink: "Go to my profile",
       },
@@ -3072,15 +3020,18 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         description:
           "Ownership is verified using official OAuth and APIs only. Text entry and scraping are never used.",
         platformsHeading: "Supported platforms",
+        platformAvailable: "OAuth available",
+        platformDeferred: "Verification deferred",
         conditionsHeading: "Requirements",
-        condOnePrefix: "Verifying ",
-        condOneStrong: "just one",
+        condOnePrefix:
+          "On the currently available platforms (YouTube · CHZZK · Twitch), passing ownership verification and manual review on ",
+        condOneStrong: "at least one",
         condOneSuffix:
-          " of the four platforms above (YouTube · CHZZK · SOOP · Twitch) is enough to be recognized as an OwOGG Streamer — you do not need to verify all four.",
+          " is enough to be recognized as an OwOGG Streamer. Multiple platforms are reviewed separately under the same criteria.",
         condNoMinimum:
-          "There is currently no minimum subscriber/follower count or channel age requirement. Ownership simply needs to be confirmed via official OAuth.",
+          "Audience and channel-age thresholds come from a versioned server policy that operators can change; no eligibility number is hard-coded in the client.",
         condOauthOnly:
-          "Verification always happens through each platform's official OAuth login screen. Entering a channel URL or nickname by hand is not supported.",
+          "Verification always happens through each platform's official OAuth login screen. Entering a channel URL or nickname by hand is not supported. SOOP remains deferred until its official flow can safely bind the callback.",
         condOneChannelOneAccount:
           "An external channel can be linked to only one OwOGG account (1 channel = 1 account).",
         methodHeading: "How to verify",
@@ -3089,38 +3040,18 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         step3:
           "Sign in and approve with your own account on that platform's official login screen.",
         step4:
-          "When you return to OwOGG, your channel details are confirmed and shown automatically.",
+          "When you return to OwOGG, the channel is shown and a manual review is created for that platform.",
         calloutLoginStrong: "Signing in to OwOGG and verifying a channel are separate things.",
         calloutLoginBody:
           " Signing in with Google does not automatically link your YouTube channel — you must go through the explicit verification flow.",
         calloutDuplicate:
           "An external channel can be linked to only one OwOGG account. A channel already verified by another user cannot be verified again.",
-        footerPrefix: "To appear in the streamer ranking, verifying ",
-        footerStrong: "just one",
-        footerMid: " of the four platforms above is enough. For full eligibility details, see the ",
+        footerPrefix: "To appear in the streamer ranking, ownership and staff approval on ",
+        footerStrong: "at least one",
+        footerMid:
+          " of the three currently available platforms are required. For full eligibility details, see the ",
         footerLink: "ranking article",
         footerSuffix: ".",
-      },
-      streamerFeatured: {
-        title: "Featured Streamer",
-        description:
-          "Featured is a display/filtering-only badge, reviewed against public channel metrics by OwOGG's criteria.",
-        conceptHeading: "Terminology",
-        conceptStreamerTerm: "Streamer",
-        conceptStreamerDesc: " — channel ownership verified through official OAuth/APIs.",
-        conceptFeaturedTerm: "Featured Streamer",
-        conceptFeaturedDesc:
-          " — a Streamer that also passed automatic/manual review against OwOGG's criteria (public metrics such as subscribers/followers and channel age).",
-        reviewHeading: "How review works",
-        reviewBody:
-          "Featured is not granted immediately after ownership verification. After some time an automatic re-review runs against fresh official metrics; if the metrics are ambiguous, or the platform does not expose them via an official API, the job is safely routed to manual staff review. Featured accounts are also periodically re-validated afterwards.",
-        calloutNoRankImpactStrong: "Featured never affects scores, XP, or ranking position.",
-        calloutNoRankImpactBody:
-          " It is a display-only badge — the streamer ranking is driven purely by channel ownership verification, regardless of Featured status.",
-        calloutTestingPhase:
-          "We are currently in a service validation phase, so Featured is not granted automatically: every Streamer with verified channel ownership goes through a staff manual-review queue. Streamer ranking visibility is identical regardless of Featured status, and the Featured badge is not publicly displayed yet.",
-        footerNote:
-          "Staff review criteria and procedures are maintained separately as internal operations documents, and specific figures are not published — review always uses only metrics verifiable through official APIs.",
       },
       account: {
         title: "Account Overview",
@@ -3228,12 +3159,10 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         streamerBodyPrefix: "Only users who completed official channel ownership verification on ",
         streamerBodyStrong: "at least one",
         streamerBodySuffix:
-          " of YouTube / CHZZK / SOOP / Twitch appear here. Game, XP, and streak rankings use the same formula and UI as General rankings, and the number of verified platforms has no effect on position.",
+          " of YouTube / CHZZK / SOOP / Twitch and received staff approval appear here. Game, XP, and streak rankings use the same formula and UI as General rankings, and the number of approved platforms has no effect on position.",
         streamerLinkPrefix: "For how to verify, see the ",
         streamerLink: "Streamer channel ownership verification",
         streamerLinkSuffix: " article.",
-        calloutFeatured:
-          "The Featured Streamer mark is a display-only badge that has no effect whatsoever on ranking position or XP calculation.",
         footerPrefix: "For per-Discord-server rankings, see the ",
         footerLink: "Discord server XP article",
         footerSuffix: ".",
@@ -4000,6 +3929,8 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       streamerVerifySuccess: "ストリーマーチャンネルの所有権認証が完了しました。",
       streamerVerifyConflict:
         "このチャンネルはすでに別のOwOGGストリーマーアカウントに連携されています。",
+      streamerVerifyPlatformConflict:
+        "このプラットフォームには所有権確認済みの別チャンネルが接続されています。先に既存の接続を整理してください。",
       streamerVerifyUnconfigured: "現在このプラットフォームの認証は利用できません。",
       streamerVerifyUnauthorized: "ログインの有効期限が切れました。再度ログインしてください。",
       streamerVerifyError: "ストリーマーチャンネル認証中にエラーが発生しました。",
@@ -4053,7 +3984,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       linkButton: "連携する",
       streamerVerificationTitle: "ストリーマーチャンネル所有権認証",
       streamerVerificationSubtitle:
-        "公式OAuth/APIを通じて、当該チャンネルを直接所有していることを検証します。（自己申告のテキスト入力やWebスクレイピングは禁止）",
+        "公式OAuth/APIで所有権を確認した後、連携した各プラットフォームを同じ基準で運営スタッフが個別に審査します。",
       ownershipVerified: "所有権認証済み",
       unverified: "未認証",
       verifiedConfirmedText:
@@ -4063,23 +3994,18 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       metricsSyncedPrefix: "・指標同期",
       verifyChannelCta: "チャンネル所有権認証",
       verifyUnavailable: "現在認証を利用できません",
-      featuredReviewStatusTitle: "Featured審査状況",
-      featuredStreamerLabel: "★ Featured Streamer",
-      featuredSelectedSuffix: "選定",
-      featuredHint:
-        "Featuredは公式チャンネル指標に基づく資格（登録者/フォロワー12,000人以上・チャンネル開設120日以上）であり、ゲームスコア・XP・ランキング順位には影響しません。",
+      streamerApprovalPending: "プラットフォーム審査待ち",
+      streamerApproved: "ストリーマー承認済み",
+      streamerRejected: "ストリーマー審査却下",
+      streamerApprovalHint:
+        "承認対象はすべてストリーマーです。複数のプラットフォームは同じ基準で個別に審査されます。",
+      streamerVerifyPaused: "このプラットフォームの新規チャンネル連携は一時停止中です。",
+      streamerVerifyDeferred:
+        "安全に関連付けられるOAuthフローが提供されるまで、このプラットフォームの認証は保留です。",
       achievedSuffix: "達成",
       myGameRecordsTitle: "自分のゲーム別最高記録",
       challengeSuffix: "挑戦",
       viewFullRankingArrow: "全体ランキングを見る →",
-      reviewNotStarted:
-        "チャンネル所有権認証完了後、自動審査が開始されます。（約6時間後に初回審査）",
-      autoReviewPending: "自動審査待機中",
-      nextReviewPrefix: "（次回審査",
-      notEligible: "現在基準未達",
-      manualReviewNeeded: "追加確認が必要",
-      autoReviewFailed: "自動審査が一時的に失敗しました（再試行待ち）",
-      nextRetryPrefix: "— 次回再試行",
     },
     discord: {
       heroTitle1: "友達とゲーム記録を",
@@ -4364,7 +4290,6 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       navGamesDevelopment: "게임 개발 및 등록",
       navStreamerOverview: "Streamer概要",
       navStreamerVerification: "チャンネル所有権認証",
-      navStreamerFeatured: "Featured Streamer",
       navSupport: "サポート",
       catSupportDesc: "お問い合わせ・通報・不具合報告チャンネルのご案内",
       tocAriaLabel: "Wiki目次",
@@ -4380,7 +4305,8 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       catAccountDesc:
         "ログイン方法、プロフィール設定、複数アカウントを1つに統合するアカウント統合。",
       catGamesDesc: "ゲームカタログ、順位の計算方法、経験値（XP）とレベル。",
-      catStreamerDesc: "チャンネル所有権認証、ストリーマーランキング資格、Featured Streamer基準。",
+      catStreamerDesc:
+        "チャンネル所有権認証、プラットフォーム別の手動審査、ストリーマーランキング資格。",
       catPolicyTitle: "ポリシー",
       catPolicyDesc: "利用規約とプライバシーポリシーをご確認ください。",
     },
@@ -4388,13 +4314,11 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       streamer: {
         title: "Streamer 概要",
         description:
-          "公式OAuth/APIでチャンネル所有権を検証したストリーマー・YouTuberをOwOGG Streamerとして認定します。",
+          "公式OAuth/APIでチャンネル所有権を確認し、プラットフォーム別の手動審査に承認されたユーザーをOwOGG Streamerとして認定します。",
         intro:
-          "Streamer認証はゲームスコアやXPに一切の加点を与えません。代わりに、殿堂のストリーマーランキングタブへの掲載、プロフィールの認証バッジと公式チャンネルリンクの表示という特典があります。",
+          "Streamer承認はゲームスコアやXPに加点を与えません。承認済みプラットフォームはストリーマーランキング資格とプロフィールの公式チャンネルリンクに使用されます。",
         cardVerification: "チャンネル所有権認証 →",
-        cardVerificationDesc: "対応プラットフォームと認証方法",
-        cardFeatured: "Featured Streamer →",
-        cardFeaturedDesc: "Featured 資格基準",
+        cardVerificationDesc: "対応プラットフォーム、所有権認証、手動審査",
         profileHint: "認証はプロフィールページから開始できます。",
         profileLink: "プロフィールへ移動",
       },
@@ -4403,53 +4327,35 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         description:
           "公式OAuthとAPIのみで所有権を検証します。テキスト入力やスクレイピングは一切使用しません。",
         platformsHeading: "対応プラットフォーム",
+        platformAvailable: "OAuth対応",
+        platformDeferred: "認証保留",
         conditionsHeading: "認証条件",
-        condOnePrefix: "上記4つのプラットフォーム（YouTube · CHZZK · SOOP · Twitch）のうち",
-        condOneStrong: "1つだけ",
+        condOnePrefix: "現在OAuth認証が利用できるYouTube・CHZZK・Twitchのうち",
+        condOneStrong: "1つ以上で所有権認証と手動審査を通過すれば",
         condOneSuffix:
-          "認証に成功すればOwOGG Streamerとして認定され、4つすべてを認証する必要はありません。",
+          "OwOGG Streamerとして認定されます。複数のプラットフォームは同じ基準で個別に審査されます。",
         condNoMinimum:
-          "現在、登録者・フォロワー数やチャンネル開設期間の最低基準は設けていません。チャンネル所有権が公式OAuthで確認できれば十分です。",
+          "視聴者数とチャンネル運営期間の基準は、運営者が変更できるバージョン管理されたサーバーポリシーから取得し、クライアントには固定値を持ちません。",
         condOauthOnly:
-          "所有権認証は常に各プラットフォームの公式OAuthログイン画面を通じてのみ行われ、チャンネルURLやニックネームを直接入力する方式には対応していません。",
+          "所有権認証は常に各プラットフォームの公式OAuthログイン画面を通じてのみ行われ、チャンネルURLやニックネームを直接入力する方式には対応していません。SOOPは安全なコールバック関連付けが公式対応されるまで保留します。",
         condOneChannelOneAccount:
           "1つの外部チャンネルは1つのOwOGGアカウントにのみ連携できます（1チャンネル = 1アカウント）。",
         methodHeading: "認証方法",
         step1: "プロフィールページの［ストリーマーチャンネル所有権認証］セクションへ移動します。",
         step2: "認証したいプラットフォームの［チャンネル所有権認証］ボタンをクリックします。",
         step3: "該当プラットフォームの公式ログイン画面でご本人のアカウントでログイン・承認します。",
-        step4: "OwOGGに戻ると、チャンネル情報が自動的に確認され表示されます。",
+        step4:
+          "OwOGGに戻るとチャンネル情報が表示され、そのプラットフォームの手動審査が作成されます。",
         calloutLoginStrong: "OwOGGへのログインとチャンネル認証は別物です。",
         calloutLoginBody:
           " Googleでログインしたからといって自動的にYouTubeチャンネルが連携されるわけではありません — 明示的な認証手続きが必要です。",
         calloutDuplicate:
           "1つの外部チャンネルは1つのOwOGGアカウントにのみ連携できます。すでに他のユーザーが認証したチャンネルを再度認証することはできません。",
-        footerPrefix: "ストリーマーランキングに掲載されるには、上記4つのうち",
-        footerStrong: "1つだけ",
-        footerMid: "認証すれば十分です。詳しい資格条件は",
+        footerPrefix: "ストリーマーランキングに掲載されるには、現在認証可能な3つのうち",
+        footerStrong: "1つ以上",
+        footerMid: "で所有権認証と運営承認の両方が必要です。詳しい資格条件は",
         footerLink: "ランキングのドキュメント",
         footerSuffix: "をご覧ください。",
-      },
-      streamerFeatured: {
-        title: "Featured Streamer",
-        description:
-          "FeaturedはOwOGG基準の公開チャンネル指標で審査する、表示・フィルタリング専用のバッジです。",
-        conceptHeading: "概念の区別",
-        conceptStreamerTerm: "Streamer",
-        conceptStreamerDesc: " — 公式OAuth/APIでチャンネル所有権が検証された状態。",
-        conceptFeaturedTerm: "Featured Streamer",
-        conceptFeaturedDesc:
-          " — Streamerのうち、OwOGG基準（登録者・フォロワー数、チャンネル開設期間などの公開指標）を満たし自動・手動審査を通過した状態。",
-        reviewHeading: "審査方式",
-        reviewBody:
-          "チャンネル所有権の認証直後にFeaturedが即時付与されることはありません。一定時間後に新しい公式指標で自動再審査が行われ、指標が曖昧な場合やプラットフォームが公式APIで指標を提供していない場合は、運営による手動審査へ安全に回されます。Featured認定後も定期的に再検証します。",
-        calloutNoRankImpactStrong: "Featuredはスコア・XP・ランキング順位に影響しません。",
-        calloutNoRankImpactBody:
-          " 表示専用のバッジであり、Featuredの有無に関わらずストリーマーランキングはチャンネル所有権の認証のみで掲載されます。",
-        calloutTestingPhase:
-          "現在はサービス検証段階のためFeaturedは自動付与されず、チャンネル所有権が認証されたすべてのStreamerが運営の手動審査待ち状態を経ます。ストリーマーランキングにはFeaturedの有無に関わらず同様に掲載され、Featuredバッジもまだ公開表示していません。",
-        footerNote:
-          "運営の審査基準と手順は内部運用ドキュメントとして別途管理され、具体的な数値は公開していません — 審査には常に公式APIで確認可能な指標のみを使用します。",
       },
       account: {
         title: "アカウント概要",
@@ -4553,12 +4459,10 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         streamerBodyPrefix: "YouTube / CHZZK / SOOP / Twitch のうち",
         streamerBodyStrong: "1つ以上",
         streamerBodySuffix:
-          "のプラットフォームで公式チャンネル所有権認証を完了したユーザーのみが表示されます。ゲーム記録・XP・連続ログインは通常ランキングと同じ計算式とUIを使い、認証数は順位に影響しません。",
+          "のプラットフォームで所有権認証と運営承認を完了したユーザーのみが表示されます。ゲーム記録・XP・連続ログインは通常ランキングと同じ計算式とUIを使い、承認数は順位に影響しません。",
         streamerLinkPrefix: "詳しい認証方法は",
         streamerLink: "Streamerチャンネル所有権認証",
         streamerLinkSuffix: "のドキュメントをご覧ください。",
-        calloutFeatured:
-          "Featured Streamerの表示は、ランキング順位やXP計算に一切影響しない表示専用のバッジです。",
         footerPrefix: "Discordサーバー単位のランキングは",
         footerLink: "DiscordサーバーXPのドキュメント",
         footerSuffix: "をご覧ください。",
@@ -5320,6 +5224,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       linkError: "关联登录方式时发生错误。",
       streamerVerifySuccess: "主播频道所有权认证已完成。",
       streamerVerifyConflict: "该频道已关联到另一个 OwOGG 主播账户。",
+      streamerVerifyPlatformConflict: "该平台已连接另一个完成所有权认证的频道，请先处理现有连接。",
       streamerVerifyUnconfigured: "当前该平台的认证暂不可用。",
       streamerVerifyUnauthorized: "登录已过期，请重新登录。",
       streamerVerifyError: "主播频道认证过程中发生错误。",
@@ -5373,7 +5278,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       linkButton: "关联",
       streamerVerificationTitle: "主播频道所有权认证",
       streamerVerificationSubtitle:
-        "通过官方 OAuth / API 验证你直接拥有该频道。（禁止自行填写文本或网页抓取）",
+        "通过官方 OAuth/API 确认所有权后，运营人员会按相同标准分别审核每个已连接平台。",
       ownershipVerified: "已认证所有权",
       unverified: "未认证",
       verifiedConfirmedText: "✓ OwOGG 已通过官方 API 确认该用户的频道所有权。",
@@ -5382,22 +5287,17 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       metricsSyncedPrefix: "· 数据同步于",
       verifyChannelCta: "认证频道所有权",
       verifyUnavailable: "当前无法使用认证功能",
-      featuredReviewStatusTitle: "Featured 审核状态",
-      featuredStreamerLabel: "★ Featured Streamer",
-      featuredSelectedSuffix: "入选",
-      featuredHint:
-        "Featured 基于官方频道数据资格（订阅者/关注者 12,000+ · 频道运营 120 天以上），不会影响游戏分数、XP 或排行榜排名。",
+      streamerApprovalPending: "平台人工审核中",
+      streamerApproved: "主播已批准",
+      streamerRejected: "主播审核已拒绝",
+      streamerApprovalHint:
+        "所有批准对象统一称为主播。连接多个平台时，每个平台都会按相同标准单独审核。",
+      streamerVerifyPaused: "该平台的新频道连接已暂时停止。",
+      streamerVerifyDeferred: "在该平台支持可安全绑定的 OAuth 流程之前，认证将暂缓。",
       achievedSuffix: "已达成",
       myGameRecordsTitle: "我的各游戏最高记录",
       challengeSuffix: "已挑战",
       viewFullRankingArrow: "查看完整排行榜 →",
-      reviewNotStarted: "频道所有权认证完成后将开始自动审核。（约 6 小时后进行首次审核）",
-      autoReviewPending: "自动审核等待中",
-      nextReviewPrefix: "（下次审核",
-      notEligible: "当前未达标准",
-      manualReviewNeeded: "需要进一步确认",
-      autoReviewFailed: "自动审核暂时失败（等待重试）",
-      nextRetryPrefix: "— 下次重试",
     },
     discord: {
       heroTitle1: "与朋友一起",
@@ -5666,7 +5566,6 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       navGamesDevelopment: "게임 개발 및 등록",
       navStreamerOverview: "Streamer 概览",
       navStreamerVerification: "频道所有权认证",
-      navStreamerFeatured: "Featured Streamer",
       navSupport: "支持",
       catSupportDesc: "联系、举报、错误反馈渠道说明",
       tocAriaLabel: "Wiki 目录",
@@ -5679,7 +5578,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       catGettingStartedDesc: "从创建 OwOGG 账户到第一局游戏的最快路径。",
       catAccountDesc: "登录方式、个人资料设置，以及将多个账户合并为一个的账户合并功能。",
       catGamesDesc: "游戏目录、排名计算方式、经验值（XP）与等级。",
-      catStreamerDesc: "频道所有权认证、主播排行榜资格、Featured Streamer 标准。",
+      catStreamerDesc: "频道所有权认证、按平台人工审核和主播排行榜资格。",
       catPolicyTitle: "政策",
       catPolicyDesc: "查看服务条款和隐私政策。",
     },
@@ -5687,13 +5586,11 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       streamer: {
         title: "Streamer 概览",
         description:
-          "通过官方 OAuth/API 验证频道所有权的主播和 YouTuber 将被认定为 OwOGG Streamer。",
+          "通过官方 OAuth/API 确认频道所有权并通过平台人工审核的用户将被认定为 OwOGG Streamer。",
         intro:
-          "Streamer 认证不会为游戏分数或 XP 提供任何加成。作为替代，它带来的权益是：在名人堂的主播排行榜标签页中展示，以及在个人资料页显示认证徽章和官方频道链接。",
+          "Streamer 批准不会为游戏分数或 XP 提供加成。已批准的平台用于主播排行榜资格和个人资料中的官方频道链接。",
         cardVerification: "频道所有权认证 →",
-        cardVerificationDesc: "支持的平台与认证方法",
-        cardFeatured: "Featured Streamer →",
-        cardFeaturedDesc: "Featured 资格标准",
+        cardVerificationDesc: "支持的平台、所有权认证和人工审核",
         profileHint: "可以从我的个人资料页面开始认证。",
         profileLink: "前往我的个人资料",
       },
@@ -5701,51 +5598,32 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         title: "频道所有权认证",
         description: "仅通过官方 OAuth 和 API 验证所有权，绝不使用文本输入或网页抓取。",
         platformsHeading: "支持的平台",
+        platformAvailable: "支持 OAuth",
+        platformDeferred: "认证暂缓",
         conditionsHeading: "认证条件",
-        condOnePrefix: "在上述四个平台（YouTube · CHZZK · SOOP · Twitch）中，",
-        condOneStrong: "只需认证一个",
-        condOneSuffix: "即可被认定为 OwOGG Streamer，无需认证全部四个平台。",
+        condOnePrefix: "在当前可使用 OAuth 认证的 YouTube、CHZZK、Twitch 中，",
+        condOneStrong: "至少一个完成所有权认证和人工审核",
+        condOneSuffix: "即可被认定为 OwOGG Streamer。连接多个平台时，各平台按相同标准单独审核。",
         condNoMinimum:
-          "目前不要求订阅/关注人数或频道创建时长的最低标准，只需通过官方 OAuth 确认频道所有权即可。",
+          "观众人数和频道运营时长标准来自运营人员可修改的版本化服务器策略，客户端不使用硬编码数值。",
         condOauthOnly:
-          "所有权认证始终只能通过各平台的官方 OAuth 登录页面完成，不支持直接输入频道 URL 或昵称的方式。",
+          "所有权认证始终只能通过各平台的官方 OAuth 登录页面完成，不支持直接输入频道 URL 或昵称的方式。SOOP 将暂缓至官方流程能够安全绑定回调为止。",
         condOneChannelOneAccount: "一个外部频道只能绑定到一个 OwOGG 账户（1 个频道 = 1 个账户）。",
         methodHeading: "认证方法",
         step1: "前往个人资料页面的［主播频道所有权认证］板块。",
         step2: "点击要认证的平台的［频道所有权认证］按钮。",
         step3: "在该平台的官方登录页面使用本人账户登录并授权。",
-        step4: "返回 OwOGG 后，频道信息会被自动确认并显示。",
+        step4: "返回 OwOGG 后会显示频道信息，并为该平台创建人工审核任务。",
         calloutLoginStrong: "登录 OwOGG 与频道认证是两回事。",
         calloutLoginBody:
           " 使用 Google 登录并不会自动绑定你的 YouTube 频道 —— 必须完成明确的认证流程。",
         calloutDuplicate:
           "一个外部频道只能绑定到一个 OwOGG 账户。已被其他用户认证过的频道无法再次认证。",
-        footerPrefix: "若要在主播排行榜中展示，在上述四个平台中",
-        footerStrong: "只需认证一个",
-        footerMid: "即可。详细资格条件请参阅",
+        footerPrefix: "若要在主播排行榜中展示，在当前可认证的三个平台中",
+        footerStrong: "至少一个",
+        footerMid: "必须同时完成所有权认证并获得运营批准。详细资格条件请参阅",
         footerLink: "排行榜文档",
         footerSuffix: "。",
-      },
-      streamerFeatured: {
-        title: "Featured Streamer",
-        description:
-          "Featured 是依据 OwOGG 标准，以公开频道指标进行审核的、仅用于展示与筛选的徽章。",
-        conceptHeading: "概念区分",
-        conceptStreamerTerm: "Streamer",
-        conceptStreamerDesc: " —— 已通过官方 OAuth/API 验证频道所有权的状态。",
-        conceptFeaturedTerm: "Featured Streamer",
-        conceptFeaturedDesc:
-          " —— 在 Streamer 之中，满足 OwOGG 标准（订阅/关注人数、频道创建时长等公开指标）并通过自动/人工审核的状态。",
-        reviewHeading: "审核方式",
-        reviewBody:
-          "频道所有权认证完成后不会立即授予 Featured。一段时间后会使用最新的官方指标进行自动复审；若指标存在歧义，或平台未通过官方 API 提供指标，则会安全地转入运营人工审核。获得 Featured 之后也会定期重新验证。",
-        calloutNoRankImpactStrong: "Featured 不会影响分数、XP 或排行榜名次。",
-        calloutNoRankImpactBody:
-          " 它仅是展示用徽章 —— 无论是否为 Featured，主播排行榜都只依据频道所有权认证来展示。",
-        calloutTestingPhase:
-          "目前处于服务验证阶段，因此不会自动授予 Featured，所有已认证频道所有权的 Streamer 都会进入运营人工审核等待状态。无论是否为 Featured，在主播排行榜中的展示完全相同，并且 Featured 徽章目前尚未公开显示。",
-        footerNote:
-          "运营的审核标准与流程作为内部运营文档单独管理，不公开具体数值 —— 审核始终只使用可通过官方 API 核实的指标。",
       },
       account: {
         title: "账户概览",
@@ -5845,12 +5723,10 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         streamerBodyPrefix: "只有在 YouTube / CHZZK / SOOP / Twitch 中",
         streamerBodyStrong: "至少一个",
         streamerBodySuffix:
-          "平台完成官方频道所有权认证的用户才会显示。游戏记录、XP 和连续签到与普通排行榜使用相同的计算公式和 UI，认证平台数量不影响名次。",
+          "平台完成频道所有权认证并获得运营批准的用户才会显示。游戏记录、XP 和连续签到与普通排行榜使用相同的计算公式和 UI，批准平台数量不影响名次。",
         streamerLinkPrefix: "详细的认证方法请参阅",
         streamerLink: "Streamer 频道所有权认证",
         streamerLinkSuffix: "文档。",
-        calloutFeatured:
-          "Featured Streamer 标识是仅用于展示的徽章，对排行榜名次和 XP 计算没有任何影响。",
         footerPrefix: "关于 Discord 服务器维度的排行榜，请参阅",
         footerLink: "Discord 服务器 XP 文档",
         footerSuffix: "。",

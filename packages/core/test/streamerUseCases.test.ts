@@ -8,7 +8,6 @@ import {
   type StreamerRankEntry,
   type StreamerPlatformType,
   type StreamerStatusType,
-  type FeaturedStatusType,
   type PublicGameCatalog,
 } from "../src/index.js";
 import { runtimeGameFixture } from "./runtimeGameFixture.js";
@@ -91,17 +90,14 @@ class MockStreamerRepo implements StreamerRepository {
   async upsertProfile(input: {
     userId: number;
     status: StreamerStatusType;
-    featuredStatus?: FeaturedStatusType;
-    featuredReason?: string | null;
   }): Promise<StreamerProfile> {
     const existing = Array.from(this.profiles.values()).find((p) => p.userId === input.userId);
     const now = new Date().toISOString();
 
     if (existing) {
       existing.status = input.status;
-      if (input.featuredStatus) existing.featuredStatus = input.featuredStatus;
-      if (input.featuredReason !== undefined) existing.featuredReason = input.featuredReason;
       existing.updatedAt = now;
+      existing.rowVersion += 1;
       return existing;
     }
 
@@ -109,9 +105,8 @@ class MockStreamerRepo implements StreamerRepository {
       id: this.nextProfileId++,
       userId: input.userId,
       status: input.status,
-      featuredStatus: input.featuredStatus ?? "NONE",
-      featuredReason: input.featuredReason ?? null,
-      featuredSince: input.featuredStatus && input.featuredStatus !== "NONE" ? now : null,
+      suspendedUntil: null,
+      rowVersion: 0,
       createdAt: now,
       updatedAt: now,
     };
@@ -151,6 +146,14 @@ class MockStreamerRepo implements StreamerRepository {
       avatarUrl: input.avatarUrl ?? null,
       verificationStatus: verStatus,
       verifiedAt: verStatus === "VERIFIED" ? now : null,
+      ownershipExpiresAt: "2030-01-01T00:00:00.000Z",
+      approvalStatus: "APPROVED",
+      approvalReasonCode: "TEST_APPROVED",
+      approvedAt: now,
+      audienceCount: null,
+      channelCreatedAt: null,
+      metricsSyncedAt: null,
+      rowVersion: 0,
       createdAt: now,
       updatedAt: now,
     };
@@ -214,7 +217,6 @@ class MockStreamerRepo implements StreamerRepository {
           avatarUrl: user.avatarUrl ?? null,
           country: user.country ?? null,
           streamerId: c.id,
-          featuredStatus: c.featuredStatus,
           platformAccounts: pAccs,
           score: best.score,
           formattedScore: String(best.score),
@@ -257,7 +259,6 @@ class MockStreamerRepo implements StreamerRepository {
           avatarUrl: user.avatarUrl ?? null,
           country: user.country ?? null,
           streamerId: c.id,
-          featuredStatus: c.featuredStatus,
           platformAccounts: pAccs,
           totalXp,
           level: Math.floor(totalXp / 100) + 1,
@@ -308,7 +309,7 @@ test("Phase D Streamer Domain & Ranking Invariants", async (t) => {
     });
     repo.userProgress.set(2, 20000);
 
-    // User 3: Verified Streamer (YouTube & Twitch, Featured)
+    // User 3: Verified Streamer (YouTube & Twitch)
     repo.users.set(3, { nickname: "StreamerBeta", country: "JP" });
     repo.scores.push({
       userId: 3,
@@ -345,11 +346,7 @@ test("Phase D Streamer Domain & Ranking Invariants", async (t) => {
       channelUrl: "https://chzzk.naver.com/alpha",
     });
 
-    const c3 = await repo.upsertProfile({
-      userId: 3,
-      status: "VERIFIED",
-      featuredStatus: "FEATURED",
-    });
+    const c3 = await repo.upsertProfile({ userId: 3, status: "VERIFIED" });
     await repo.addPlatformAccount({
       streamerId: c3.id,
       platform: "YOUTUBE",
@@ -425,12 +422,8 @@ test("Phase D Streamer Domain & Ranking Invariants", async (t) => {
     );
   });
 
-  await t.test("5. Featured or Partner status never modifies scores or XP", async () => {
-    const c2 = await repo.upsertProfile({
-      userId: 2,
-      status: "VERIFIED",
-      featuredStatus: "PARTNER",
-    });
+  await t.test("5. Streamer approval never modifies canonical scores or XP", async () => {
+    const c2 = await repo.upsertProfile({ userId: 2, status: "VERIFIED" });
     await repo.addPlatformAccount({
       streamerId: c2.id,
       platform: "TWITCH",
