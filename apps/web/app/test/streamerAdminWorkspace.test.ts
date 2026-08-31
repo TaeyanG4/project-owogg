@@ -11,6 +11,10 @@ import {
   canPerformStreamerAdminAction,
   canViewStreamerAdminSection,
 } from "../features/streamers/adminStreamerViewModel";
+import {
+  isStreamerUiPlatform,
+  STREAMER_UI_PLATFORMS,
+} from "../features/streamers/streamerPlatforms";
 
 const policyValues = {
   minimumAudience: 1_000,
@@ -24,6 +28,12 @@ const policyValues = {
   reconsiderationCooldownDays: 7,
   providerTimeoutSeconds: 10,
 } as const;
+
+test("public Streamer UI exposes only YouTube, CHZZK, and Twitch", () => {
+  assert.deepEqual(STREAMER_UI_PLATFORMS, ["YOUTUBE", "CHZZK", "TWITCH"]);
+  assert.equal(isStreamerUiPlatform("YOUTUBE"), true);
+  assert.equal(isStreamerUiPlatform("SOOP"), false);
+});
 
 test("all admin lists accept only the supported 10/20/30/50 page sizes", () => {
   for (const pageSize of [10, 20, 30, 50]) {

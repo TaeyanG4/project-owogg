@@ -35,7 +35,7 @@ function seedScore(
 function seedStreamer(
   raw: import("node:sqlite").DatabaseSync,
   userId: number,
-  platform: "YOUTUBE" | "TWITCH" = "YOUTUBE",
+  platform: "YOUTUBE" | "CHZZK" | "SOOP" | "TWITCH" = "YOUTUBE",
 ): number {
   const profile = raw
     .prepare(
@@ -181,6 +181,49 @@ test("streamer scope applies ownership and platform filters while returning chan
     rows[0]?.platformAccounts.map((account) => account.platform),
     ["YOUTUBE"],
   );
+});
+
+test("public streamer ranking excludes SOOP eligibility and channel badges", async () => {
+  const { db, raw } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);
+  const visibleUser = seedUser(raw, "Visible");
+  const hiddenUser = seedUser(raw, "Hidden SOOP");
+  seedStreamer(raw, visibleUser, "CHZZK");
+  seedStreamer(raw, hiddenUser, "SOOP");
+  seedScore(raw, visibleUser, 100, "2026-08-30T16:00:00.000Z");
+  seedScore(raw, hiddenUser, 999, "2026-08-30T16:00:00.000Z");
+
+  const repository = new D1PublicRankingRepository(db);
+  const all = await repository.getScoreRanking({
+    scope: "streamer",
+    gameId: "aim-test",
+    difficulty: "normal",
+    rulesetRevision: 2,
+    direction: "desc",
+    startAt: "2026-08-30T15:00:00.000Z",
+    endAt: "2026-08-31T15:00:00.000Z",
+    limit: 20,
+  });
+  const soop = await repository.getScoreRanking({
+    scope: "streamer",
+    platform: "SOOP",
+    gameId: "aim-test",
+    difficulty: "normal",
+    rulesetRevision: 2,
+    direction: "desc",
+    startAt: "2026-08-30T15:00:00.000Z",
+    endAt: "2026-08-31T15:00:00.000Z",
+    limit: 20,
+  });
+
+  assert.deepEqual(
+    all.map((row) => row.userId),
+    [visibleUser],
+  );
+  assert.deepEqual(
+    all[0]?.platformAccounts.map((account) => account.platform),
+    ["CHZZK"],
+  );
+  assert.deepEqual(soop, []);
 });
 
 test("streamer scope uses the same XP and active-streak calculations as general rankings", async () => {

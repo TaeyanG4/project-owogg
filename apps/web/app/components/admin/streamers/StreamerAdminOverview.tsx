@@ -6,8 +6,9 @@ import type {
 } from "@owogg/contracts";
 import {
   formatStreamerDateTime,
-  STREAMER_PLATFORM_LABELS,
+  formatStreamerPlatform,
 } from "../../../features/streamers/adminStreamerViewModel";
+import { isStreamerUiPlatform } from "../../../features/streamers/streamerPlatforms";
 import { StreamerBadge, StreamerPagination, StreamerPanel } from "./StreamerAdminShared";
 
 export function StreamerAdminOverview({
@@ -19,6 +20,12 @@ export function StreamerAdminOverview({
   onNavigate: (section: StreamerAdminSection) => void;
   onPageChange: (page: number, pageSize: StreamerAdminPageSize) => void;
 }) {
+  const visibleOverviewQueue = data.overviewQueue.items.filter((review) =>
+    isStreamerUiPlatform(review.platformAccount.platform),
+  );
+  const visibleProviders = data.providers.filter((provider) =>
+    isStreamerUiPlatform(provider.platform),
+  );
   const metrics = [
     {
       label: "전체 신청자",
@@ -94,11 +101,11 @@ export function StreamerAdminOverview({
               작업함 열기 <ArrowRight className="h-3.5 w-3.5" />
             </button>
           </div>
-          {data.overviewQueue.items.length === 0 ? (
+          {visibleOverviewQueue.length === 0 ? (
             <p className="p-6 text-xs text-text-muted">활성 심사가 없습니다.</p>
           ) : (
             <div className="divide-y divide-border/70">
-              {data.overviewQueue.items.map((review) => (
+              {visibleOverviewQueue.map((review) => (
                 <button
                   key={review.id}
                   type="button"
@@ -111,7 +118,7 @@ export function StreamerAdminOverview({
                         {review.nickname} · {review.platformAccount.channelName}
                       </span>
                       <StreamerBadge tone={review.priority === "URGENT" ? "danger" : "neutral"}>
-                        {STREAMER_PLATFORM_LABELS[review.platformAccount.platform]}
+                        {formatStreamerPlatform(review.platformAccount.platform)}
                       </StreamerBadge>
                     </div>
                     <p className="mt-1 text-[10px] text-text-muted">
@@ -148,7 +155,7 @@ export function StreamerAdminOverview({
           <StreamerPanel className="p-5">
             <h2 className="text-sm font-black text-text-primary">플랫폼 연결 상태</h2>
             <div className="mt-4 space-y-2">
-              {data.providers.map((provider) => (
+              {visibleProviders.map((provider) => (
                 <div
                   key={provider.platform}
                   className="flex items-center justify-between rounded-xl bg-surface px-3 py-2.5"

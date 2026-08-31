@@ -1,25 +1,29 @@
 import type { StreamerPlatform } from "@owogg/contracts";
 import { useI18n } from "../../features/i18n/I18nContext";
 import type { Dictionary } from "../../features/i18n/dictionary";
+import {
+  isStreamerUiPlatform,
+  STREAMER_UI_PLATFORMS,
+  type StreamerUiPlatform,
+} from "../../features/streamers/streamerPlatforms";
 
 /**
- * Lightweight local SVG badges for the four supported Streamer platforms — deliberately not
+ * Lightweight local SVG badges for the user-facing Streamer platforms — deliberately not
  * emoji (▶️/🟢/🔵/💜) and not a hotlinked third-party image. Each badge is a brand-colored
  * circle with a simple glyph; it is not a pixel-accurate trademark reproduction, just a
  * compact, distinguishable, accessible indicator.
  */
 function platformMeta(
   dict: Dictionary["platformIcon"],
-): Record<StreamerPlatform, { label: string; bg: string; fg: string }> {
+): Record<StreamerUiPlatform, { label: string; bg: string; fg: string }> {
   return {
     YOUTUBE: { label: "YouTube", bg: "#FF0000", fg: "#ffffff" },
     CHZZK: { label: dict.chzzkLabel, bg: "#1ECB4F", fg: "#0b1b0f" },
-    SOOP: { label: dict.soopLabel, bg: "#1B78FF", fg: "#ffffff" },
     TWITCH: { label: "Twitch", bg: "#9146FF", fg: "#ffffff" },
   };
 }
 
-function PlatformGlyph({ platform }: { platform: StreamerPlatform }) {
+function PlatformGlyph({ platform }: { platform: StreamerUiPlatform }) {
   if (platform === "YOUTUBE") {
     // Universal "play" triangle — not the trademarked YouTube wordmark/icon, just the shape.
     return (
@@ -28,7 +32,7 @@ function PlatformGlyph({ platform }: { platform: StreamerPlatform }) {
       </svg>
     );
   }
-  const letter = platform === "CHZZK" ? "Z" : platform === "SOOP" ? "S" : "T";
+  const letter = platform === "CHZZK" ? "Z" : "T";
   return (
     <svg viewBox="0 0 24 24" width="70%" height="70%" aria-hidden="true">
       <text
@@ -64,6 +68,8 @@ export function PlatformIcon({
   className?: string;
 }) {
   const { dict } = useI18n();
+  if (!isStreamerUiPlatform(platform)) return null;
+
   const meta = platformMeta(dict.platformIcon)[platform];
   const label = `${meta.label} ${dict.platformIcon.channelSuffix}`;
 
@@ -95,7 +101,7 @@ export function PlatformIcon({
   );
 }
 
-/** Compact row of verified-platform badges, ordered YouTube → CHZZK → SOOP → Twitch regardless
+/** Compact row of verified-platform badges, ordered YouTube → CHZZK → Twitch regardless
  * of input order, deduplicated by platform. */
 export function PlatformIconRow({
   accounts,
@@ -105,14 +111,11 @@ export function PlatformIconRow({
   size?: number;
 }) {
   const { dict } = useI18n();
-  const order: StreamerPlatform[] = ["YOUTUBE", "CHZZK", "SOOP", "TWITCH"];
   const byPlatform = new Map(accounts.map((a) => [a.platform, a] as const));
 
-  const verified = order
-    .map((platform) => byPlatform.get(platform))
-    .filter((account): account is { platform: StreamerPlatform; channelUrl: string } =>
-      Boolean(account),
-    );
+  const verified = STREAMER_UI_PLATFORMS.map((platform) => byPlatform.get(platform)).filter(
+    (account): account is { platform: StreamerPlatform; channelUrl: string } => Boolean(account),
+  );
 
   return (
     <div className="flex items-center gap-1.5" aria-label={dict.platformIcon.verifiedPlatforms}>

@@ -25,6 +25,12 @@ export function StreamerAdminAudit({
   const [search, setSearch] = useState(query.auditQuery);
   useEffect(() => setSearch(query.auditQuery), [query.auditQuery]);
   const submitSearch = () => onQueryChange({ auditQuery: search.trim(), auditPage: 1 });
+  const visibleAudits = data.audits.items.filter(
+    (entry) =>
+      ![entry.targetLabel, entry.changeSummary, entry.internalNote]
+        .filter((value): value is string => Boolean(value))
+        .some((value) => /\bSOOP\b/i.test(value)),
+  );
   return (
     <div className="space-y-4">
       <StreamerPanel className="p-4">
@@ -71,11 +77,11 @@ export function StreamerAdminAudit({
       </StreamerPanel>
 
       <StreamerPanel className="overflow-hidden">
-        {data.audits.items.length === 0 ? (
+        {visibleAudits.length === 0 ? (
           <p className="p-10 text-center text-xs text-text-muted">감사 이력이 없습니다.</p>
         ) : (
           <div className="divide-y divide-border/70">
-            {data.audits.items.map((entry) => (
+            {visibleAudits.map((entry) => (
               <AuditEntry key={entry.id} entry={entry} />
             ))}
           </div>

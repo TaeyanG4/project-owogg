@@ -8,10 +8,11 @@ import type {
 import {
   formatStreamerAudience,
   formatStreamerDateTime,
+  formatStreamerPlatform,
   STREAMER_OWNERSHIP_LABELS,
-  STREAMER_PLATFORM_LABELS,
   STREAMER_REVIEW_STATE_LABELS,
 } from "../../../features/streamers/adminStreamerViewModel";
+import { isStreamerUiPlatform } from "../../../features/streamers/streamerPlatforms";
 import {
   StreamerActionButton,
   StreamerBadge,
@@ -36,6 +37,9 @@ export function StreamerAdminReviews({
   const [search, setSearch] = useState(query.reviewQuery);
   useEffect(() => setSearch(query.reviewQuery), [query.reviewQuery]);
   const submitSearch = () => onQueryChange({ reviewQuery: search.trim(), reviewPage: 1 });
+  const visibleReviews = data.reviews.items.filter((review) =>
+    isStreamerUiPlatform(review.platformAccount.platform),
+  );
 
   return (
     <div className="space-y-4">
@@ -97,13 +101,13 @@ export function StreamerAdminReviews({
         </div>
       </StreamerPanel>
 
-      {data.reviews.items.length === 0 ? (
+      {visibleReviews.length === 0 ? (
         <StreamerPanel className="p-10 text-center text-xs text-text-muted">
           조건에 맞는 플랫폼 심사가 없습니다.
         </StreamerPanel>
       ) : (
         <div className="space-y-3">
-          {data.reviews.items.map((review) => (
+          {visibleReviews.map((review) => (
             <ReviewCard
               key={review.id}
               review={review}
@@ -182,7 +186,7 @@ function ReviewCard({
               {STREAMER_REVIEW_STATE_LABELS[review.workState]}
             </StreamerBadge>
             <StreamerBadge tone="info">
-              {STREAMER_PLATFORM_LABELS[review.platformAccount.platform]}
+              {formatStreamerPlatform(review.platformAccount.platform)}
             </StreamerBadge>
           </div>
           <p className="mt-2 text-[10px] text-text-muted">

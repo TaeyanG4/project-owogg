@@ -32,6 +32,7 @@ import { fetchPublicRankingApi } from "../features/rankings/api";
 import { formatRankingDate } from "../features/rankings/format";
 import { filterLeaderboardGames } from "../features/scores/leaderboardGames";
 import { leaderboardVariantLabel } from "../features/scores/variantLabel";
+import { STREAMER_UI_PLATFORMS } from "../features/streamers/streamerPlatforms";
 
 export function meta() {
   return [
@@ -149,10 +150,15 @@ export default function Ranking() {
   ];
   const platformOptions: Array<{ id: PlatformFilter; label: string }> = [
     { id: "ALL", label: dict.ranking.allPlatforms },
-    { id: "YOUTUBE", label: "YouTube" },
-    { id: "CHZZK", label: dict.ranking.platformChzzk },
-    { id: "SOOP", label: dict.ranking.platformSoop },
-    { id: "TWITCH", label: "Twitch" },
+    ...STREAMER_UI_PLATFORMS.map((platform) => ({
+      id: platform,
+      label:
+        platform === "CHZZK"
+          ? dict.ranking.platformChzzk
+          : platform === "YOUTUBE"
+            ? "YouTube"
+            : "Twitch",
+    })),
   ];
 
   const valueHeader =

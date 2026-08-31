@@ -1,15 +1,14 @@
 # Streamer 시스템 SSoT
 
-이 문서는 OwOGG Streamer 연결·심사·관리 기능의 단일 진실 공급원입니다. 현재 구현 기준은
-`origin/staging`의 `6249f967c2a22f08b4bb1affb87990dd2b8bcdd2`에서 분기한
-`feature/streamer-management-ui` 작업 브랜치입니다.
+이 문서는 OwOGG Streamer 연결·심사·관리 기능의 단일 진실 공급원입니다. 구현 기준은 이 문서가
+포함된 최신 `staging` tree이며, Production 승격 전에는 같은 tree의 Staging acceptance를 다시 확인합니다.
 
 ## 1. 제품 정의
 
 OwOGG에는 하나의 **Streamer** 상태만 존재합니다. 별도의 등급·배지·파트너 계층을 두지 않습니다.
 
-- 지원 대상은 YouTube, CHZZK, SOOP, Twitch입니다. 현재 안전한 플랫폼 OAuth 연결이 열린 곳은
-  YouTube, CHZZK, Twitch이며 SOOP은 아래 Provider 경계에 따라 보류합니다.
+- 사용자에게 제공하는 플랫폼은 YouTube, CHZZK, Twitch입니다. SOOP 식별자는 기존 데이터와 안전한
+  실패 처리를 위해 내부 계약에만 예약하며 설정·랭킹·Wiki·관리자 UI에는 노출하지 않습니다.
 - OAuth 소유권 확인과 OwOGG Streamer 승인은 서로 다른 상태입니다.
 - 연결한 플랫폼 계정마다 독립적으로 같은 수동 심사를 받아야 합니다.
 - canonical 채널은 최초 연결 사용자의 심사·감사 이력에 고정하며 다른 사용자에게 조용히 재할당하지 않습니다.
@@ -140,9 +139,9 @@ OwOGG에는 하나의 **Streamer** 상태만 존재합니다. 별도의 등급·
 - [SOOP 공식 인증 계약](https://developers.sooplive.co.kr/docs/api/auth-token)의 현재 브라우저 callback은
   OwOGG가 발급한 `state`를 돌려주는 계약이 없습니다.
   따라서 공격자가 자기 SOOP authorization code를 다른 OwOGG 사용자의 callback에 주입하는 login-CSRF를
-  확실히 차단할 수 없습니다. 임의 채널 입력이나 별도 인증번호 방식으로 대체하지 않고 사용자 UI와 API를
-  `보류`로 닫습니다. Provider가 `state` 또는 동등한 안전한 callback 결박(PKCE 포함)을 공식 지원하고 실제
-  Staging acceptance를 통과할 때만 엽니다.
+  확실히 차단할 수 없습니다. 임의 채널 입력이나 별도 인증번호 방식으로 대체하지 않고 API는
+  fail-closed로 유지하며 사용자 UI에서는 항목 자체를 노출하지 않습니다. Provider가 `state` 또는 동등한
+  안전한 callback 결박(PKCE 포함)을 공식 지원하고 실제 Staging acceptance를 통과할 때만 다시 검토합니다.
 
 ## 6. 관리자 화면
 
@@ -308,7 +307,7 @@ callback은 provider 콘솔과 GitHub Variable에 정확히 같은 값을 등록
 - OAuth 사용자·session·platform 결박, state 만료·재사용, 타 사용자 canonical 채널 탈취 방지 테스트 통과
 - YouTube·Twitch·CHZZK token-bound canonical identity adapter 테스트 통과; SOOP fail-closed 보류 테스트 통과
 - 전체 `pnpm verify` 통과
-- 스트리머 인증 Wiki의 데스크톱·390px 모바일 렌더, 플랫폼 상태 표기와 브라우저 오류 없음 확인
+- 스트리머 인증 Wiki의 데스크톱·390px 모바일 렌더와 브라우저 오류 없음 확인
 
 ### Staging
 
@@ -324,8 +323,8 @@ Environment의 `STAGING_STREAMER_ENABLED_PROVIDERS`와 provider별 `STAGING_*_CL
 실패합니다. 활성 목록의 허용값은 `YOUTUBE`, `TWITCH`, `CHZZK`이며 SOOP은 fail-closed로 거부합니다.
 
 이 단계에서 YouTube·Twitch·CHZZK의 실제 provider 계정 OAuth 왕복과 인증된 설정·관리자 화면의 API 연동을
-브라우저로 확인합니다. SOOP은 안전한 callback 결박을 공식 지원하기 전까지 acceptance 대상이 아니라
-보류 상태가 유지되는지를 확인합니다.
+브라우저로 확인합니다. SOOP은 실제 계정 acceptance 대상이 아니며 fail-closed API 회귀 테스트와 공개
+UI 비노출 테스트만 수행합니다.
 
 ### Production
 
@@ -345,7 +344,8 @@ Production provider 등록이나 preflight 구현 완료는 Production 배포 �
 - 기존 예시 프리뷰와 등급 UI는 제거했습니다.
 - migration·API·실제 datasource 연결과 관리자 UI 구현 및 로컬 통합 검증을 완료했습니다.
 - YouTube·Twitch·CHZZK callback은 OwOGG 사용자·정확한 session·플랫폼·일회용 intent에 결박했습니다.
-- SOOP은 현재 공식 OAuth callback만으로 본인 결박을 증명할 수 없어 UI와 API 모두 fail-closed 보류합니다.
+- SOOP은 현재 공식 OAuth callback만으로 본인 결박을 증명할 수 없어 공개 UI에서 숨기고 API는
+  fail-closed로 유지합니다.
 - Staging과 Production workflow의 환경별 provider credential 매핑, callback·누락·SOOP 활성화
   preflight, API readiness smoke 연결을 완료했습니다. 환경별 접두사로 credential 공유와 fallback을
   막습니다.

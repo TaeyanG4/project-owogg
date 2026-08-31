@@ -37,6 +37,10 @@ import {
   fetchMyStreamerProfileApi,
   fetchStreamerProvidersApi,
 } from "../features/streamers/streamerApi";
+import {
+  STREAMER_UI_PLATFORM_LABELS,
+  STREAMER_UI_PLATFORMS,
+} from "../features/streamers/streamerPlatforms";
 import { fetchDevMe } from "../features/devApi";
 import { COUNTRY_OPTIONS } from "../lib/countries";
 import type {
@@ -47,9 +51,10 @@ import type {
   StreamerProvidersResponse,
   GameCreatorMeResponse,
 } from "@owogg/contracts";
-import { formatPublicUserTag, type StreamerPlatformType } from "@owogg/core";
+import { formatPublicUserTag } from "@owogg/core";
 import { ApiClientError } from "../lib/api";
 import { MergeModal } from "../components/ui/MergeModal";
+import { PlatformIcon } from "../components/ui/PlatformIcon";
 
 export function meta() {
   return [
@@ -818,8 +823,8 @@ export default function SettingsPage() {
           <p className="text-xs text-text-muted">{dict.profile.streamerVerificationSubtitle}</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-          {(["YOUTUBE", "CHZZK", "SOOP", "TWITCH"] as StreamerPlatformType[]).map((platform) => {
+        <div className="flex flex-col gap-3">
+          {STREAMER_UI_PLATFORMS.map((platform) => {
             const platformAccount = streamerProfile?.platformAccounts?.find(
               (account) => account.platform === platform,
             );
@@ -855,92 +860,86 @@ export default function SettingsPage() {
             return (
               <div
                 key={platform}
-                className="flex flex-col justify-between p-4 rounded-2xl bg-surface-raised border border-border shadow-md gap-3"
+                className="flex flex-col gap-4 rounded-2xl border border-border bg-surface-raised p-4 shadow-md sm:flex-row sm:items-center sm:justify-between"
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-sm text-text-primary">{platform}</span>
-                    {ownershipVerified ? (
-                      <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-accent-green/10 text-accent-green border border-accent-green/30">
-                        <CheckCircle2 className="w-3 h-3 text-accent-green" />
-                        {dict.profile.ownershipVerified}
+                <div className="flex min-w-0 items-start gap-3">
+                  <PlatformIcon platform={platform} size={34} className="mt-0.5" />
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-bold text-text-primary">
+                        {STREAMER_UI_PLATFORM_LABELS[platform]}
                       </span>
+                      {ownershipVerified ? (
+                        <span className="flex items-center gap-1 rounded-full border border-accent-green/30 bg-accent-green/10 px-2.5 py-0.5 text-[10px] font-extrabold text-accent-green">
+                          <CheckCircle2 className="h-3 w-3 text-accent-green" />
+                          {dict.profile.ownershipVerified}
+                        </span>
+                      ) : (
+                        <span className="rounded-full border border-border bg-surface px-2.5 py-0.5 text-[10px] font-extrabold text-text-muted">
+                          {dict.profile.unverified}
+                        </span>
+                      )}
+                      {platformAccount && (
+                        <span
+                          className={`rounded-full border px-2.5 py-0.5 text-[10px] font-extrabold ${approvalClass}`}
+                        >
+                          {approvalLabel}
+                        </span>
+                      )}
+                    </div>
+
+                    {platformAccount ? (
+                      <div className="mt-1.5 min-w-0">
+                        <a
+                          href={platformAccount.channelUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block truncate text-xs font-bold text-brand-light hover:underline"
+                        >
+                          {platformAccount.channelName}{" "}
+                          {platformAccount.channelHandle
+                            ? `(${platformAccount.channelHandle})`
+                            : ""}
+                        </a>
+                        <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[10px] text-text-muted">
+                          {ownershipVerified && <span>{dict.profile.verifiedConfirmedText}</span>}
+                          {/* audienceCount === null means UNKNOWN (never obtained via official
+                              API) — never rendered as 0; the value is simply omitted. */}
+                          {platformAccount.audienceCount !== null && (
+                            <span>
+                              {dict.profile.audienceCountLabel}{" "}
+                              {platformAccount.audienceCount.toLocaleString()}
+                              {dict.profile.audienceUnit}
+                              {platformAccount.metricsSyncedAt
+                                ? ` ${dict.profile.metricsSyncedPrefix} ${platformAccount.metricsSyncedAt.split("T")[0]}`
+                                : ""}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     ) : (
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-surface text-text-muted border border-border">
-                        {dict.profile.unverified}
-                      </span>
+                      <p className="mt-1.5 text-[11px] text-text-muted">
+                        {dict.profile.notLinkedStatus}
+                      </p>
                     )}
                   </div>
                 </div>
 
-                {platformAccount ? (
-                  <div className="flex flex-col gap-1">
+                <div className="w-full shrink-0 sm:w-auto">
+                  {!ownershipVerified && canConnect ? (
                     <a
-                      href={platformAccount.channelUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-xs font-bold text-brand-light hover:underline truncate"
+                      href={`/api/streamers/verify/${platform.toLowerCase()}`}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-brand bg-brand px-4 py-2 text-xs font-bold text-white shadow-md transition-all hover:bg-brand-dark sm:w-auto"
                     >
-                      {platformAccount.channelName}{" "}
-                      {platformAccount.channelHandle ? `(${platformAccount.channelHandle})` : ""}
+                      <Video className="h-3.5 w-3.5" />
+                      <span>{dict.profile.verifyChannelCta}</span>
                     </a>
-                    {ownershipVerified && (
-                      <p className="text-[10px] text-text-muted">
-                        {dict.profile.verifiedConfirmedText}
-                      </p>
-                    )}
-                    <span
-                      className={`mt-1 inline-flex w-fit rounded-full border px-2.5 py-0.5 text-[10px] font-extrabold ${approvalClass}`}
-                    >
-                      {approvalLabel}
-                    </span>
-                    {/* audienceCount === null means UNKNOWN (never obtained via official
-                        API) — never rendered as 0; the line is simply omitted. */}
-                    {platformAccount.audienceCount !== null && (
-                      <p className="text-[10px] text-text-muted">
-                        {dict.profile.audienceCountLabel}{" "}
-                        {platformAccount.audienceCount.toLocaleString()}
-                        {dict.profile.audienceUnit}
-                        {platformAccount.metricsSyncedAt
-                          ? ` ${dict.profile.metricsSyncedPrefix} ${platformAccount.metricsSyncedAt.split("T")[0]}`
-                          : ""}
-                      </p>
-                    )}
-                    {!ownershipVerified && (
-                      <div className="mt-2">
-                        {canConnect ? (
-                          <a
-                            href={`/api/streamers/verify/${platform.toLowerCase()}`}
-                            className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-brand bg-brand py-2 text-xs font-bold text-white shadow-md transition-all hover:bg-brand-dark"
-                          >
-                            <Video className="h-3.5 w-3.5" />
-                            <span>{dict.profile.verifyChannelCta}</span>
-                          </a>
-                        ) : (
-                          <div className="w-full rounded-xl border border-border bg-surface py-2 text-center text-xs font-bold text-text-muted">
-                            {unavailableLabel}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-between gap-2 mt-1">
-                    {canConnect ? (
-                      <a
-                        href={`/api/streamers/verify/${platform.toLowerCase()}`}
-                        className="flex items-center justify-center gap-1.5 w-full py-2 bg-brand text-white border border-brand rounded-xl font-bold text-xs hover:bg-brand-dark transition-all cursor-pointer shadow-md"
-                      >
-                        <Video className="w-3.5 h-3.5" />
-                        <span>{dict.profile.verifyChannelCta}</span>
-                      </a>
-                    ) : (
-                      <div className="w-full py-2 bg-surface text-text-muted border border-border rounded-xl font-bold text-xs text-center">
-                        {unavailableLabel}
-                      </div>
-                    )}
-                  </div>
-                )}
+                  ) : !ownershipVerified ? (
+                    <div className="w-full rounded-xl border border-border bg-surface px-4 py-2 text-center text-xs font-bold text-text-muted sm:w-auto">
+                      {unavailableLabel}
+                    </div>
+                  ) : null}
+                </div>
               </div>
             );
           })}
