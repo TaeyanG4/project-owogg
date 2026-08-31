@@ -257,6 +257,29 @@ async function createVerifiedStreamerProfile(db: D1Database, userId: number) {
     )
     .bind(userId, now, now)
     .run();
+  const profile = await db
+    .prepare("SELECT id FROM streamer_profiles WHERE user_id = ?")
+    .bind(userId)
+    .first<{ id: number }>();
+  assert.ok(profile);
+  await db
+    .prepare(
+      `INSERT INTO streamer_platform_accounts
+         (streamer_id, platform, platform_user_id, channel_name, channel_url,
+          verification_status, verified_at, ownership_expires_at, approval_status,
+          created_at, updated_at)
+       VALUES (?, 'YOUTUBE', ?, 'Verified channel', ?, 'VERIFIED', ?, ?, 'APPROVED', ?, ?)`,
+    )
+    .bind(
+      profile.id,
+      `verified-channel-${userId}`,
+      `https://youtube.com/channel/verified-${userId}`,
+      now,
+      "2099-01-01T00:00:00.000Z",
+      now,
+      now,
+    )
+    .run();
 }
 
 test("GET /api/me/access without a session cookie is 401 UNAUTHORIZED", async () => {

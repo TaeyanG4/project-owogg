@@ -21,6 +21,7 @@ import type {
 import type { D1Database, D1PreparedStatement } from "./D1UserRepository.js";
 
 const ACTIVE_REVIEW_STATES = "'QUEUED', 'ON_HOLD'";
+const MANAGED_STREAMER_PLATFORMS_SQL = "'YOUTUBE', 'CHZZK', 'TWITCH'";
 const STREAMER_POLICY_FIELDS = [
   "minimumAudience",
   "minimumChannelAgeDays",
@@ -416,7 +417,7 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
     activeOnly?: boolean;
     generatedAt: string;
   }): Promise<StreamerAdminPage<StreamerAdminReviewItem>> {
-    const conditions: string[] = [];
+    const conditions: string[] = [`account.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})`];
     const binds: unknown[] = [];
     if (input.activeOnly) conditions.push(`review.work_state IN (${ACTIVE_REVIEW_STATES})`);
     if (input.state !== "ALL") {
@@ -477,13 +478,21 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
     query: StreamerAdminWorkspaceQuery,
     generatedAt: string,
   ): Promise<StreamerAdminPage<StreamerAdminRosterItem>> {
-    const conditions: string[] = [];
+    const conditions: string[] = [
+      `EXISTS (
+        SELECT 1 FROM streamer_platform_accounts visible_account
+        WHERE visible_account.streamer_id = profile.id
+          AND visible_account.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
+      )`,
+    ];
     const binds: unknown[] = [];
     if (query.rosterQuery) {
       conditions.push(
         `(user.nickname LIKE ? OR CAST(profile.user_id AS TEXT) LIKE ? OR EXISTS (
           SELECT 1 FROM streamer_platform_accounts search_account
-          WHERE search_account.streamer_id = profile.id AND search_account.channel_name LIKE ?
+          WHERE search_account.streamer_id = profile.id
+            AND search_account.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
+            AND search_account.channel_name LIKE ?
         ))`,
       );
       const pattern = `%${query.rosterQuery}%`;
@@ -491,13 +500,23 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
     }
     if (query.rosterPlatform !== "ALL") {
       conditions.push(
-        "EXISTS (SELECT 1 FROM streamer_platform_accounts filter_account WHERE filter_account.streamer_id = profile.id AND filter_account.platform = ?)",
+        `EXISTS (
+          SELECT 1 FROM streamer_platform_accounts filter_account
+          WHERE filter_account.streamer_id = profile.id
+            AND filter_account.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
+            AND filter_account.platform = ?
+        )`,
       );
       binds.push(query.rosterPlatform);
     }
     if (query.rosterApproval !== "ALL") {
       conditions.push(
-        "EXISTS (SELECT 1 FROM streamer_platform_accounts filter_account WHERE filter_account.streamer_id = profile.id AND filter_account.approval_status = ?)",
+        `EXISTS (
+          SELECT 1 FROM streamer_platform_accounts filter_account
+          WHERE filter_account.streamer_id = profile.id
+            AND filter_account.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
+            AND filter_account.approval_status = ?
+        )`,
       );
       binds.push(query.rosterApproval);
     }
@@ -514,8 +533,26 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
     const rows = await this.db
       .prepare(
         `SELECT profile.*, user.nickname, user.avatar_url,
+           CASE
+             WHEN profile.status = 'SUSPENDED'
+               AND (profile.suspended_until IS NULL
+                 OR datetime(profile.suspended_until) IS NULL
+                 OR datetime(profile.suspended_until) > datetime(?))
+               THEN 'SUSPENDED'
+             WHEN EXISTS (
+               SELECT 1 FROM streamer_platform_accounts effective_approved
+               WHERE effective_approved.streamer_id = profile.id
+                 AND effective_approved.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
+                 AND effective_approved.verification_status = 'VERIFIED'
+                 AND effective_approved.approval_status = 'APPROVED'
+                 AND effective_approved.ownership_expires_at IS NOT NULL
+                 AND datetime(effective_approved.ownership_expires_at) > datetime(?)
+             ) THEN 'VERIFIED'
+             ELSE 'UNVERIFIED'
+           END AS effective_program_status,
            (SELECT COUNT(*) FROM streamer_platform_accounts approved
             WHERE approved.streamer_id = profile.id AND approved.verification_status = 'VERIFIED'
+              AND approved.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
               AND approved.approval_status = 'APPROVED'
               AND approved.ownership_expires_at IS NOT NULL
               AND datetime(approved.ownership_expires_at) > datetime(?)) AS approved_platform_count,
@@ -523,16 +560,19 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
             JOIN streamer_platform_accounts pending_account
               ON pending_account.id = pending.streamer_platform_account_id
             WHERE pending_account.streamer_id = profile.id
+              AND pending_account.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
               AND pending.work_state IN (${ACTIVE_REVIEW_STATES})) AS pending_review_count,
            (SELECT latest.work_state FROM streamer_platform_reviews latest
             JOIN streamer_platform_accounts latest_account
               ON latest_account.id = latest.streamer_platform_account_id
             WHERE latest_account.streamer_id = profile.id
+              AND latest_account.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
             ORDER BY latest.updated_at DESC, latest.id DESC LIMIT 1) AS latest_review_state,
            (SELECT MIN(next_review.due_at) FROM streamer_platform_reviews next_review
             JOIN streamer_platform_accounts next_account
               ON next_account.id = next_review.streamer_platform_account_id
             WHERE next_account.streamer_id = profile.id
+              AND next_account.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
               AND next_review.work_state IN (${ACTIVE_REVIEW_STATES})) AS next_action_at
          FROM streamer_profiles profile
          JOIN users user ON user.id = profile.user_id
@@ -541,6 +581,8 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
          LIMIT ? OFFSET ?`,
       )
       .bind(
+        generatedAt,
+        generatedAt,
         generatedAt,
         ...binds,
         query.rosterPageSize,
@@ -555,7 +597,9 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
       const accountRows = await this.db
         .prepare(
           `SELECT * FROM streamer_platform_accounts
-           WHERE streamer_id IN (${placeholders}) ORDER BY id ASC`,
+           WHERE streamer_id IN (${placeholders})
+             AND platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
+           ORDER BY id ASC`,
         )
         .bind(...profileIds)
         .all<Record<string, unknown>>();
@@ -566,22 +610,28 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
         accountsByProfile.set(streamerId, accounts);
       }
     }
-    const items: StreamerAdminRosterItem[] = profileRows.map((row) => ({
-      streamerId: Number(row.id),
-      userId: Number(row.user_id),
-      nickname: String(row.nickname),
-      avatarUrl: row.avatar_url ? String(row.avatar_url) : null,
-      programStatus: String(row.status) as StreamerAdminRosterItem["programStatus"],
-      suspendedUntil: row.suspended_until ? String(row.suspended_until) : null,
-      approvedPlatformCount: Number(row.approved_platform_count ?? 0),
-      pendingReviewCount: Number(row.pending_review_count ?? 0),
-      latestReviewState: row.latest_review_state
-        ? (String(row.latest_review_state) as StreamerAdminRosterItem["latestReviewState"])
-        : null,
-      nextActionAt: row.next_action_at ? String(row.next_action_at) : null,
-      platformAccounts: accountsByProfile.get(Number(row.id)) ?? [],
-      rowVersion: Number(row.row_version ?? 0),
-    }));
+    const items: StreamerAdminRosterItem[] = profileRows.map((row) => {
+      const programStatus = String(
+        row.effective_program_status,
+      ) as StreamerAdminRosterItem["programStatus"];
+      return {
+        streamerId: Number(row.id),
+        userId: Number(row.user_id),
+        nickname: String(row.nickname),
+        avatarUrl: row.avatar_url ? String(row.avatar_url) : null,
+        programStatus,
+        suspendedUntil:
+          programStatus === "SUSPENDED" && row.suspended_until ? String(row.suspended_until) : null,
+        approvedPlatformCount: Number(row.approved_platform_count ?? 0),
+        pendingReviewCount: Number(row.pending_review_count ?? 0),
+        latestReviewState: row.latest_review_state
+          ? (String(row.latest_review_state) as StreamerAdminRosterItem["latestReviewState"])
+          : null,
+        nextActionAt: row.next_action_at ? String(row.next_action_at) : null,
+        platformAccounts: accountsByProfile.get(Number(row.id)) ?? [],
+        rowVersion: Number(row.row_version ?? 0),
+      };
+    });
     return pageResult(items, Number(count?.total ?? 0), query.rosterPage, query.rosterPageSize);
   }
 
@@ -620,7 +670,9 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
            (SELECT MAX(account.verified_at) FROM streamer_platform_accounts account
             WHERE account.platform = setting.platform
               AND account.verification_status = 'VERIFIED') AS last_successful_connection_at
-         FROM streamer_provider_settings setting ORDER BY setting.platform ASC`,
+         FROM streamer_provider_settings setting
+         WHERE setting.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
+         ORDER BY setting.platform ASC`,
       )
       .all<Record<string, unknown>>();
     return (rows.results ?? []).map((row) => ({
@@ -637,7 +689,27 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
   private async listAudits(
     query: StreamerAdminWorkspaceQuery,
   ): Promise<StreamerAdminPage<StreamerAdminAuditEntry>> {
-    const conditions: string[] = [];
+    const conditions: string[] = [
+      `NOT (
+        (audit.target_type = 'PROVIDER' AND audit.target_id = 'SOOP')
+        OR (audit.target_type = 'PLATFORM_ACCOUNT' AND EXISTS (
+          SELECT 1 FROM streamer_platform_accounts hidden_account
+          WHERE hidden_account.id = CAST(audit.target_id AS INTEGER)
+            AND hidden_account.platform = 'SOOP'
+        ))
+        OR (audit.target_type = 'REVIEW' AND EXISTS (
+          SELECT 1 FROM streamer_platform_reviews hidden_review
+          JOIN streamer_platform_accounts hidden_review_account
+            ON hidden_review_account.id = hidden_review.streamer_platform_account_id
+          WHERE hidden_review.id = CAST(audit.target_id AS INTEGER)
+            AND hidden_review_account.platform = 'SOOP'
+        ))
+        OR instr(upper(COALESCE(audit.target_label, '')), 'SOOP') > 0
+        OR instr(upper(COALESCE(audit.public_reason_code, '')), 'SOOP') > 0
+        OR instr(upper(COALESCE(audit.internal_note, '')), 'SOOP') > 0
+        OR instr(upper(COALESCE(audit.change_summary, '')), 'SOOP') > 0
+      )`,
+    ];
     const binds: unknown[] = [];
     if (query.auditTarget !== "ALL") {
       conditions.push("audit.target_type = ?");
@@ -697,38 +769,76 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
     const overviewRow = await this.db
       .prepare(
         `SELECT
-          (SELECT COUNT(*) FROM streamer_profiles) AS total_applicants,
+          (SELECT COUNT(*) FROM streamer_profiles applicant_profile
+           WHERE EXISTS (
+             SELECT 1 FROM streamer_platform_accounts applicant_account
+             WHERE applicant_account.streamer_id = applicant_profile.id
+               AND applicant_account.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
+           )) AS total_applicants,
           (SELECT COUNT(*) FROM streamer_profiles overview_profile
-           WHERE overview_profile.status = 'VERIFIED' AND EXISTS (
+           WHERE (
+             overview_profile.status <> 'SUSPENDED'
+             OR (overview_profile.suspended_until IS NOT NULL
+               AND datetime(overview_profile.suspended_until) IS NOT NULL
+               AND datetime(overview_profile.suspended_until) <= datetime(?))
+           ) AND EXISTS (
              SELECT 1 FROM streamer_platform_accounts overview_account
              WHERE overview_account.streamer_id = overview_profile.id
+               AND overview_account.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
                AND overview_account.verification_status = 'VERIFIED'
                AND overview_account.approval_status = 'APPROVED'
                AND overview_account.ownership_expires_at IS NOT NULL
                AND datetime(overview_account.ownership_expires_at) > datetime(?)
            )) AS approved_streamers,
-          (SELECT COUNT(*) FROM streamer_profiles WHERE status = 'SUSPENDED') AS suspended_streamers,
+          (SELECT COUNT(*) FROM streamer_profiles suspended_profile
+           WHERE suspended_profile.status = 'SUSPENDED'
+             AND (suspended_profile.suspended_until IS NULL
+               OR datetime(suspended_profile.suspended_until) IS NULL
+               OR datetime(suspended_profile.suspended_until) > datetime(?))
+             AND EXISTS (
+             SELECT 1 FROM streamer_platform_accounts suspended_account
+             WHERE suspended_account.streamer_id = suspended_profile.id
+               AND suspended_account.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
+           )) AS suspended_streamers,
           (SELECT COUNT(*) FROM streamer_platform_accounts
-           WHERE verification_status = 'VERIFIED' AND ownership_expires_at IS NOT NULL
+           WHERE platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
+             AND verification_status = 'VERIFIED' AND ownership_expires_at IS NOT NULL
              AND datetime(ownership_expires_at) > datetime(?)) AS connected_platforms,
-          (SELECT COUNT(*) FROM streamer_platform_reviews
-           WHERE work_state IN (${ACTIVE_REVIEW_STATES})) AS pending_platform_reviews,
+          (SELECT COUNT(*) FROM streamer_platform_reviews pending_review
+           JOIN streamer_platform_accounts pending_account
+             ON pending_account.id = pending_review.streamer_platform_account_id
+           WHERE pending_account.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
+             AND pending_review.work_state IN (${ACTIVE_REVIEW_STATES})) AS pending_platform_reviews,
           (SELECT COUNT(*) FROM streamer_platform_accounts
-           WHERE verification_status = 'VERIFIED' AND ownership_expires_at IS NOT NULL
+           WHERE platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
+             AND verification_status = 'VERIFIED' AND ownership_expires_at IS NOT NULL
              AND datetime(ownership_expires_at) > datetime(?)
              AND datetime(ownership_expires_at) <= datetime(?)) AS ownership_expiring_soon,
-          (SELECT COUNT(*) FROM streamer_platform_reviews
-           WHERE work_state IN (${ACTIVE_REVIEW_STATES})
-             AND (claimed_by_user_id IS NULL OR claim_expires_at IS NULL
-               OR datetime(claim_expires_at) <= datetime(?))) AS unassigned_reviews,
-          (SELECT COUNT(*) FROM streamer_platform_reviews
-           WHERE work_state IN (${ACTIVE_REVIEW_STATES}) AND claimed_by_user_id = ?
-             AND datetime(claim_expires_at) > datetime(?)) AS my_claimed_reviews,
-          (SELECT COUNT(*) FROM streamer_platform_reviews
-           WHERE work_state IN (${ACTIVE_REVIEW_STATES})
-             AND datetime(due_at) < datetime(?)) AS overdue_reviews`,
+          (SELECT COUNT(*) FROM streamer_platform_reviews unassigned_review
+           JOIN streamer_platform_accounts unassigned_account
+             ON unassigned_account.id = unassigned_review.streamer_platform_account_id
+           WHERE unassigned_account.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
+             AND unassigned_review.work_state IN (${ACTIVE_REVIEW_STATES})
+             AND (unassigned_review.claimed_by_user_id IS NULL
+               OR unassigned_review.claim_expires_at IS NULL
+               OR datetime(unassigned_review.claim_expires_at) <= datetime(?))) AS unassigned_reviews,
+          (SELECT COUNT(*) FROM streamer_platform_reviews claimed_review
+           JOIN streamer_platform_accounts claimed_account
+             ON claimed_account.id = claimed_review.streamer_platform_account_id
+           WHERE claimed_account.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
+             AND claimed_review.work_state IN (${ACTIVE_REVIEW_STATES})
+             AND claimed_review.claimed_by_user_id = ?
+             AND datetime(claimed_review.claim_expires_at) > datetime(?)) AS my_claimed_reviews,
+          (SELECT COUNT(*) FROM streamer_platform_reviews overdue_review
+           JOIN streamer_platform_accounts overdue_account
+             ON overdue_account.id = overdue_review.streamer_platform_account_id
+           WHERE overdue_account.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
+             AND overdue_review.work_state IN (${ACTIVE_REVIEW_STATES})
+             AND datetime(overdue_review.due_at) < datetime(?)) AS overdue_reviews`,
       )
       .bind(
+        generatedAt,
+        generatedAt,
         generatedAt,
         generatedAt,
         generatedAt,
@@ -866,7 +976,8 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
              ON account.id = review.streamer_platform_account_id
            JOIN streamer_profiles profile ON profile.id = account.streamer_id
            JOIN users user ON user.id = profile.user_id
-           WHERE review.id = ?`,
+           WHERE review.id = ?
+             AND account.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})`,
         )
         .bind(id)
         .first<Record<string, unknown>>();
@@ -890,7 +1001,8 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
            FROM streamer_platform_accounts account
            JOIN streamer_profiles profile ON profile.id = account.streamer_id
            JOIN users user ON user.id = profile.user_id
-           WHERE account.id = ?`,
+           WHERE account.id = ?
+             AND account.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})`,
         )
         .bind(id)
         .first<Record<string, unknown>>();
@@ -907,7 +1019,12 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
     const row = await this.db
       .prepare(
         `SELECT profile.id, user.nickname FROM streamer_profiles profile
-         JOIN users user ON user.id = profile.user_id WHERE profile.id = ?`,
+         JOIN users user ON user.id = profile.user_id
+         WHERE profile.id = ? AND EXISTS (
+           SELECT 1 FROM streamer_platform_accounts visible_account
+           WHERE visible_account.streamer_id = profile.id
+             AND visible_account.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
+         )`,
       )
       .bind(id)
       .first<Record<string, unknown>>();
@@ -1227,13 +1344,20 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
       ? this.db
           .prepare(
             `UPDATE streamer_profiles
-             SET status = CASE WHEN status = 'SUSPENDED' THEN status ELSE 'VERIFIED' END,
-                 updated_at = ?, row_version = row_version + 1, last_correlation_id = ?
+             SET status = CASE
+                   WHEN status = 'SUSPENDED'
+                     AND (suspended_until IS NULL OR datetime(suspended_until) IS NULL
+                       OR datetime(suspended_until) > datetime(?))
+                     THEN status
+                   ELSE 'VERIFIED'
+                 END,
+                  updated_at = ?, row_version = row_version + 1, last_correlation_id = ?
              WHERE id = ? AND EXISTS (
                SELECT 1 FROM streamer_platform_reviews WHERE id = ? AND last_correlation_id = ?
              )`,
           )
           .bind(
+            input.nowIso,
             input.nowIso,
             input.correlationId,
             target.streamerId,
@@ -1243,12 +1367,16 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
       : this.db
           .prepare(
             `UPDATE streamer_profiles
-             SET status = CASE
-                   WHEN status = 'SUSPENDED' THEN status
-                   WHEN EXISTS (
-                     SELECT 1 FROM streamer_platform_accounts approved_account
-                      WHERE approved_account.streamer_id = streamer_profiles.id
-                        AND approved_account.approval_status = 'APPROVED'
+              SET status = CASE
+                    WHEN status = 'SUSPENDED'
+                      AND (suspended_until IS NULL OR datetime(suspended_until) IS NULL
+                        OR datetime(suspended_until) > datetime(?))
+                      THEN status
+                    WHEN EXISTS (
+                      SELECT 1 FROM streamer_platform_accounts approved_account
+                       WHERE approved_account.streamer_id = streamer_profiles.id
+                         AND approved_account.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
+                         AND approved_account.approval_status = 'APPROVED'
                         AND approved_account.verification_status = 'VERIFIED'
                         AND approved_account.ownership_expires_at IS NOT NULL
                         AND datetime(approved_account.ownership_expires_at) > datetime(?)
@@ -1262,6 +1390,7 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
              )`,
           )
           .bind(
+            input.nowIso,
             input.nowIso,
             target.platformAccountId,
             input.nowIso,
@@ -1459,12 +1588,16 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
     const profileUpdate = this.db
       .prepare(
         `UPDATE streamer_profiles
-         SET status = CASE
-               WHEN status = 'SUSPENDED' THEN status
-               WHEN EXISTS (
-                 SELECT 1 FROM streamer_platform_accounts approved
-                  WHERE approved.streamer_id = streamer_profiles.id
-                    AND approved.id <> ? AND approved.approval_status = 'APPROVED'
+          SET status = CASE
+                WHEN status = 'SUSPENDED'
+                  AND (suspended_until IS NULL OR datetime(suspended_until) IS NULL
+                    OR datetime(suspended_until) > datetime(?))
+                  THEN status
+                WHEN EXISTS (
+                  SELECT 1 FROM streamer_platform_accounts approved
+                   WHERE approved.streamer_id = streamer_profiles.id
+                     AND approved.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
+                     AND approved.id <> ? AND approved.approval_status = 'APPROVED'
                     AND approved.verification_status = 'VERIFIED'
                     AND approved.ownership_expires_at IS NOT NULL
                     AND datetime(approved.ownership_expires_at) > datetime(?)
@@ -1476,6 +1609,7 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
          )`,
       )
       .bind(
+        input.nowIso,
         target.platformAccountId,
         input.nowIso,
         input.nowIso,
@@ -1552,7 +1686,9 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
              SET status = 'SUSPENDED', suspended_at = ?, suspended_by_user_id = ?,
                  suspended_until = ?, suspension_reason_code = ?, updated_at = ?,
                  row_version = row_version + 1, last_correlation_id = ?
-             WHERE id = ? AND row_version = ? AND status <> 'SUSPENDED'`,
+             WHERE id = ? AND row_version = ?
+               AND (status <> 'SUSPENDED'
+                 OR (suspended_until IS NOT NULL AND datetime(suspended_until) <= datetime(?)))`,
           )
           .bind(
             input.nowIso,
@@ -1563,14 +1699,16 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
             input.correlationId,
             target.streamerId,
             input.expectedVersion ?? -1,
+            input.nowIso,
           )
       : this.db
           .prepare(
             `UPDATE streamer_profiles
              SET status = CASE WHEN EXISTS (
                    SELECT 1 FROM streamer_platform_accounts approved
-                   WHERE approved.streamer_id = streamer_profiles.id
-                      AND approved.approval_status = 'APPROVED'
+                    WHERE approved.streamer_id = streamer_profiles.id
+                      AND approved.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
+                       AND approved.approval_status = 'APPROVED'
                       AND approved.verification_status = 'VERIFIED'
                       AND approved.ownership_expires_at IS NOT NULL
                       AND datetime(approved.ownership_expires_at) > datetime(?)
@@ -1682,7 +1820,7 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
     input: StreamerAdminActionInput,
   ): Promise<StreamerAdminActionResult> {
     const platform = input.targetId as StreamerPlatformType;
-    if (!["YOUTUBE", "CHZZK", "SOOP", "TWITCH"].includes(platform)) {
+    if (!["YOUTUBE", "CHZZK", "TWITCH"].includes(platform)) {
       return { applied: false, code: "NOT_FOUND", rowVersion: null };
     }
     const paused = input.action === "PAUSE_PROVIDER_CONNECTIONS";

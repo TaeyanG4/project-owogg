@@ -585,9 +585,10 @@ export interface StreamerReviewJob {
 export interface StreamerReviewRepository {
   /** 플랫폼별 활성 수동 심사를 반환합니다. */
   findActiveJobByAccountId(streamerPlatformAccountId: number): Promise<StreamerReviewJob | null>;
-  /** 새 연결의 INITIAL 수동 심사를 멱등적으로 생성합니다. */
-  createInitialReview(input: {
+  /** 소유권 확인 결과에 맞는 INITIAL/OWNERSHIP_REVERIFY 수동 심사를 멱등적으로 생성합니다. */
+  createOwnershipReview(input: {
     streamerPlatformAccountId: number;
+    reviewType: "INITIAL" | "OWNERSHIP_REVERIFY";
     dueAt: string;
     policyVersion: number;
     evidenceJson: string;
@@ -630,6 +631,8 @@ export interface StreamerRepository {
     audienceCount?: number;
     channelCreatedAt?: string | null;
     ownershipExpiresAt?: string | null;
+    /** 만료·재인증 요청 뒤의 공식 OAuth 성공이면 과거 승인이 자동 복구되지 않도록 초기화합니다. */
+    resetApprovalForOwnershipReview?: boolean;
   }): Promise<StreamerPlatformAccount>;
   /** 명시적인 운영자 요청으로 공식 지표와 metrics_synced_at를 갱신합니다. */
   updatePlatformAccountMetrics(

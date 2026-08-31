@@ -195,9 +195,11 @@ test("workspace exposes live sections with 10, 20, 30, and 50 row page sizes", a
     assert.equal(workspace.audits.pageSize, pageSize);
     assert.equal(workspace.roster.total, 1);
     assert.equal(workspace.reviews.total, 2);
-    const soop = workspace.providers.find((provider) => provider.platform === "SOOP");
-    assert.equal(soop?.ownership, "UNAVAILABLE");
-    assert.equal(soop?.reasonCode, "CONTRACT_UNVERIFIED");
+    assert.deepEqual(workspace.providers.map((provider) => provider.platform).sort(), [
+      "CHZZK",
+      "TWITCH",
+      "YOUTUBE",
+    ]);
   }
 });
 

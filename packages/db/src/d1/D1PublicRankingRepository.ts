@@ -25,7 +25,13 @@ function scopeSql(scope: PublicRankingScope, platform?: StreamerPlatformType): S
   }
 
   return {
-    join: "JOIN streamer_profiles sp ON sp.user_id = u.id AND sp.status = 'VERIFIED'",
+    join: `JOIN streamer_profiles sp ON sp.user_id = u.id
+      AND (
+        sp.status <> 'SUSPENDED'
+        OR (sp.suspended_until IS NOT NULL
+          AND datetime(sp.suspended_until) IS NOT NULL
+          AND datetime(sp.suspended_until) <= datetime('now'))
+      )`,
     platformClause: `AND EXISTS (
       SELECT 1 FROM streamer_platform_accounts spa
       WHERE spa.streamer_id = sp.id

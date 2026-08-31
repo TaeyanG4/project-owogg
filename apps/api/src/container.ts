@@ -512,6 +512,8 @@ export async function evaluateAchievementsForUser(
  * evaluateAchievementsForUser/the private /profile page can see — never includes email,
  * linked-provider list, or unverified/pending streamer platform attempts.
  */
+const PUBLIC_STREAMER_PLATFORMS = new Set(["YOUTUBE", "CHZZK", "TWITCH"]);
+
 export async function getPublicProfileData(
   container: AppContainer,
   userId: number,
@@ -569,6 +571,7 @@ export async function getPublicProfileData(
   )
     .filter(
       (a) =>
+        PUBLIC_STREAMER_PLATFORMS.has(a.platform) &&
         a.verificationStatus === "VERIFIED" &&
         a.approvalStatus === "APPROVED" &&
         a.ownershipExpiresAt !== null &&
