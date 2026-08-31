@@ -6,14 +6,14 @@
 등 안 변하는 내용)는 **[`GUIDE.md`](./GUIDE.md)를 보세요**. 파일이 새로 번역되거나 코드에
 연결될 때마다 이 문서만 갱신합니다.
 
-_최근 갱신: 2026-08-14 — 게임 카탈로그 콘텐츠(제목/설명/태그)까지 연결 완료. `docs/i18n-content/`에
-있던 번역 대기 파일이 전부 코드에 연결되어, 사이트 문구 다국어화는 이걸로 사실상 마무리되었습니다._
+_최근 갱신: 2026-09-01 — Streamer 플랫폼 OAuth 보안 경계를 최신화했습니다. YouTube·CHZZK·Twitch는
+공식 OAuth 지원, 안전한 callback 결박이 없는 SOOP은 인증 보류로 4개 언어 문구를 동기화했습니다._
 
 ## 파일 목록
 
 | 파일                                                 | 상태                                           | 내용                                                                                                                                                     |
 | ---------------------------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `translated-streamer.json`                           | ✅ 번역 완료, 코드 연결됨                      | Streamer 개요/인증/Featured 3페이지, 4개 언어 전체                                                                                                       |
+| `translated-streamer.json`                           | ✅ 번역 완료, 코드 연결됨                      | Streamer 개요/인증 2페이지, 플랫폼별 수동 심사 기준, 4개 언어 전체                                                                                       |
 | `translated-account-games.json`                      | ✅ 번역 완료, 코드 연결됨                      | Account/AccountMerge/Games/GamesRanking/GamesXp/GettingStarted 6페이지, 4개 언어 전체                                                                    |
 | `01-wiki-discord.json` + `.en-US`/`.ja-JP`/`.zh-CN`  | ✅ 번역 완료, 코드 연결됨                      | 위키 Discord 섹션 7페이지(Overview/Install/AccountLink/ServerRegistration/Commands/Xp/Troubleshooting), 4개 언어 전체                                    |
 | `03-terms-privacy.json` + `.en-US`/`.ja-JP`/`.zh-CN` | ✅ 번역 완료, 코드 연결됨 (`dict.legal`)       | 이용약관·개인정보처리방침 전문. `/terms`, `/privacy` 라우트가 `dict.legal.terms`/`dict.legal.privacy`를 사용.                                            |
@@ -41,7 +41,7 @@ manifest 위에 오버레이합니다(항목이 없으면 manifest의 한국어 
 
 ## 위키 본문 다국어화 진행률
 
-**16/16페이지 완료** (Getting Started 1 + Account 2 + Games 3 + Streamer 3 + Discord 7). 위키 본문
+**16/16페이지 완료** (Getting Started 1 + Account 2 + Games 4 + Streamer 2 + Discord 7). 위키 본문
 다국어화(Task #7)는 완료되었습니다.
 
 ## 최신화(드리프트) 상태
@@ -49,7 +49,8 @@ manifest 위에 오버레이합니다(항목이 없으면 manifest의 한국어 
 ✅ 완료된 위키 본문 16페이지는 `pnpm i18n:sync-check`로 자동 감시됩니다 — 한국어 원문이 스냅샷과
 달라지면 경고가 뜹니다. 실행 방법/해석 방법은 `GUIDE.md`의 "최신화 상태 확인" 섹션 참고.
 
-- 마지막 스냅샷 갱신 시점 기준(2026-08-14): 위키 본문 16페이지 288개 키 전부 일치 확인됨.
+- 마지막 스냅샷 갱신 시점 기준(2026-09-01): Streamer OAuth 지원/보류 상태를 포함한 위키 본문 309개
+  키 일치 확인.
 - `dict.legal`, `dict.games.categories`, `dict.gameContent`, `dict.wiki.catPolicy*`는 아직 이
   자동 감시 대상에 포함되지 않았습니다(스냅샷 도구는 현재 `wikiBody`만 봄) — 범위를 넓히는 건
   별도 작업으로 남김.

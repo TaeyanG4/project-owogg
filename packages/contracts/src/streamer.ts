@@ -3,59 +3,75 @@ import { z } from "zod";
 export const StreamerPlatformSchema = z.enum(["YOUTUBE", "CHZZK", "SOOP", "TWITCH"]);
 export type StreamerPlatform = z.infer<typeof StreamerPlatformSchema>;
 
+export const StreamerOwnershipVerificationMethodSchema = z.enum(["OAUTH_REDIRECT", "UNAVAILABLE"]);
+export type StreamerOwnershipVerificationMethod = z.infer<
+  typeof StreamerOwnershipVerificationMethodSchema
+>;
+
+export const StreamerProviderAvailabilitySchema = z
+  .object({
+    configured: z.boolean(),
+    paused: z.boolean(),
+    verificationMethod: StreamerOwnershipVerificationMethodSchema,
+    unavailableReason: z.enum(["SECURE_OAUTH_CALLBACK_BINDING_UNAVAILABLE"]).nullable(),
+  })
+  .strict();
+
+export const StreamerProvidersResponseSchema = z
+  .object({
+    YOUTUBE: StreamerProviderAvailabilitySchema,
+    TWITCH: StreamerProviderAvailabilitySchema,
+    CHZZK: StreamerProviderAvailabilitySchema,
+    SOOP: StreamerProviderAvailabilitySchema,
+  })
+  .strict();
+export type StreamerProvidersResponse = z.infer<typeof StreamerProvidersResponseSchema>;
+
+/**
+ * Aggregate Streamer programme state. A user is VERIFIED when at least one platform account has
+ * passed the independent staff review. UNVERIFIED includes users whose connected accounts are
+ * still pending or were rejected. SUSPENDED is an explicit staff action.
+ */
 export const StreamerStatusSchema = z.enum(["UNVERIFIED", "VERIFIED", "SUSPENDED"]);
 export type StreamerStatus = z.infer<typeof StreamerStatusSchema>;
 
-export const FeaturedStatusSchema = z.enum(["NONE", "FEATURED", "PARTNER"]);
-export type FeaturedStatus = z.infer<typeof FeaturedStatusSchema>;
+/** OAuth ownership and staff approval are separate facts. */
+export const StreamerPlatformApprovalStatusSchema = z.enum(["PENDING", "APPROVED", "REJECTED"]);
+export type StreamerPlatformApprovalStatus = z.infer<typeof StreamerPlatformApprovalStatusSchema>;
 
 export const StreamerPlatformAccountDtoSchema = z.object({
-  id: z.number(),
-  streamerId: z.number(),
+  id: z.number().int().positive(),
+  streamerId: z.number().int().positive(),
   platform: StreamerPlatformSchema,
   platformUserId: z.string(),
   channelName: z.string(),
   channelHandle: z.string().nullable(),
-  channelUrl: z.string(),
-  avatarUrl: z.string().nullable(),
-  verificationStatus: z.string(),
-  verifiedAt: z.string().nullable(),
-  /** null = 공식 API로 확인되지 않은 미지(UNKNOWN) 값. 0은 공식 API가 확정한 실제 0명. */
-  audienceCount: z.number().nullable(),
-  channelCreatedAt: z.string().nullable(),
-  metricsSyncedAt: z.string().nullable(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
+  channelUrl: z.string().url(),
+  avatarUrl: z.string().url().nullable(),
+  verificationStatus: z.enum(["UNVERIFIED", "VERIFIED", "REJECTED"]),
+  verifiedAt: z.string().datetime().nullable(),
+  ownershipExpiresAt: z.string().datetime().nullable(),
+  approvalStatus: StreamerPlatformApprovalStatusSchema,
+  approvalReasonCode: z.string().nullable(),
+  approvedAt: z.string().datetime().nullable(),
+  /** null = official provider value is unknown; zero is a provider-confirmed real zero. */
+  audienceCount: z.number().int().nonnegative().nullable(),
+  channelCreatedAt: z.string().datetime().nullable(),
+  metricsSyncedAt: z.string().datetime().nullable(),
+  rowVersion: z.number().int().nonnegative(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
 });
 export type StreamerPlatformAccountDto = z.infer<typeof StreamerPlatformAccountDtoSchema>;
 
-export const StreamerFeaturedReviewSchema = z.object({
-  status: z.enum([
-    "AUTO_REVIEW_PENDING",
-    "FEATURED",
-    "NOT_ELIGIBLE",
-    "MANUAL_REVIEW",
-    "FAILED_RETRYABLE",
-    "REVALIDATION_PENDING",
-    "REVALIDATION_FAILED_RETRYABLE",
-  ]),
-  reason: z.string().nullable(),
-  nextCheckAt: z.string().nullable(),
-  attemptCount: z.number(),
-});
-export type StreamerFeaturedReview = z.infer<typeof StreamerFeaturedReviewSchema>;
-
 export const StreamerProfileDtoSchema = z.object({
-  id: z.number(),
-  userId: z.number(),
+  id: z.number().int().positive(),
+  userId: z.number().int().positive(),
   status: StreamerStatusSchema,
-  featuredStatus: FeaturedStatusSchema,
-  featuredReason: z.string().nullable(),
-  featuredSince: z.string().nullable(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
+  suspendedUntil: z.string().datetime().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
   platformAccounts: z.array(StreamerPlatformAccountDtoSchema),
-  featuredReview: StreamerFeaturedReviewSchema.nullable(),
 });
 export type StreamerProfileDto = z.infer<typeof StreamerProfileDtoSchema>;
 
@@ -65,13 +81,12 @@ export const StreamerRankEntrySchema = z.object({
   avatarUrl: z.string().nullable(),
   country: z.string().nullable(),
   streamerId: z.number(),
-  featuredStatus: FeaturedStatusSchema,
   platformAccounts: z.array(
     z.object({
       platform: StreamerPlatformSchema,
       channelName: z.string(),
-      channelUrl: z.string(),
-      avatarUrl: z.string().nullable(),
+      channelUrl: z.string().url(),
+      avatarUrl: z.string().url().nullable(),
     }),
   ),
   score: z.number().optional(),

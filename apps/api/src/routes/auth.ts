@@ -141,7 +141,7 @@ export type ApiEnv = {
     ADMIN_SESSION_TTL_SECONDS?: string;
     YOUTUBE_CLIENT_ID?: string;
     YOUTUBE_CLIENT_SECRET?: string;
-    /** YouTube Data API key (public data) — 6시간 자동 재심사용 공식 지표 조회. */
+    /** YouTube Data API key (public data) — 운영자가 요청한 수동 공식 지표 갱신에만 사용. */
     YOUTUBE_API_KEY?: string;
     YOUTUBE_REDIRECT_URI?: string;
     TWITCH_CLIENT_ID?: string;
@@ -155,7 +155,7 @@ export type ApiEnv = {
     SOOP_REDIRECT_URI?: string;
     USE_MOCK_STREAMER_PROVIDERS?: string;
     /** 쉼표로 구분한, 이 배포에서 필수로 기대하는 Streamer provider 목록 (예: "YOUTUBE,TWITCH").
-     * 프로덕션 readiness 게이트(scripts/verify-production.ts)가 사용하며 미설정 시 필수 provider가 없음을 의미. */
+     * 배포 readiness 게이트(scripts/verify-production.ts)가 사용하며 미설정 시 필수 provider가 없음을 의미. */
     STREAMER_ENABLED_PROVIDERS?: string;
   };
 };

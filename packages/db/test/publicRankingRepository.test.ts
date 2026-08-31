@@ -40,8 +40,8 @@ function seedStreamer(
   const profile = raw
     .prepare(
       `INSERT INTO streamer_profiles
-         (user_id, status, featured_status, created_at, updated_at)
-       VALUES (?, 'VERIFIED', 'NONE', '2026-01-01', '2026-01-01')`,
+         (user_id, status, created_at, updated_at)
+       VALUES (?, 'VERIFIED', '2026-01-01', '2026-01-01')`,
     )
     .run(userId);
   const streamerId = Number(profile.lastInsertRowid);
@@ -49,8 +49,9 @@ function seedStreamer(
     .prepare(
       `INSERT INTO streamer_platform_accounts
          (streamer_id, platform, platform_user_id, channel_name, channel_url,
-          verification_status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'VERIFIED', '2026-01-01', '2026-01-01')`,
+          verification_status, approval_status, ownership_expires_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'VERIFIED', 'APPROVED', '2030-01-01T00:00:00.000Z',
+               '2026-01-01', '2026-01-01')`,
     )
     .run(
       streamerId,

@@ -94,6 +94,34 @@ test("a fresh re-verification snapshot with no audience value downgrades a previ
   assert.equal(reVerified.audienceCount, null);
 });
 
+test("upsertPlatformAccount never reassigns a canonical channel to another Streamer profile", async () => {
+  const { db } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);
+  const repo = new D1StreamerRepository(db);
+  const originalProfile = await seedStreamer(repo, 1);
+  const otherProfile = await seedStreamer(repo, 2);
+  const original = await repo.upsertPlatformAccount({
+    streamerId: originalProfile.id,
+    platform: "YOUTUBE",
+    platformUserId: "UC-IMMUTABLE",
+    channelName: "Original owner",
+    channelUrl: "https://youtube.com/channel/UC-IMMUTABLE",
+    verificationStatus: "VERIFIED",
+  });
+
+  const conflicting = await repo.upsertPlatformAccount({
+    streamerId: otherProfile.id,
+    platform: "YOUTUBE",
+    platformUserId: "UC-IMMUTABLE",
+    channelName: "Attempted takeover",
+    channelUrl: "https://youtube.com/channel/UC-IMMUTABLE",
+    verificationStatus: "VERIFIED",
+  });
+
+  assert.equal(conflicting.id, original.id);
+  assert.equal(conflicting.streamerId, originalProfile.id);
+  assert.equal(conflicting.channelName, "Original owner");
+});
+
 test("updatePlatformAccountMetrics: null audience marks the account UNKNOWN again", async () => {
   const { db } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);
   const repo = new D1StreamerRepository(db);

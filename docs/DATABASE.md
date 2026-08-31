@@ -4,7 +4,7 @@
 
 마지막 검증: 2026-08-31
 
-최신 마이그레이션: `0050_oauth_identity_release_on_unlink.sql`
+최신 마이그레이션: `0051_streamer_manual_management.sql`
 
 기준 소스:
 
@@ -16,7 +16,7 @@
 - [`ERD.md`](ERD.md) — 도메인별 관계도와 전체 물리 테이블·호환 뷰 사전
 
 Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 권한 원천입니다. 이 문서는
-현재 `0000_initial_schema.sql`부터 `0050_oauth_identity_release_on_unlink.sql`까지의 역할을 설명합니다.
+현재 `0000_initial_schema.sql`부터 `0051_streamer_manual_management.sql`까지의 역할을 설명합니다.
 
 ## 마이그레이션 범위
 
@@ -50,9 +50,12 @@ Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 
 | `0048`        | Google/Discord 등록 원장과 identity 중복 연결 DB guard                      |
 | `0049`        | 활성 OAuth identity의 in-place 소유자 이전을 금지하는 DB guard              |
 | `0050`        | 연결 해제 시 OAuth 등록 예약 해제와 기존 고아 예약 정리                     |
+| `0051`        | 단일 Streamer, 플랫폼별 수동 심사·정책·OAuth intent·Provider 운영·감사 원장 |
 
-기존 migration은 변경, squash, 삭제하지 않습니다. 프로덕션 배포는 API보다 먼저
-`pnpm d1:migrate:prod`를 실행합니다.
+기존 migration은 변경, squash, 삭제하지 않습니다. 프로덕션 배포는 먼저 Repository variable
+`PRODUCTION_D1_DATABASE_ID`를 read-only 원격 D1 목록과 committed `owogg-d1` binding에 대조한 뒤,
+API보다 먼저 `pnpm d1:migrate:prod`를 실행합니다. ID 검증이 실패하거나 값이 누락되면 migration을
+시작하지 않습니다.
 
 ## 접근 경계
 
@@ -287,7 +290,9 @@ D1 migration이 새 Worker보다 먼저 실행되는 동안 이전 Worker가 깨
   별도 가변 aggregate row를 두지 않아 원장과 통계가 어긋나지 않으며, `0040`의 `(game_id, user_id)`
   인덱스로 공개 조회를 지원합니다. 인기 점수는 Core 정책인 `playerCount + bookmarkCount × 3`입니다.
 - **Discord**: link challenges, guild registration/manager, play context, guild XP attribution
-- **Streamer**: streamer profile, platform account, metrics, verification/review
+- **Streamer**: 단일 프로그램 profile, 플랫폼별 소유권·승인, 수동 심사, 해시된 일회성 OAuth intent,
+  버전 정책, Provider 운영과 감사. 현재 YouTube·CHZZK·Twitch 플랫폼 OAuth만 열고, 안전한 callback
+  결박이 없는 SOOP 연결은 fail-closed로 보류합니다.
 - **Operations**: game kill switch, moderation, monitoring indexes, staff/program entitlement
 
 관계와 전체 물리 테이블·호환 뷰 사전은 [D1 ERD](ERD.md)를 확인합니다. 정확한 column, index,

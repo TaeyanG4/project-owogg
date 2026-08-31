@@ -6,6 +6,7 @@ import type {
 
 export class YouTubeStreamerProvider implements StreamerProviderAdapter {
   public platform = "YOUTUBE" as const;
+  public verificationMethod = "OAUTH_REDIRECT" as const;
 
   constructor(
     private clientId?: string,
@@ -31,13 +32,18 @@ export class YouTubeStreamerProvider implements StreamerProviderAdapter {
     return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
   }
 
-  async verifyOwnershipCode(code: string, redirectUri: string): Promise<StreamerChannelInfo> {
+  async verifyOwnershipCode(
+    code: string,
+    redirectUri: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<StreamerChannelInfo> {
     if (!this.clientId || !this.clientSecret) {
       throw new Error("YouTube OAuth credentials not configured");
     }
 
     const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
+      ...(options?.signal ? { signal: options.signal } : {}),
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         code,
@@ -49,8 +55,7 @@ export class YouTubeStreamerProvider implements StreamerProviderAdapter {
     });
 
     if (!tokenRes.ok) {
-      const errText = await tokenRes.text();
-      throw new Error(`YouTube token exchange failed: ${tokenRes.status} ${errText}`);
+      throw new Error(`YouTube token exchange failed with HTTP ${tokenRes.status}`);
     }
 
     const tokenData = (await tokenRes.json()) as { access_token?: string };
@@ -62,13 +67,13 @@ export class YouTubeStreamerProvider implements StreamerProviderAdapter {
     const channelRes = await fetch(
       "https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&mine=true",
       {
+        ...(options?.signal ? { signal: options.signal } : {}),
         headers: { Authorization: `Bearer ${accessToken}` },
       },
     );
 
     if (!channelRes.ok) {
-      const errText = await channelRes.text();
-      throw new Error(`YouTube channels API call failed: ${channelRes.status} ${errText}`);
+      throw new Error(`YouTube channels API call failed with HTTP ${channelRes.status}`);
     }
 
     const channelData = (await channelRes.json()) as {
@@ -125,15 +130,18 @@ export class YouTubeStreamerProvider implements StreamerProviderAdapter {
   /**
    * 공식 공개 데이터 API(API Key 기반)로 채널 지표를 재조회합니다.
    * 사용자 OAuth 토큰 없이 canonical channel ID만으로 동작합니다.
-   * API Key 미설정 시 자동 재심사 미지원 → MANUAL_REVIEW 라우팅.
+   * API Key가 없으면 운영자의 수동 지표 갱신을 제공하지 않습니다.
    */
-  supportsAutomaticMetricRefresh(): boolean {
+  supportsMetricRefresh(): boolean {
     return Boolean(this.apiKey);
   }
 
-  async fetchChannelMetrics(platformUserId: string): Promise<StreamerChannelMetrics> {
+  async fetchChannelMetrics(
+    platformUserId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<StreamerChannelMetrics> {
     if (!this.apiKey) {
-      throw new Error("YOUTUBE_API_KEY not configured for automatic metric refresh");
+      throw new Error("YOUTUBE_API_KEY not configured for metric refresh");
     }
 
     const params = new URLSearchParams({
@@ -142,14 +150,15 @@ export class YouTubeStreamerProvider implements StreamerProviderAdapter {
       key: this.apiKey,
     });
 
-    const res = await fetch(`https://www.googleapis.com/youtube/v3/channels?${params.toString()}`);
+    const res = await fetch(`https://www.googleapis.com/youtube/v3/channels?${params.toString()}`, {
+      ...(options?.signal ? { signal: options.signal } : {}),
+    });
 
     if (!res.ok) {
       if (res.status === 404) {
         return { audienceCount: null, channelCreatedAt: null, channelState: "NOT_FOUND" };
       }
-      const errText = await res.text();
-      throw new Error(`YouTube channels API (metric refresh) failed: ${res.status} ${errText}`);
+      throw new Error(`YouTube channels API (metric refresh) failed with HTTP ${res.status}`);
     }
 
     const data = (await res.json()) as {

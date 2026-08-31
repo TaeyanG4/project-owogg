@@ -509,17 +509,16 @@ export interface DiscordGuildRepository {
 
 export type StreamerPlatformType = "YOUTUBE" | "CHZZK" | "SOOP" | "TWITCH";
 export type StreamerStatusType = "UNVERIFIED" | "VERIFIED" | "SUSPENDED";
-export type FeaturedStatusType = "NONE" | "FEATURED" | "PARTNER";
-export type StreamerReviewType = "ACQUISITION" | "REVALIDATION";
-export type StreamerReviewAction = "APPROVE_FEATURED" | "REJECT_FEATURED" | "KEEP_FOR_REVIEW";
+export type StreamerPlatformApprovalStatusType = "PENDING" | "APPROVED" | "REJECTED";
+export type StreamerReviewType = "INITIAL" | "RECONSIDERATION" | "OWNERSHIP_REVERIFY";
+export type StreamerReviewJobStatus = "QUEUED" | "ON_HOLD" | "APPROVED" | "REJECTED" | "CANCELLED";
 
 export interface StreamerProfile {
   id: number;
   userId: number;
   status: StreamerStatusType;
-  featuredStatus: FeaturedStatusType;
-  featuredReason: string | null;
-  featuredSince: string | null;
+  suspendedUntil: string | null;
+  rowVersion: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -535,10 +534,15 @@ export interface StreamerPlatformAccount {
   avatarUrl: string | null;
   verificationStatus: string;
   verifiedAt: string | null;
+  ownershipExpiresAt: string | null;
+  approvalStatus: StreamerPlatformApprovalStatusType;
+  approvalReasonCode: string | null;
+  approvedAt: string | null;
   /** null = UNKNOWN (official value never obtained/confirmed), not "zero". */
   audienceCount: number | null;
   channelCreatedAt?: string | null;
   metricsSyncedAt?: string | null;
+  rowVersion: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -549,7 +553,6 @@ export interface StreamerRankEntry {
   avatarUrl: string | null;
   country: string | null;
   streamerId: number;
-  featuredStatus: FeaturedStatusType;
   platformAccounts: Array<{
     platform: StreamerPlatformType;
     channelName: string;
@@ -565,145 +568,31 @@ export interface StreamerRankEntry {
   rank: number;
 }
 
-export type StreamerReviewJobStatus =
-  | "AUTO_REVIEW_PENDING"
-  | "FEATURED"
-  | "NOT_ELIGIBLE"
-  | "MANUAL_REVIEW"
-  | "FAILED_RETRYABLE"
-  | "REVALIDATION_PENDING"
-  | "REVALIDATION_FAILED_RETRYABLE";
-
 export interface StreamerReviewJob {
   id: number;
   streamerPlatformAccountId: number;
   reviewType: StreamerReviewType;
   status: StreamerReviewJobStatus;
-  initialAudience: number | null;
-  initialChannelCreatedAt: string | null;
-  nextCheckAt: string;
-  attemptCount: number;
-  lastError: string | null;
-  reviewReason: string | null;
+  dueAt: string;
+  policyVersion: number;
+  publicReasonCode: string | null;
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
-}
-
-export interface StreamerManualReviewItem {
-  job: StreamerReviewJob;
-  userId: number;
-  nickname: string;
-  streamerId: number;
-  streamerStatus: StreamerStatusType;
-  featuredStatus: FeaturedStatusType;
-  platformAccount: StreamerPlatformAccount;
-}
-
-export interface StreamerReviewMetricSnapshot {
-  platform: StreamerPlatformType;
-  channelName: string;
-  channelUrl: string;
-  verificationStatus: string;
-  audienceCount: number | null;
-  channelCreatedAt: string | null;
-  metricsSyncedAt: string | null;
-}
-
-export interface StreamerReviewAuditLog {
-  id: number;
-  streamerPlatformAccountId: number;
-  reviewJobId: number | null;
-  reviewerUserId: number;
-  action: StreamerReviewAction;
-  reason: string;
-  previousStatus: StreamerReviewJobStatus;
-  newStatus: StreamerReviewJobStatus;
-  metricSnapshot: StreamerReviewMetricSnapshot | null;
-  createdAt: string;
-  platform?: StreamerPlatformType | undefined;
-  channelName?: string | undefined;
-}
-
-export interface StreamerReviewQueueResult {
-  items: StreamerManualReviewItem[];
-  total: number;
-}
-
-export interface StreamerReviewAuditResult {
-  entries: StreamerReviewAuditLog[];
-  total: number;
-}
-
-export type StreamerManualReviewFailureCode =
-  "NOT_FOUND" | "ALREADY_DECIDED" | "OWNERSHIP_NOT_VERIFIED" | "ALREADY_APPLIED" | "INVALID_REASON";
-
-export interface StreamerManualReviewDecisionResult {
-  applied: boolean;
-  code?: StreamerManualReviewFailureCode;
-  previousStatus: StreamerReviewJobStatus | null;
-  newStatus: StreamerReviewJobStatus | null;
+  rowVersion: number;
 }
 
 export interface StreamerReviewRepository {
-  /** 가장 최근 심사/재심사 결과 (프로필 단위 프레젠테이션용). */
-  findLatestJobByAccountIds(
-    streamerPlatformAccountIds: number[],
-  ): Promise<StreamerReviewJob | null>;
-  /** 아직 활성 상태(진행/재시도 대기)인 계정의 잡을 조회. */
+  /** 플랫폼별 활성 수동 심사를 반환합니다. */
   findActiveJobByAccountId(streamerPlatformAccountId: number): Promise<StreamerReviewJob | null>;
-  /** 계정별 최신 재검증 잡을 조회합니다. */
-  findLatestRevalidationJobByAccountId(
-    streamerPlatformAccountId: number,
-  ): Promise<StreamerReviewJob | null>;
-  /** 활성 잡이 없으면 신규 생성, 있으면 스냅샷/다음 심사 시각을 리셋(멱등). */
-  createOrResetJob(input: {
+  /** 새 연결의 INITIAL 수동 심사를 멱등적으로 생성합니다. */
+  createInitialReview(input: {
     streamerPlatformAccountId: number;
-    initialAudience: number | null;
-    initialChannelCreatedAt: string | null;
-    nextCheckAt: string;
-  }): Promise<StreamerReviewJob>;
-  /** 기존 Featured Streamer의 14일 재검증 잡을 멱등적으로 예약합니다. */
-  scheduleRevalidationJob(input: {
-    streamerPlatformAccountId: number;
-    nextCheckAt: string;
+    dueAt: string;
+    policyVersion: number;
+    evidenceJson: string;
     nowIso: string;
   }): Promise<StreamerReviewJob>;
-  /** 기존 Featured 계정 중 재검증 잡이 없는 계정을 제한된 수만큼 보충합니다. */
-  ensureRevalidationJobs(limit: number, nextCheckAt: string, nowIso: string): Promise<number>;
-  /** 예정 시각이 지난 진행/재시도 잡을 바운디드 배치로 조회 (unbounded scan 금지). */
-  listDuePendingJobs(limit: number, nowIso: string): Promise<StreamerReviewJob[]>;
-  /** 14일 재검증 잡만 조회합니다 (6시간 취득 파이프라인과 분리). */
-  listDueRevalidationJobs(limit: number, nowIso: string): Promise<StreamerReviewJob[]>;
-  /** 재시도 가능 실패 기록. attempt_count 1 증가. */
-  markJobFailed(id: number, error: string, nextCheckAt: string, nowIso: string): Promise<void>;
-  /**
-   * 잡을 종결 상태로 전이. 동시 실행/중복 실행 시 이미 전이된 잡은 false 반환(멱등).
-   * 성공 시에만 호출자가 Featured 프로필 전이를 수행해야 합니다.
-   */
-  completeJob(
-    id: number,
-    status: Exclude<
-      StreamerReviewJobStatus,
-      | "AUTO_REVIEW_PENDING"
-      | "FAILED_RETRYABLE"
-      | "REVALIDATION_PENDING"
-      | "REVALIDATION_FAILED_RETRYABLE"
-    >,
-    completedAt: string,
-    reason?: string,
-  ): Promise<boolean>;
-  listManualReviewQueue(limit: number, offset: number): Promise<StreamerReviewQueueResult>;
-  listAuditLogs(limit: number, offset: number): Promise<StreamerReviewAuditResult>;
-  applyManualReviewDecision(input: {
-    jobId: number;
-    reviewerUserId: number;
-    action: StreamerReviewAction;
-    reason: string;
-    publicProfileReason: string;
-    nextRevalidationAt: string;
-    nowIso: string;
-  }): Promise<StreamerManualReviewDecisionResult>;
 }
 
 export interface StreamerRepository {
@@ -718,12 +607,7 @@ export interface StreamerRepository {
     platform: StreamerPlatformType,
     platformUserId: string,
   ): Promise<StreamerPlatformAccount | null>;
-  upsertProfile(input: {
-    userId: number;
-    status: StreamerStatusType;
-    featuredStatus?: FeaturedStatusType;
-    featuredReason?: string | null;
-  }): Promise<StreamerProfile>;
+  upsertProfile(input: { userId: number; status: StreamerStatusType }): Promise<StreamerProfile>;
   addPlatformAccount(input: {
     streamerId: number;
     platform: StreamerPlatformType;
@@ -745,8 +629,9 @@ export interface StreamerRepository {
     verificationStatus?: string;
     audienceCount?: number;
     channelCreatedAt?: string | null;
+    ownershipExpiresAt?: string | null;
   }): Promise<StreamerPlatformAccount>;
-  /** 스케줄 재심사 성공 시 공식 지표를 갱신하고 metrics_synced_at를 갱신합니다. */
+  /** 명시적인 운영자 요청으로 공식 지표와 metrics_synced_at를 갱신합니다. */
   updatePlatformAccountMetrics(
     platformAccountId: number,
     input: {

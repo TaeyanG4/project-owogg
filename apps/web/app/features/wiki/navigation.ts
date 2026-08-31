@@ -56,7 +56,6 @@ export function buildWikiSections(dict: Dictionary): WikiNavSection[] {
       items: [
         { path: "/wiki/streamer", label: dict.wiki.navStreamerOverview },
         { path: "/wiki/streamer/verification", label: dict.wiki.navStreamerVerification },
-        { path: "/wiki/streamer/featured", label: dict.wiki.navStreamerFeatured },
       ],
     },
     {

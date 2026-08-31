@@ -126,7 +126,7 @@ test("0029 migration actual-file: cleanly applies to existing DB and backfills U
 
   const id2 = insertRawSandboxGame(raw, {
     id: 202,
-    slug: "featured-runner",
+    slug: "spotlight-runner",
     developerUserId: 2,
     visibility: "PUBLIC",
     liveVersionId: 77,
@@ -191,7 +191,7 @@ test("0029 migration actual-file: cleanly applies to existing DB and backfills U
     assert.equal(g1.liveVersionId, null);
 
     assert.ok(g2);
-    assert.equal(g2.slug, "featured-runner");
+    assert.equal(g2.slug, "spotlight-runner");
     assert.deepEqual(g2.publisher, { type: "USER", userId: 2 });
     assert.equal(g2.visibility, "PUBLIC");
     assert.equal(g2.liveVersionId, 77);

@@ -17,20 +17,13 @@ export default function WikiStreamerRoute() {
     <WikiLayout eyebrow="STREAMER" title={t.title} description={t.description}>
       <p>{t.intro}</p>
 
-      <section className="grid gap-3 sm:grid-cols-2">
+      <section>
         <Link
           to="/wiki/streamer/verification"
           className="rounded-2xl border border-border bg-surface-raised p-4 hover:border-brand/40"
         >
           <p className="text-sm font-black text-text-primary">{t.cardVerification}</p>
           <p className="mt-1 text-xs text-text-muted">{t.cardVerificationDesc}</p>
-        </Link>
-        <Link
-          to="/wiki/streamer/featured"
-          className="rounded-2xl border border-border bg-surface-raised p-4 hover:border-brand/40"
-        >
-          <p className="text-sm font-black text-text-primary">{t.cardFeatured}</p>
-          <p className="mt-1 text-xs text-text-muted">{t.cardFeaturedDesc}</p>
         </Link>
       </section>
 

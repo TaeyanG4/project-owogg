@@ -23,7 +23,7 @@ export function meta() {
 
 /** Admin/operator-facing Game Creator program management: the self-serve application review
  * queue (new) plus the pre-existing admin-direct grant/revoke path (unchanged since the
- * game_developers days — inviting a known partner without requiring them to apply first). See
+ * game_developers days — inviting a known creator without requiring them to apply first). See
  * docs/AUTHORIZATION.md — GAME_CREATOR is a Program/Entitlement, never a Staff Role. */
 export default function AdminGameCreatorsRoute() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();

@@ -10,7 +10,6 @@ import {
   Link2,
   Unlink,
   Loader2,
-  Award,
   Settings as SettingsIcon,
   Eye,
   EyeOff,
@@ -45,6 +44,7 @@ import type {
   SocialProvider,
   CreateMergeChallengeResponse,
   StreamerProfileDto,
+  StreamerProvidersResponse,
   GameCreatorMeResponse,
 } from "@owogg/contracts";
 import { formatPublicUserTag, type StreamerPlatformType } from "@owogg/core";
@@ -99,13 +99,31 @@ export default function SettingsPage() {
   >(null);
 
   const [streamerProfile, setStreamerProfile] = useState<StreamerProfileDto | null>(null);
-  const [streamerProviders, setStreamerProviders] = useState<
-    Record<StreamerPlatformType, { configured: boolean }>
-  >({
-    YOUTUBE: { configured: false },
-    TWITCH: { configured: false },
-    CHZZK: { configured: false },
-    SOOP: { configured: false },
+  const [streamerProviders, setStreamerProviders] = useState<StreamerProvidersResponse>({
+    YOUTUBE: {
+      configured: false,
+      paused: false,
+      verificationMethod: "OAUTH_REDIRECT",
+      unavailableReason: null,
+    },
+    TWITCH: {
+      configured: false,
+      paused: false,
+      verificationMethod: "OAUTH_REDIRECT",
+      unavailableReason: null,
+    },
+    CHZZK: {
+      configured: false,
+      paused: false,
+      verificationMethod: "OAUTH_REDIRECT",
+      unavailableReason: null,
+    },
+    SOOP: {
+      configured: false,
+      paused: false,
+      verificationMethod: "UNAVAILABLE",
+      unavailableReason: "SECURE_OAUTH_CALLBACK_BINDING_UNAVAILABLE",
+    },
   });
 
   // "게임 크리에이터" card — admin 또는 게임 크리에이터(승인/신청 가능/신청 이력)에게만 노출
@@ -202,8 +220,14 @@ export default function SettingsPage() {
         void refreshStreamerProfile();
       } else if (streamerVerify === "conflict") {
         setStatusMessage(dict.profile.streamerVerifyConflict);
+      } else if (streamerVerify === "platform_conflict") {
+        setStatusMessage(dict.profile.streamerVerifyPlatformConflict);
       } else if (streamerVerify === "unconfigured") {
         setStatusMessage(dict.profile.streamerVerifyUnconfigured);
+      } else if (streamerVerify === "paused") {
+        setStatusMessage(dict.profile.streamerVerifyPaused);
+      } else if (streamerVerify === "deferred") {
+        setStatusMessage(dict.profile.streamerVerifyDeferred);
       } else if (streamerVerify === "unauthorized") {
         setStatusMessage(dict.profile.streamerVerifyUnauthorized);
       } else if (streamerVerify === "error") {
@@ -796,10 +820,37 @@ export default function SettingsPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
           {(["YOUTUBE", "CHZZK", "SOOP", "TWITCH"] as StreamerPlatformType[]).map((platform) => {
-            const verifiedAcc = streamerProfile?.platformAccounts?.find(
-              (a) => a.platform === platform && a.verificationStatus === "VERIFIED",
+            const platformAccount = streamerProfile?.platformAccounts?.find(
+              (account) => account.platform === platform,
             );
-            const isConfigured = streamerProviders[platform]?.configured ?? false;
+            const ownershipVerified = Boolean(
+              platformAccount?.verificationStatus === "VERIFIED" &&
+              platformAccount.ownershipExpiresAt &&
+              new Date(platformAccount.ownershipExpiresAt).getTime() > Date.now(),
+            );
+            const provider = streamerProviders[platform];
+            const canConnect =
+              provider.verificationMethod === "OAUTH_REDIRECT" &&
+              provider.configured &&
+              !provider.paused;
+            const unavailableLabel =
+              provider.verificationMethod === "UNAVAILABLE"
+                ? dict.profile.streamerVerifyDeferred
+                : provider.paused
+                  ? dict.profile.streamerVerifyPaused
+                  : dict.profile.verifyUnavailable;
+            const approvalLabel =
+              platformAccount?.approvalStatus === "APPROVED"
+                ? dict.profile.streamerApproved
+                : platformAccount?.approvalStatus === "REJECTED"
+                  ? dict.profile.streamerRejected
+                  : dict.profile.streamerApprovalPending;
+            const approvalClass =
+              platformAccount?.approvalStatus === "APPROVED"
+                ? "bg-accent-green/10 text-accent-green border-accent-green/30"
+                : platformAccount?.approvalStatus === "REJECTED"
+                  ? "bg-accent-red/10 text-accent-red border-accent-red/30"
+                  : "bg-accent-yellow/10 text-accent-yellow border-accent-yellow/30";
 
             return (
               <div
@@ -809,7 +860,7 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-sm text-text-primary">{platform}</span>
-                    {verifiedAcc ? (
+                    {ownershipVerified ? (
                       <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-accent-green/10 text-accent-green border border-accent-green/30">
                         <CheckCircle2 className="w-3 h-3 text-accent-green" />
                         {dict.profile.ownershipVerified}
@@ -822,36 +873,60 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {verifiedAcc ? (
+                {platformAccount ? (
                   <div className="flex flex-col gap-1">
                     <a
-                      href={verifiedAcc.channelUrl}
+                      href={platformAccount.channelUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="text-xs font-bold text-brand-light hover:underline truncate"
                     >
-                      {verifiedAcc.channelName}{" "}
-                      {verifiedAcc.channelHandle ? `(${verifiedAcc.channelHandle})` : ""}
+                      {platformAccount.channelName}{" "}
+                      {platformAccount.channelHandle ? `(${platformAccount.channelHandle})` : ""}
                     </a>
-                    <p className="text-[10px] text-text-muted">
-                      {dict.profile.verifiedConfirmedText}
-                    </p>
+                    {ownershipVerified && (
+                      <p className="text-[10px] text-text-muted">
+                        {dict.profile.verifiedConfirmedText}
+                      </p>
+                    )}
+                    <span
+                      className={`mt-1 inline-flex w-fit rounded-full border px-2.5 py-0.5 text-[10px] font-extrabold ${approvalClass}`}
+                    >
+                      {approvalLabel}
+                    </span>
                     {/* audienceCount === null means UNKNOWN (never obtained via official
                         API) — never rendered as 0; the line is simply omitted. */}
-                    {verifiedAcc.audienceCount !== null && (
+                    {platformAccount.audienceCount !== null && (
                       <p className="text-[10px] text-text-muted">
                         {dict.profile.audienceCountLabel}{" "}
-                        {verifiedAcc.audienceCount.toLocaleString()}
+                        {platformAccount.audienceCount.toLocaleString()}
                         {dict.profile.audienceUnit}
-                        {verifiedAcc.metricsSyncedAt
-                          ? ` ${dict.profile.metricsSyncedPrefix} ${verifiedAcc.metricsSyncedAt.split("T")[0]}`
+                        {platformAccount.metricsSyncedAt
+                          ? ` ${dict.profile.metricsSyncedPrefix} ${platformAccount.metricsSyncedAt.split("T")[0]}`
                           : ""}
                       </p>
+                    )}
+                    {!ownershipVerified && (
+                      <div className="mt-2">
+                        {canConnect ? (
+                          <a
+                            href={`/api/streamers/verify/${platform.toLowerCase()}`}
+                            className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-brand bg-brand py-2 text-xs font-bold text-white shadow-md transition-all hover:bg-brand-dark"
+                          >
+                            <Video className="h-3.5 w-3.5" />
+                            <span>{dict.profile.verifyChannelCta}</span>
+                          </a>
+                        ) : (
+                          <div className="w-full rounded-xl border border-border bg-surface py-2 text-center text-xs font-bold text-text-muted">
+                            {unavailableLabel}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 ) : (
                   <div className="flex items-center justify-between gap-2 mt-1">
-                    {isConfigured ? (
+                    {canConnect ? (
                       <a
                         href={`/api/streamers/verify/${platform.toLowerCase()}`}
                         className="flex items-center justify-center gap-1.5 w-full py-2 bg-brand text-white border border-brand rounded-xl font-bold text-xs hover:bg-brand-dark transition-all cursor-pointer shadow-md"
@@ -861,7 +936,7 @@ export default function SettingsPage() {
                       </a>
                     ) : (
                       <div className="w-full py-2 bg-surface text-text-muted border border-border rounded-xl font-bold text-xs text-center">
-                        {dict.profile.verifyUnavailable}
+                        {unavailableLabel}
                       </div>
                     )}
                   </div>
@@ -871,28 +946,7 @@ export default function SettingsPage() {
           })}
         </div>
 
-        {/* Featured Streamer 심사 상태 */}
-        {streamerProfile && (
-          <div className="flex flex-col gap-1 p-4 rounded-2xl bg-surface-raised border border-border shadow-md">
-            <div className="flex items-center gap-2">
-              <Award className="w-4 h-4 text-accent-yellow" />
-              <h3 className="text-sm font-bold text-text-primary">
-                {dict.profile.featuredReviewStatusTitle}
-              </h3>
-            </div>
-            {streamerProfile.featuredStatus === "FEATURED" ? (
-              <p className="text-xs font-bold text-accent-yellow">
-                {dict.profile.featuredStreamerLabel}
-                {streamerProfile.featuredSince
-                  ? ` (${streamerProfile.featuredSince.split("T")[0]} ${dict.profile.featuredSelectedSuffix})`
-                  : ""}
-              </p>
-            ) : (
-              <FeaturedReviewStatusLine profile={streamerProfile} />
-            )}
-            <p className="text-[10px] text-text-muted">{dict.profile.featuredHint}</p>
-          </div>
-        )}
+        <p className="text-[10px] leading-5 text-text-muted">{dict.profile.streamerApprovalHint}</p>
       </div>
 
       {/* 게임 크리에이터 — 승인/신청 가능/신청 이력이 있거나 admin인 사용자에게만 노출. 실제
@@ -938,51 +992,4 @@ export default function SettingsPage() {
       )}
     </div>
   );
-}
-
-function FeaturedReviewStatusLine({ profile }: { profile: StreamerProfileDto }) {
-  const { dict } = useI18n();
-  const review = profile.featuredReview;
-  const reason = profile.featuredReason;
-
-  if (!review) {
-    return <p className="text-xs font-bold text-text-muted">{dict.profile.reviewNotStarted}</p>;
-  }
-
-  switch (review.status) {
-    case "AUTO_REVIEW_PENDING":
-      return (
-        <p className="text-xs font-bold text-accent-yellow">
-          {dict.profile.autoReviewPending}
-          {review.nextCheckAt
-            ? ` ${dict.profile.nextReviewPrefix} ${review.nextCheckAt.split("T")[0]})`
-            : ""}
-        </p>
-      );
-    case "NOT_ELIGIBLE":
-      return (
-        <p className="text-xs font-bold text-text-muted">
-          {dict.profile.notEligible}
-          {reason ? ` — ${reason}` : ""}
-        </p>
-      );
-    case "MANUAL_REVIEW":
-      return (
-        <p className="text-xs font-bold text-text-muted">
-          {dict.profile.manualReviewNeeded}
-          {reason ? ` — ${reason}` : ""}
-        </p>
-      );
-    case "FAILED_RETRYABLE":
-      return (
-        <p className="text-xs font-bold text-accent-yellow">
-          {dict.profile.autoReviewFailed}
-          {review.nextCheckAt
-            ? ` ${dict.profile.nextRetryPrefix} ${review.nextCheckAt.split("T")[0]}`
-            : ""}
-        </p>
-      );
-    default:
-      return null;
-  }
 }

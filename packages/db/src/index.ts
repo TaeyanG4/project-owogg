@@ -9,6 +9,8 @@ export * from "./d1/D1DiscordLinkRepository.js";
 export * from "./d1/D1DiscordGuildRepository.js";
 export * from "./d1/D1StreamerRepository.js";
 export * from "./d1/D1StreamerReviewRepository.js";
+export * from "./d1/D1StreamerAdminRepository.js";
+export * from "./d1/D1StreamerVerificationIntentRepository.js";
 export * from "./d1/D1AdminAuthRepository.js";
 export * from "./d1/D1AdminAccountRepository.js";
 export * from "./d1/D1GameSettingsRepository.js";

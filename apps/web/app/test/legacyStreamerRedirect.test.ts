@@ -9,5 +9,6 @@ test("former broadcast-program bookmarks redirect to Streamer routes", () => {
     legacyStreamerRedirectTarget("/wiki/creator/verification"),
     "/wiki/streamer/verification",
   );
-  assert.equal(legacyStreamerRedirectTarget("/wiki/creator/featured"), "/wiki/streamer/featured");
+  assert.equal(legacyStreamerRedirectTarget("/wiki/streamer/featured"), "/wiki/streamer");
+  assert.equal(legacyStreamerRedirectTarget("/wiki/creator/featured"), "/wiki/streamer");
 });

@@ -3,11 +3,8 @@ import assert from "node:assert/strict";
 import { D1StreamerRepository } from "../src/d1/D1StreamerRepository.js";
 import { createSqliteD1, LEADERBOARD_TEST_SCHEMA } from "./helpers/sqliteD1.js";
 
-// Streamer ranking eligibility rule (WORK_PROGRESS Phase B): a OwOGG user qualifies for the
-// streamer/Streamer ranking once they have AT LEAST ONE ownership-VERIFIED account on ANY
-// supported platform (YOUTUBE, CHZZK, SOOP, TWITCH) — not all four, and never on
-// streamer_profiles.status alone (which could in principle drift from the real per-platform
-// verification state).
+// A user appears in Streamer rankings only after at least one platform has both valid ownership
+// and its own staff approval. Other platforms remain independent.
 
 function seedUser(raw: import("node:sqlite").DatabaseSync, nickname: string): number {
   const info = raw
@@ -28,8 +25,8 @@ function seedStreamerProfile(
   const now = new Date().toISOString();
   const info = raw
     .prepare(
-      `INSERT INTO streamer_profiles (user_id, status, featured_status, created_at, updated_at)
-       VALUES (?, ?, 'NONE', ?, ?)`,
+      `INSERT INTO streamer_profiles (user_id, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?)`,
     )
     .run(userId, status, now, now);
   return Number(info.lastInsertRowid);
@@ -46,8 +43,9 @@ function addPlatformAccount(
   raw
     .prepare(
       `INSERT INTO streamer_platform_accounts
-         (streamer_id, platform, platform_user_id, channel_name, channel_url, verification_status, created_at, updated_at)
-       VALUES (?, ?, ?, 'ch', ?, ?, ?, ?)`,
+         (streamer_id, platform, platform_user_id, channel_name, channel_url,
+          verification_status, approval_status, ownership_expires_at, created_at, updated_at)
+       VALUES (?, ?, ?, 'ch', ?, ?, ?, '2030-01-01T00:00:00.000Z', ?, ?)`,
     )
     .run(
       streamerId,
@@ -55,6 +53,7 @@ function addPlatformAccount(
       platformUserId,
       `https://example.com/${platform}`,
       verificationStatus,
+      verificationStatus === "VERIFIED" ? "APPROVED" : "PENDING",
       now,
       now,
     );
@@ -135,6 +134,26 @@ test("streamer ranking (score mode): streamer_profiles.status=VERIFIED but zero 
   assert.equal(result.entries.length, 0);
 });
 
+for (const ownershipExpiry of [null, "2020-01-01T00:00:00.000Z"] as const) {
+  test(`streamer ranking: approved ownership with ${ownershipExpiry === null ? "no" : "an expired"} expiry is excluded`, async () => {
+    const { db, raw } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);
+    const userId = seedUser(raw, ownershipExpiry === null ? "missing-expiry" : "expired");
+    const streamerId = seedStreamerProfile(raw, userId);
+    addPlatformAccount(raw, streamerId, "YOUTUBE", "yt-invalid-expiry", "VERIFIED");
+    raw
+      .prepare(
+        "UPDATE streamer_platform_accounts SET ownership_expires_at = ? WHERE streamer_id = ?",
+      )
+      .run(ownershipExpiry, streamerId);
+    seedScore(raw, userId, 550);
+
+    const repo = new D1StreamerRepository(db);
+    const result = await repo.getStreamerRankings({ mode: "score", gameId: "reaction-time" });
+    assert.equal(result.total, 0);
+    assert.equal(result.entries.length, 0);
+  });
+}
+
 test("streamer ranking: one verified + one pending account exposes only the verified platform badge", async () => {
   const { db, raw } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);
   const userId = seedUser(raw, "partial");
@@ -201,17 +220,14 @@ test("streamer ranking (xp mode): same eligibility rule applies — zero verifie
   assert.equal(result.entries[0]?.userId, eligibleUser);
 });
 
-test("streamer ranking: Featured status does not affect score/XP ranking value or eligibility", async () => {
+test("streamer ranking preserves the canonical score after platform approval", async () => {
   const { db, raw } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);
-  const userId = seedUser(raw, "featured");
+  const userId = seedUser(raw, "approved-streamer");
   const streamerId = seedStreamerProfile(raw, userId);
   addPlatformAccount(raw, streamerId, "YOUTUBE", "yt-1", "VERIFIED");
-  raw
-    .prepare(`UPDATE streamer_profiles SET featured_status = 'FEATURED' WHERE id = ?`)
-    .run(streamerId);
   seedScore(raw, userId, 321);
 
   const repo = new D1StreamerRepository(db);
   const result = await repo.getStreamerRankings({ mode: "score", gameId: "reaction-time" });
-  assert.equal(result.entries[0]?.score, 321, "Featured never boosts the ranked value");
+  assert.equal(result.entries[0]?.score, 321);
 });

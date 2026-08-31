@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import { WikiLayout, WikiCallout } from "../components/wiki/WikiLayout";
+import { WikiLayout } from "../components/wiki/WikiLayout";
 import { useI18n } from "../features/i18n/I18nContext";
 
 export function meta() {
@@ -49,8 +49,6 @@ export default function WikiGamesRankingRoute() {
           {t.streamerLinkSuffix}
         </p>
       </section>
-
-      <WikiCallout>{t.calloutFeatured}</WikiCallout>
 
       <p className="text-xs text-text-muted">
         {t.footerPrefix}

@@ -4,6 +4,7 @@ import {
   StreamerRankEntrySchema,
   StreamerPlatformSchema,
   StreamerProfileDtoSchema,
+  StreamerProvidersResponseSchema,
 } from "@owogg/contracts";
 
 export const StreamerRankingsResponseSchema = z.object({
@@ -16,12 +17,7 @@ export const StreamerRankingsResponseSchema = z.object({
   offset: z.number(),
 });
 
-export const StreamerProvidersResponseSchema = z.object({
-  YOUTUBE: z.object({ configured: z.boolean() }),
-  TWITCH: z.object({ configured: z.boolean() }),
-  CHZZK: z.object({ configured: z.boolean() }),
-  SOOP: z.object({ configured: z.boolean() }),
-});
+export { StreamerProvidersResponseSchema };
 
 export async function fetchStreamerRankingsApi(
   mode: "score" | "xp" = "score",

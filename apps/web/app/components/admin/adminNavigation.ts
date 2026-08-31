@@ -56,10 +56,16 @@ export const ADMIN_NAVIGATION_GROUPS: AdminNavigationGroup[] = [
       },
       {
         id: "streamer-reviews",
-        label: "스트리머 심사",
-        description: "Featured Streamer 수동 심사",
+        label: "스트리머 관리 및 심사",
+        description: "플랫폼별 수동 심사, 정책과 연결 운영",
         path: "/admin/streamers",
-        permissionAny: ["streamers.review"],
+        permissionAny: [
+          "streamers.view",
+          "streamers.review",
+          "streamers.manage",
+          "streamers.policy.manage",
+          "streamers.operations.manage",
+        ],
         elevatedOnly: true,
       },
       {

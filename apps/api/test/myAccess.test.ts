@@ -143,9 +143,8 @@ CREATE TABLE streamer_profiles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER UNIQUE NOT NULL,
   status TEXT NOT NULL DEFAULT 'UNVERIFIED',
-  featured_status TEXT NOT NULL DEFAULT 'NONE',
-  featured_reason TEXT,
-  featured_since TEXT,
+  suspended_until TEXT,
+  row_version INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -161,6 +160,9 @@ CREATE TABLE streamer_platform_accounts (
   avatar_url TEXT,
   verification_status TEXT NOT NULL DEFAULT 'UNVERIFIED',
   verified_at TEXT,
+  ownership_expires_at TEXT,
+  approval_status TEXT NOT NULL DEFAULT 'PENDING',
+  row_version INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE(platform, platform_user_id)
@@ -250,8 +252,8 @@ async function createVerifiedStreamerProfile(db: D1Database, userId: number) {
   const now = new Date().toISOString();
   await db
     .prepare(
-      `INSERT INTO streamer_profiles (user_id, status, featured_status, created_at, updated_at)
-       VALUES (?, 'VERIFIED', 'NONE', ?, ?)`,
+      `INSERT INTO streamer_profiles (user_id, status, created_at, updated_at)
+       VALUES (?, 'VERIFIED', ?, ?)`,
     )
     .bind(userId, now, now)
     .run();

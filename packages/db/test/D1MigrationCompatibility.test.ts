@@ -28,7 +28,7 @@ test("generic production migrations avoid Cloudflare-incompatible TEMP table DDL
   }
 });
 
-test("full production migration chain applies through 0050 with active OAuth ownership guards", () => {
+test("full production migration chain applies through 0051 with manual Streamer review authority", () => {
   const { raw } = createSqliteD1("");
   const migrationUrl = new URL("../migrations/", import.meta.url);
   const filenames = fs
@@ -38,6 +38,14 @@ test("full production migration chain applies through 0050 with active OAuth own
   for (const filename of filenames) {
     raw.exec(fs.readFileSync(new URL(filename, migrationUrl), "utf8"));
   }
+
+  assert.ok(
+    raw
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'streamer_platform_reviews'",
+      )
+      .get(),
+  );
 
   const gameColumns = raw.prepare("PRAGMA table_info(games)").all() as Array<{ name: string }>;
   const scoreColumns = raw.prepare("PRAGMA table_info(scores)").all() as Array<{ name: string }>;
@@ -118,6 +126,30 @@ test("full production migration chain applies through 0050 with active OAuth own
     rolePermissions.map((row) => row.permission),
     ["admin.center.access", "system.dev.access", "system.monitor"],
   );
+  for (const [role, expectedPermissions] of [
+    [
+      "OPERATOR",
+      [
+        "streamers.manage",
+        "streamers.operations.manage",
+        "streamers.policy.manage",
+        "streamers.review",
+        "streamers.view",
+      ],
+    ],
+    ["MODERATOR", ["streamers.review", "streamers.view"]],
+  ] as const) {
+    const streamerPermissions = raw
+      .prepare(
+        `SELECT permission FROM admin_role_permissions
+         WHERE role = ? AND permission LIKE 'streamers.%' ORDER BY permission`,
+      )
+      .all(role) as Array<{ permission: string }>;
+    assert.deepEqual(
+      streamerPermissions.map((row) => row.permission),
+      expectedPermissions,
+    );
+  }
   assert.ok(
     raw
       .prepare(
@@ -137,23 +169,55 @@ test("full production migration chain applies through 0050 with active OAuth own
       )
       .get(),
   );
-  assert.ok(
-    raw
-      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'view' AND name = 'creator_profiles'")
-      .get(),
-  );
-  raw.prepare("INSERT INTO users (id, nickname) VALUES (1, 'compat-streamer')").run();
+  for (const compatibilityView of [
+    "creator_profiles",
+    "creator_platform_accounts",
+    "creator_review_jobs",
+    "creator_review_audit_log",
+  ]) {
+    assert.equal(
+      raw
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'view' AND name = ?")
+        .get(compatibilityView),
+      undefined,
+      compatibilityView,
+    );
+  }
+  const streamerProfileColumns = raw
+    .prepare("PRAGMA table_info(streamer_profiles)")
+    .all() as Array<{
+    name: string;
+  }>;
+  for (const removedTierColumn of ["featured_status", "featured_reason", "featured_since"]) {
+    assert.equal(
+      streamerProfileColumns.some((column) => column.name === removedTierColumn),
+      false,
+      removedTierColumn,
+    );
+  }
+  for (const archiveTable of [
+    "streamer_legacy_tier_state_archive",
+    "streamer_legacy_automated_review_jobs",
+    "streamer_legacy_automated_review_audit_log",
+  ]) {
+    assert.ok(
+      raw
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .get(archiveTable),
+      archiveTable,
+    );
+  }
+  raw.prepare("INSERT INTO users (id, nickname) VALUES (1, 'streamer')").run();
   raw
     .prepare(
-      `INSERT INTO creator_profiles
-         (user_id, status, featured_status, created_at, updated_at)
-       VALUES (1, 'PENDING', 'NONE', 'now', 'now')`,
+      `INSERT INTO streamer_profiles (user_id, status, created_at, updated_at)
+       VALUES (1, 'PENDING', 'now', 'now')`,
     )
     .run();
-  const compatibilityStreamer = raw
+  const streamer = raw
     .prepare("SELECT user_id, status FROM streamer_profiles WHERE user_id = 1")
     .get() as { user_id: number; status: string };
-  assert.deepEqual({ ...compatibilityStreamer }, { user_id: 1, status: "PENDING" });
+  assert.deepEqual({ ...streamer }, { user_id: 1, status: "PENDING" });
   const updateTrigger = raw
     .prepare(
       "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_sandbox_games_after_update'",
@@ -184,6 +248,116 @@ test("full production migration chain applies through 0050 with active OAuth own
   assert.deepEqual(
     { ...rollingScore },
     { leaderboard_generation: 4, variant_id: "standard", ruleset_revision: 1 },
+  );
+});
+
+test("0051 retires tier and automatic-review runtime schema without deleting historical evidence", () => {
+  const { raw } = createSqliteD1("");
+  const migrationUrl = new URL("../migrations/", import.meta.url);
+  const filenames = fs
+    .readdirSync(migrationUrl)
+    .filter((filename) => filename.endsWith(".sql"))
+    .sort();
+
+  for (const filename of filenames.filter((filename) => filename < "0051_")) {
+    raw.exec(fs.readFileSync(new URL(filename, migrationUrl), "utf8"));
+  }
+
+  raw.prepare("INSERT INTO users (id, nickname) VALUES (77, 'archived-streamer')").run();
+  raw
+    .prepare(
+      `INSERT INTO streamer_profiles
+         (id, user_id, status, featured_status, featured_reason, featured_since, created_at, updated_at)
+       VALUES (31, 77, 'VERIFIED', 'PARTNER', 'historic-reason', '2025-01-02', '2025-01-01', '2025-01-02')`,
+    )
+    .run();
+  raw
+    .prepare(
+      `INSERT INTO streamer_platform_accounts
+         (id, streamer_id, platform, platform_user_id, channel_name, channel_url,
+          verification_status, verified_at, audience_count, audience_count_known, created_at,
+          updated_at)
+       VALUES (41, 31, 'YOUTUBE', 'legacy-channel', 'Legacy Channel',
+               'https://youtube.test/legacy-channel', 'VERIFIED', '2025-01-02', 15000, 1,
+               '2025-01-01', '2025-01-02')`,
+    )
+    .run();
+  raw
+    .prepare(
+      `INSERT INTO streamer_review_jobs
+         (id, streamer_platform_account_id, status, next_check_at, attempt_count, created_at,
+          updated_at, completed_at, review_type, review_reason)
+       VALUES (51, 41, 'FEATURED', '2025-01-02', 1, '2025-01-01', '2025-01-02',
+               '2025-01-02', 'ACQUISITION', 'historic-review')`,
+    )
+    .run();
+  raw
+    .prepare(
+      `INSERT INTO streamer_review_audit_log
+         (id, streamer_platform_account_id, streamer_review_job_id, reviewer_user_id, action,
+          reason, previous_status, new_status, metric_snapshot_json, created_at)
+       VALUES (61, 41, 51, 77, 'APPROVE', 'historic-audit', 'AUTO_REVIEW_PENDING',
+               'FEATURED', '{}', '2025-01-02')`,
+    )
+    .run();
+
+  raw.exec(
+    fs.readFileSync(
+      new URL("../migrations/0051_streamer_manual_management.sql", import.meta.url),
+      "utf8",
+    ),
+  );
+
+  const archivedTier = raw
+    .prepare(
+      `SELECT streamer_profile_id, tier_state, reason, since_at
+       FROM streamer_legacy_tier_state_archive WHERE streamer_profile_id = 31`,
+    )
+    .get();
+  assert.deepEqual(
+    { ...archivedTier },
+    {
+      streamer_profile_id: 31,
+      tier_state: "PARTNER",
+      reason: "historic-reason",
+      since_at: "2025-01-02",
+    },
+  );
+  assert.equal(
+    Number(
+      (
+        raw
+          .prepare("SELECT COUNT(*) AS count FROM streamer_legacy_automated_review_jobs")
+          .get() as { count: number }
+      ).count,
+    ),
+    1,
+  );
+  assert.equal(
+    Number(
+      (
+        raw
+          .prepare("SELECT COUNT(*) AS count FROM streamer_legacy_automated_review_audit_log")
+          .get() as { count: number }
+      ).count,
+    ),
+    1,
+  );
+  assert.throws(() =>
+    raw.prepare("DELETE FROM streamer_legacy_automated_review_audit_log WHERE id = 61").run(),
+  );
+  const migratedAccount = raw
+    .prepare(
+      `SELECT approval_status, approval_reason_code
+       FROM streamer_platform_accounts WHERE id = 41`,
+    )
+    .get();
+  assert.deepEqual(
+    { ...migratedAccount },
+    {
+      approval_status: "APPROVED",
+      approval_reason_code: "MIGRATED_EXISTING_STREAMER",
+    },
   );
 });
 

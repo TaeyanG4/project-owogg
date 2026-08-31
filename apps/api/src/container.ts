@@ -10,6 +10,8 @@ import {
   D1DiscordGuildRepository,
   D1StreamerRepository,
   D1StreamerReviewRepository,
+  D1StreamerAdminRepository,
+  D1StreamerVerificationIntentRepository,
   D1AdminAuthRepository,
   D1AdminAccountRepository,
   D1GameSettingsRepository,
@@ -88,6 +90,8 @@ import {
   type DiscordGuildRepository,
   type StreamerRepository,
   type StreamerReviewRepository,
+  type StreamerAdminRepository,
+  type StreamerVerificationIntentRepository,
   type AdminAuthRepository,
   type AdminAccountRepository,
   type GameSettingsRepository,
@@ -131,6 +135,8 @@ export interface AppContainer {
   discordGuildRepo: DiscordGuildRepository;
   streamerRepo: StreamerRepository;
   streamerReviewRepo: StreamerReviewRepository;
+  streamerAdminRepo: StreamerAdminRepository;
+  streamerVerificationIntentRepo: StreamerVerificationIntentRepository;
   adminAuthRepo: AdminAuthRepository;
   adminAccountRepo: AdminAccountRepository;
   gameSettingsRepo: GameSettingsRepository;
@@ -227,6 +233,8 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
   const discordGuildRepo = new D1DiscordGuildRepository(db);
   const streamerRepo = new D1StreamerRepository(db);
   const streamerReviewRepo = new D1StreamerReviewRepository(db);
+  const streamerAdminRepo = new D1StreamerAdminRepository(db);
+  const streamerVerificationIntentRepo = new D1StreamerVerificationIntentRepository(db);
   const adminAuthRepo = new D1AdminAuthRepository(db);
   const adminAccountRepo = new D1AdminAccountRepository(db);
   const gameSettingsRepo = new D1GameSettingsRepository(db);
@@ -320,6 +328,7 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     streamerRepo,
     streamerReviewRepo,
     publicGameCatalog,
+    streamerAdminRepo,
   );
   const adminAuthUseCases = new AdminAuthUseCases(adminAuthRepo);
   const adminAccountUseCases = new AdminAccountUseCases(adminAccountRepo, adminAuthRepo);
@@ -408,6 +417,8 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     discordGuildRepo,
     streamerRepo,
     streamerReviewRepo,
+    streamerAdminRepo,
+    streamerVerificationIntentRepo,
     adminAuthRepo,
     adminAccountRepo,
     gameSettingsRepo,
@@ -552,8 +563,17 @@ export async function getPublicProfileData(
         : null,
     ]);
 
-  const streamerBadges = (streamerProfile?.platformAccounts ?? [])
-    .filter((a) => a.verificationStatus === "VERIFIED")
+  const now = new Date().toISOString();
+  const streamerBadges = (
+    streamerProfile?.status === "VERIFIED" ? streamerProfile.platformAccounts : []
+  )
+    .filter(
+      (a) =>
+        a.verificationStatus === "VERIFIED" &&
+        a.approvalStatus === "APPROVED" &&
+        a.ownershipExpiresAt !== null &&
+        a.ownershipExpiresAt > now,
+    )
     .map((a) => ({
       platform: a.platform,
       channelName: a.channelName,

@@ -61,7 +61,6 @@
       "streamerLinkPrefix": "자세한 인증 방법은 ",
       "streamerLink": "Streamer 채널 소유권 인증",
       "streamerLinkSuffix": " 문서를 참고하세요.",
-      "calloutFeatured": "Featured Streamer 표시는 랭킹 순위나 XP 계산에 어떠한 영향도 주지 않는 표시 전용 배지입니다.",
       "footerPrefix": "Discord 서버 단위 랭킹은 ",
       "footerLink": "Discord 서버 XP 문서",
       "footerSuffix": "를 참고하세요."
@@ -168,7 +167,6 @@
       "streamerLinkPrefix": "For how to verify, see the ",
       "streamerLink": "Streamer channel ownership verification",
       "streamerLinkSuffix": " article.",
-      "calloutFeatured": "The Featured Streamer mark is a display-only badge that has no effect whatsoever on ranking position or XP calculation.",
       "footerPrefix": "For per-Discord-server rankings, see the ",
       "footerLink": "Discord server XP article",
       "footerSuffix": "."
@@ -275,7 +273,6 @@
       "streamerLinkPrefix": "詳しい認証方法は",
       "streamerLink": "Streamerチャンネル所有権認証",
       "streamerLinkSuffix": "のドキュメントをご覧ください。",
-      "calloutFeatured": "Featured Streamerの表示は、ランキング順位やXP計算に一切影響しない表示専用のバッジです。",
       "footerPrefix": "Discordサーバー単位のランキングは",
       "footerLink": "DiscordサーバーXPのドキュメント",
       "footerSuffix": "をご覧ください。"
@@ -382,7 +379,6 @@
       "streamerLinkPrefix": "详细的认证方法请参阅",
       "streamerLink": "Streamer 频道所有权认证",
       "streamerLinkSuffix": "文档。",
-      "calloutFeatured": "Featured Streamer 标识是仅用于展示的徽章，对排行榜名次和 XP 计算没有任何影响。",
       "footerPrefix": "关于 Discord 服务器维度的排行榜，请参阅",
       "footerLink": "Discord 服务器 XP 文档",
       "footerSuffix": "。"

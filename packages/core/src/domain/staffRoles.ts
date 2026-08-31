@@ -66,10 +66,13 @@ export const PERMISSIONS = [
   // grant/revoke, and reviewing self-serve applications.
   "game_creators.manage",
 
-  // Streamer Featured-badge manual review (apps/api/src/routes/adminStreamers.ts). Base
-  // Streamer status itself has no review step — see domain/gameCreator.ts's sibling doc comment
-  // on why STREAMER program access is read directly off streamer_profiles.status, not a queue.
+  // Streamer administration is split by blast radius across read, review, lifecycle, policy, and
+  // provider controls. Runtime role grants are persisted in D1.
+  "streamers.view",
   "streamers.review",
+  "streamers.manage",
+  "streamers.policy.manage",
+  "streamers.operations.manage",
 
   // Read-only operational dashboards (apps/api/src/routes/admin.ts: /overview, /monitoring).
   "system.monitor",
@@ -98,7 +101,11 @@ export const ASSIGNABLE_PERMISSIONS = [
   "sandbox_games.review",
   "sandbox_games.delete",
   "game_creators.manage",
+  "streamers.view",
   "streamers.review",
+  "streamers.manage",
+  "streamers.policy.manage",
+  "streamers.operations.manage",
   "system.monitor",
   "system.dev.access",
 ] as const satisfies readonly Permission[];
@@ -129,7 +136,11 @@ export const INITIAL_ROLE_PERMISSIONS: Record<ConfigurableStaffRole, Permission[
     "sandbox_games.review",
     "sandbox_games.delete",
     "game_creators.manage",
+    "streamers.view",
     "streamers.review",
+    "streamers.manage",
+    "streamers.policy.manage",
+    "streamers.operations.manage",
     "system.monitor",
   ],
   // A deliberate subset of OPERATOR's bundle (see the module doc comment on why this isn't
@@ -140,6 +151,7 @@ export const INITIAL_ROLE_PERMISSIONS: Record<ConfigurableStaffRole, Permission[
     "users.view",
     "users.suspend",
     "sandbox_games.review",
+    "streamers.view",
     "streamers.review",
   ],
   // Role-specific centers no longer exist. System developers enter the same admin center and see

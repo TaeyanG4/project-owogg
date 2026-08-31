@@ -385,7 +385,6 @@ export const TOKEN_RULES: TokenRule[] = [
       "routes/adminStreamers.tsx",
       "routes/wikiStreamer.tsx",
       "routes/wikiStreamerVerification.tsx",
-      "routes/wikiStreamerFeatured.tsx",
     ],
     rule: "broadcast-channel Web modules must use Streamer terminology",
     tokens: ["CreatorProfile", "CreatorRank", "creatorApi", "adminCreatorApi", "/wiki/creator"],

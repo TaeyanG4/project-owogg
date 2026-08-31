@@ -75,6 +75,42 @@ jobs:
           GAME_ORIGIN: ${{ vars.GAME_ORIGIN }}
           VITE_GAME_ORIGIN: ${{ vars.VITE_GAME_ORIGIN }}
 
+      # Read-only. The independent Repository variable is checked against both the committed
+      # Wrangler binding and Cloudflare's exact Production database name/UUID before migration.
+      - name: Read remote Production D1 targets
+        run: >-
+          pnpm exec wrangler d1 list --json
+          --x-provision=false
+          --x-auto-create=false
+          > "$RUNNER_TEMP/production-d1-list.json"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Validate isolated Production deployment configuration
+        run: pnpm production:preflight --d1-list "$RUNNER_TEMP/production-d1-list.json"
+        # Actions scope contract: every new deployment-specific value lives at Repository scope.
+        # The PRODUCTION_* prefix isolates these values from the staging Environment without
+        # coupling the Production deploy job to a GitHub Environment.
+        env:
+          PRODUCTION_D1_DATABASE_ID: ${{ vars.PRODUCTION_D1_DATABASE_ID }}
+          PRODUCTION_MULTIPLAYER_ENABLED: ${{ vars.PRODUCTION_MULTIPLAYER_ENABLED }}
+          PRODUCTION_MULTIPLAYER_TICKET_KEY_ID: ${{ vars.PRODUCTION_MULTIPLAYER_TICKET_KEY_ID }}
+          PRODUCTION_MULTIPLAYER_TICKET_SECRET: ${{ secrets.PRODUCTION_MULTIPLAYER_TICKET_SECRET }}
+          PRODUCTION_MULTIPLAYER_TICKET_PREVIOUS_KEY_ID: ${{ vars.PRODUCTION_MULTIPLAYER_TICKET_PREVIOUS_KEY_ID || '' }}
+          PRODUCTION_MULTIPLAYER_TICKET_PREVIOUS_SECRET: ${{ secrets.PRODUCTION_MULTIPLAYER_TICKET_PREVIOUS_SECRET }}
+          PRODUCTION_STREAMER_ENABLED_PROVIDERS: ${{ vars.PRODUCTION_STREAMER_ENABLED_PROVIDERS }}
+          PRODUCTION_YOUTUBE_CLIENT_ID: ${{ vars.PRODUCTION_YOUTUBE_CLIENT_ID }}
+          PRODUCTION_YOUTUBE_CLIENT_SECRET: ${{ secrets.PRODUCTION_YOUTUBE_CLIENT_SECRET }}
+          PRODUCTION_YOUTUBE_API_KEY: ${{ secrets.PRODUCTION_YOUTUBE_API_KEY }}
+          PRODUCTION_YOUTUBE_REDIRECT_URI: ${{ vars.PRODUCTION_YOUTUBE_REDIRECT_URI }}
+          PRODUCTION_TWITCH_CLIENT_ID: ${{ vars.PRODUCTION_TWITCH_CLIENT_ID }}
+          PRODUCTION_TWITCH_CLIENT_SECRET: ${{ secrets.PRODUCTION_TWITCH_CLIENT_SECRET }}
+          PRODUCTION_TWITCH_REDIRECT_URI: ${{ vars.PRODUCTION_TWITCH_REDIRECT_URI }}
+          PRODUCTION_CHZZK_CLIENT_ID: ${{ vars.PRODUCTION_CHZZK_CLIENT_ID }}
+          PRODUCTION_CHZZK_CLIENT_SECRET: ${{ secrets.PRODUCTION_CHZZK_CLIENT_SECRET }}
+          PRODUCTION_CHZZK_REDIRECT_URI: ${{ vars.PRODUCTION_CHZZK_REDIRECT_URI }}
+
       - name: Apply D1 Migrations to Production
         run: pnpm d1:migrate:prod
         env:
@@ -87,9 +123,11 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: apps/api
-          # Streamer provider client IDs/redirect URIs are non-secret and optional — OwOGG must
-          # still deploy when some (or all) are unconfigured (`|| ''`). Client secrets/API keys go
-          # through `secrets:` below, never `--var`.
+          # Streamer provider client IDs/redirect URIs are non-secret, but every provider declared
+          # in PRODUCTION_STREAMER_ENABLED_PROVIDERS passed the fail-closed preflight above.
+          # GitHub configuration names stay PRODUCTION-prefixed and are mapped to the Worker's
+          # generic runtime bindings only here. Client secrets/API keys come from Repository
+          # secrets and are uploaded in the next step.
           #
           # B2_ENDPOINT/B2_REGION/B2_BUCKET_NAME/B2_KEY_ID/B2_APPLICATION_KEY and GAME_ORIGIN's own
           # existence (as a Secret vs. plain Variable, however an operator first set it via the
@@ -103,6 +141,7 @@ jobs:
           # exists to prevent for a value an operator may have first set by hand via the Dashboard.
           command: >-
             deploy
+            --env=""
             --define __OWOGG_BUILD_COMMIT_SHA__:'"${{ github.event.workflow_run.head_sha }}"'
             --var COMMIT_SHA:${{ github.event.workflow_run.head_sha }}
             GOOGLE_CLIENT_ID:${{ vars.GOOGLE_CLIENT_ID }}
@@ -115,15 +154,17 @@ jobs:
             GAME_ORIGIN:${{ vars.GAME_ORIGIN }}
             ADMIN_USER_IDS:${{ vars.ADMIN_USER_IDS || '' }}
             ADMIN_LOGIN_USERNAME:${{ vars.ADMIN_LOGIN_USERNAME || '' }}
-            STREAMER_ENABLED_PROVIDERS:${{ vars.STREAMER_ENABLED_PROVIDERS || '' }}
-            YOUTUBE_CLIENT_ID:${{ vars.YOUTUBE_CLIENT_ID || '' }}
-            YOUTUBE_REDIRECT_URI:${{ vars.YOUTUBE_REDIRECT_URI || '' }}
-            TWITCH_CLIENT_ID:${{ vars.TWITCH_CLIENT_ID || '' }}
-            TWITCH_REDIRECT_URI:${{ vars.TWITCH_REDIRECT_URI || '' }}
-            CHZZK_CLIENT_ID:${{ vars.CHZZK_CLIENT_ID || '' }}
-            CHZZK_REDIRECT_URI:${{ vars.CHZZK_REDIRECT_URI || '' }}
-            SOOP_CLIENT_ID:${{ vars.SOOP_CLIENT_ID || '' }}
-            SOOP_REDIRECT_URI:${{ vars.SOOP_REDIRECT_URI || '' }}
+            STREAMER_ENABLED_PROVIDERS:${{ vars.PRODUCTION_STREAMER_ENABLED_PROVIDERS }}
+            YOUTUBE_CLIENT_ID:${{ vars.PRODUCTION_YOUTUBE_CLIENT_ID }}
+            YOUTUBE_REDIRECT_URI:${{ vars.PRODUCTION_YOUTUBE_REDIRECT_URI }}
+            TWITCH_CLIENT_ID:${{ vars.PRODUCTION_TWITCH_CLIENT_ID }}
+            TWITCH_REDIRECT_URI:${{ vars.PRODUCTION_TWITCH_REDIRECT_URI }}
+            CHZZK_CLIENT_ID:${{ vars.PRODUCTION_CHZZK_CLIENT_ID }}
+            CHZZK_REDIRECT_URI:${{ vars.PRODUCTION_CHZZK_REDIRECT_URI }}
+            MULTIPLAYER_ENABLED:${{ vars.PRODUCTION_MULTIPLAYER_ENABLED }}
+            MULTIPLAYER_SOCKET_ORIGIN:https://api.owogg.com
+            MULTIPLAYER_TICKET_KEY_ID:${{ vars.PRODUCTION_MULTIPLAYER_TICKET_KEY_ID }}
+            MULTIPLAYER_TICKET_PREVIOUS_KEY_ID:${{ vars.PRODUCTION_MULTIPLAYER_TICKET_PREVIOUS_KEY_ID || '' }}
           # Google, Discord and Game Session secrets are always expected to be configured. They go
           # through this list because wrangler-action's `secrets:` input hard
           # -fails the whole action when a listed secret resolves to an empty string, which is
@@ -132,9 +173,10 @@ jobs:
           # the Game Session tokens Game Creator score acceptance depends on
           # (packages/core/src/domain/gameSession.ts) — without it, POST /api/games/:slug/session
           # fails closed with 503 in Production (apps/api/src/routes/games.ts), which is the exact
-          # gap this line closes. The Streamer/Admin secrets below are genuinely optional and are
-          # uploaded separately (see next step), which is why they're NOT listed here — this list
-          # is only for secrets a Production deploy cannot proceed without.
+          # gap this line closes. Streamer secrets are validated conditionally from the explicit
+          # enabled-provider list, while Admin step-up secrets remain optional; both groups are
+          # uploaded separately in the next step. This list is only for unconditional secrets a
+          # Production deploy cannot proceed without.
           secrets: |
             GOOGLE_CLIENT_SECRET
             DISCORD_CLIENT_SECRET
@@ -144,35 +186,46 @@ jobs:
           DISCORD_CLIENT_SECRET: ${{ secrets.DISCORD_CLIENT_SECRET }}
           GAME_SESSION_SECRET: ${{ secrets.GAME_SESSION_SECRET }}
 
-      - name: Upload optional Streamer/Admin secrets (skips any that are unconfigured)
+      - name: Upload validated multiplayer, Streamer, and optional Admin secrets
         working-directory: apps/api
         run: |
-          set -e
+          set -euo pipefail
           put_secret() {
             local name="$1"
             local value="$2"
+            if [ -z "$value" ]; then
+              echo "::error::$name is required after Production preflight"
+              exit 1
+            fi
+            printf '%s' "$value" | pnpm exec wrangler secret put "$name" --env="" --config wrangler.jsonc
+            echo "✅ $name uploaded"
+          }
+          put_optional_secret() {
+            local name="$1"
+            local value="$2"
             if [ -n "$value" ]; then
-              printf '%s' "$value" | npx wrangler secret put "$name"
-              echo "✅ $name uploaded"
+              put_secret "$name" "$value"
             else
               echo "ℹ️ $name not configured — skipping (외부 설정 대기)"
             fi
           }
-          put_secret YOUTUBE_CLIENT_SECRET "$YOUTUBE_CLIENT_SECRET"
-          put_secret YOUTUBE_API_KEY "$YOUTUBE_API_KEY"
-          put_secret TWITCH_CLIENT_SECRET "$TWITCH_CLIENT_SECRET"
-          put_secret CHZZK_CLIENT_SECRET "$CHZZK_CLIENT_SECRET"
-          put_secret SOOP_CLIENT_SECRET "$SOOP_CLIENT_SECRET"
-          put_secret ADMIN_GOOGLE_SUBS "$ADMIN_GOOGLE_SUBS"
-          put_secret ADMIN_PASSWORD_PBKDF2 "$ADMIN_PASSWORD_PBKDF2"
+          put_secret MULTIPLAYER_TICKET_SECRET "$PRODUCTION_MULTIPLAYER_TICKET_SECRET"
+          put_optional_secret MULTIPLAYER_TICKET_PREVIOUS_SECRET "$PRODUCTION_MULTIPLAYER_TICKET_PREVIOUS_SECRET"
+          put_optional_secret YOUTUBE_CLIENT_SECRET "$PRODUCTION_YOUTUBE_CLIENT_SECRET"
+          put_optional_secret YOUTUBE_API_KEY "$PRODUCTION_YOUTUBE_API_KEY"
+          put_optional_secret TWITCH_CLIENT_SECRET "$PRODUCTION_TWITCH_CLIENT_SECRET"
+          put_optional_secret CHZZK_CLIENT_SECRET "$PRODUCTION_CHZZK_CLIENT_SECRET"
+          put_optional_secret ADMIN_GOOGLE_SUBS "$ADMIN_GOOGLE_SUBS"
+          put_optional_secret ADMIN_PASSWORD_PBKDF2 "$ADMIN_PASSWORD_PBKDF2"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
-          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
-          CHZZK_CLIENT_SECRET: ${{ secrets.CHZZK_CLIENT_SECRET }}
-          SOOP_CLIENT_SECRET: ${{ secrets.SOOP_CLIENT_SECRET }}
+          PRODUCTION_MULTIPLAYER_TICKET_SECRET: ${{ secrets.PRODUCTION_MULTIPLAYER_TICKET_SECRET }}
+          PRODUCTION_MULTIPLAYER_TICKET_PREVIOUS_SECRET: ${{ secrets.PRODUCTION_MULTIPLAYER_TICKET_PREVIOUS_SECRET }}
+          PRODUCTION_YOUTUBE_CLIENT_SECRET: ${{ secrets.PRODUCTION_YOUTUBE_CLIENT_SECRET }}
+          PRODUCTION_YOUTUBE_API_KEY: ${{ secrets.PRODUCTION_YOUTUBE_API_KEY }}
+          PRODUCTION_TWITCH_CLIENT_SECRET: ${{ secrets.PRODUCTION_TWITCH_CLIENT_SECRET }}
+          PRODUCTION_CHZZK_CLIENT_SECRET: ${{ secrets.PRODUCTION_CHZZK_CLIENT_SECRET }}
           # Admin step-up identity data — sensitive operational config, never a Variable.
           ADMIN_GOOGLE_SUBS: ${{ secrets.ADMIN_GOOGLE_SUBS }}
           # PBKDF2-derived record only (see `pnpm admin:password:hash`) — never the plaintext password.
@@ -181,7 +234,7 @@ jobs:
       - name: Verify API Health & Provenance
         run: pnpm smoke:prod --api-only --sha ${{ github.event.workflow_run.head_sha }}
         env:
-          STREAMER_ENABLED_PROVIDERS: ${{ vars.STREAMER_ENABLED_PROVIDERS || '' }}
+          STREAMER_ENABLED_PROVIDERS: ${{ vars.PRODUCTION_STREAMER_ENABLED_PROVIDERS }}
 
       - name: Build Web Frontend
         run: pnpm --filter @owogg/web build
@@ -197,7 +250,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: apps/web
-          command: deploy
+          command: deploy --env=""
 
       - name: Smoke Test Web Frontend & Provenance
         run: pnpm smoke:prod --sha ${{ github.event.workflow_run.head_sha }}

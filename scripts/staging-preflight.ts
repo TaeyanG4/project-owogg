@@ -25,5 +25,5 @@ assertNoContractErrors(
 assertNoContractErrors(validateStagingEnvironment(process.env), "Staging environment preflight");
 
 console.log(
-  "Staging preflight passed: URLs, OAuth/Discord IDs, D1/B2 targets, routes and multiplayer ticket keys are isolated.",
+  "Staging preflight passed: URLs, login/Streamer OAuth credentials, D1/B2 targets, routes and multiplayer ticket keys are isolated.",
 );
