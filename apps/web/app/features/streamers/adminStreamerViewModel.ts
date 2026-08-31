@@ -9,6 +9,7 @@ import type {
   StreamerPolicyUnit,
   StreamerReviewWorkState,
 } from "@owogg/contracts";
+import { isStreamerUiPlatform, STREAMER_UI_PLATFORM_LABELS } from "./streamerPlatforms";
 
 export const STREAMER_ADMIN_SECTION_LABELS: Record<StreamerAdminSection, string> = {
   OVERVIEW: "운영 개요",
@@ -19,12 +20,11 @@ export const STREAMER_ADMIN_SECTION_LABELS: Record<StreamerAdminSection, string>
   AUDIT: "감사 이력",
 };
 
-export const STREAMER_PLATFORM_LABELS: Record<StreamerPlatform, string> = {
-  YOUTUBE: "YouTube",
-  CHZZK: "CHZZK",
-  SOOP: "SOOP",
-  TWITCH: "Twitch",
-};
+export const STREAMER_PLATFORM_LABELS = STREAMER_UI_PLATFORM_LABELS;
+
+export function formatStreamerPlatform(platform: StreamerPlatform) {
+  return isStreamerUiPlatform(platform) ? STREAMER_UI_PLATFORM_LABELS[platform] : null;
+}
 
 export const STREAMER_OWNERSHIP_LABELS: Record<StreamerOwnershipStatus, string> = {
   UNVERIFIED: "미확인",

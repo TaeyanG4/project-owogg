@@ -135,7 +135,6 @@ export interface Dictionary {
     allCategories: string;
     allPlatforms: string;
     platformChzzk: string;
-    platformSoop: string;
     scoreMode: string;
     xpMode: string;
     streakMode: string;
@@ -562,7 +561,6 @@ export interface Dictionary {
       description: string;
       platformsHeading: string;
       platformAvailable: string;
-      platformDeferred: string;
       conditionsHeading: string;
       condOnePrefix: string;
       condOneStrong: string;
@@ -1138,7 +1136,6 @@ export interface Dictionary {
   };
   platformIcon: {
     chzzkLabel: string;
-    soopLabel: string;
     channelSuffix: string;
     verifiedPlatforms: string;
   };
@@ -1280,7 +1277,6 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       allCategories: "전체 종목",
       allPlatforms: "전체 플랫폼",
       platformChzzk: "치지직 (CHZZK)",
-      platformSoop: "SOOP (아프리카)",
       scoreMode: "게임 점수",
       xpMode: "경험치 (XP)",
       streakMode: "연속 출석",
@@ -1737,7 +1733,6 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
           "공식 OAuth와 API만으로 소유권을 검증합니다. 텍스트 입력이나 스크래핑은 절대 사용하지 않습니다.",
         platformsHeading: "지원 플랫폼",
         platformAvailable: "OAuth 지원",
-        platformDeferred: "인증 보류",
         conditionsHeading: "인증 조건",
         condOnePrefix: "현재 OAuth 인증이 열린 YouTube · CHZZK · Twitch 중 ",
         condOneStrong: "하나 이상에서 소유권 인증과 수동 심사를 통과하면",
@@ -1746,7 +1741,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         condNoMinimum:
           "구독자/팔로워 수와 채널 운영 기간 기준은 서버의 버전된 정책으로 관리되며 운영자가 변경할 수 있습니다. 소스 코드에 고정된 수치를 사용하지 않습니다.",
         condOauthOnly:
-          "소유권 인증은 항상 각 플랫폼의 공식 OAuth 로그인 화면을 통해서만 이루어지며, 채널 URL이나 닉네임을 직접 입력하는 방식은 지원하지 않습니다. SOOP은 안전한 callback 결박을 공식 지원할 때까지 보류합니다.",
+          "소유권 인증은 항상 각 플랫폼의 공식 OAuth 로그인 화면을 통해서만 이루어지며, 채널 URL이나 닉네임을 직접 입력하는 방식은 지원하지 않습니다.",
         condOneChannelOneAccount:
           "하나의 외부 채널은 한 OwOGG 계정에만 연동할 수 있습니다(1채널 = 1계정).",
         methodHeading: "인증 방법",
@@ -1862,7 +1857,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         xpBodyLink: "XP와 레벨 문서",
         xpBodySuffix: "를 참고하세요.",
         streamerHeading: "스트리머 랭킹",
-        streamerBodyPrefix: "YouTube / CHZZK / SOOP / Twitch 중 ",
+        streamerBodyPrefix: "YouTube / CHZZK / Twitch 중 ",
         streamerBodyStrong: "하나 이상",
         streamerBodySuffix:
           "의 플랫폼에서 소유권 인증과 운영진 승인을 모두 받은 사용자만 노출됩니다. 게임 기록·XP·연속 출석은 일반 랭킹과 동일한 계산식과 UI를 사용하며, 승인 플랫폼 수는 순위에 영향을 주지 않습니다.",
@@ -2243,7 +2238,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
           },
           {
             term: "Streamer 채널 인증 정보",
-            desc: " — 스트리머 랭킹 참여를 위해 자발적으로 채널 소유권 인증을 진행한 경우, 해당 플랫폼(YouTube/Twitch/CHZZK/SOOP)의 공식 API를 통해 확인된 채널명, 채널 URL, 구독자/팔로워 수",
+            desc: " — 스트리머 랭킹 참여를 위해 자발적으로 채널 소유권 인증을 진행한 경우, 해당 플랫폼(YouTube/Twitch/CHZZK)의 공식 API를 통해 확인된 채널명, 채널 URL, 구독자/팔로워 수",
           },
         ],
         section1Outro:
@@ -2414,7 +2409,6 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
     },
     platformIcon: {
       chzzkLabel: "CHZZK (치지직)",
-      soopLabel: "SOOP (아프리카)",
       channelSuffix: "채널",
       verifiedPlatforms: "검증된 플랫폼",
     },
@@ -2559,7 +2553,6 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       allCategories: "All Games",
       allPlatforms: "All Platforms",
       platformChzzk: "CHZZK",
-      platformSoop: "SOOP",
       scoreMode: "Game Score",
       xpMode: "Experience (XP)",
       streakMode: "Attendance Streak",
@@ -3021,7 +3014,6 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
           "Ownership is verified using official OAuth and APIs only. Text entry and scraping are never used.",
         platformsHeading: "Supported platforms",
         platformAvailable: "OAuth available",
-        platformDeferred: "Verification deferred",
         conditionsHeading: "Requirements",
         condOnePrefix:
           "On the currently available platforms (YouTube · CHZZK · Twitch), passing ownership verification and manual review on ",
@@ -3031,7 +3023,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         condNoMinimum:
           "Audience and channel-age thresholds come from a versioned server policy that operators can change; no eligibility number is hard-coded in the client.",
         condOauthOnly:
-          "Verification always happens through each platform's official OAuth login screen. Entering a channel URL or nickname by hand is not supported. SOOP remains deferred until its official flow can safely bind the callback.",
+          "Verification always happens through each platform's official OAuth login screen. Entering a channel URL or nickname by hand is not supported.",
         condOneChannelOneAccount:
           "An external channel can be linked to only one OwOGG account (1 channel = 1 account).",
         methodHeading: "How to verify",
@@ -3159,7 +3151,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         streamerBodyPrefix: "Only users who completed official channel ownership verification on ",
         streamerBodyStrong: "at least one",
         streamerBodySuffix:
-          " of YouTube / CHZZK / SOOP / Twitch and received staff approval appear here. Game, XP, and streak rankings use the same formula and UI as General rankings, and the number of approved platforms has no effect on position.",
+          " of YouTube / CHZZK / Twitch and received staff approval appear here. Game, XP, and streak rankings use the same formula and UI as General rankings, and the number of approved platforms has no effect on position.",
         streamerLinkPrefix: "For how to verify, see the ",
         streamerLink: "Streamer channel ownership verification",
         streamerLinkSuffix: " article.",
@@ -3543,7 +3535,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
           },
           {
             term: "Streamer Channel Verification Information",
-            desc: " — Channel name, channel URL, subscriber/follower count verified through official APIs of respective platforms (YouTube/Twitch/CHZZK/SOOP) when voluntarily completing channel ownership verification to participate in Streamer rankings",
+            desc: " — Channel name, channel URL, subscriber/follower count verified through official APIs of respective platforms (YouTube/Twitch/CHZZK) when voluntarily completing channel ownership verification to participate in Streamer rankings",
           },
         ],
         section1Outro:
@@ -3716,7 +3708,6 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
     },
     platformIcon: {
       chzzkLabel: "CHZZK",
-      soopLabel: "SOOP",
       channelSuffix: "channel",
       verifiedPlatforms: "Verified platforms",
     },
@@ -3862,7 +3853,6 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       allCategories: "全種目",
       allPlatforms: "全プラットフォーム",
       platformChzzk: "CHZZK",
-      platformSoop: "SOOP",
       scoreMode: "ゲームスコア",
       xpMode: "経験値 (XP)",
       streakMode: "連続ログイン",
@@ -4328,7 +4318,6 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
           "公式OAuthとAPIのみで所有権を検証します。テキスト入力やスクレイピングは一切使用しません。",
         platformsHeading: "対応プラットフォーム",
         platformAvailable: "OAuth対応",
-        platformDeferred: "認証保留",
         conditionsHeading: "認証条件",
         condOnePrefix: "現在OAuth認証が利用できるYouTube・CHZZK・Twitchのうち",
         condOneStrong: "1つ以上で所有権認証と手動審査を通過すれば",
@@ -4337,7 +4326,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         condNoMinimum:
           "視聴者数とチャンネル運営期間の基準は、運営者が変更できるバージョン管理されたサーバーポリシーから取得し、クライアントには固定値を持ちません。",
         condOauthOnly:
-          "所有権認証は常に各プラットフォームの公式OAuthログイン画面を通じてのみ行われ、チャンネルURLやニックネームを直接入力する方式には対応していません。SOOPは安全なコールバック関連付けが公式対応されるまで保留します。",
+          "所有権認証は常に各プラットフォームの公式OAuthログイン画面を通じてのみ行われ、チャンネルURLやニックネームを直接入力する方式には対応していません。",
         condOneChannelOneAccount:
           "1つの外部チャンネルは1つのOwOGGアカウントにのみ連携できます（1チャンネル = 1アカウント）。",
         methodHeading: "認証方法",
@@ -4456,7 +4445,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         xpBodyLink: "XPとレベルのドキュメント",
         xpBodySuffix: "をご覧ください。",
         streamerHeading: "ストリーマーランキング",
-        streamerBodyPrefix: "YouTube / CHZZK / SOOP / Twitch のうち",
+        streamerBodyPrefix: "YouTube / CHZZK / Twitch のうち",
         streamerBodyStrong: "1つ以上",
         streamerBodySuffix:
           "のプラットフォームで所有権認証と運営承認を完了したユーザーのみが表示されます。ゲーム記録・XP・連続ログインは通常ランキングと同じ計算式とUIを使い、承認数は順位に影響しません。",
@@ -4841,7 +4830,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
           },
           {
             term: "Streamerチャンネル認証情報",
-            desc: " — ストリーマーランキング参加のために自主的にチャンネル所有権認証を行った場合、該当プラットフォーム（YouTube/Twitch/CHZZK/SOOP）の公式APIを通じて確認されたチャンネル名、チャンネルURL、チャンネル登録者/フォロワー数",
+            desc: " — ストリーマーランキング参加のために自主的にチャンネル所有権認証を行った場合、該当プラットフォーム（YouTube/Twitch/CHZZK）の公式APIを通じて確認されたチャンネル名、チャンネルURL、チャンネル登録者/フォロワー数",
           },
         ],
         section1Outro:
@@ -5016,7 +5005,6 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
     },
     platformIcon: {
       chzzkLabel: "CHZZK",
-      soopLabel: "SOOP",
       channelSuffix: "チャンネル",
       verifiedPlatforms: "認証済みプラットフォーム",
     },
@@ -5161,7 +5149,6 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       allCategories: "全部项目",
       allPlatforms: "全部平台",
       platformChzzk: "CHZZK",
-      platformSoop: "SOOP",
       scoreMode: "游戏分数",
       xpMode: "经验值 (XP)",
       streakMode: "连续签到",
@@ -5599,7 +5586,6 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         description: "仅通过官方 OAuth 和 API 验证所有权，绝不使用文本输入或网页抓取。",
         platformsHeading: "支持的平台",
         platformAvailable: "支持 OAuth",
-        platformDeferred: "认证暂缓",
         conditionsHeading: "认证条件",
         condOnePrefix: "在当前可使用 OAuth 认证的 YouTube、CHZZK、Twitch 中，",
         condOneStrong: "至少一个完成所有权认证和人工审核",
@@ -5607,7 +5593,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         condNoMinimum:
           "观众人数和频道运营时长标准来自运营人员可修改的版本化服务器策略，客户端不使用硬编码数值。",
         condOauthOnly:
-          "所有权认证始终只能通过各平台的官方 OAuth 登录页面完成，不支持直接输入频道 URL 或昵称的方式。SOOP 将暂缓至官方流程能够安全绑定回调为止。",
+          "所有权认证始终只能通过各平台的官方 OAuth 登录页面完成，不支持直接输入频道 URL 或昵称的方式。",
         condOneChannelOneAccount: "一个外部频道只能绑定到一个 OwOGG 账户（1 个频道 = 1 个账户）。",
         methodHeading: "认证方法",
         step1: "前往个人资料页面的［主播频道所有权认证］板块。",
@@ -5720,7 +5706,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         xpBodyLink: "XP 与等级文档",
         xpBodySuffix: "。",
         streamerHeading: "主播排行榜",
-        streamerBodyPrefix: "只有在 YouTube / CHZZK / SOOP / Twitch 中",
+        streamerBodyPrefix: "只有在 YouTube / CHZZK / Twitch 中",
         streamerBodyStrong: "至少一个",
         streamerBodySuffix:
           "平台完成频道所有权认证并获得运营批准的用户才会显示。游戏记录、XP 和连续签到与普通排行榜使用相同的计算公式和 UI，批准平台数量不影响名次。",
@@ -6089,7 +6075,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
           },
           {
             term: "Streamer 频道认证信息",
-            desc: " — 为参与主播排行榜而自愿完成频道所有权认证时，通过相应平台（YouTube/Twitch/CHZZK/SOOP）官方 API 确认的频道名称、频道 URL、订阅者/粉丝数量",
+            desc: " — 为参与主播排行榜而自愿完成频道所有权认证时，通过相应平台（YouTube/Twitch/CHZZK）官方 API 确认的频道名称、频道 URL、订阅者/粉丝数量",
           },
         ],
         section1Outro:
@@ -6260,7 +6246,6 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
     },
     platformIcon: {
       chzzkLabel: "CHZZK",
-      soopLabel: "SOOP",
       channelSuffix: "频道",
       verifiedPlatforms: "已验证平台",
     },

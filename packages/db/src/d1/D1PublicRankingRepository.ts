@@ -30,7 +30,10 @@ function scopeSql(scope: PublicRankingScope, platform?: StreamerPlatformType): S
       SELECT 1 FROM streamer_platform_accounts spa
       WHERE spa.streamer_id = sp.id
         AND spa.verification_status = 'VERIFIED'
-        AND spa.platform IN ('YOUTUBE', 'CHZZK', 'SOOP', 'TWITCH')
+        AND spa.approval_status = 'APPROVED'
+        AND spa.ownership_expires_at IS NOT NULL
+        AND datetime(spa.ownership_expires_at) > datetime('now')
+        AND spa.platform IN ('YOUTUBE', 'CHZZK', 'TWITCH')
         ${platform ? "AND spa.platform = ?" : ""}
     )`,
     streamerSelect: "sp.id AS streamer_id",
@@ -183,7 +186,10 @@ export class D1PublicRankingRepository implements PublicRankingRepository {
         `SELECT streamer_id, platform, channel_name, channel_url, avatar_url
          FROM streamer_platform_accounts
          WHERE verification_status = 'VERIFIED'
-           AND platform IN ('YOUTUBE', 'CHZZK', 'SOOP', 'TWITCH')
+           AND approval_status = 'APPROVED'
+           AND ownership_expires_at IS NOT NULL
+           AND datetime(ownership_expires_at) > datetime('now')
+           AND platform IN ('YOUTUBE', 'CHZZK', 'TWITCH')
            AND streamer_id IN (${placeholders})
          ORDER BY id ASC`,
       )

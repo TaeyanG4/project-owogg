@@ -348,6 +348,7 @@ export class D1StreamerRepository implements StreamerRepository {
              AND cpa.verification_status = 'VERIFIED' AND cpa.approval_status = 'APPROVED'
              AND cpa.ownership_expires_at IS NOT NULL
              AND datetime(cpa.ownership_expires_at) > datetime('now')
+             AND cpa.platform IN ('YOUTUBE', 'CHZZK', 'TWITCH')
          )`
       : `AND EXISTS (
            SELECT 1 FROM streamer_platform_accounts cpa
@@ -355,7 +356,7 @@ export class D1StreamerRepository implements StreamerRepository {
              AND cpa.approval_status = 'APPROVED'
              AND cpa.ownership_expires_at IS NOT NULL
              AND datetime(cpa.ownership_expires_at) > datetime('now')
-             AND cpa.platform IN ('YOUTUBE', 'CHZZK', 'SOOP', 'TWITCH')
+             AND cpa.platform IN ('YOUTUBE', 'CHZZK', 'TWITCH')
          )`;
 
     if (options.mode === "score") {
@@ -524,6 +525,7 @@ export class D1StreamerRepository implements StreamerRepository {
       WHERE verification_status = 'VERIFIED' AND approval_status = 'APPROVED'
         AND ownership_expires_at IS NOT NULL
         AND datetime(ownership_expires_at) > datetime('now')
+        AND platform IN ('YOUTUBE', 'CHZZK', 'TWITCH')
         AND streamer_id IN (${placeholders})
       ORDER BY id ASC
     `;

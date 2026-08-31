@@ -6,8 +6,8 @@
 등 안 변하는 내용)는 **[`GUIDE.md`](./GUIDE.md)를 보세요**. 파일이 새로 번역되거나 코드에
 연결될 때마다 이 문서만 갱신합니다.
 
-_최근 갱신: 2026-09-01 — Streamer 플랫폼 OAuth 보안 경계를 최신화했습니다. YouTube·CHZZK·Twitch는
-공식 OAuth 지원, 안전한 callback 결박이 없는 SOOP은 인증 보류로 4개 언어 문구를 동기화했습니다._
+_최근 갱신: 2026-09-01 — Streamer 사용자 UI와 다국어 문구의 플랫폼 범위를
+YouTube·CHZZK·Twitch로 통일했습니다. 보류 provider는 공개 설정·랭킹·Wiki에 노출하지 않습니다._
 
 ## 파일 목록
 

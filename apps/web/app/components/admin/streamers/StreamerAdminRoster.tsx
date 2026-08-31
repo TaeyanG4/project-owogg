@@ -9,10 +9,12 @@ import type {
 import {
   formatStreamerAudience,
   formatStreamerDateTime,
+  formatStreamerPlatform,
   STREAMER_APPROVAL_LABELS,
   STREAMER_OWNERSHIP_LABELS,
   STREAMER_PLATFORM_LABELS,
 } from "../../../features/streamers/adminStreamerViewModel";
+import { isStreamerUiPlatform } from "../../../features/streamers/streamerPlatforms";
 import {
   StreamerActionButton,
   StreamerBadge,
@@ -35,7 +37,12 @@ export function StreamerAdminRoster({
   const [search, setSearch] = useState(query.rosterQuery);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   useEffect(() => setSearch(query.rosterQuery), [query.rosterQuery]);
-  const selected = data.roster.items.find((item) => item.streamerId === selectedId) ?? null;
+  const visibleRosterItems = data.roster.items.filter(
+    (item) =>
+      item.platformAccounts.length === 0 ||
+      item.platformAccounts.some((account) => isStreamerUiPlatform(account.platform)),
+  );
+  const selected = visibleRosterItems.find((item) => item.streamerId === selectedId) ?? null;
 
   const submitSearch = () => onQueryChange({ rosterQuery: search.trim(), rosterPage: 1 });
   return (
@@ -102,7 +109,7 @@ export function StreamerAdminRoster({
       </StreamerPanel>
 
       <StreamerPanel className="overflow-hidden">
-        {data.roster.items.length === 0 ? (
+        {visibleRosterItems.length === 0 ? (
           <p className="p-10 text-center text-xs text-text-muted">
             조건에 맞는 스트리머가 없습니다.
           </p>
@@ -119,7 +126,7 @@ export function StreamerAdminRoster({
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/70">
-                {data.roster.items.map((item) => (
+                {visibleRosterItems.map((item) => (
                   <tr key={item.streamerId} className="hover:bg-surface/70">
                     <td className="px-5 py-4">
                       <p className="font-black text-text-primary">{item.nickname}</p>
@@ -142,15 +149,17 @@ export function StreamerAdminRoster({
                     </td>
                     <td className="px-4 py-4">
                       <div className="flex max-w-md flex-wrap gap-1.5">
-                        {item.platformAccounts.map((account) => (
-                          <StreamerBadge
-                            key={account.id}
-                            tone={account.approvalStatus === "APPROVED" ? "success" : "warning"}
-                          >
-                            {STREAMER_PLATFORM_LABELS[account.platform]} ·{" "}
-                            {STREAMER_APPROVAL_LABELS[account.approvalStatus]}
-                          </StreamerBadge>
-                        ))}
+                        {item.platformAccounts
+                          .filter((account) => isStreamerUiPlatform(account.platform))
+                          .map((account) => (
+                            <StreamerBadge
+                              key={account.id}
+                              tone={account.approvalStatus === "APPROVED" ? "success" : "warning"}
+                            >
+                              {formatStreamerPlatform(account.platform)} ·{" "}
+                              {STREAMER_APPROVAL_LABELS[account.approvalStatus]}
+                            </StreamerBadge>
+                          ))}
                       </div>
                     </td>
                     <td className="px-4 py-4 text-[10px] text-text-muted">
@@ -232,121 +241,124 @@ function StreamerDetail({
       </div>
 
       <div className="mt-5 grid gap-3 xl:grid-cols-2">
-        {item.platformAccounts.map((account) => (
-          <div key={account.id} className="rounded-2xl border border-border bg-surface p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-black text-text-primary">
-                  {STREAMER_PLATFORM_LABELS[account.platform]} · {account.channelName}
-                </p>
-                <p className="mt-1 text-[10px] text-text-muted">{account.maskedCanonicalId}</p>
+        {item.platformAccounts
+          .filter((account) => isStreamerUiPlatform(account.platform))
+          .map((account) => (
+            <div key={account.id} className="rounded-2xl border border-border bg-surface p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-black text-text-primary">
+                    {formatStreamerPlatform(account.platform)} · {account.channelName}
+                  </p>
+                  <p className="mt-1 text-[10px] text-text-muted">{account.maskedCanonicalId}</p>
+                </div>
+                <a
+                  href={account.channelUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-text-muted hover:text-white"
+                  aria-label="채널 열기"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                </a>
               </div>
-              <a
-                href={account.channelUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="text-text-muted hover:text-white"
-                aria-label="채널 열기"
-              >
-                <ExternalLink className="h-4 w-4" />
-              </a>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <StreamerBadge
-                tone={account.verificationStatus === "VERIFIED" ? "success" : "danger"}
-              >
-                소유권 {STREAMER_OWNERSHIP_LABELS[account.verificationStatus]}
-              </StreamerBadge>
-              <StreamerBadge tone={account.approvalStatus === "APPROVED" ? "success" : "warning"}>
-                {STREAMER_APPROVAL_LABELS[account.approvalStatus]}
-              </StreamerBadge>
-            </div>
-            <dl className="mt-4 grid grid-cols-2 gap-2 text-[10px]">
-              <div>
-                <dt className="text-text-muted">Audience</dt>
-                <dd className="mt-1 text-text-primary">
-                  {formatStreamerAudience(account.audienceCount)}
-                </dd>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <StreamerBadge
+                  tone={account.verificationStatus === "VERIFIED" ? "success" : "danger"}
+                >
+                  소유권 {STREAMER_OWNERSHIP_LABELS[account.verificationStatus]}
+                </StreamerBadge>
+                <StreamerBadge tone={account.approvalStatus === "APPROVED" ? "success" : "warning"}>
+                  {STREAMER_APPROVAL_LABELS[account.approvalStatus]}
+                </StreamerBadge>
               </div>
-              <div>
-                <dt className="text-text-muted">소유권 만료</dt>
-                <dd className="mt-1 text-text-primary">
-                  {formatStreamerDateTime(account.ownershipExpiresAt)}
-                </dd>
-              </div>
-            </dl>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {account.approvalStatus !== "APPROVED" && (
+              <dl className="mt-4 grid grid-cols-2 gap-2 text-[10px]">
+                <div>
+                  <dt className="text-text-muted">Audience</dt>
+                  <dd className="mt-1 text-text-primary">
+                    {formatStreamerAudience(account.audienceCount)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-text-muted">소유권 만료</dt>
+                  <dd className="mt-1 text-text-primary">
+                    {formatStreamerDateTime(account.ownershipExpiresAt)}
+                  </dd>
+                </div>
+              </dl>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {account.approvalStatus !== "APPROVED" && (
+                  <StreamerActionButton
+                    disabled={
+                      account.verificationStatus !== "VERIFIED" ||
+                      !actions.isActionEnabled("CREATE_REVIEW")
+                    }
+                    disabledReason={
+                      account.verificationStatus !== "VERIFIED"
+                        ? "유효한 소유권 확인이 먼저 필요합니다."
+                        : actions.actionDisabledReason("CREATE_REVIEW")
+                    }
+                    onClick={() =>
+                      request({
+                        action: "CREATE_REVIEW",
+                        targetId: String(account.id),
+                        expectedVersion: account.rowVersion,
+                        title: "플랫폼 심사 생성",
+                        description: `${formatStreamerPlatform(account.platform)} 연결에 별도의 수동 심사를 생성합니다.`,
+                      })
+                    }
+                  >
+                    심사 생성
+                  </StreamerActionButton>
+                )}
+                {account.approvalStatus === "APPROVED" && (
+                  <StreamerActionButton
+                    tone="warning"
+                    disabled={!actions.isActionEnabled("REVOKE_STREAMER_APPROVAL")}
+                    disabledReason={actions.actionDisabledReason("REVOKE_STREAMER_APPROVAL")}
+                    onClick={() =>
+                      request({
+                        action: "REVOKE_STREAMER_APPROVAL",
+                        targetId: String(account.id),
+                        expectedVersion: account.rowVersion,
+                        title: "플랫폼 승인 철회",
+                        description:
+                          "이 플랫폼의 승인만 철회합니다. 다른 승인 플랫폼은 유지됩니다.",
+                        danger: true,
+                      })
+                    }
+                  >
+                    승인 철회
+                  </StreamerActionButton>
+                )}
                 <StreamerActionButton
+                  tone="danger"
                   disabled={
                     account.verificationStatus !== "VERIFIED" ||
-                    !actions.isActionEnabled("CREATE_REVIEW")
+                    !actions.isActionEnabled("INVALIDATE_OWNERSHIP")
                   }
                   disabledReason={
                     account.verificationStatus !== "VERIFIED"
-                      ? "유효한 소유권 확인이 먼저 필요합니다."
-                      : actions.actionDisabledReason("CREATE_REVIEW")
+                      ? "현재 유효한 소유권이 없습니다."
+                      : actions.actionDisabledReason("INVALIDATE_OWNERSHIP")
                   }
                   onClick={() =>
                     request({
-                      action: "CREATE_REVIEW",
+                      action: "INVALIDATE_OWNERSHIP",
                       targetId: String(account.id),
                       expectedVersion: account.rowVersion,
-                      title: "플랫폼 심사 생성",
-                      description: `${STREAMER_PLATFORM_LABELS[account.platform]} 연결에 별도의 수동 심사를 생성합니다.`,
-                    })
-                  }
-                >
-                  심사 생성
-                </StreamerActionButton>
-              )}
-              {account.approvalStatus === "APPROVED" && (
-                <StreamerActionButton
-                  tone="warning"
-                  disabled={!actions.isActionEnabled("REVOKE_STREAMER_APPROVAL")}
-                  disabledReason={actions.actionDisabledReason("REVOKE_STREAMER_APPROVAL")}
-                  onClick={() =>
-                    request({
-                      action: "REVOKE_STREAMER_APPROVAL",
-                      targetId: String(account.id),
-                      expectedVersion: account.rowVersion,
-                      title: "플랫폼 승인 철회",
-                      description: "이 플랫폼의 승인만 철회합니다. 다른 승인 플랫폼은 유지됩니다.",
+                      title: "플랫폼 소유권 무효화",
+                      description:
+                        "소유권과 해당 플랫폼 승인을 함께 무효화하고 활성 심사를 닫습니다.",
                       danger: true,
                     })
                   }
                 >
-                  승인 철회
+                  소유권 무효화
                 </StreamerActionButton>
-              )}
-              <StreamerActionButton
-                tone="danger"
-                disabled={
-                  account.verificationStatus !== "VERIFIED" ||
-                  !actions.isActionEnabled("INVALIDATE_OWNERSHIP")
-                }
-                disabledReason={
-                  account.verificationStatus !== "VERIFIED"
-                    ? "현재 유효한 소유권이 없습니다."
-                    : actions.actionDisabledReason("INVALIDATE_OWNERSHIP")
-                }
-                onClick={() =>
-                  request({
-                    action: "INVALIDATE_OWNERSHIP",
-                    targetId: String(account.id),
-                    expectedVersion: account.rowVersion,
-                    title: "플랫폼 소유권 무효화",
-                    description:
-                      "소유권과 해당 플랫폼 승인을 함께 무효화하고 활성 심사를 닫습니다.",
-                    danger: true,
-                  })
-                }
-              >
-                소유권 무효화
-              </StreamerActionButton>
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
       </div>
     </StreamerPanel>
   );

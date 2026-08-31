@@ -76,7 +76,7 @@
           },
           {
             "term": "Streamer Channel Verification Information",
-            "desc": " — Channel name, channel URL, subscriber/follower count verified through official APIs of respective platforms (YouTube/Twitch/CHZZK/SOOP) when voluntarily completing channel ownership verification to participate in Streamer rankings"
+            "desc": " — Channel name, channel URL, subscriber/follower count verified through official APIs of respective platforms (YouTube/Twitch/CHZZK) when voluntarily completing channel ownership verification to participate in Streamer rankings"
           }
         ],
         "outro": "Passwords are not collected separately (administrator-exclusive accounts are an exception, where passwords are stored hashed with PBKDF2 and never stored in plain text)."

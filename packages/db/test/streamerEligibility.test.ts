@@ -75,7 +75,7 @@ function seedXp(raw: import("node:sqlite").DatabaseSync, userId: number, totalXp
     .run(userId, totalXp);
 }
 
-for (const platform of ["YOUTUBE", "CHZZK", "SOOP", "TWITCH"] as const) {
+for (const platform of ["YOUTUBE", "CHZZK", "TWITCH"] as const) {
   test(`streamer ranking (score mode): ${platform}-only verified is included`, async () => {
     const { db, raw } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);
     const userId = seedUser(raw, "solo");
@@ -90,7 +90,25 @@ for (const platform of ["YOUTUBE", "CHZZK", "SOOP", "TWITCH"] as const) {
   });
 }
 
-test("streamer ranking (score mode): all four platforms verified still produces exactly one row", async () => {
+test("streamer ranking excludes a SOOP-only profile, including a direct SOOP filter", async () => {
+  const { db, raw } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);
+  const userId = seedUser(raw, "hidden-soop");
+  const streamerId = seedStreamerProfile(raw, userId);
+  addPlatformAccount(raw, streamerId, "SOOP", "sp-only", "VERIFIED");
+  seedScore(raw, userId, 900);
+
+  const repo = new D1StreamerRepository(db);
+  const all = await repo.getStreamerRankings({ mode: "score", gameId: "reaction-time" });
+  const soop = await repo.getStreamerRankings({
+    mode: "score",
+    gameId: "reaction-time",
+    platform: "SOOP",
+  });
+  assert.equal(all.total, 0);
+  assert.equal(soop.total, 0);
+});
+
+test("a profile with all stored platforms produces one row with only public platform badges", async () => {
   const { db, raw } = createSqliteD1(LEADERBOARD_TEST_SCHEMA);
   const userId = seedUser(raw, "multi");
   const streamerId = seedStreamerProfile(raw, userId);
@@ -104,7 +122,10 @@ test("streamer ranking (score mode): all four platforms verified still produces 
   const result = await repo.getStreamerRankings({ mode: "score", gameId: "reaction-time" });
   assert.equal(result.total, 1);
   assert.equal(result.entries.length, 1);
-  assert.equal(result.entries[0]?.platformAccounts.length, 4);
+  assert.deepEqual(
+    result.entries[0]?.platformAccounts.map((account) => account.platform),
+    ["YOUTUBE", "CHZZK", "TWITCH"],
+  );
 });
 
 test("streamer ranking (score mode): zero verified platforms excludes the streamer even with a score", async () => {

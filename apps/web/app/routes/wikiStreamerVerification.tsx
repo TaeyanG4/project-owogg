@@ -2,6 +2,10 @@ import { Link } from "react-router";
 import { WikiLayout, WikiCallout, WikiSteps } from "../components/wiki/WikiLayout";
 import { PlatformIcon } from "../components/ui/PlatformIcon";
 import { useI18n } from "../features/i18n/I18nContext";
+import {
+  STREAMER_UI_PLATFORM_LABELS,
+  STREAMER_UI_PLATFORMS,
+} from "../features/streamers/streamerPlatforms";
 
 export function meta() {
   return [
@@ -19,18 +23,14 @@ export default function WikiStreamerVerificationRoute() {
       <section>
         <h2 className="text-lg font-black text-text-primary">{t.platformsHeading}</h2>
         <div className="mt-3 flex flex-wrap items-center gap-4">
-          {(["YOUTUBE", "CHZZK", "SOOP", "TWITCH"] as const).map((p) => (
-            <div key={p} className="flex items-center gap-2 rounded-xl bg-surface px-3 py-2">
-              <PlatformIcon platform={p} size={22} />
-              <span className="text-xs font-bold text-text-primary">{p}</span>
-              <span
-                className={`rounded-full border px-2 py-0.5 text-[10px] font-extrabold ${
-                  p === "SOOP"
-                    ? "border-accent-yellow/30 bg-accent-yellow/10 text-accent-yellow"
-                    : "border-accent-green/30 bg-accent-green/10 text-accent-green"
-                }`}
-              >
-                {p === "SOOP" ? t.platformDeferred : t.platformAvailable}
+          {STREAMER_UI_PLATFORMS.map((platform) => (
+            <div key={platform} className="flex items-center gap-2 rounded-xl bg-surface px-3 py-2">
+              <PlatformIcon platform={platform} size={22} />
+              <span className="text-xs font-bold text-text-primary">
+                {STREAMER_UI_PLATFORM_LABELS[platform]}
+              </span>
+              <span className="rounded-full border border-accent-green/30 bg-accent-green/10 px-2 py-0.5 text-[10px] font-extrabold text-accent-green">
+                {t.platformAvailable}
               </span>
             </div>
           ))}
