@@ -277,18 +277,19 @@ export function Sidebar({ isMobileOpen, onMobileClose, isGamePlayPage }: Sidebar
       >
         <div className="h-[calc(100dvh-4rem)] w-16">
           <div
-            className={`fixed bottom-0 left-0 top-16 flex flex-col overflow-hidden border-r border-border/80 bg-surface-sidebar shadow-[14px_0_36px_rgba(0,0,0,0.24)] transition-[width] duration-300 ease-out ${
+            className={`fixed bottom-0 left-0 top-16 flex flex-col border-r border-border/80 bg-surface-sidebar shadow-[14px_0_36px_rgba(0,0,0,0.24)] transition-[width] duration-300 ease-out ${
               expanded ? "w-56" : "w-16"
             }`}
           >
             {isGamePlayPage && (
               <button
+                data-gameplay-sidebar-toggle
                 type="button"
                 onClick={toggleGameplaySidebar}
                 aria-expanded={expanded}
                 aria-label={expanded ? dict.sidebar.collapseMenuAria : dict.sidebar.expandMenuAria}
                 title={expanded ? dict.sidebar.collapseMenuAria : dict.sidebar.expandMenuAria}
-                className="absolute -right-3 top-4 z-20 flex h-7 w-7 items-center justify-center rounded-full border border-border bg-surface-raised text-brand-light shadow-lg transition-colors hover:border-brand/60 hover:bg-surface-overlay hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                className="absolute right-0 top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 translate-x-1/2 items-center justify-center rounded-full border border-border bg-surface-raised text-brand-light shadow-lg transition-colors hover:border-brand/60 hover:bg-surface-overlay hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
               >
                 {expanded ? (
                   <ChevronLeft className="h-4 w-4" aria-hidden="true" />

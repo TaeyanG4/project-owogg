@@ -30,6 +30,10 @@ test("desktop pages reserve the expanded rail while gameplay keeps a persisted m
   assert.match(sidebar, /onMouseEnter=\{openAutoSidebar\}/);
   assert.match(sidebar, /expanded \? "w-56" : "w-16"/);
   assert.match(sidebar, /fixed bottom-0 left-0 top-16/);
+  assert.doesNotMatch(sidebar, /fixed bottom-0 left-0 top-16[^\n]*overflow-hidden/);
+  assert.match(sidebar, /data-gameplay-sidebar-toggle/);
+  assert.match(sidebar, /right-0 top-1\/2/);
+  assert.match(sidebar, /-translate-y-1\/2 translate-x-1\/2/);
   assert.match(sidebar, /flex h-full min-h-0 flex-col overflow-hidden p-2/);
   assert.match(sidebar, /flex shrink-0 flex-col gap-1\.5/);
   assert.match(sidebar, /data-sidebar-secondary-scroll/);
