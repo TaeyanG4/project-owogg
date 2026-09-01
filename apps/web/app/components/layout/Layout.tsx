@@ -46,6 +46,7 @@ export function Layout({ children }: LayoutProps) {
           isMobileOpen={isMobileSidebarOpen}
           onMobileClose={closeMobileSidebar}
           isGamePlayPage={isGamePlayWorkspace}
+          reserveExpandedWidth={isAdminWorkspace}
         />
         {isAdminWorkspace ? (
           <AdminWorkspace

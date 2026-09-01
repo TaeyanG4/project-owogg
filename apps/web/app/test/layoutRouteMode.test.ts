@@ -24,6 +24,7 @@ test("catalog auto-expands the desktop rail while gameplay keeps a persisted man
 
   assert.match(layout, /isGamePlayPage=\{isGamePlayWorkspace\}/);
   assert.match(sidebar, /onMouseEnter=\{openAutoSidebar\}/);
+  assert.match(sidebar, /expanded && \(isGamePlayPage \|\| reserveExpandedWidth\)/);
   assert.match(sidebar, /GAMEPLAY_EXPANDED_KEY/);
   assert.match(sidebar, /aria-expanded=\{expanded\}/);
   assert.match(sidebar, /games\?view=genres/);

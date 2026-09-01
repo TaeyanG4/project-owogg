@@ -170,11 +170,17 @@ interface SidebarProps {
   isMobileOpen: boolean;
   onMobileClose: () => void;
   isGamePlayPage: boolean;
+  reserveExpandedWidth: boolean;
 }
 
 const GAMEPLAY_EXPANDED_KEY = "owogg_gameplay_sidebar_expanded";
 
-export function Sidebar({ isMobileOpen, onMobileClose, isGamePlayPage }: SidebarProps) {
+export function Sidebar({
+  isMobileOpen,
+  onMobileClose,
+  isGamePlayPage,
+  reserveExpandedWidth,
+}: SidebarProps) {
   const location = useLocation();
   const { dict } = useI18n();
   const { externalPlatformGamesVisible } = usePlatformFeatureSettings();
@@ -220,6 +226,7 @@ export function Sidebar({ isMobileOpen, onMobileClose, isGamePlayPage }: Sidebar
   };
 
   const expanded = isGamePlayPage ? gameplayExpanded : autoExpanded;
+  const expandedWithinLayout = expanded && (isGamePlayPage || reserveExpandedWidth);
   const gameNavItems: NavItem[] = [
     { label: dict.sidebar.home, path: "/", icon: Home, match: "home" },
     { label: dict.sidebar.allGames, path: "/games", icon: Gamepad2, match: "games-all" },
@@ -263,7 +270,7 @@ export function Sidebar({ isMobileOpen, onMobileClose, isGamePlayPage }: Sidebar
     <>
       <aside
         className={`relative z-30 hidden shrink-0 bg-surface-sidebar transition-[width] duration-300 ease-out lg:block ${
-          isGamePlayPage && expanded ? "w-56" : "w-16"
+          expandedWithinLayout ? "w-56" : "w-16"
         }`}
         onMouseEnter={openAutoSidebar}
         onMouseLeave={scheduleAutoCollapse}
