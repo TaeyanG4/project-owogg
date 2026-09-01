@@ -442,7 +442,7 @@ const FULLSCREEN_KEYS = ["supported", "recommended"] as const;
 const MOBILE_SUPPORT = ["supported", "experimental", "unsupported"] as const;
 const MOBILE_ORIENTATIONS = ["any", "portrait", "landscape"] as const;
 const MOBILE_KEYS = ["support", "orientation"] as const;
-const PRESENTATION_KEYS = ["viewport", "fullscreen", "mobile"] as const;
+const PRESENTATION_KEYS = ["viewport", "fullscreen", "mobile", "defaultMode"] as const;
 
 function parseViewport(value: unknown): GamePresentation["viewport"] {
   const raw = asRecord(value, "presentation.viewport");
@@ -564,10 +564,21 @@ function parsePresentation(value: unknown): GamePresentation {
   if (!("fullscreen" in raw)) fail("INVALID_DOCUMENT", "presentation.fullscreen is required");
   if (!("mobile" in raw)) fail("INVALID_DOCUMENT", "presentation.mobile is required");
 
+  const defaultMode = raw.defaultMode;
+  if (
+    defaultMode !== undefined &&
+    (typeof defaultMode !== "string" || !["default", "theater"].includes(defaultMode))
+  ) {
+    fail("INVALID_DOCUMENT", "presentation.defaultMode must be one of default, theater");
+  }
+
   return {
     viewport: parseViewport(raw.viewport),
     fullscreen: parseFullscreen(raw.fullscreen),
     mobile: parseMobile(raw.mobile),
+    ...(typeof defaultMode === "string"
+      ? { defaultMode: defaultMode as GamePresentation["defaultMode"] }
+      : {}),
   };
 }
 

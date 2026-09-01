@@ -81,7 +81,20 @@ const GamePresentationSchema = z.object({
     support: z.enum(["supported", "experimental", "unsupported"]),
     orientation: z.enum(["any", "portrait", "landscape"]).optional(),
   }),
+  defaultMode: z.enum(["default", "theater"]).optional(),
 });
+
+export const PublicGameDescriptionDocumentSchema = z
+  .object({
+    locale: z.enum(["en", "ko", "ja", "zh"]),
+    path: z.enum(["description.md", "description_kr.md", "description_ja.md", "description_zh.md"]),
+    markdown: z.string(),
+  })
+  .strict();
+
+export const PublicGameDescriptionImageSchema = z
+  .object({ path: z.string().min(1), url: z.string().url() })
+  .strict();
 
 const TaxonomyCatalogSchema = z.object({
   type: z.literal("TAXONOMY"),
@@ -123,6 +136,8 @@ const PublicGameSchemaBase = {
     popularityScore: z.number().int().nonnegative(),
   }),
   mediaUrl: z.union([z.string().url(), z.string().startsWith("/")]).nullable(),
+  descriptions: z.array(PublicGameDescriptionDocumentSchema).optional(),
+  descriptionImages: z.array(PublicGameDescriptionImageSchema).max(5).optional(),
 };
 
 /** Provider authority is an explicit wire discriminant. No publisher user id or review fields

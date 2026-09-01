@@ -1,10 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  extractGameCreatorManifest,
   GameCreatorManifestValidationError,
   parseGameCreatorManifest,
   resolveGameCreatorManifestMultiplayerPlanV1,
 } from "../src/domain/gameCreatorManifest.js";
+
+const textBytes = (value: string) => new TextEncoder().encode(value);
 
 function minimal() {
   return {
@@ -98,6 +101,129 @@ test("Creator Manifest v1 accepts the minimum unscored game", () => {
   assert.equal(manifest.game.slug, "test-game");
   assert.equal(manifest.result.score, null);
   assert.deepEqual(manifest.game.playModes, ["single"]);
+});
+
+test("file-based descriptions require the English default and exact bundle references", () => {
+  const source = {
+    ...minimal(),
+    game: {
+      ...minimal().game,
+      description: ["description.md", "description_kr.md"],
+      description_images: ["guide.webp"],
+    },
+    presentation: { defaultMode: "theater" },
+  };
+  const manifest = extractGameCreatorManifest([
+    {
+      path: "owogg.json",
+      bytes: textBytes(JSON.stringify(source)),
+      contentType: "application/json",
+    },
+    {
+      path: "description.md",
+      bytes: textBytes("# English"),
+      contentType: "text/markdown",
+    },
+    {
+      path: "description_kr.md",
+      bytes: textBytes("# 한국어"),
+      contentType: "text/markdown",
+    },
+    { path: "guide.webp", bytes: textBytes("image"), contentType: "image/webp" },
+  ]);
+  assert.deepEqual(manifest?.game.description, ["description.md", "description_kr.md"]);
+  assert.equal(manifest?.presentation?.defaultMode, "theater");
+
+  assert.throws(
+    () =>
+      extractGameCreatorManifest([
+        {
+          path: "owogg.json",
+          bytes: textBytes(JSON.stringify(source)),
+          contentType: "application/json",
+        },
+        {
+          path: "description.md",
+          bytes: textBytes("# English"),
+          contentType: "text/markdown",
+        },
+        {
+          path: "description_kr.md",
+          bytes: textBytes("# 한국어"),
+          contentType: "text/markdown",
+        },
+      ]),
+    /references missing file guide\.webp/,
+  );
+
+  assert.throws(
+    () =>
+      parseGameCreatorManifest({
+        ...minimal(),
+        game: { ...minimal().game, description: ["description_kr.md"] },
+      }),
+    /must include description\.md/,
+  );
+
+  assert.throws(
+    () =>
+      extractGameCreatorManifest([
+        {
+          path: "owogg.json",
+          bytes: textBytes(JSON.stringify(source)),
+          contentType: "application/json",
+        },
+        { path: "description.md", bytes: textBytes("   \n"), contentType: "text/markdown" },
+        {
+          path: "description_kr.md",
+          bytes: textBytes("# 한국어"),
+          contentType: "text/markdown",
+        },
+        { path: "guide.webp", bytes: textBytes("image"), contentType: "image/webp" },
+      ]),
+    /description\.md must not be blank/,
+  );
+});
+
+test("description images are capped at five raster files", () => {
+  assert.throws(
+    () =>
+      parseGameCreatorManifest({
+        ...minimal(),
+        game: {
+          ...minimal().game,
+          description: ["description.md"],
+          description_images: Array.from({ length: 6 }, (_, index) => `image-${index}.png`),
+        },
+      }),
+    /at most 5 files/,
+  );
+
+  const svgSource = {
+    ...minimal(),
+    game: {
+      ...minimal().game,
+      description: ["description.md"],
+      description_images: ["unsafe.svg"],
+    },
+  };
+  assert.throws(
+    () =>
+      extractGameCreatorManifest([
+        {
+          path: "owogg.json",
+          bytes: textBytes(JSON.stringify(svgSource)),
+          contentType: "application/json",
+        },
+        {
+          path: "description.md",
+          bytes: textBytes("# English"),
+          contentType: "text/markdown",
+        },
+        { path: "unsafe.svg", bytes: textBytes("<svg/>"), contentType: "image/svg+xml" },
+      ]),
+    /must reference a raster image/,
+  );
 });
 
 test("Creator Manifest requires the unified v1 shape and rejects other schema versions", () => {

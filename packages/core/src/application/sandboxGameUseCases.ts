@@ -35,7 +35,10 @@ import {
 } from "../domain/sandboxGameBundle.js";
 import {
   GameCreatorManifestValidationError,
+  defaultGameDescription,
   extractGameCreatorManifest,
+  gameDescriptionFilePaths,
+  gameDescriptionImagePaths,
   getMultiplayerRuntimeProfileRequestV1,
   parseGameCreatorManifestBytes,
 } from "../domain/gameCreatorManifest.js";
@@ -50,6 +53,7 @@ import {
 import { jsonDeepEqual } from "./jsonDeepEqual.js";
 import type { GamePublicationService } from "./gamePublicationService.js";
 import {
+  buildGameDescriptionRevision,
   patchGameCreatorManifestBasicMetadata,
   rebuildGameBundleArchive,
   serializeGameCreatorManifest,
@@ -72,6 +76,8 @@ export type SandboxGameUseCaseError =
   | "VERSION_NOT_PUBLISHED"
   | "VERSION_NOT_APPROVED"
   | "PUBLISH_FAILED"
+  /** A non-admin creator already changed description content/tags within the last 24 hours. */
+  | "CONTENT_EDIT_COOLDOWN"
   /** The developer already has MAX_CONCURRENT_REVIEW_SLOTS games awaiting their first review
    * decision — see createGame. */
   | "SUBMISSION_LIMIT_REACHED"
@@ -138,9 +144,58 @@ export type SandboxGameUseCaseError =
   | SandboxBundleRejection;
 
 export class SandboxGameUseCaseFailure extends Error {
-  constructor(public readonly code: SandboxGameUseCaseError) {
+  constructor(
+    public readonly code: SandboxGameUseCaseError,
+    public readonly availableAt?: string | undefined,
+  ) {
     super(code);
   }
+}
+
+const CREATOR_CONTENT_EDIT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) return false;
+  for (let index = 0; index < left.byteLength; index++) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
+}
+
+function creatorManagedContentChanged(
+  previousManifest: NonNullable<ReturnType<typeof extractGameCreatorManifest>>,
+  previousFiles: readonly PreparedBundleFile[],
+  nextManifest: NonNullable<ReturnType<typeof extractGameCreatorManifest>>,
+  nextFiles: readonly PreparedBundleFile[],
+): boolean {
+  if (
+    JSON.stringify(previousManifest.game.tags ?? []) !==
+    JSON.stringify(nextManifest.game.tags ?? [])
+  ) {
+    return true;
+  }
+  if (
+    JSON.stringify(previousManifest.game.description ?? null) !==
+      JSON.stringify(nextManifest.game.description ?? null) ||
+    JSON.stringify(previousManifest.game.description_images ?? []) !==
+      JSON.stringify(nextManifest.game.description_images ?? [])
+  ) {
+    return true;
+  }
+  const managedPaths = new Set([
+    ...gameDescriptionFilePaths(previousManifest),
+    ...gameDescriptionImagePaths(previousManifest),
+    ...gameDescriptionFilePaths(nextManifest),
+    ...gameDescriptionImagePaths(nextManifest),
+  ]);
+  const previousByPath = new Map(previousFiles.map((file) => [file.path, file.bytes]));
+  const nextByPath = new Map(nextFiles.map((file) => [file.path, file.bytes]));
+  for (const path of managedPaths) {
+    const before = previousByPath.get(path);
+    const after = nextByPath.get(path);
+    if (!before || !after || !bytesEqual(before, after)) return true;
+  }
+  return false;
 }
 
 /** Bundle rejections are raised deep in the pure domain layer (which has no reason to know about
@@ -295,6 +350,8 @@ export class SandboxGameUseCases {
     description: string | null;
     genre: string;
     mode: SandboxGameMode;
+    tags?: readonly string[] | undefined;
+    defaultScreenMode?: "default" | "theater" | undefined;
   }): Promise<SandboxGameRecord> {
     const slug = input.slug.trim().toLowerCase();
     if (!isValidSandboxGameSlug(slug)) throw new SandboxGameUseCaseFailure("INVALID_SLUG");
@@ -317,6 +374,8 @@ export class SandboxGameUseCases {
       description: input.description,
       genre: input.genre.trim(),
       mode: input.mode,
+      tags: input.tags ?? [],
+      defaultScreenMode: input.defaultScreenMode ?? "default",
       nowIso: new Date().toISOString(),
     });
     if (!created) throw new SandboxGameUseCaseFailure("SUBMISSION_LIMIT_REACHED");
@@ -391,15 +450,66 @@ export class SandboxGameUseCases {
         }
       : prepared;
 
-    return this.uploadPreparedVersion({
-      gameId: game.id,
-      requestedByUserId: game.developerUserId,
-      bytes: input.bytes,
-      contentType: input.contentType,
-      prepared: publishablePrepared,
-      manifest,
-      ...(logoFile ? { logoFile } : {}),
-    });
+    let claimedAt: string | null = null;
+    if (!input.isAdmin) {
+      let previous: Awaited<ReturnType<SandboxGameUseCases["revisionBase"]>> | null = null;
+      try {
+        previous = await this.revisionBase(game);
+      } catch (error) {
+        if (!(error instanceof SandboxGameUseCaseFailure) || error.code !== "VERSION_NOT_FOUND") {
+          throw error;
+        }
+      }
+      if (
+        previous &&
+        creatorManagedContentChanged(
+          previous.manifest,
+          previous.prepared.files,
+          manifest,
+          publishablePrepared.files,
+        )
+      ) {
+        claimedAt = new Date().toISOString();
+        const cutoffIso = new Date(
+          Date.parse(claimedAt) - CREATOR_CONTENT_EDIT_COOLDOWN_MS,
+        ).toISOString();
+        const claim = await this.repo.claimContentEdit({
+          gameId: game.id,
+          userId: input.actingUserId,
+          nowIso: claimedAt,
+          cutoffIso,
+        });
+        if (!claim.claimed) {
+          throw new SandboxGameUseCaseFailure(
+            "CONTENT_EDIT_COOLDOWN",
+            claim.availableAt ?? undefined,
+          );
+        }
+      }
+    }
+
+    try {
+      return await this.uploadPreparedVersion({
+        gameId: game.id,
+        requestedByUserId: game.developerUserId,
+        bytes: input.bytes,
+        contentType: input.contentType,
+        prepared: publishablePrepared,
+        manifest,
+        ...(logoFile ? { logoFile } : {}),
+      });
+    } catch (error) {
+      if (claimedAt) {
+        await this.repo
+          .releaseContentEditClaim({
+            gameId: game.id,
+            userId: input.actingUserId,
+            claimedAt,
+          })
+          .catch(() => {});
+      }
+      throw error;
+    }
   }
 
   private async revisionBase(game: SandboxGameRecord): Promise<{
@@ -485,11 +595,13 @@ export class SandboxGameUseCases {
   }): Promise<SandboxGameVersionRecord> {
     const game = await this.assertRevisionAccess(input);
     const base = await this.revisionBase(game);
-    let manifest = base.manifest;
+    let manifest: typeof base.manifest;
     try {
-      const canonical = await this.gameCanonicalRepo.findBySlug(game.slug);
-      if (canonical?.creatorManifest) manifest = canonical.creatorManifest;
-      manifest = patchGameCreatorManifestBasicMetadata(manifest, input.metadata);
+      // The canonical document describes the approved/live projection and can legitimately lag a
+      // newer PENDING_REVIEW source ZIP. Basing this edit on it would silently resurrect old tags
+      // or description declarations. Partial creator/admin edits always preserve the newest
+      // immutable source version instead; review will canonicalize the resulting version again.
+      manifest = patchGameCreatorManifestBasicMetadata(base.manifest, input.metadata);
     } catch (error) {
       return manifestFailure(error);
     }
@@ -499,6 +611,60 @@ export class SandboxGameUseCases {
       isAdmin: input.isAdmin,
       bytes: serializeGameCreatorManifest(manifest).buffer as ArrayBuffer,
     });
+  }
+
+  /** Creator/admin partial description submission. USER publications remain reviewable immutable
+   * versions; authorization is checked against the server-owned publisher user id. */
+  async replaceDescriptionPackage(input: {
+    gameId: number;
+    actingUserId: number;
+    isAdmin: boolean;
+    fileName: string;
+    bytes: ArrayBuffer;
+  }): Promise<SandboxGameVersionRecord> {
+    if (!this.archiveWriter) throw new SandboxGameUseCaseFailure("PUBLISH_FAILED");
+    if (
+      input.bytes.byteLength === 0 ||
+      input.bytes.byteLength > SANDBOX_GAME_POLICY.MAX_BUNDLE_BYTES
+    ) {
+      throw new SandboxGameUseCaseFailure("BUNDLE_TOO_LARGE");
+    }
+    const game = await this.assertRevisionAccess(input);
+    const base = await this.revisionBase(game);
+    const replaceAll = input.fileName.toLowerCase().endsWith(".zip");
+    try {
+      const packageFiles = replaceAll
+        ? this.publisher.prepareArchiveFiles(input.bytes).files
+        : [
+            (() => {
+              const path = input.fileName.replace(/\\/g, "/").split("/").at(-1) ?? "";
+              const { contentType, contentEncoding } = resolveBundleContentType(path);
+              return {
+                path,
+                bytes: new Uint8Array(input.bytes),
+                contentType,
+                contentEncoding,
+              };
+            })(),
+          ];
+      const revision = buildGameDescriptionRevision({
+        manifest: base.manifest,
+        packageFiles,
+        replaceAll,
+      });
+      const archive = rebuildGameBundleArchive({
+        prepared: base.prepared,
+        writer: this.archiveWriter,
+        manifestBytes: serializeGameCreatorManifest(revision.manifest),
+        currentLogo: null,
+        removePaths: revision.removePaths,
+        replacementFiles: revision.replacementFiles,
+      });
+      return await this.uploadVersion({ ...input, bytes: archive, contentType: "application/zip" });
+    } catch (error) {
+      if (error instanceof SandboxGameUseCaseFailure) throw error;
+      return manifestFailure(error);
+    }
   }
 
   /** Replaces only the game-level logo. A content-addressed object is written before D1 switches
@@ -616,9 +782,11 @@ export class SandboxGameUseCases {
       developerUserId: input.developerUserId,
       title: manifest.game.title,
       shortDescription: manifest.game.shortDescription ?? null,
-      description: manifest.game.description ?? null,
+      description: defaultGameDescription(manifest, prepared.files) ?? null,
       genre: manifest.game.genre,
       mode: manifest.game.mode,
+      tags: manifest.game.tags ?? [],
+      defaultScreenMode: manifest.presentation?.defaultMode ?? "default",
     });
 
     // The logo is a game-level asset, not a playable bundle file — excluded from what actually
@@ -844,8 +1012,10 @@ export class SandboxGameUseCases {
         {
           title: manifest.game.title,
           shortDescription: manifest.game.shortDescription ?? null,
-          description: manifest.game.description ?? null,
+          description: defaultGameDescription(manifest, prepared.files) ?? null,
           genre: manifest.game.genre,
+          tags: manifest.game.tags ?? [],
+          defaultScreenMode: manifest.presentation?.defaultMode ?? "default",
           scoreUnit: score?.unit ?? null,
           scoreDirection: score?.direction ?? null,
           scoreMin: score?.range.min ?? null,
@@ -860,6 +1030,7 @@ export class SandboxGameUseCases {
           manifest,
           publisherOfficial: false,
           updatedAt: nowIso,
+          defaultDescription: defaultGameDescription(manifest, prepared.files),
           previous,
         }),
       );

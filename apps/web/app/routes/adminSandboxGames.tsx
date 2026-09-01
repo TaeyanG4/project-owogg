@@ -16,6 +16,7 @@ import {
   X,
   FileArchive,
   FileJson,
+  FileText,
   Image,
 } from "lucide-react";
 import { useAuth } from "../features/auth";
@@ -27,11 +28,13 @@ import {
   postRejectSandboxVersion,
   postRevokeSandboxVersion,
   patchSandboxGameMetadata,
+  patchAdminSandboxGameBasicMetadata,
   patchSandboxGameVisibility,
   deleteSandboxGame,
   purgeSandboxGame,
   uploadAdminSandboxGameVersion,
   replaceAdminSandboxGameManifest,
+  replaceAdminSandboxGameDescription,
   replaceAdminSandboxGameLogo,
 } from "../features/adminApi";
 import type {
@@ -496,6 +499,7 @@ export default function AdminSandboxGamesRoute() {
 
             {detail && (
               <GameDetailPanel
+                key={`${detail.game.id}:${detail.game.updatedAt}`}
                 detail={detail}
                 onChanged={setDetail}
                 onPurged={handlePurged}
@@ -526,9 +530,12 @@ function GameDetailPanel({
     detail.auditLog.some((entry) => entry.action === "VERSION_APPROVED");
   const [title, setTitle] = useState(game.title);
   const [shortDescription, setShortDescription] = useState(game.shortDescription ?? "");
-  const [description, setDescription] = useState(game.description ?? "");
   const [genre, setGenre] = useState(game.genre);
   const [mode, setMode] = useState<"single" | "multi">(game.mode);
+  const [tags, setTags] = useState(game.tags.join(", "));
+  const [defaultScreenMode, setDefaultScreenMode] = useState<"default" | "theater">(
+    game.defaultScreenMode,
+  );
   const [xp, setXp] = useState(String(game.xpPerCompletion));
   const [scoreUnit, setScoreUnit] = useState(game.scoreUnit ?? "");
   const [scoreDirection, setScoreDirection] = useState(game.scoreDirection ?? "");
@@ -539,25 +546,63 @@ function GameDetailPanel({
   const [deleting, setDeleting] = useState(false);
   const [purging, setPurging] = useState(false);
   const [revokingVersionId, setRevokingVersionId] = useState<number | null>(null);
-  const [uploadingPart, setUploadingPart] = useState<"bundle" | "manifest" | "logo" | null>(null);
+  const [uploadingPart, setUploadingPart] = useState<
+    "bundle" | "manifest" | "description" | "logo" | null
+  >(null);
 
   const handleSaveMetadata = async () => {
     setSaving(true);
     onError("");
     try {
-      const game2 = await patchSandboxGameMetadata(game.id, {
-        title,
-        shortDescription: shortDescription || null,
-        description: description || null,
-        genre,
-        mode,
-        xpPerCompletion: Number(xp) || 0,
-        scoreUnit: scoreUnit || null,
-        scoreDirection: (scoreDirection || null) as "asc" | "desc" | null,
-        scoreMin: scoreMin === "" ? null : Number(scoreMin),
-        scoreMax: scoreMax === "" ? null : Number(scoreMax),
-      });
-      onChanged({ ...detail, game: game2 });
+      const nextTitle = title.trim();
+      const nextShortDescription = shortDescription.trim() || null;
+      const nextGenre = genre.trim();
+      const nextTags = tags
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean);
+      const basicChanged =
+        nextTitle !== game.title ||
+        nextShortDescription !== game.shortDescription ||
+        nextGenre !== game.genre ||
+        mode !== game.mode ||
+        nextTags.length !== game.tags.length ||
+        nextTags.some((tag, index) => tag !== game.tags[index]) ||
+        defaultScreenMode !== game.defaultScreenMode;
+      const nextXp = Number(xp) || 0;
+      const nextScoreUnit = scoreUnit.trim() || null;
+      const nextScoreDirection = (scoreDirection || null) as "asc" | "desc" | null;
+      const nextScoreMin = scoreMin === "" ? null : Number(scoreMin);
+      const nextScoreMax = scoreMax === "" ? null : Number(scoreMax);
+      const operationalChanged =
+        nextXp !== game.xpPerCompletion ||
+        nextScoreUnit !== game.scoreUnit ||
+        nextScoreDirection !== game.scoreDirection ||
+        nextScoreMin !== game.scoreMin ||
+        nextScoreMax !== game.scoreMax;
+
+      if (basicChanged) {
+        await patchAdminSandboxGameBasicMetadata(game.id, {
+          title: nextTitle,
+          shortDescription: nextShortDescription,
+          genre: nextGenre,
+          mode,
+          tags: nextTags,
+          defaultScreenMode,
+        });
+      }
+      if (operationalChanged) {
+        await patchSandboxGameMetadata(game.id, {
+          xpPerCompletion: nextXp,
+          scoreUnit: nextScoreUnit,
+          scoreDirection: nextScoreDirection,
+          scoreMin: nextScoreMin,
+          scoreMax: nextScoreMax,
+        });
+      }
+      if (basicChanged || operationalChanged) {
+        onChanged(await fetchAdminSandboxGameDetail(game.id));
+      }
     } catch (err) {
       onError(err instanceof Error ? err.message : "메타데이터 저장에 실패했습니다.");
     } finally {
@@ -565,12 +610,16 @@ function GameDetailPanel({
     }
   };
 
-  const handleSupportUpload = async (kind: "bundle" | "manifest" | "logo", file: File) => {
+  const handleSupportUpload = async (
+    kind: "bundle" | "manifest" | "description" | "logo",
+    file: File,
+  ) => {
     setUploadingPart(kind);
     onError("");
     try {
       if (kind === "bundle") await uploadAdminSandboxGameVersion(game.id, file);
       if (kind === "manifest") await replaceAdminSandboxGameManifest(game.id, file);
+      if (kind === "description") await replaceAdminSandboxGameDescription(game.id, file);
       if (kind === "logo") await replaceAdminSandboxGameLogo(game.id, file);
       onChanged(await fetchAdminSandboxGameDetail(game.id));
     } catch (err) {
@@ -754,8 +803,8 @@ function GameDetailPanel({
         <div className="rounded-xl border border-border bg-surface p-4">
           <h4 className="text-xs font-black text-text-primary">제작자 지원 재업로드</h4>
           <p className="mt-1 text-[11px] text-text-muted">
-            전체 ZIP 또는 owogg.json은 새 심사 버전이 되며, 로고는 게임 공통 이미지로 즉시
-            교체됩니다.
+            전체 ZIP, owogg.json, 게임 설명은 새 심사 버전이 되며, 로고는 게임 공통 이미지로 즉시
+            교체됩니다. 관리자는 설명·태그 수정의 24시간 제한을 적용받지 않습니다.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <SupportUploadLabel
@@ -775,6 +824,14 @@ function GameDetailPanel({
               onFile={(file) => void handleSupportUpload("manifest", file)}
             />
             <SupportUploadLabel
+              label="게임 설명"
+              accept=".md,.zip,text/markdown,application/zip"
+              busy={uploadingPart === "description"}
+              disabled={uploadingPart !== null}
+              icon={<FileText className="h-3.5 w-3.5" />}
+              onFile={(file) => void handleSupportUpload("description", file)}
+            />
+            <SupportUploadLabel
               label="로고"
               accept=".png,.jpg,.jpeg,.webp,.svg,image/png,image/jpeg,image/webp,image/svg+xml"
               busy={uploadingPart === "logo"}
@@ -785,6 +842,11 @@ function GameDetailPanel({
           </div>
         </div>
       )}
+
+      <p className="rounded-xl border border-border/70 bg-surface px-3 py-2 text-[11px] leading-relaxed text-text-muted">
+        제목·장르·모드·짧은 설명·태그·기본 화면은 새 <strong>owogg.json 심사 버전</strong>으로
+        저장됩니다. XP와 점수 정책은 관리자 운영값으로 즉시 저장됩니다.
+      </p>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <LabeledField label="제목">
@@ -828,12 +890,21 @@ function GameDetailPanel({
             className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-primary outline-none focus:ring-2 focus:ring-brand"
           />
         </LabeledField>
-        <LabeledField label="상세 설명">
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={3}
-            className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-primary outline-none focus:ring-2 focus:ring-brand"
+        <LabeledField label="기본 게임 화면">
+          <select
+            value={defaultScreenMode}
+            onChange={(e) => setDefaultScreenMode(e.target.value as "default" | "theater")}
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-primary"
+          >
+            <option value="default">기본 모드</option>
+            <option value="theater">영화관 모드</option>
+          </select>
+        </LabeledField>
+        <LabeledField label="태그 (쉼표로 구분, 최대 20개)">
+          <input
+            value={tags}
+            onChange={(e) => setTags(e.target.value)}
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-primary outline-none focus:ring-2 focus:ring-brand"
           />
         </LabeledField>
         <LabeledField label="점수 단위">

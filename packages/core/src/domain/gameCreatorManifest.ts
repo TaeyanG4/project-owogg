@@ -12,6 +12,8 @@ import {
   type OwoggGameCreatorManifest,
   type OwoggDifficultyDefinition,
   type OwoggEventDefinition,
+  type OwoggDescriptionFile,
+  type OwoggGameScreenMode,
   type OwoggInputMethod,
   type OwoggManifestGame,
   type OwoggManifestPlayConfig,
@@ -38,9 +40,34 @@ import {
   type MultiplayerRuntimeRequestResolutionV1,
 } from "../modules/multiplayer/domain/multiplayerProfileRequest.js";
 import { SANDBOX_GAME_POLICY } from "./sandboxGames.js";
-import type { PreparedBundleFile } from "./sandboxGameBundle.js";
+import {
+  normalizeBundleEntryPath,
+  resolveBundleContentType,
+  type PreparedBundleFile,
+} from "./sandboxGameBundle.js";
 
 export { OWOGG_GAME_CREATOR_MANIFEST_FILENAME };
+
+export type GameDescriptionLocale = "en" | "ko" | "ja" | "zh";
+
+export const GAME_DESCRIPTION_FILE_LOCALES = {
+  "description.md": "en",
+  "description_kr.md": "ko",
+  "description_ja.md": "ja",
+  "description_zh.md": "zh",
+} as const satisfies Readonly<Record<OwoggDescriptionFile, GameDescriptionLocale>>;
+
+export const GAME_DESCRIPTION_POLICY = {
+  MAX_MARKDOWN_BYTES_PER_FILE: 64 * 1024,
+  MAX_IMAGE_COUNT: 5,
+  MAX_IMAGE_BYTES_PER_FILE: 5 * 1024 * 1024,
+} as const;
+
+export interface GameDescriptionDocument {
+  readonly locale: GameDescriptionLocale;
+  readonly path: OwoggDescriptionFile;
+  readonly markdown: string;
+}
 
 export class GameCreatorManifestValidationError extends Error {
   constructor(public readonly detail: string) {
@@ -178,16 +205,54 @@ function parseGame(value: unknown): OwoggManifestGame {
   const source = record(value, "game");
   exactKeys(
     source,
-    ["slug", "title", "genre", "mode", "shortDescription", "description", "tags", "playModes"],
+    [
+      "slug",
+      "title",
+      "genre",
+      "mode",
+      "shortDescription",
+      "description",
+      "description_images",
+      "tags",
+      "playModes",
+    ],
     "game",
   );
   const shortDescription = optionalString(source, "shortDescription", "game", {
     max: SANDBOX_GAME_POLICY.MAX_SHORT_DESCRIPTION_LENGTH,
   });
-  const description = optionalString(source, "description", "game", {
-    max: SANDBOX_GAME_POLICY.MAX_DESCRIPTION_LENGTH,
-  });
+  const description =
+    source.description === undefined
+      ? undefined
+      : typeof source.description === "string"
+        ? optionalString(source, "description", "game", {
+            max: SANDBOX_GAME_POLICY.MAX_DESCRIPTION_LENGTH,
+          })
+        : (uniqueStrings(source.description, "game.description", [
+            "description.md",
+            "description_kr.md",
+            "description_ja.md",
+            "description_zh.md",
+          ] as const satisfies readonly OwoggDescriptionFile[]) as readonly OwoggDescriptionFile[]);
+  if (Array.isArray(description)) {
+    if (description.length === 0) invalid("game.description must not be empty");
+    if (!description.includes("description.md")) {
+      invalid("game.description must include description.md as the English default");
+    }
+  }
+  const descriptionImages =
+    source.description_images === undefined
+      ? undefined
+      : uniqueStrings(source.description_images, "game.description_images");
+  if ((descriptionImages?.length ?? 0) > GAME_DESCRIPTION_POLICY.MAX_IMAGE_COUNT) {
+    invalid(
+      `game.description_images must contain at most ${GAME_DESCRIPTION_POLICY.MAX_IMAGE_COUNT} files`,
+    );
+  }
   const tags = source.tags === undefined ? undefined : uniqueStrings(source.tags, "game.tags");
+  if ((tags?.length ?? 0) > 20) invalid("game.tags must contain at most 20 tags");
+  if (tags?.some((tag) => tag.length > 40))
+    invalid("game.tags entries must be at most 40 characters");
   const mode = enumValue(source, "mode", "game", ["single", "multi"] as const);
   const common: Omit<OwoggManifestGame, "playModes"> = {
     slug: requiredString(source, "slug", "game", {
@@ -203,6 +268,7 @@ function parseGame(value: unknown): OwoggManifestGame {
     mode,
     ...(shortDescription !== undefined ? { shortDescription } : {}),
     ...(description !== undefined ? { description } : {}),
+    ...(descriptionImages !== undefined ? { description_images: descriptionImages } : {}),
     ...(tags !== undefined ? { tags } : {}),
   };
   const playModes = uniqueStrings(source.playModes, "game.playModes", [
@@ -223,7 +289,7 @@ function parseGame(value: unknown): OwoggManifestGame {
 
 function parsePresentation(value: unknown): OwoggManifestPresentation {
   const source = record(value, "presentation");
-  exactKeys(source, ["orientation", "aspectRatio"], "presentation");
+  exactKeys(source, ["orientation", "aspectRatio", "defaultMode"], "presentation");
   const orientation =
     source.orientation === undefined
       ? undefined
@@ -235,9 +301,17 @@ function parsePresentation(value: unknown): OwoggManifestPresentation {
   const aspectRatio = optionalString(source, "aspectRatio", "presentation", {
     pattern: /^[1-9][0-9]*:[1-9][0-9]*$/,
   });
+  const defaultMode =
+    source.defaultMode === undefined
+      ? undefined
+      : enumValue(source, "defaultMode", "presentation", [
+          "default",
+          "theater",
+        ] as const satisfies readonly OwoggGameScreenMode[]);
   return {
     ...(orientation !== undefined ? { orientation } : {}),
     ...(aspectRatio !== undefined ? { aspectRatio } : {}),
+    ...(defaultMode !== undefined ? { defaultMode } : {}),
   };
 }
 
@@ -827,7 +901,97 @@ export function extractGameCreatorManifest(
 ): OwoggGameCreatorManifest | null {
   const file = files.find((candidate) => candidate.path === OWOGG_GAME_CREATOR_MANIFEST_FILENAME);
   if (!file) return null;
-  return parseGameCreatorManifestBytes(file.bytes);
+  const manifest = parseGameCreatorManifestBytes(file.bytes);
+  validateGameCreatorDescriptionFiles(manifest, files);
+  return manifest;
+}
+
+export function gameDescriptionFilePaths(
+  manifest: OwoggGameCreatorManifest,
+): readonly OwoggDescriptionFile[] {
+  return Array.isArray(manifest.game.description) ? manifest.game.description : [];
+}
+
+export function gameDescriptionImagePaths(manifest: OwoggGameCreatorManifest): readonly string[] {
+  return manifest.game.description_images ?? [];
+}
+
+function decodeDescriptionMarkdown(file: PreparedBundleFile): string {
+  if (file.bytes.byteLength === 0) invalid(`${file.path} must not be empty`);
+  if (file.bytes.byteLength > GAME_DESCRIPTION_POLICY.MAX_MARKDOWN_BYTES_PER_FILE) {
+    invalid(`${file.path} exceeds ${GAME_DESCRIPTION_POLICY.MAX_MARKDOWN_BYTES_PER_FILE} bytes`);
+  }
+  let markdown: string;
+  try {
+    markdown = new TextDecoder("utf-8", { fatal: true }).decode(file.bytes);
+  } catch {
+    return invalid(`${file.path} must be valid UTF-8 Markdown`);
+  }
+  if (markdown.trim().length === 0) invalid(`${file.path} must not be blank`);
+  return markdown;
+}
+
+/** Validates every file reference against the normalized immutable bundle. No public route may
+ * serve a description asset that did not pass this exact allowlist boundary at publication. */
+export function validateGameCreatorDescriptionFiles(
+  manifest: OwoggGameCreatorManifest,
+  files: readonly PreparedBundleFile[],
+): void {
+  const descriptionPaths = gameDescriptionFilePaths(manifest);
+  const imagePaths = gameDescriptionImagePaths(manifest);
+  if (imagePaths.length > 0 && descriptionPaths.length === 0) {
+    invalid("game.description_images requires file-based game.description");
+  }
+
+  const filesByPath = new Map(files.map((file) => [file.path, file]));
+  for (const path of descriptionPaths) {
+    const file = filesByPath.get(path);
+    if (!file) invalid(`game.description references missing file ${path}`);
+    decodeDescriptionMarkdown(file);
+  }
+
+  for (const path of imagePaths) {
+    if (normalizeBundleEntryPath(path) !== path) {
+      invalid(`game.description_images contains an invalid path: ${path}`);
+    }
+    const file = filesByPath.get(path);
+    if (!file) invalid(`game.description_images references missing file ${path}`);
+    if (
+      !new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]).has(
+        resolveBundleContentType(path).contentType,
+      )
+    ) {
+      invalid(`game.description_images must reference a raster image: ${path}`);
+    }
+    if (file.bytes.byteLength === 0) invalid(`${path} must not be empty`);
+    if (file.bytes.byteLength > GAME_DESCRIPTION_POLICY.MAX_IMAGE_BYTES_PER_FILE) {
+      invalid(`${path} exceeds ${GAME_DESCRIPTION_POLICY.MAX_IMAGE_BYTES_PER_FILE} bytes`);
+    }
+  }
+}
+
+export function extractGameDescriptionDocuments(
+  manifest: OwoggGameCreatorManifest,
+  files: readonly PreparedBundleFile[],
+): readonly GameDescriptionDocument[] {
+  validateGameCreatorDescriptionFiles(manifest, files);
+  const filesByPath = new Map(files.map((file) => [file.path, file]));
+  return gameDescriptionFilePaths(manifest).map((path) => ({
+    locale: GAME_DESCRIPTION_FILE_LOCALES[path],
+    path,
+    markdown: decodeDescriptionMarkdown(filesByPath.get(path) as PreparedBundleFile),
+  }));
+}
+
+/** Canonical's legacy string remains a compact default-language fallback for catalog consumers. */
+export function defaultGameDescription(
+  manifest: OwoggGameCreatorManifest,
+  files: readonly PreparedBundleFile[],
+): string | undefined {
+  if (typeof manifest.game.description === "string") return manifest.game.description;
+  return extractGameDescriptionDocuments(manifest, files).find(
+    (document) => document.locale === "en",
+  )?.markdown;
 }
 
 function parseGameCreatorManifestJsonBytes(bytes: ArrayBuffer | Uint8Array): unknown {

@@ -5,6 +5,7 @@ import {
   SandboxGameVersionDecisionRequestSchema,
   SandboxGameVersionRecordSchema,
   SandboxGameMetadataUpdateRequestSchema,
+  SandboxGameBasicMetadataUpdateRequestSchema,
   SandboxGameVisibilityUpdateRequestSchema,
   SandboxGameLiveVersionUpdateRequestSchema,
   SandboxGameRecordSchema,
@@ -306,8 +307,9 @@ adminSandboxGamesRouter.patch("/:id/live-version", async (c) => {
   }
 });
 
-// PATCH /api/admin/sandbox-games/:id/metadata — generalized, admin-adjustable metadata
-// (title/description/genre/XP/score config), independent of any bundle re-upload.
+// PATCH /api/admin/sandbox-games/:id/metadata — legacy/admin operational metadata. New UI edits
+// to owogg.json fields use /basic-metadata below so the source ZIP and review history remain the
+// authority; this route stays compatible for score/XP and older administrative callers.
 //
 // Stage C-2: this now also keeps a B2 canonical document in sync (see SandboxGameUseCases.
 // updateMetadata's own doc comment), which requires the same real Backblaze B2 config every
@@ -350,6 +352,53 @@ adminSandboxGamesRouter.patch("/:id/metadata", async (c) => {
     return c.json(errBody, status);
   }
 });
+
+// PATCH /api/admin/sandbox-games/:id/basic-metadata — support edit of the safe owogg.json subset
+// on a USER-owned game. It creates a normal immutable PENDING_REVIEW version; elevated access
+// bypasses the creator cooldown but never changes server-owned publisher identity.
+adminSandboxGamesRouter.patch(
+  "/:id/basic-metadata",
+  rateLimit({ name: "game-upload", binding: "GAME_UPLOAD_RATE_LIMITER" }),
+  async (c) => {
+    const admin = await requireElevatedAdmin(c);
+    if (isElevatedAdminResponse(admin)) return admin;
+    const denied = requirePermission(admin, "sandbox_games.review");
+    if (denied) return denied;
+    const parsed = SandboxGameBasicMetadataUpdateRequestSchema.safeParse(
+      await c.req.json().catch(() => ({})),
+    );
+    if (!parsed.success) {
+      return c.json(
+        { error: { code: "INVALID_REQUEST", message: "수정할 게임 속성이 올바르지 않습니다." } },
+        400,
+      );
+    }
+    const container = createContainer(c.env.DB, readB2Config(c.env));
+    if (!container.gameBundlesConfigured) {
+      return c.json(
+        {
+          error: {
+            code: "GAME_BUNDLES_NOT_CONFIGURED",
+            message: "번들 저장소(Backblaze B2)가 아직 이 환경에 구성되지 않았습니다.",
+          },
+        },
+        503,
+      );
+    }
+    try {
+      const version = await container.sandboxGameUseCases.updateBasicMetadataAsVersion({
+        gameId: Number(c.req.param("id")),
+        actingUserId: admin.userId,
+        isAdmin: true,
+        metadata: parsed.data,
+      });
+      return c.json(SandboxGameVersionRecordSchema.parse(version), 201);
+    } catch (err) {
+      const { body: errBody, status } = failureResponse(err);
+      return c.json(errBody, status);
+    }
+  },
+);
 
 // Admin support uploads use the same core version/manifest/logo operations as the Game Creator
 // Center. Publisher ownership remains USER; elevated access only acts on the owner's behalf.
@@ -421,6 +470,50 @@ adminSandboxGamesRouter.post(
         actingUserId: admin.userId,
         isAdmin: true,
         bytes: await manifest.arrayBuffer(),
+      });
+      return c.json(SandboxGameVersionRecordSchema.parse(version), 201);
+    } catch (err) {
+      const { body: errBody, status } = failureResponse(err);
+      return c.json(errBody, status);
+    }
+  },
+);
+
+adminSandboxGamesRouter.post(
+  "/:id/description",
+  rateLimit({ name: "game-upload", binding: "GAME_UPLOAD_RATE_LIMITER" }),
+  async (c) => {
+    const admin = await requireElevatedAdmin(c);
+    if (isElevatedAdminResponse(admin)) return admin;
+    const denied = requirePermission(admin, "sandbox_games.review");
+    if (denied) return denied;
+    const container = createContainer(c.env.DB, readB2Config(c.env));
+    if (!container.gameBundlesConfigured) {
+      return c.json(
+        { error: { code: "GAME_BUNDLES_NOT_CONFIGURED", message: "B2가 구성되지 않았습니다." } },
+        503,
+      );
+    }
+    const body = await c.req.parseBody().catch(() => null);
+    const description = body?.description;
+    if (!(description instanceof File)) {
+      return c.json(
+        {
+          error: {
+            code: "INVALID_REQUEST",
+            message: "description.md 또는 설명 ZIP 파일이 필요합니다.",
+          },
+        },
+        400,
+      );
+    }
+    try {
+      const version = await container.sandboxGameUseCases.replaceDescriptionPackage({
+        gameId: Number(c.req.param("id")),
+        actingUserId: admin.userId,
+        isAdmin: true,
+        fileName: description.name,
+        bytes: await description.arrayBuffer(),
       });
       return c.json(SandboxGameVersionRecordSchema.parse(version), 201);
     } catch (err) {

@@ -3,10 +3,12 @@ import {
   buildBundleManifest,
   isSha256ContentHash,
   isValidSandboxGameBundleManifest,
+  prepareArchiveFileEntries,
   prepareBundleFromArchive,
   publishedManifestObjectKey,
   publishedObjectKey,
   SandboxBundleRejectionError,
+  validateBundleEntryMetadata,
   type PreparedBundle,
   type SandboxGameBundleManifest,
 } from "../domain/sandboxGameBundle.js";
@@ -31,6 +33,15 @@ export class GamePublicationService {
   prepare(archive: ArrayBuffer): PreparedBundle {
     if (!this.archives) throw new Error("Bundle archive reader is not configured");
     return prepareBundleFromArchive(this.archives, archive);
+  }
+
+  /** Validated ZIP decoding for a partial content package. Unlike prepare(), this deliberately
+   * does not require index.html; the caller must enforce a narrower file allowlist. */
+  prepareArchiveFiles(archive: ArrayBuffer) {
+    if (!this.archives) throw new Error("Bundle archive reader is not configured");
+    const metadata = this.archives.readMetadata(archive);
+    validateBundleEntryMetadata(metadata);
+    return prepareArchiveFileEntries(this.archives.read(archive));
   }
 
   async publish(

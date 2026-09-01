@@ -14,6 +14,8 @@ export interface GameAvailability {
   description: string | null;
   genre: string | null;
   mode: "single" | "multi" | null;
+  tags: readonly string[];
+  defaultScreenMode: "default" | "theater";
   /** Latest bundle/manifest revision receipt time from server-owned game_versions data. */
   latestUploadedAt: string | null;
   publisherType: "OWOGG" | "USER";
@@ -73,6 +75,8 @@ export class GameSettingsUseCases {
       description: canonical?.description ?? null,
       genre: canonical?.catalog.type === "GENRE_MODE" ? canonical.catalog.genre : null,
       mode: canonical?.catalog.type === "GENRE_MODE" ? canonical.catalog.mode : null,
+      tags: canonical?.catalog.tags ?? [],
+      defaultScreenMode: canonical?.presentation?.defaultMode ?? "default",
       latestUploadedAt: item.latestUploadedAt,
       publisherType: identity.publisher.type,
       catalogRole: setting?.catalogRole ?? "GAME",
@@ -144,6 +148,8 @@ export class GameSettingsUseCases {
         description: canonical?.description ?? null,
         genre: canonical?.catalog.type === "GENRE_MODE" ? canonical.catalog.genre : null,
         mode: canonical?.catalog.type === "GENRE_MODE" ? canonical.catalog.mode : null,
+        tags: canonical?.catalog.tags ?? [],
+        defaultScreenMode: canonical?.presentation?.defaultMode ?? "default",
         latestUploadedAt: null,
         publisherType: identity.publisher.type,
         catalogRole: override?.catalogRole ?? "GAME",

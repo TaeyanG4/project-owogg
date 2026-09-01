@@ -107,6 +107,49 @@ test("PATCH /api/admin/sandbox-games/:id/metadata returns 503 GAME_BUNDLES_NOT_C
   assert.equal(gameQueries.length, 0);
 });
 
+test("PATCH /api/admin/sandbox-games/:id/basic-metadata uses the immutable bundle path and fails before a D1 metadata mutation when B2 is absent", async () => {
+  const { db, gameQueries } = createAdminDb({ userId: 1 });
+  const res = await app.request(
+    "/api/admin/sandbox-games/1/basic-metadata",
+    {
+      method: "PATCH",
+      headers: {
+        Cookie: ADMIN_COOKIE,
+        "Content-Type": "application/json",
+        Origin: "http://localhost:5173",
+      },
+      body: JSON.stringify({ tags: ["board"], defaultScreenMode: "theater" }),
+    },
+    { DB: db, ADMIN_USER_IDS: "1", FRONTEND_URL: "http://localhost:5173" } as any,
+  );
+
+  assert.equal(res.status, 503);
+  const body = (await res.json()) as { error: { code: string } };
+  assert.equal(body.error.code, "GAME_BUNDLES_NOT_CONFIGURED");
+  assert.equal(gameQueries.length, 0);
+});
+
+test("PATCH /api/admin/sandbox-games/:id/basic-metadata validates the manifest subset before storage configuration", async () => {
+  const { db } = createAdminDb({ userId: 1 });
+  const res = await app.request(
+    "/api/admin/sandbox-games/1/basic-metadata",
+    {
+      method: "PATCH",
+      headers: {
+        Cookie: ADMIN_COOKIE,
+        "Content-Type": "application/json",
+        Origin: "http://localhost:5173",
+      },
+      body: JSON.stringify({ tags: Array.from({ length: 21 }, (_, index) => `tag-${index}`) }),
+    },
+    { DB: db, ADMIN_USER_IDS: "1", FRONTEND_URL: "http://localhost:5173" } as any,
+  );
+
+  assert.equal(res.status, 400);
+  const body = (await res.json()) as { error: { code: string } };
+  assert.equal(body.error.code, "INVALID_REQUEST");
+});
+
 test("PATCH /api/admin/sandbox-games/:id/metadata still validates the request body before the B2 config check", async () => {
   const { db } = createAdminDb({ userId: 1 });
   const res = await app.request(
@@ -148,6 +191,25 @@ test("PATCH /api/admin/sandbox-games/:id/metadata is still denied for a non-admi
 
   // userId 7 is not in ADMIN_USER_IDS ("1") -> not eligible at all, same 403 as
   // adminStreamers.test.ts's own "non-admin is denied" case.
+  assert.equal(res.status, 403);
+});
+
+test("PATCH /api/admin/sandbox-games/:id/basic-metadata is denied for a non-admin", async () => {
+  const { db } = createAdminDb({ userId: 7 });
+  const res = await app.request(
+    "/api/admin/sandbox-games/1/basic-metadata",
+    {
+      method: "PATCH",
+      headers: {
+        Cookie: "owogg_session=valid_session",
+        "Content-Type": "application/json",
+        Origin: "http://localhost:5173",
+      },
+      body: JSON.stringify({ tags: ["board"] }),
+    },
+    { DB: db, ADMIN_USER_IDS: "1", FRONTEND_URL: "http://localhost:5173" } as any,
+  );
+
   assert.equal(res.status, 403);
 });
 

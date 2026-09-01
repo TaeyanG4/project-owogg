@@ -25,6 +25,7 @@ interface FakeGame {
   internalTool?: boolean;
   playerCount?: number;
   bookmarkCount?: number;
+  bundleFiles?: Readonly<Record<string, string | Uint8Array>>;
 }
 
 interface PublicGameJson {
@@ -191,6 +192,15 @@ function request(path: string, db: unknown, games: readonly FakeGame[], init: Re
     }
     const assetGame = games.find((game) => game.assetKey && url.endsWith(`/${game.assetKey}`));
     if (assetGame) return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    for (const game of games) {
+      if (game.live_version_id === null) continue;
+      for (const [path, bytes] of Object.entries(game.bundleFiles ?? {})) {
+        const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+        if (url.endsWith(`/games/${game.id}/${game.live_version_id}/${encodedPath}`)) {
+          return new Response(bytes, { status: 200 });
+        }
+      }
+    }
     return new Response("Not Found", { status: 404 });
   }) as typeof fetch;
 
@@ -391,6 +401,87 @@ test("GET /api/games/:slug resolves the same generic projection and denies priva
     games,
   );
   assert.equal(privateResponse.status, 404);
+});
+
+test("game detail projects localized Markdown and serves only current allowlisted raster images", async () => {
+  const localized: FakeGame = {
+    ...OFFICIAL,
+    id: 12,
+    slug: "localized-guide",
+    live_version_id: 1201,
+    canonical: {
+      ...OFFICIAL.canonical,
+      slug: "localized-guide",
+      creatorManifest: {
+        ...OFFICIAL.canonical.creatorManifest!,
+        game: {
+          ...OFFICIAL.canonical.creatorManifest!.game,
+          slug: "localized-guide",
+          description: ["description.md", "description_kr.md"],
+          description_images: ["guide/board.png", "guide/empty.png"],
+        },
+      },
+    },
+    bundleFiles: {
+      "description.md": "# English guide",
+      "description_kr.md": "# 한국어 안내",
+      "guide/board.png": new Uint8Array([137, 80, 78, 71]),
+      "guide/empty.png": new Uint8Array(),
+      "guide/private.png": new Uint8Array([1, 2, 3]),
+    },
+  };
+  const games = [localized];
+  const db = createDb(games);
+
+  const detailResponse = await request(
+    "https://api.example.test/api/games/localized-guide",
+    db,
+    games,
+  );
+  assert.equal(detailResponse.status, 200);
+  const detail = (await detailResponse.json()) as PublicGameJson;
+  assert.deepEqual(detail.descriptions, [
+    { locale: "en", path: "description.md", markdown: "# English guide" },
+    { locale: "ko", path: "description_kr.md", markdown: "# 한국어 안내" },
+  ]);
+  assert.deepEqual(detail.descriptionImages, [
+    {
+      path: "guide/board.png",
+      url: "https://api.example.test/api/games/localized-guide/media/description?path=guide%2Fboard.png&v=1201",
+    },
+    {
+      path: "guide/empty.png",
+      url: "https://api.example.test/api/games/localized-guide/media/description?path=guide%2Fempty.png&v=1201",
+    },
+  ]);
+
+  const allowed = await request(
+    "https://api.example.test/api/games/localized-guide/media/description?path=guide%2Fboard.png&v=1201",
+    db,
+    games,
+  );
+  assert.equal(allowed.status, 200);
+  assert.equal(allowed.headers.get("Content-Type"), "image/png");
+  assert.equal(allowed.headers.get("X-Content-Type-Options"), "nosniff");
+
+  const unlisted = await request(
+    "https://api.example.test/api/games/localized-guide/media/description?path=guide%2Fprivate.png&v=1201",
+    db,
+    games,
+  );
+  const stale = await request(
+    "https://api.example.test/api/games/localized-guide/media/description?path=guide%2Fboard.png&v=1200",
+    db,
+    games,
+  );
+  const empty = await request(
+    "https://api.example.test/api/games/localized-guide/media/description?path=guide%2Fempty.png&v=1201",
+    db,
+    games,
+  );
+  assert.equal(unlisted.status, 404);
+  assert.equal(stale.status, 404);
+  assert.equal(empty.status, 404);
 });
 
 test("internal tools are excluded from generic public catalog and detail routes", async () => {

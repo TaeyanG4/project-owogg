@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
-import { Bookmark, CalendarDays, Check, ChevronDown, Eye, TrendingUp } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import type { GameSortKey } from "../../features/catalog/gameSort";
 
 interface GameSortSelectProps {
@@ -10,14 +10,11 @@ interface GameSortSelectProps {
 }
 
 const SORT_ITEMS = [
-  { value: "popular", icon: TrendingUp },
-  { value: "newest", icon: CalendarDays },
-  { value: "players", icon: Eye },
-  { value: "bookmarks", icon: Bookmark },
-] as const satisfies ReadonlyArray<{
-  value: GameSortKey;
-  icon: typeof TrendingUp;
-}>;
+  { value: "popular" },
+  { value: "newest" },
+  { value: "players" },
+  { value: "bookmarks" },
+] as const satisfies ReadonlyArray<{ value: GameSortKey }>;
 
 export function GameSortSelect({ value, onChange, label, options }: GameSortSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -28,8 +25,6 @@ export function GameSortSelect({ value, onChange, label, options }: GameSortSele
   const triggerRef = useRef<HTMLButtonElement>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const listboxId = useId();
-  const selectedItem = SORT_ITEMS.find((item) => item.value === value) ?? SORT_ITEMS[0];
-  const SelectedIcon = selectedItem.icon;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -104,15 +99,12 @@ export function GameSortSelect({ value, onChange, label, options }: GameSortSele
         aria-controls={listboxId}
         onClick={() => setIsOpen((open) => !open)}
         onKeyDown={handleTriggerKeyDown}
-        className={`group flex h-9 min-w-40 cursor-pointer items-center gap-2 rounded-xl border px-2 pr-2.5 text-left outline-none transition-all focus-visible:ring-2 focus-visible:ring-brand/40 ${
+        className={`group flex h-11 min-w-40 cursor-pointer items-center gap-3 rounded-2xl border px-4 text-left outline-none transition-all focus-visible:ring-2 focus-visible:ring-brand/40 ${
           isOpen
             ? "border-brand bg-brand/10 shadow-lg shadow-brand/10"
             : "border-border/90 bg-surface-raised hover:border-brand/60 hover:bg-surface-overlay"
         }`}
       >
-        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-brand/15 text-brand-light transition-colors group-hover:bg-brand/20">
-          <SelectedIcon aria-hidden="true" className="h-3.5 w-3.5" />
-        </span>
         <span className="min-w-0 flex-1 truncate text-sm font-extrabold text-text-primary">
           {options[value]}
         </span>
@@ -127,10 +119,9 @@ export function GameSortSelect({ value, onChange, label, options }: GameSortSele
           id={listboxId}
           role="listbox"
           aria-label={label}
-          className="absolute left-0 top-[calc(100%+0.5rem)] w-full min-w-52 overflow-hidden rounded-2xl border border-border bg-surface-raised p-1.5 shadow-2xl shadow-black/40"
+          className="absolute left-0 top-[calc(100%+0.5rem)] w-full min-w-52 overflow-hidden rounded-2xl border border-border/90 bg-surface-raised p-1.5 shadow-2xl shadow-black/40"
         >
           {SORT_ITEMS.map((item, optionIndex) => {
-            const Icon = item.icon;
             const isSelected = item.value === value;
             const isActive = optionIndex === activeIndex;
 
@@ -147,16 +138,12 @@ export function GameSortSelect({ value, onChange, label, options }: GameSortSele
                 onMouseEnter={() => setActiveIndex(optionIndex)}
                 onClick={() => selectOption(item.value)}
                 onKeyDown={(event) => handleOptionKeyDown(event, optionIndex)}
-                className={`flex w-full cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40 ${
+                className={`flex w-full cursor-pointer items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-sm font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40 ${
                   isSelected
                     ? "bg-brand/15 text-text-primary"
                     : "text-text-secondary hover:bg-surface-overlay hover:text-text-primary"
                 }`}
               >
-                <Icon
-                  aria-hidden="true"
-                  className={`h-4 w-4 shrink-0 ${isSelected ? "text-brand-light" : "text-text-muted"}`}
-                />
                 <span className="flex-1">{options[item.value]}</span>
                 {isSelected && <Check aria-hidden="true" className="h-4 w-4 text-brand-light" />}
               </button>

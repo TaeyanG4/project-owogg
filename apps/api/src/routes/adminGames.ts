@@ -12,6 +12,8 @@ import {
   AdminGameCatalogRoleRequestSchema,
   AdminGameCatalogRoleResponseSchema,
   AdminGameToggleRequestSchema,
+  AdminPlatformFeatureSettingsUpdateRequestSchema,
+  PlatformFeatureSettingsResponseSchema,
   AdminOfficialGameDeleteResponseSchema,
   AdminOfficialGameUploadResponseSchema,
   SandboxGameBasicMetadataUpdateRequestSchema,
@@ -172,6 +174,42 @@ adminGamesRouter.get("/", async (c) => {
   });
 
   return c.json(AdminGameListResponseSchema.parse(result), 200);
+});
+
+adminGamesRouter.get("/platform-settings", async (c) => {
+  const admin = await requireElevatedAdmin(c);
+  if (isElevatedAdminResponse(admin)) return admin;
+  const denied = requirePermission(admin, "games.moderate");
+  if (denied) return denied;
+  const { platformFeatureSettingsUseCases } = createContainer(c.env.DB);
+  return c.json(
+    PlatformFeatureSettingsResponseSchema.parse(await platformFeatureSettingsUseCases.get()),
+    200,
+  );
+});
+
+adminGamesRouter.patch("/platform-settings", async (c) => {
+  const admin = await requireElevatedAdmin(c);
+  if (isElevatedAdminResponse(admin)) return admin;
+  const denied = requirePermission(admin, "games.moderate");
+  if (denied) return denied;
+  const parsed = AdminPlatformFeatureSettingsUpdateRequestSchema.safeParse(
+    await c.req.json().catch(() => null),
+  );
+  if (!parsed.success) {
+    return c.json(
+      { error: { code: "INVALID_REQUEST", message: "변경할 운영 설정이 올바르지 않습니다." } },
+      400,
+    );
+  }
+  const { platformFeatureSettingsUseCases } = createContainer(c.env.DB);
+  const result = await platformFeatureSettingsUseCases.set({
+    ...parsed.data,
+    adminId: admin.userId,
+  });
+  await purgePublicGameReadCache(c.req.url);
+  c.header("Clear-Site-Data", '"cache"');
+  return c.json(PlatformFeatureSettingsResponseSchema.parse(result), 200);
 });
 
 // Creator/OWOGG manifests submit only an untrusted exact-version request. This elevated route is
@@ -624,6 +662,55 @@ adminGamesRouter.post(
       await purgePublicGameReadCache(c.req.url, [result.slug], c.env.GAME_ORIGIN);
       c.header("Clear-Site-Data", '"cache"');
       return c.json(GameLogoUpdateResponseSchema.parse(result), 200);
+    } catch (error) {
+      const failure = officialUpdateFailure(error);
+      return c.json(failure.body, failure.status);
+    }
+  },
+);
+
+adminGamesRouter.post(
+  "/:gameId/description",
+  rateLimit({ name: "game-upload", binding: "GAME_UPLOAD_RATE_LIMITER" }),
+  async (c) => {
+    const admin = await requireElevatedAdmin(c);
+    if (isElevatedAdminResponse(admin)) return admin;
+    const denied = requirePermission(admin, "games.moderate");
+    if (denied) return denied;
+    const container = createContainer(c.env.DB, readB2Config(c.env));
+    if (!container.gameBundlesConfigured) {
+      return c.json(
+        {
+          error: {
+            code: "GAME_BUNDLES_NOT_CONFIGURED",
+            message: "번들 저장소(Backblaze B2)가 아직 이 환경에 구성되지 않았습니다.",
+          },
+        },
+        503,
+      );
+    }
+    const body = await c.req.parseBody().catch(() => null);
+    const description = body?.description;
+    if (!(description instanceof File)) {
+      return c.json(
+        {
+          error: {
+            code: "INVALID_REQUEST",
+            message: "description Markdown 또는 ZIP 파일이 필요합니다.",
+          },
+        },
+        400,
+      );
+    }
+    try {
+      const result = await container.officialGameUploadUseCases.replaceDescriptionPackage({
+        slug: c.req.param("gameId"),
+        fileName: description.name,
+        bytes: await description.arrayBuffer(),
+      });
+      await purgePublicGameReadCache(c.req.url, [result.slug], c.env.GAME_ORIGIN);
+      c.header("Clear-Site-Data", '"cache"');
+      return c.json(AdminOfficialGameUploadResponseSchema.parse(result), 201);
     } catch (error) {
       const failure = officialUpdateFailure(error);
       return c.json(failure.body, failure.status);

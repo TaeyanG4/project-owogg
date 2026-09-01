@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../../features/i18n/I18nContext";
+import { usePlatformFeatureSettings } from "../../features/catalog/gameAvailability";
 
 type NavMatch = "home" | "games-all" | "games-genres" | "games-single" | "games-multi" | "path";
 
@@ -176,6 +177,7 @@ const GAMEPLAY_EXPANDED_KEY = "owogg_gameplay_sidebar_expanded";
 export function Sidebar({ isMobileOpen, onMobileClose, isGamePlayPage }: SidebarProps) {
   const location = useLocation();
   const { dict } = useI18n();
+  const { externalPlatformGamesVisible } = usePlatformFeatureSettings();
   const [autoExpanded, setAutoExpanded] = useState(false);
   const [gameplayExpanded, setGameplayExpanded] = useState(false);
   const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -239,12 +241,16 @@ export function Sidebar({ isMobileOpen, onMobileClose, isGamePlayPage }: Sidebar
       icon: UsersRound,
       match: "games-multi",
     },
-    {
-      label: dict.sidebar.externalGames,
-      icon: MonitorPlay,
-      badge: dict.sidebar.comingSoon,
-      disabled: true,
-    },
+    ...(externalPlatformGamesVisible
+      ? [
+          {
+            label: dict.sidebar.externalGames,
+            icon: MonitorPlay,
+            badge: dict.sidebar.comingSoon,
+            disabled: true,
+          } satisfies NavItem,
+        ]
+      : []),
   ];
   const otherNavItems: NavItem[] = [
     { label: dict.sidebar.rankingRecords, path: "/ranking", icon: Trophy, match: "path" },

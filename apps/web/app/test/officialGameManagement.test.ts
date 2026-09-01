@@ -28,6 +28,8 @@ function game(gameId: string): GameAvailabilityDto {
     description: null,
     genre: null,
     mode: "single",
+    tags: [],
+    defaultScreenMode: "default",
     latestUploadedAt: "2026-08-27T00:00:00.000Z",
     publisherType: "OWOGG",
     catalogRole: "GAME",
@@ -115,6 +117,11 @@ test("Relay operations stay per-game while the removed global review panel stays
   assert.match(relayControlSource, /Relay 활성화/);
   assert.match(relayControlSource, /테스터 열기/);
   assert.match(relayControlSource, /allowDocumentScrolling/);
+});
+
+test("platform switches publish their confirmed value to the current SPA after the server accepts it", () => {
+  assert.match(managementSource, /publishPlatformFeatureSettings\(updated\)/);
+  assert.match(managementSource, /이미 열린 연결은 자연 종료/);
 });
 
 test("admin batch upload publishes ZIPs serially and isolates a failed file", async () => {

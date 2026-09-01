@@ -1423,3 +1423,69 @@ test("0034: Game Creator reads use generic games/game_versions as the authority"
     .run(version.id);
   assert.equal((await repo.findVersionById(version.id))?.status, "APPROVED");
 });
+
+test("game content metadata round-trips tags and the default screen mode", async () => {
+  const { db, raw } = createSqliteD1(SANDBOX_GAMES_TEST_SCHEMA);
+  seedUser(raw, 1, "Content Dev");
+  const repo = new D1SandboxGameRepository(db);
+  const created = await repo.create({
+    slug: "content-metadata",
+    developerUserId: 1,
+    title: "Content Metadata",
+    shortDescription: null,
+    description: "English fallback",
+    genre: "board",
+    mode: "single",
+    tags: ["board", "strategy"],
+    defaultScreenMode: "theater",
+    nowIso: "2026-09-01T00:00:00.000Z",
+  });
+
+  assert.deepEqual(created?.tags, ["board", "strategy"]);
+  assert.equal(created?.defaultScreenMode, "theater");
+  assert.equal((await repo.findBySlug("content-metadata"))?.defaultScreenMode, "theater");
+});
+
+test("creator content cooldown is an atomic 24-hour claim and exposes the next edit time", async () => {
+  const { db, raw } = createSqliteD1(SANDBOX_GAMES_TEST_SCHEMA);
+  seedUser(raw, 1, "Cooldown Dev");
+  const repo = new D1SandboxGameRepository(db);
+  const game = await seedGame(repo, "cooldown-game", 1);
+  const firstAt = "2026-09-01T00:00:00.000Z";
+
+  const simultaneous = await Promise.all([
+    repo.claimContentEdit({
+      gameId: game.id,
+      userId: 1,
+      nowIso: firstAt,
+      cutoffIso: "2026-08-31T00:00:00.000Z",
+    }),
+    repo.claimContentEdit({
+      gameId: game.id,
+      userId: 1,
+      nowIso: firstAt,
+      cutoffIso: "2026-08-31T00:00:00.000Z",
+    }),
+  ]);
+  assert.equal(simultaneous.filter((result) => result.claimed).length, 1);
+  assert.equal((await repo.findById(game.id))?.contentEditAvailableAt, "2026-09-02T00:00:00.000Z");
+
+  const early = await repo.claimContentEdit({
+    gameId: game.id,
+    userId: 1,
+    nowIso: "2026-09-01T23:59:59.999Z",
+    cutoffIso: "2026-08-31T23:59:59.999Z",
+  });
+  assert.deepEqual(early, {
+    claimed: false,
+    availableAt: "2026-09-02T00:00:00.000Z",
+  });
+
+  const afterWindow = await repo.claimContentEdit({
+    gameId: game.id,
+    userId: 1,
+    nowIso: "2026-09-02T00:00:00.000Z",
+    cutoffIso: firstAt,
+  });
+  assert.deepEqual(afterWindow, { claimed: true, availableAt: null });
+});

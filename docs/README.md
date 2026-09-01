@@ -2,7 +2,7 @@
 
 상태: 가이드
 
-마지막 검증: 2026-08-30
+마지막 검증: 2026-09-01
 
 이 인덱스는 문서를 독자의 목적과 문서 역할에 따라 안내합니다. 구현 사실은 현재 코드,
 마이그레이션, 워크플로 순으로 확인하며 문서와 구현이 다르면 구현이 우선합니다.
@@ -21,8 +21,8 @@
 ## 시스템 아키텍처
 
 - [시스템 아키텍처](ARCHITECTURE.md) — **기준 문서**, 앱/패키지/인프라 경계
-- [Game Platform 아키텍처](GAME_PLATFORM_ARCHITECTURE.md) — **기준 문서**, 공통 게임
-  identity, publication, runtime, score
+- [Game Platform 아키텍처](GAME_PLATFORM_ARCHITECTURE.md) — **게임 기능 단일 기준 문서**, 공통 게임
+  identity, publication, runtime, score, 설명·태그·운영 스위치
 - [데이터베이스](DATABASE.md) — **기준 문서**, D1 migration 및 데이터 경계
 - [D1 ERD](ERD.md) — **기준 문서**, 도메인별 관계도와 전체 물리 테이블·호환 뷰 사전
 - [인가 모델](AUTHORIZATION.md) — **기준 문서**, identity, staff, entitlement, permission,

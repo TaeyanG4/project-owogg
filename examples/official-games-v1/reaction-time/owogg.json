@@ -8,11 +8,16 @@
     "mode": "single",
     "playModes": ["single"],
     "shortDescription": "예측하기 어려운 신호 시점에 얼마나 빠르게 반응하는지 측정합니다.",
-    "description": "한국어·영어 UI를 지원하며 매 라운드 2~8초 사이의 넓은 무작위 준비 간격 뒤 화면이 초록색으로 바뀌는 순간 누릅니다. 게임 안에서 소리와 재시작을 제어할 수 있으며 OWOGG verifier가 challenge seed로 신호 시점을 재생성하고 evidence에서 평균 반응 시간을 계산합니다.",
+    "description": [
+      "description.md",
+      "description_kr.md",
+      "description_ja.md",
+      "description_zh.md"
+    ],
     "tags": ["reaction", "timing", "verified"]
   },
   "input": ["mouse", "touch", "keyboard"],
-  "presentation": { "orientation": "any", "aspectRatio": "16:9" },
+  "presentation": { "orientation": "any", "aspectRatio": "16:9", "defaultMode": "theater" },
   "playConfig": {
     "version": 1,
     "rulesetRevision": 3,

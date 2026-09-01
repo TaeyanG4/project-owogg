@@ -8,11 +8,16 @@
     "mode": "single",
     "playModes": ["single"],
     "shortDescription": "서버 seed로 생성된 표적을 빠르고 정확하게 클릭하세요.",
-    "description": "게임 안에서 한국어·영어 UI와 난이도를 고르면 OWOGG 서버가 승인한 challenge seed로 표적 위치를 결정합니다. 화면 비율과 관계없이 원형 표적을 제공하며 게임 안에서 소리와 재시작을 제어합니다. 게임은 점수 대신 순차 hit evidence를 제출하고 verifier가 완료 시간을 계산합니다.",
+    "description": [
+      "description.md",
+      "description_kr.md",
+      "description_ja.md",
+      "description_zh.md"
+    ],
     "tags": ["aim", "reaction", "verified"]
   },
   "input": ["mouse", "touch"],
-  "presentation": { "orientation": "landscape", "aspectRatio": "16:9" },
+  "presentation": { "orientation": "landscape", "aspectRatio": "16:9", "defaultMode": "theater" },
   "difficulties": [
     { "id": "normal", "title": "보통", "default": true },
     { "id": "hard", "title": "어려움" }
