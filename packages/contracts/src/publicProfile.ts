@@ -55,6 +55,53 @@ export const PublicProfileContributionsSchema = z
   .strict();
 export type PublicProfileContributions = z.infer<typeof PublicProfileContributionsSchema>;
 
+export const PublicProfileFollowStatsSchema = z
+  .object({
+    followerCount: z.number().int().nonnegative(),
+    followingCount: z.number().int().nonnegative(),
+    viewerIsFollowing: z.boolean(),
+  })
+  .strict();
+export type PublicProfileFollowStats = z.infer<typeof PublicProfileFollowStatsSchema>;
+
+export const ProfileConnectionSchema = z
+  .object({
+    userId: z.number().int().positive(),
+    nickname: z.string().min(1),
+    avatarUrl: z.string().nullable(),
+    country: z.string().nullable(),
+    followedAt: z.string().datetime(),
+  })
+  .strict();
+export type ProfileConnection = z.infer<typeof ProfileConnectionSchema>;
+
+export const ProfileConnectionsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce
+    .number()
+    .int()
+    .refine((value) => [10, 20, 30, 50].includes(value))
+    .default(20),
+});
+export type ProfileConnectionsQuery = z.infer<typeof ProfileConnectionsQuerySchema>;
+
+export const ProfileConnectionsResponseSchema = z
+  .object({
+    user: z.object({ id: z.number().int().positive(), nickname: z.string().min(1) }).strict(),
+    kind: z.enum(["FOLLOWERS", "FOLLOWING"]),
+    items: z.array(ProfileConnectionSchema),
+    total: z.number().int().nonnegative(),
+    page: z.number().int().min(1),
+    pageSize: z.union([z.literal(10), z.literal(20), z.literal(30), z.literal(50)]),
+  })
+  .strict();
+export type ProfileConnectionsResponse = z.infer<typeof ProfileConnectionsResponseSchema>;
+
+export const ProfileFollowMutationResponseSchema = z
+  .object({ success: z.literal(true), followStats: PublicProfileFollowStatsSchema })
+  .strict();
+export type ProfileFollowMutationResponse = z.infer<typeof ProfileFollowMutationResponseSchema>;
+
 export const PublicProfileResponseSchema = z.object({
   id: z.number(),
   nickname: z.string(),
@@ -69,6 +116,11 @@ export const PublicProfileResponseSchema = z.object({
     bugAcceptedCount: 0,
     createdGameCount: 0,
     introducedExternalGameCount: 0,
+  }),
+  followStats: PublicProfileFollowStatsSchema.default({
+    followerCount: 0,
+    followingCount: 0,
+    viewerIsFollowing: false,
   }),
   progression: ProgressionSummarySchema,
   globalRank: z.number().int().min(1).nullable(),

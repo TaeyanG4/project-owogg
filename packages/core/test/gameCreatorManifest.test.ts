@@ -103,6 +103,43 @@ test("Creator Manifest v1 accepts the minimum unscored game", () => {
   assert.deepEqual(manifest.game.playModes, ["single"]);
 });
 
+test("game display metadata keeps English required and accepts strict optional translations", () => {
+  const manifest = parseGameCreatorManifest({
+    ...minimal(),
+    game: {
+      ...minimal().game,
+      localizations: {
+        ko: { title: "테스트", shortDescription: "한국어 요약" },
+        ja: { title: "テスト" },
+        zh: { shortDescription: "中文摘要" },
+      },
+    },
+  });
+  assert.equal(manifest.game.title, "Test");
+  assert.deepEqual(manifest.game.localizations, {
+    ko: { title: "테스트", shortDescription: "한국어 요약" },
+    ja: { title: "テスト" },
+    zh: { shortDescription: "中文摘要" },
+  });
+
+  assert.throws(
+    () =>
+      parseGameCreatorManifest({
+        ...minimal(),
+        game: { ...minimal().game, localizations: { en: { title: "Duplicate default" } } },
+      }),
+    /game\.localizations\.en is not allowed/,
+  );
+  assert.throws(
+    () =>
+      parseGameCreatorManifest({
+        ...minimal(),
+        game: { ...minimal().game, localizations: { ko: {} } },
+      }),
+    /must contain title or shortDescription/,
+  );
+});
+
 test("file-based descriptions require the English default and exact bundle references", () => {
   const source = {
     ...minimal(),

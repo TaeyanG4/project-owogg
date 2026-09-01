@@ -84,6 +84,7 @@ export * from "./application/accountMergeUseCases.js";
 export * from "./application/progressionUseCases.js";
 export * from "./application/achievementUseCases.js";
 export * from "./application/profileUseCases.js";
+export * from "./application/profileFollowUseCases.js";
 export * from "./application/discordLinkUseCases.js";
 export * from "./domain/discordGuildPolicy.js";
 export * from "./application/discordGuildUseCases.js";

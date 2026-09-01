@@ -18,6 +18,9 @@ export type SandboxGameVersionStatus = z.infer<typeof SandboxGameVersionStatusSc
 export const SandboxGameModeSchema = z.enum(["single", "multi"]);
 export type SandboxGameMode = z.infer<typeof SandboxGameModeSchema>;
 
+export const GameContentLocaleSchema = z.enum(["en", "ko", "ja", "zh"]);
+export type GameContentLocale = z.infer<typeof GameContentLocaleSchema>;
+
 /** The wire shape of a sandbox game, as it actually travels over HTTP.
  *
  * MUST stay symmetric — i.e. `Schema.parse(JSON.parse(JSON.stringify(Schema.parse(x))))` has to
@@ -220,6 +223,9 @@ export type SandboxGameMetadataUpdateRequest = z.infer<
  * slug is intentionally absent because it is the game's permanent D1 identity. */
 export const SandboxGameBasicMetadataUpdateRequestSchema = z
   .object({
+    /** Omitted means the required English/default fields. Non-English values are written into
+     * owogg.json.game.localizations without changing the English fallback. */
+    locale: GameContentLocaleSchema.optional(),
     title: z.string().trim().min(1).max(60).optional(),
     shortDescription: z.string().trim().max(200).nullable().optional(),
     genre: z.string().trim().min(1).max(40).optional(),
@@ -231,6 +237,23 @@ export const SandboxGameBasicMetadataUpdateRequestSchema = z
 export type SandboxGameBasicMetadataUpdateRequest = z.infer<
   typeof SandboxGameBasicMetadataUpdateRequestSchema
 >;
+
+/** One inline game-information edit. Metadata, tags, and an optional localized Markdown document
+ * are rebuilt into one immutable version so a creator's 24-hour content limit is claimed at most
+ * once per save. `title` is required for the selected locale; English remains the mandatory
+ * default and translated titles live in `game.localizations`. */
+export const GameContentUpdateRequestSchema = z.object({
+  locale: GameContentLocaleSchema,
+  title: z.string().trim().min(1).max(60),
+  shortDescription: z.string().trim().max(200).nullable(),
+  tags: z.array(z.string().trim().min(1).max(40)).max(20),
+  descriptionMarkdown: z
+    .string()
+    .min(1)
+    .max(64 * 1024)
+    .optional(),
+});
+export type GameContentUpdateRequest = z.infer<typeof GameContentUpdateRequestSchema>;
 
 export const GameLogoUpdateResponseSchema = z.object({
   gameId: z.number().int().positive(),

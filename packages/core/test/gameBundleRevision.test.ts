@@ -52,6 +52,22 @@ test("basic metadata patch preserves non-editable manifest policy and cannot cha
   );
 });
 
+test("localized metadata patch never overwrites the required English fallback", () => {
+  const updated = patchGameCreatorManifestBasicMetadata(manifest(), {
+    locale: "ko",
+    title: "새 제목",
+    shortDescription: "한국어 설명",
+    tags: ["localized", "skill-test"],
+  });
+
+  assert.equal(updated.game.title, "Old title");
+  assert.equal(updated.game.shortDescription, "old");
+  assert.deepEqual(updated.game.localizations, {
+    ko: { title: "새 제목", shortDescription: "한국어 설명" },
+  });
+  assert.deepEqual(updated.game.tags, ["localized", "skill-test"]);
+});
+
 test("bundle rebuild replaces owogg.json and stale embedded logo with the current logo", () => {
   const prepared = prepareBundleEntries({
     "index.html": bytes("<html/>"),

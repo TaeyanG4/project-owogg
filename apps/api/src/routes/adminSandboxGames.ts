@@ -6,6 +6,7 @@ import {
   SandboxGameVersionRecordSchema,
   SandboxGameMetadataUpdateRequestSchema,
   SandboxGameBasicMetadataUpdateRequestSchema,
+  GameContentUpdateRequestSchema,
   SandboxGameVisibilityUpdateRequestSchema,
   SandboxGameLiveVersionUpdateRequestSchema,
   SandboxGameRecordSchema,
@@ -396,6 +397,43 @@ adminSandboxGamesRouter.patch(
     } catch (err) {
       const { body: errBody, status } = failureResponse(err);
       return c.json(errBody, status);
+    }
+  },
+);
+
+adminSandboxGamesRouter.patch(
+  "/:id/content",
+  rateLimit({ name: "game-upload", binding: "GAME_UPLOAD_RATE_LIMITER" }),
+  async (c) => {
+    const admin = await requireElevatedAdmin(c);
+    if (isElevatedAdminResponse(admin)) return admin;
+    const denied = requirePermission(admin, "sandbox_games.review");
+    if (denied) return denied;
+    const parsed = GameContentUpdateRequestSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) {
+      return c.json(
+        { error: { code: "INVALID_REQUEST", message: "수정할 게임 정보가 올바르지 않습니다." } },
+        400,
+      );
+    }
+    const container = createContainer(c.env.DB, readB2Config(c.env));
+    if (!container.gameBundlesConfigured) {
+      return c.json(
+        { error: { code: "GAME_BUNDLES_NOT_CONFIGURED", message: "B2가 구성되지 않았습니다." } },
+        503,
+      );
+    }
+    try {
+      const version = await container.sandboxGameUseCases.updateContentAsVersion({
+        gameId: Number(c.req.param("id")),
+        actingUserId: admin.userId,
+        isAdmin: true,
+        content: parsed.data,
+      });
+      return c.json(SandboxGameVersionRecordSchema.parse(version), 201);
+    } catch (error) {
+      const { body, status } = failureResponse(error);
+      return c.json(body, status);
     }
   },
 );

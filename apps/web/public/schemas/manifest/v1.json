@@ -14,7 +14,12 @@
       "required": ["slug", "title", "genre", "mode", "playModes"],
       "properties": {
         "slug": { "type": "string", "pattern": "^[a-z0-9-]+$", "minLength": 3, "maxLength": 64 },
-        "title": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Required English/default title. Use localizations for ko, ja, and zh."
+        },
         "genre": { "type": "string", "minLength": 1 },
         "mode": { "type": "string", "enum": ["single", "multi"] },
         "playModes": {
@@ -23,7 +28,22 @@
           "uniqueItems": true,
           "items": { "type": "string", "enum": ["single", "local-multi", "online-multi"] }
         },
-        "shortDescription": { "type": "string", "maxLength": 200 },
+        "shortDescription": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "English/default summary."
+        },
+        "localizations": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "description": "Optional translated titles and summaries. English stays in the top-level fields.",
+          "properties": {
+            "ko": { "$ref": "#/$defs/gameLocalization" },
+            "ja": { "$ref": "#/$defs/gameLocalization" },
+            "zh": { "$ref": "#/$defs/gameLocalization" }
+          }
+        },
         "description": {
           "oneOf": [
             { "type": "string", "maxLength": 4000, "deprecated": true },
@@ -168,6 +188,15 @@
     "playConfig": { "$ref": "#/$defs/playConfig" }
   },
   "$defs": {
+    "gameLocalization": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "shortDescription": { "type": "string", "maxLength": 200 }
+      }
+    },
     "range": {
       "type": "object",
       "additionalProperties": false,

@@ -31,12 +31,22 @@ export type OwoggAchievementAggregate = "max" | "min" | "sum" | "count";
 export type OwoggComparisonOperator = "==" | "!=" | ">" | ">=" | "<" | "<=";
 export type OwoggPlayMode = "single" | "local-multi" | "online-multi";
 export type OwoggGameScreenMode = "default" | "theater";
+export type OwoggGameContentLocale = "en" | "ko" | "ja" | "zh";
+export type OwoggGameTranslationLocale = Exclude<OwoggGameContentLocale, "en">;
 
 /** Localized Markdown sources stored inside the same immutable game bundle. `description.md` is
  * always the English/default document; the suffixes intentionally match the public v1 filename
  * contract rather than browser locale spellings. */
 export type OwoggDescriptionFile =
   "description.md" | "description_kr.md" | "description_ja.md" | "description_zh.md";
+
+/** Optional translated display metadata. `game.title` and `game.shortDescription` remain the
+ * required English/default source of truth, so old v1 manifests stay readable without copying
+ * the same English strings into a second object. */
+export interface OwoggManifestGameLocalization {
+  readonly title?: string | undefined;
+  readonly shortDescription?: string | undefined;
+}
 
 export interface OwoggRangeDefinition {
   readonly min: number;
@@ -53,6 +63,11 @@ export interface OwoggManifestGame {
   /** Explicit runtime topology. This is required for every manifest v1 game. */
   readonly playModes: readonly OwoggPlayMode[];
   readonly shortDescription?: string | undefined;
+  /** Per-language display overrides. English is deliberately absent: the top-level fields are
+   * the mandatory English fallback and `description.md` is the English Markdown document. */
+  readonly localizations?:
+    | Partial<Readonly<Record<OwoggGameTranslationLocale, OwoggManifestGameLocalization>>>
+    | undefined;
   /** New manifests use localized Markdown filenames. A string remains readable only so an
    * already-published v1 canonical document can be revised without becoming unparsable. */
   readonly description?: readonly OwoggDescriptionFile[] | string | undefined;

@@ -3,11 +3,25 @@
   "schemaVersion": 1,
   "game": {
     "slug": "memory-test",
-    "title": "순서 기억력 테스트",
+    "title": "Sequence Memory Test",
     "genre": "skill-test",
     "mode": "single",
     "playModes": ["single"],
-    "shortDescription": "서버 seed로 정해진 색상 순서를 기억하고 그대로 입력하세요.",
+    "shortDescription": "Memorize and repeat the color sequence generated from a server seed.",
+    "localizations": {
+      "ko": {
+        "title": "순서 기억력 테스트",
+        "shortDescription": "서버 seed로 정해진 색상 순서를 기억하고 그대로 입력하세요."
+      },
+      "ja": {
+        "title": "順番記憶テスト",
+        "shortDescription": "サーバーseedで決まる色の順番を覚えて、その通りに入力します。"
+      },
+      "zh": {
+        "title": "顺序记忆测试",
+        "shortDescription": "记住由服务器seed生成的颜色顺序，并按原顺序输入。"
+      }
+    },
     "description": [
       "description.md",
       "description_kr.md",

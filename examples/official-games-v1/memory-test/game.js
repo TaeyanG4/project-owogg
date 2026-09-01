@@ -29,9 +29,9 @@
 
   const TEXT = Object.freeze({
     ko: Object.freeze({
-      name: "순서 기억력 테스트",
-      header: "순서 기억력 패드",
-      title: "아케이드 순서 기억력",
+      name: "순서기억력 테스트",
+      header: "순서기억력 테스트",
+      title: "순서기억력 테스트",
       description: "깜빡이는 4색 패드의 패턴을 기억하고 같은 순서로 눌러보세요.",
       start: "게임 시작",
       retry: "다시 도전하기",
@@ -57,12 +57,17 @@
       finished: "게임 종료",
       allFinished: "모든 레벨 완료",
       grade: (value) => `달성 등급 · ${value}`,
-      labels: Object.freeze({ normal: "보통", hard: "어려움", standard: "기본", reverse: "역순" }),
+      labels: Object.freeze({
+        normal: "보통",
+        hard: "어려움",
+        standard: "기본",
+        reverse: "역순",
+      }),
     }),
     en: Object.freeze({
       name: "Sequence Memory Test",
-      header: "Sequence Memory Pad",
-      title: "Arcade Sequence Memory",
+      header: "Sequence Memory Test",
+      title: "Sequence Memory Test",
       description: "Remember the flashing four-color pattern and press the pads in the same order.",
       start: "Start game",
       retry: "Try again",
@@ -167,7 +172,10 @@
         (item) => item[axis] === id && item[otherAxis] === selection[otherAxis],
       ) ?? config.allowedConfigs.find((item) => item[axis] === id);
     if (!candidate) return;
-    selection = { difficultyId: candidate.difficultyId, variantId: candidate.variantId };
+    selection = {
+      difficultyId: candidate.difficultyId,
+      variantId: candidate.variantId,
+    };
     renderConfig();
   }
 

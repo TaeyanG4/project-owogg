@@ -96,6 +96,21 @@ export const PublicGameDescriptionImageSchema = z
   .object({ path: z.string().min(1), url: z.string().url() })
   .strict();
 
+export const PublicGameLocalizationSchema = z
+  .object({
+    title: z.string().min(1).max(60).optional(),
+    shortDescription: z.string().max(200).optional(),
+  })
+  .strict();
+
+export const PublicGameLocalizationsSchema = z
+  .object({
+    ko: PublicGameLocalizationSchema.optional(),
+    ja: PublicGameLocalizationSchema.optional(),
+    zh: PublicGameLocalizationSchema.optional(),
+  })
+  .strict();
+
 const TaxonomyCatalogSchema = z.object({
   type: z.literal("TAXONOMY"),
   categories: z.array(z.string()),
@@ -136,6 +151,9 @@ const PublicGameSchemaBase = {
     popularityScore: z.number().int().nonnegative(),
   }),
   mediaUrl: z.union([z.string().url(), z.string().startsWith("/")]).nullable(),
+  /** Optional translated display metadata. Top-level title/summary are always the English/default
+   * fallback and therefore remain required for every game. */
+  localizations: PublicGameLocalizationsSchema.optional(),
   descriptions: z.array(PublicGameDescriptionDocumentSchema).optional(),
   descriptionImages: z.array(PublicGameDescriptionImageSchema).max(5).optional(),
 };
@@ -155,6 +173,35 @@ export const PublicGameSchema = z.discriminatedUnion("publisherType", [
   }),
 ]);
 export type PublicGame = z.infer<typeof PublicGameSchema>;
+
+const GameEditorContextBaseSchema = {
+  gameId: z.number().int().positive(),
+  contentEditAvailableAt: z.string().datetime().nullable(),
+};
+
+export const GameEditorContextSchema = z.discriminatedUnion("mode", [
+  z.object({
+    ...GameEditorContextBaseSchema,
+    mode: z.literal("OFFICIAL_ADMIN"),
+    publisherType: z.literal("OWOGG"),
+  }),
+  z.object({
+    ...GameEditorContextBaseSchema,
+    mode: z.literal("USER_ADMIN"),
+    publisherType: z.literal("USER"),
+  }),
+  z.object({
+    ...GameEditorContextBaseSchema,
+    mode: z.literal("USER_CREATOR"),
+    publisherType: z.literal("USER"),
+  }),
+]);
+export type GameEditorContext = z.infer<typeof GameEditorContextSchema>;
+
+export const GameEditorContextResponseSchema = z.object({
+  editor: GameEditorContextSchema.nullable(),
+});
+export type GameEditorContextResponse = z.infer<typeof GameEditorContextResponseSchema>;
 
 export const PublicGameListResponseSchema = z.object({
   games: z.array(PublicGameSchema),

@@ -1165,6 +1165,19 @@ export interface Dictionary {
     roleAdmin: string;
     roleOperator: string;
     roleStreamer: string;
+    followersLabel: string;
+    followingLabel: string;
+    followCta: string;
+    followingCta: string;
+    followUpdateFailed: string;
+    followersTitle: string;
+    followingTitle: string;
+    followersEmpty: string;
+    followingEmpty: string;
+    pageSizeLabel: string;
+    previousPage: string;
+    nextPage: string;
+    backToProfile: string;
   };
   /** Header icon that lists PUBLIC-visibility registered Discord servers (lives next to
    * favorites/language selector) — fetched lazily on first open, not on every page load. */
@@ -2499,6 +2512,19 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       roleAdmin: "관리자",
       roleOperator: "운영자",
       roleStreamer: "스트리머",
+      followersLabel: "팔로워",
+      followingLabel: "팔로잉",
+      followCta: "관심 플레이어 등록",
+      followingCta: "관심 등록됨",
+      followUpdateFailed: "관심 플레이어 설정을 변경하지 못했습니다.",
+      followersTitle: "팔로워",
+      followingTitle: "팔로잉",
+      followersEmpty: "아직 이 플레이어를 관심 등록한 사용자가 없습니다.",
+      followingEmpty: "아직 관심 등록한 플레이어가 없습니다.",
+      pageSizeLabel: "페이지당",
+      previousPage: "이전",
+      nextPage: "다음",
+      backToProfile: "프로필로",
     },
     registeredServers: {
       ariaLabel: "등록된 Discord 서버",
@@ -3853,6 +3879,19 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       roleAdmin: "Admin",
       roleOperator: "Operator",
       roleStreamer: "Streamer",
+      followersLabel: "followers",
+      followingLabel: "following",
+      followCta: "Follow player",
+      followingCta: "Following",
+      followUpdateFailed: "Could not update this follow.",
+      followersTitle: "Followers",
+      followingTitle: "Following",
+      followersEmpty: "No one follows this player yet.",
+      followingEmpty: "This player is not following anyone yet.",
+      pageSizeLabel: "Per page",
+      previousPage: "Previous",
+      nextPage: "Next",
+      backToProfile: "Back to profile",
     },
     registeredServers: {
       ariaLabel: "Registered Discord servers",
@@ -5205,6 +5244,19 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       roleAdmin: "管理者",
       roleOperator: "運営者",
       roleStreamer: "ストリーマー",
+      followersLabel: "フォロワー",
+      followingLabel: "フォロー中",
+      followCta: "プレイヤーをフォロー",
+      followingCta: "フォロー中",
+      followUpdateFailed: "フォロー設定を更新できませんでした。",
+      followersTitle: "フォロワー",
+      followingTitle: "フォロー中",
+      followersEmpty: "このプレイヤーをフォローしている人はまだいません。",
+      followingEmpty: "フォロー中のプレイヤーはまだいません。",
+      pageSizeLabel: "1ページ",
+      previousPage: "前へ",
+      nextPage: "次へ",
+      backToProfile: "プロフィールへ",
     },
     registeredServers: {
       ariaLabel: "登録済みDiscordサーバー",
@@ -6502,6 +6554,19 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       roleAdmin: "管理员",
       roleOperator: "运营者",
       roleStreamer: "主播",
+      followersLabel: "粉丝",
+      followingLabel: "正在关注",
+      followCta: "关注玩家",
+      followingCta: "已关注",
+      followUpdateFailed: "无法更新关注状态。",
+      followersTitle: "粉丝",
+      followingTitle: "正在关注",
+      followersEmpty: "暂时还没有人关注这位玩家。",
+      followingEmpty: "这位玩家暂时还没有关注任何人。",
+      pageSizeLabel: "每页",
+      previousPage: "上一页",
+      nextPage: "下一页",
+      backToProfile: "返回个人资料",
     },
     registeredServers: {
       ariaLabel: "已注册的 Discord 服务器",

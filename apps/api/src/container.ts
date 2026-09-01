@@ -1,6 +1,7 @@
 import {
   D1UserRepository,
   D1PublicProfileInsightsRepository,
+  D1ProfileFollowRepository,
   D1SessionRepository,
   D1ScoreRepository,
   D1PersonalizationRepository,
@@ -51,6 +52,7 @@ import {
   ProgressionUseCases,
   AchievementUseCases,
   ProfileUseCases,
+  ProfileFollowUseCases,
   DiscordLinkUseCases,
   DiscordGuildRegistrationUseCases,
   DiscordGuildDirectoryUseCases,
@@ -84,6 +86,7 @@ import {
   PlatformFeatureSettingsUseCases,
   type UserRepository,
   type PublicProfileInsightsRepository,
+  type ProfileFollowRepository,
   type SessionRepository,
   type ScoreRepository,
   type PersonalizationRepository,
@@ -131,6 +134,7 @@ import { createTrustedGameVerifierRegistry } from "./infrastructure/games/Static
 export interface AppContainer {
   userRepo: UserRepository;
   publicProfileInsightsRepo: PublicProfileInsightsRepository;
+  profileFollowRepo: ProfileFollowRepository;
   sessionRepo: SessionRepository;
   scoreRepo: ScoreRepository;
   personalizationRepo: PersonalizationRepository;
@@ -194,6 +198,7 @@ export interface AppContainer {
   progressionUseCases: ProgressionUseCases;
   achievementUseCases: AchievementUseCases;
   profileUseCases: ProfileUseCases;
+  profileFollowUseCases: ProfileFollowUseCases;
   discordLinkUseCases: DiscordLinkUseCases;
   discordGuildRegistrationUseCases: DiscordGuildRegistrationUseCases;
   discordGuildDirectoryUseCases: DiscordGuildDirectoryUseCases;
@@ -232,6 +237,7 @@ export interface AppContainer {
 export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): AppContainer {
   const userRepo = new D1UserRepository(db);
   const publicProfileInsightsRepo = new D1PublicProfileInsightsRepository(db);
+  const profileFollowRepo = new D1ProfileFollowRepository(db);
   const sessionRepo = new D1SessionRepository(db);
   const scoreRepo = new D1ScoreRepository(db);
   const personalizationRepo = new D1PersonalizationRepository(db);
@@ -325,6 +331,7 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
   const progressionUseCases = new ProgressionUseCases(progressionRepo);
   const achievementUseCases = new AchievementUseCases(achievementRepo, publicGameCatalog);
   const profileUseCases = new ProfileUseCases(userRepo);
+  const profileFollowUseCases = new ProfileFollowUseCases(userRepo, profileFollowRepo);
   const discordLinkUseCases = new DiscordLinkUseCases(discordLinkRepo);
   const discordGuildRegistrationUseCases = new DiscordGuildRegistrationUseCases(discordGuildRepo);
   const discordGuildDirectoryUseCases = new DiscordGuildDirectoryUseCases(discordGuildRepo);
@@ -421,6 +428,7 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
   return {
     userRepo,
     publicProfileInsightsRepo,
+    profileFollowRepo,
     sessionRepo,
     scoreRepo,
     personalizationRepo,
@@ -474,6 +482,7 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     progressionUseCases,
     achievementUseCases,
     profileUseCases,
+    profileFollowUseCases,
     discordLinkUseCases,
     discordGuildRegistrationUseCases,
     discordGuildDirectoryUseCases,
@@ -572,6 +581,7 @@ export async function getPublicProfileData(
   bioMarkdown: string;
   roles: Array<"ADMIN" | "OPERATOR" | "STREAMER">;
   contributions: import("@owogg/core").PublicProfileInsights;
+  followStats: import("@owogg/core").ProfileFollowSummary;
   progression: import("@owogg/core").ProgressionSummary;
   globalRank: number | null;
   currentStreak: number;
@@ -617,6 +627,7 @@ export async function getPublicProfileData(
     personalization,
     dailyCompletionCounts,
     contributions,
+    followStats,
   ] = await Promise.all([
     container.progressionUseCases.getProgressionSummary(userId),
     container.progressionUseCases.getGlobalXpRank(userId),
@@ -632,6 +643,7 @@ export async function getPublicProfileData(
         })
       : null,
     container.publicProfileInsightsRepo.getByUserId(userId),
+    container.profileFollowUseCases.getSummary(userId, viewerId),
   ]);
 
   const nowIso = now.toISOString();
@@ -667,6 +679,7 @@ export async function getPublicProfileData(
     bioMarkdown: user.profile_bio_markdown ?? "",
     roles,
     contributions,
+    followStats,
     progression: progress.summary,
     globalRank,
     currentStreak: user.current_streak ?? 0,

@@ -3,11 +3,25 @@
   "schemaVersion": 1,
   "game": {
     "slug": "reaction-time",
-    "title": "반응속도 테스트",
+    "title": "Reaction Time Test",
     "genre": "skill-test",
     "mode": "single",
     "playModes": ["single"],
-    "shortDescription": "예측하기 어려운 신호 시점에 얼마나 빠르게 반응하는지 측정합니다.",
+    "shortDescription": "Measure how quickly you react to an unpredictable visual signal.",
+    "localizations": {
+      "ko": {
+        "title": "반응속도 테스트",
+        "shortDescription": "예측하기 어려운 신호 시점에 얼마나 빠르게 반응하는지 측정합니다."
+      },
+      "ja": {
+        "title": "反応速度テスト",
+        "shortDescription": "予測できない視覚信号にどれだけ速く反応できるか測定します。"
+      },
+      "zh": {
+        "title": "反应速度测试",
+        "shortDescription": "测量你对不可预测的视觉信号作出反应的速度。"
+      }
+    },
     "description": [
       "description.md",
       "description_kr.md",

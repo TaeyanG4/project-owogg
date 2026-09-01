@@ -4,7 +4,7 @@
 
 마지막 검증: 2026-09-02
 
-최신 마이그레이션: `0053_profile_customization_and_streamer_disconnect.sql`
+최신 마이그레이션: `0054_profile_follows.sql`
 
 기준 소스:
 
@@ -16,7 +16,7 @@
 - [`ERD.md`](ERD.md) — 도메인별 관계도와 전체 물리 테이블·호환 뷰 사전
 
 Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 권한 원천입니다. 이 문서는
-현재 `0000_initial_schema.sql`부터 `0053_profile_customization_and_streamer_disconnect.sql`까지의 역할을 설명합니다.
+현재 `0000_initial_schema.sql`부터 `0054_profile_follows.sql`까지의 역할을 설명합니다.
 
 ## 마이그레이션 범위
 
@@ -53,6 +53,7 @@ Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 
 | `0051`        | 단일 Streamer, 플랫폼별 수동 심사·정책·OAuth intent·Provider 운영·감사 원장 |
 | `0052`        | 게임 태그·기본 화면 모드, 제작자 편집 쿨다운, 플랫폼 운영 스위치            |
 | `0053`        | 프로필 배너·Markdown 소개·기여 원장과 Streamer 연결 해제 불변 이력          |
+| `0054`        | 방향성 관심 플레이어 관계와 팔로워·팔로잉 조회 인덱스                       |
 
 기존 migration은 변경, squash, 삭제하지 않습니다. 프로덕션 배포는 먼저 Repository variable
 `PRODUCTION_D1_DATABASE_ID`를 read-only 원격 D1 목록과 committed `owogg-d1` binding에 대조한 뒤,

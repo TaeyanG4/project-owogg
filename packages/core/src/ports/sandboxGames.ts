@@ -4,6 +4,7 @@ import type {
   SandboxGamePublishStatus,
   SandboxGameMode,
 } from "../domain/sandboxGames.js";
+import type { OwoggGameContentLocale } from "@owogg/game-sdk/contracts";
 
 export interface SandboxGameRecord {
   id: number;
@@ -94,6 +95,8 @@ export interface SandboxGameReviewAuditEntry {
  * `null` (on nullable fields) = explicitly clear. Mirrors the same convention as
  * AdminScoreSubmissionBlockRequestSchema's `reason` field elsewhere in this codebase. */
 export interface SandboxGameMetadataInput {
+  /** Selected display language. Omitted preserves the historical English/default behavior. */
+  locale?: OwoggGameContentLocale | undefined;
   title?: string | undefined;
   shortDescription?: string | null | undefined;
   description?: string | null | undefined;
@@ -114,8 +117,24 @@ export interface SandboxGameMetadataInput {
  * than mutating an already-published immutable version in place. */
 export type SandboxGameBasicMetadataInput = Pick<
   SandboxGameMetadataInput,
-  "title" | "shortDescription" | "description" | "genre" | "mode" | "tags" | "defaultScreenMode"
+  | "locale"
+  | "title"
+  | "shortDescription"
+  | "description"
+  | "genre"
+  | "mode"
+  | "tags"
+  | "defaultScreenMode"
 >;
+
+/** Atomic inline edit payload shared by OWOGG and USER publication paths. */
+export interface GameContentUpdateInput {
+  locale: OwoggGameContentLocale;
+  title: string;
+  shortDescription: string | null;
+  tags: readonly string[];
+  descriptionMarkdown?: string | undefined;
+}
 
 export interface SandboxGamePendingVersionsPage {
   versions: SandboxGameVersionRecord[];

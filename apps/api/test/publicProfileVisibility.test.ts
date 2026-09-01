@@ -62,6 +62,13 @@ function fakeContainer(user: User, streamerProfile: unknown = null): AppContaine
         introducedExternalGameCount: 4,
       }),
     },
+    profileFollowUseCases: {
+      getSummary: async () => ({
+        followerCount: 5,
+        followingCount: 3,
+        viewerIsFollowing: false,
+      }),
+    },
     personalizationUseCases: {
       getPersonalizationState: async () => ({
         favoriteGameIds: FAVORITES,
@@ -115,6 +122,11 @@ test("a guest viewer sees neither list while both flags are private", async () =
   assert.equal(data.favoriteGameIds, null);
   assert.equal(data.recentPlays, null);
   assert.equal(data.playActivity, null);
+  assert.deepEqual(data.followStats, {
+    followerCount: 5,
+    followingCount: 3,
+    viewerIsFollowing: false,
+  });
   // visibilitySettings is the owner's own toggle state and must never leak to other viewers.
   assert.equal(data.visibilitySettings, null);
 });

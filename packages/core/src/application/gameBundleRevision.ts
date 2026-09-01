@@ -20,27 +20,51 @@ export function patchGameCreatorManifestBasicMetadata(
   manifest: OwoggGameCreatorManifest,
   input: SandboxGameBasicMetadataInput,
 ): OwoggGameCreatorManifest {
+  const locale = input.locale ?? "en";
   const game: Record<string, unknown> = {
     ...manifest.game,
-    ...(input.title !== undefined ? { title: input.title } : {}),
     ...(input.genre !== undefined ? { genre: input.genre } : {}),
     ...(input.mode !== undefined ? { mode: input.mode } : {}),
     ...(input.tags !== undefined ? { tags: input.tags } : {}),
   };
 
-  if (input.shortDescription !== undefined) {
-    if (input.shortDescription === null || input.shortDescription === "") {
-      delete game.shortDescription;
-    } else {
-      game.shortDescription = input.shortDescription;
+  if (locale === "en") {
+    if (input.title !== undefined) game.title = input.title;
+    if (input.shortDescription !== undefined) {
+      if (input.shortDescription === null || input.shortDescription === "") {
+        delete game.shortDescription;
+      } else {
+        game.shortDescription = input.shortDescription;
+      }
     }
-  }
-  if (input.description !== undefined) {
-    if (input.description === null || input.description === "") {
-      delete game.description;
-    } else {
-      game.description = input.description;
+    if (input.description !== undefined) {
+      if (input.description === null || input.description === "") {
+        delete game.description;
+      } else {
+        game.description = input.description;
+      }
     }
+  } else {
+    const previousLocalizations: Record<string, unknown> = {
+      ...(manifest.game.localizations ?? {}),
+    };
+    const localized: Record<string, unknown> = {
+      ...((previousLocalizations[locale] as Record<string, unknown> | undefined) ?? {}),
+    };
+    if (input.title !== undefined) localized.title = input.title;
+    if (input.shortDescription !== undefined) {
+      if (input.shortDescription === null || input.shortDescription === "") {
+        delete localized.shortDescription;
+      } else {
+        localized.shortDescription = input.shortDescription;
+      }
+    }
+    const localizations: Record<string, unknown> = Object.fromEntries(
+      Object.entries(previousLocalizations).filter(([key]) => key !== locale),
+    );
+    if (Object.keys(localized).length > 0) localizations[locale] = localized;
+    if (Object.keys(localizations).length > 0) game.localizations = localizations;
+    else delete game.localizations;
   }
 
   const presentation: Record<string, unknown> = {

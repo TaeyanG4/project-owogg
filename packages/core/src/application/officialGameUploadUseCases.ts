@@ -6,10 +6,12 @@ import {
   sandboxGameLogoObjectKey,
   sourceArchiveObjectKey,
   type PreparedBundle,
+  type PreparedBundleFile,
 } from "../domain/sandboxGameBundle.js";
 import {
   defaultGameDescription,
   extractGameCreatorManifest,
+  GAME_DESCRIPTION_LOCALE_FILES,
   getMultiplayerRuntimeProfileRequestV1,
   parseGameCreatorManifestBytes,
 } from "../domain/gameCreatorManifest.js";
@@ -28,6 +30,7 @@ import type {
 } from "../modules/game/ports/gameVersionPublicationRepository.js";
 import type {
   BundleArchiveWriter,
+  GameContentUpdateInput,
   GameBundleStorageRepository,
   SandboxGameBasicMetadataInput,
 } from "../ports/sandboxGames.js";
@@ -472,6 +475,59 @@ export class OfficialGameUploadUseCases {
       slug: input.slug,
       bytes: serializeGameCreatorManifest(manifest).buffer as ArrayBuffer,
     });
+  }
+
+  /** Admin-only inline information edit. Localized metadata and Markdown are published in one
+   * official immutable version so every public projection moves to the same manifest atomically. */
+  async updateContent(input: {
+    slug: string;
+    content: GameContentUpdateInput;
+  }): Promise<OfficialGameUploadResult> {
+    const base = await this.revisionBase(input.slug);
+    try {
+      let manifest = base.manifest;
+      const canonical = await this.canonicals.findBySlug(input.slug);
+      if (canonical?.creatorManifest) manifest = canonical.creatorManifest;
+      manifest = patchGameCreatorManifestBasicMetadata(manifest, {
+        locale: input.content.locale,
+        title: input.content.title,
+        shortDescription: input.content.shortDescription,
+        tags: input.content.tags,
+      });
+      let replacementFiles: readonly PreparedBundleFile[] = [];
+      let removePaths: readonly string[] = [];
+      if (input.content.descriptionMarkdown !== undefined) {
+        const path = GAME_DESCRIPTION_LOCALE_FILES[input.content.locale];
+        const { contentType, contentEncoding } = resolveBundleContentType(path);
+        const revision = buildGameDescriptionRevision({
+          manifest,
+          packageFiles: [
+            {
+              path,
+              bytes: new TextEncoder().encode(input.content.descriptionMarkdown),
+              contentType,
+              contentEncoding,
+            },
+          ],
+          replaceAll: false,
+        });
+        manifest = revision.manifest;
+        replacementFiles = revision.replacementFiles;
+        removePaths = revision.removePaths;
+      }
+      const archive = rebuildGameBundleArchive({
+        prepared: base.prepared,
+        writer: this.archiveWriter as BundleArchiveWriter,
+        manifestBytes: serializeGameCreatorManifest(manifest),
+        currentLogo: base.currentLogo,
+        replacementFiles,
+        removePaths,
+      });
+      return await this.upload({ bytes: archive, contentType: "application/zip" });
+    } catch (error) {
+      if (error instanceof OfficialGameUploadFailure) throw error;
+      throw new OfficialGameUploadFailure("MANIFEST_INVALID");
+    }
   }
 
   /** Adds/replaces one localized Markdown file, or replaces the complete description set from a

@@ -5,6 +5,7 @@ import type {
   SandboxGameReviewAuditEntry,
   SandboxGameMetadataInput,
   SandboxGameBasicMetadataInput,
+  GameContentUpdateInput,
   SandboxGamePendingVersionsPage,
   GameBundleStorageRepository,
   BundleArchiveWriter,
@@ -37,6 +38,7 @@ import {
   GameCreatorManifestValidationError,
   defaultGameDescription,
   extractGameCreatorManifest,
+  GAME_DESCRIPTION_LOCALE_FILES,
   gameDescriptionFilePaths,
   gameDescriptionImagePaths,
   getMultiplayerRuntimeProfileRequestV1,
@@ -168,6 +170,14 @@ function creatorManagedContentChanged(
   nextManifest: NonNullable<ReturnType<typeof extractGameCreatorManifest>>,
   nextFiles: readonly PreparedBundleFile[],
 ): boolean {
+  if (
+    previousManifest.game.title !== nextManifest.game.title ||
+    (previousManifest.game.shortDescription ?? "") !== (nextManifest.game.shortDescription ?? "") ||
+    JSON.stringify(previousManifest.game.localizations ?? {}) !==
+      JSON.stringify(nextManifest.game.localizations ?? {})
+  ) {
+    return true;
+  }
   if (
     JSON.stringify(previousManifest.game.tags ?? []) !==
     JSON.stringify(nextManifest.game.tags ?? [])
@@ -611,6 +621,68 @@ export class SandboxGameUseCases {
       isAdmin: input.isAdmin,
       bytes: serializeGameCreatorManifest(manifest).buffer as ArrayBuffer,
     });
+  }
+
+  /** Saves localized title/summary, global tags, and an optional localized Markdown document as
+   * one immutable version. This is deliberately atomic: a non-admin creator changing both tags
+   * and Markdown consumes one 24-hour content-edit slot, never two sequential requests. */
+  async updateContentAsVersion(input: {
+    gameId: number;
+    actingUserId: number;
+    isAdmin: boolean;
+    content: GameContentUpdateInput;
+  }): Promise<SandboxGameVersionRecord> {
+    if (!this.archiveWriter) throw new SandboxGameUseCaseFailure("PUBLISH_FAILED");
+    const game = await this.assertRevisionAccess(input);
+    const base = await this.revisionBase(game);
+    try {
+      let manifest = patchGameCreatorManifestBasicMetadata(base.manifest, {
+        locale: input.content.locale,
+        title: input.content.title,
+        shortDescription: input.content.shortDescription,
+        tags: input.content.tags,
+      });
+      let replacementFiles: readonly PreparedBundleFile[] = [];
+      let removePaths: readonly string[] = [];
+      if (input.content.descriptionMarkdown !== undefined) {
+        const path = GAME_DESCRIPTION_LOCALE_FILES[input.content.locale];
+        const { contentType, contentEncoding } = resolveBundleContentType(path);
+        const revision = buildGameDescriptionRevision({
+          manifest,
+          packageFiles: [
+            {
+              path,
+              bytes: new TextEncoder().encode(input.content.descriptionMarkdown),
+              contentType,
+              contentEncoding,
+            },
+          ],
+          replaceAll: false,
+        });
+        manifest = revision.manifest;
+        replacementFiles = revision.replacementFiles;
+        removePaths = revision.removePaths;
+      }
+      const archive = rebuildGameBundleArchive({
+        prepared: base.prepared,
+        writer: this.archiveWriter,
+        manifestBytes: serializeGameCreatorManifest(manifest),
+        currentLogo: null,
+        replacementFiles,
+        removePaths,
+      });
+      return await this.uploadVersion({
+        gameId: game.id,
+        actingUserId: input.actingUserId,
+        isAdmin: input.isAdmin,
+        bytes: archive,
+        contentType: "application/zip",
+      });
+    } catch (error) {
+      if (error instanceof SandboxGameUseCaseFailure) throw error;
+      if (error instanceof GameCreatorManifestValidationError) return manifestFailure(error);
+      throw new SandboxGameUseCaseFailure("MANIFEST_INVALID");
+    }
   }
 
   /** Creator/admin partial description submission. USER publications remain reviewable immutable

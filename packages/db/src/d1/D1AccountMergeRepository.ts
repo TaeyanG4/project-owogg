@@ -361,6 +361,32 @@ export class D1AccountMergeRepository implements AccountMergeRepository {
           `UPDATE multiplayer_invites SET created_by_user_id = ? WHERE created_by_user_id = ?`,
         )
         .bind(primaryId, secondaryId),
+      // Social relationships are public identity data, not gameplay aggregates. Preserve their
+      // union while removing edges that would become self-follows and deduplicating overlaps.
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO user_follows
+             (follower_user_id, followed_user_id, created_at)
+           SELECT ?, followed_user_id, created_at
+             FROM user_follows
+            WHERE follower_user_id = ? AND followed_user_id <> ?`,
+        )
+        .bind(primaryId, secondaryId, primaryId),
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO user_follows
+             (follower_user_id, followed_user_id, created_at)
+           SELECT follower_user_id, ?, created_at
+             FROM user_follows
+            WHERE followed_user_id = ? AND follower_user_id <> ?`,
+        )
+        .bind(primaryId, secondaryId, primaryId),
+      this.db
+        .prepare(
+          `DELETE FROM user_follows
+            WHERE follower_user_id = ? OR followed_user_id = ?`,
+        )
+        .bind(secondaryId, secondaryId),
     ];
     statements.push(
       this.db

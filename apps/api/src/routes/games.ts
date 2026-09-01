@@ -11,11 +11,13 @@ import {
   PublicGameAvailabilityResponseSchema,
   PublicGameListResponseSchema,
   PublicGameSchema,
+  GameEditorContextResponseSchema,
 } from "@owogg/contracts";
 import {
   GAME_SESSION_POLICY,
   canonicalizeGameEvidence,
   emptyPublicGameStats,
+  effectivePermissions,
   evaluateClientAuthoredResultFlow,
   gameDescriptionFilePaths,
   gameDescriptionImagePaths,
@@ -46,18 +48,25 @@ import { readB2Config } from "./devGames.js";
 import { MAX_GAME_RESULT_REQUEST_BYTES, readBoundedJsonBody } from "./boundedJsonBody.js";
 import type { ApiEnv } from "./auth.js";
 import { isMultiplayerFeatureEnabled } from "../multiplayer/config.js";
+import { resolveAdminEligibility, resolveEffectiveStaffRole } from "../auth/adminEligibility.js";
 
 // Same local requireAuth as streamers.ts/discordGuilds.ts — not shared from auth.ts, matching this
 // codebase's existing per-route-file convention rather than introducing a shared import for it.
-async function requireAuth(
-  c: Context<ApiEnv>,
-): Promise<{ userId: number; user: { id: number; nickname: string } } | null> {
+async function requireAuth(c: Context<ApiEnv>): Promise<{
+  userId: number;
+  rawSessionToken: string;
+  user: { id: number; nickname: string };
+} | null> {
   const sessionId = getCookie(c, "owogg_session");
   if (!sessionId) return null;
   const { sessionRepo } = createContainer(c.env.DB);
   const result = await sessionRepo.findSession(sessionId);
   if (!result) return null;
-  return { userId: result.user.id, user: { id: result.user.id, nickname: result.user.nickname } };
+  return {
+    userId: result.user.id,
+    rawSessionToken: sessionId,
+    user: { id: result.user.id, nickname: result.user.nickname },
+  };
 }
 
 export const gamesRouter = new Hono<ApiEnv>();
@@ -340,6 +349,83 @@ gamesRouter.get("/:slug/media/description", async (c) => {
   } catch {
     return c.text("Not Found", 404);
   }
+});
+
+/** Authenticated capability projection for the inline game-information editor. Publisher user ids
+ * remain private: callers receive a concrete route mode only when they own the USER game or hold
+ * the matching permission in a currently elevated admin session. Mutation routes re-check every
+ * fact; this endpoint is only the safe UI discovery layer. */
+gamesRouter.get("/:slug/edit-context", async (c) => {
+  c.header("Cache-Control", "no-store");
+  if (!c.env?.DB) return c.text("Not Found", 404);
+  const auth = await requireAuth(c);
+  if (!auth) {
+    return c.json({ error: { code: "UNAUTHORIZED", message: "로그인이 필요합니다." } }, 401);
+  }
+
+  const container = createContainer(c.env.DB, readB2Config(c.env));
+  const identity = await container.gameIdentityRepo.findBySlug(c.req.param("slug"));
+  if (!identity || identity.deletedAt !== null) return c.text("Not Found", 404);
+
+  let elevatedPermissions: readonly string[] = [];
+  const eligibility = await resolveAdminEligibility(
+    auth.userId,
+    c.env.ADMIN_USER_IDS,
+    container.adminAccountUseCases,
+  );
+  if (eligibility.eligible) {
+    const elevated = await container.adminAuthUseCases.validateAdminSession({
+      rawToken: getCookie(c, "owogg_admin_session"),
+      rawSessionToken: auth.rawSessionToken,
+    });
+    if (elevated) {
+      const staffRole = resolveEffectiveStaffRole(eligibility);
+      const [rolePermissions, individualPermissions] =
+        !staffRole || staffRole === "ADMIN"
+          ? [[], []]
+          : await Promise.all([
+              container.adminAccountUseCases.listRolePermissions(staffRole),
+              eligibility.account
+                ? container.adminAccountUseCases.listPermissions(eligibility.account.id)
+                : Promise.resolve([]),
+            ]);
+      elevatedPermissions = effectivePermissions(staffRole, rolePermissions, individualPermissions);
+    }
+  }
+
+  if (identity.publisher.type === "OWOGG") {
+    return c.json(
+      GameEditorContextResponseSchema.parse({
+        editor: elevatedPermissions.includes("games.moderate")
+          ? {
+              gameId: identity.id,
+              mode: "OFFICIAL_ADMIN",
+              publisherType: "OWOGG",
+              contentEditAvailableAt: null,
+            }
+          : null,
+      }),
+      200,
+    );
+  }
+
+  const sandboxGame = await container.sandboxGameRepo.findById(identity.id);
+  const editor = elevatedPermissions.includes("sandbox_games.review")
+    ? {
+        gameId: identity.id,
+        mode: "USER_ADMIN" as const,
+        publisherType: "USER" as const,
+        contentEditAvailableAt: null,
+      }
+    : identity.publisher.userId === auth.userId
+      ? {
+          gameId: identity.id,
+          mode: "USER_CREATOR" as const,
+          publisherType: "USER" as const,
+          contentEditAvailableAt: sandboxGame?.contentEditAvailableAt ?? null,
+        }
+      : null;
+  return c.json(GameEditorContextResponseSchema.parse({ editor }), 200);
 });
 
 // GET /api/games/:slug — one provider-neutral runtime resolution path for OWOGG and USER.

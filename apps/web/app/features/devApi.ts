@@ -7,6 +7,7 @@ import {
   SandboxGameUploadResponseSchema,
   GameLogoUpdateResponseSchema,
   type SandboxGameBasicMetadataUpdateRequest,
+  type GameContentUpdateRequest,
   type SandboxGameUploadResponse,
 } from "@owogg/contracts";
 import { apiFetch } from "../lib/api/client";
@@ -187,6 +188,13 @@ export function patchDevGameBasicMetadata(
   input: SandboxGameBasicMetadataUpdateRequest,
 ) {
   return apiFetch(`/api/dev/games/${gameId}/basic-metadata`, SandboxGameVersionRecordSchema, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export function patchDevGameContent(gameId: number, input: GameContentUpdateRequest) {
+  return apiFetch(`/api/dev/games/${gameId}/content`, SandboxGameVersionRecordSchema, {
     method: "PATCH",
     body: JSON.stringify(input),
   });

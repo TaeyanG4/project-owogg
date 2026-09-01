@@ -24,10 +24,10 @@ const frozenGameSlugs = [
 ];
 const expectedArtifactVersions = new Map([
   ["aim-test", "1.0.2"],
-  ["memory-test", "1.0.2"],
+  ["memory-test", "1.0.5"],
   ["official-omok", "1.0.8"],
   ["reaction-time", "1.0.1"],
-  ["typing-test", "1.0.1"],
+  ["typing-test", "1.0.3"],
 ]);
 
 function read(relativePath: string): string {

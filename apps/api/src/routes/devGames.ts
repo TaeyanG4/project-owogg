@@ -12,6 +12,7 @@ import {
   SandboxGameVersionRecordSchema,
   SandboxGameUploadResponseSchema,
   SandboxGameBasicMetadataUpdateRequestSchema,
+  GameContentUpdateRequestSchema,
   GameLogoUpdateResponseSchema,
 } from "@owogg/contracts";
 import {
@@ -376,6 +377,50 @@ devGamesRouter.patch(
     } catch (err) {
       const { body: errBody, status } = failureResponse(err);
       return c.json(errBody, status);
+    }
+  },
+);
+
+// PATCH /api/dev/games/:id/content — inline game-page editor. Localized title/summary, tags, and
+// optional Markdown become one reviewable immutable version so the creator cooldown is atomic.
+devGamesRouter.patch(
+  "/games/:id/content",
+  rateLimit({ name: "game-upload", binding: "GAME_UPLOAD_RATE_LIMITER" }),
+  async (c) => {
+    const session = await resolveDevSession(c);
+    if (!session) {
+      return c.json({ error: { code: "UNAUTHORIZED", message: "로그인이 필요합니다." } }, 401);
+    }
+    const parsed = GameContentUpdateRequestSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) {
+      return c.json(
+        { error: { code: "INVALID_REQUEST", message: "수정할 게임 정보가 올바르지 않습니다." } },
+        400,
+      );
+    }
+    const container = createContainer(c.env.DB, readB2Config(c.env));
+    if (!container.gameBundlesConfigured) {
+      return c.json(
+        {
+          error: {
+            code: "GAME_BUNDLES_NOT_CONFIGURED",
+            message: "번들 저장소(Backblaze B2)가 아직 이 환경에 구성되지 않았습니다.",
+          },
+        },
+        503,
+      );
+    }
+    try {
+      const version = await container.sandboxGameUseCases.updateContentAsVersion({
+        gameId: Number(c.req.param("id")),
+        actingUserId: session.userId,
+        isAdmin: session.isAdmin,
+        content: parsed.data,
+      });
+      return c.json(SandboxGameVersionRecordSchema.parse(version), 201);
+    } catch (error) {
+      const { body, status } = failureResponse(error);
+      return c.json(body, status);
     }
   },
 );

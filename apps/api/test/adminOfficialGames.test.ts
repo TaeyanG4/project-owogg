@@ -73,7 +73,22 @@ function createAdminDb(options: {
             retains_history: options.multiplayerHistory ? 1 : 0,
           } as T;
         }
-        if (query.includes("FROM games")) queriedGames.push(query);
+        if (query.includes("FROM games")) {
+          queriedGames.push(query);
+          if (options.officialGame && query.includes("WHERE slug = ?")) {
+            return {
+              id: 7,
+              slug: "official-game",
+              publisher_type: "OWOGG",
+              publisher_user_id: null,
+              visibility: "PUBLIC",
+              live_version_id: 11,
+              deleted_at: null,
+              created_at: "2026-08-24T00:00:00.000Z",
+              updated_at: "2026-08-24T00:00:00.000Z",
+            } as T;
+          }
+        }
         return null;
       },
       async all<T>() {
@@ -150,6 +165,25 @@ function createAdminDb(options: {
     },
   };
 }
+
+test("GET /api/games/:slug/edit-context exposes official editing to an elevated root admin", async () => {
+  const { db } = createAdminDb({ userId: 1, officialGame: true });
+  const response = await app.request(
+    "/api/games/official-game/edit-context",
+    { headers: { Cookie: ADMIN_COOKIE } },
+    { DB: db, ADMIN_USER_IDS: "1" } as any,
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    editor: {
+      gameId: 7,
+      mode: "OFFICIAL_ADMIN",
+      publisherType: "OWOGG",
+      contentEditAvailableAt: null,
+    },
+  });
+});
 
 test("DELETE /api/admin/games/:slug requires an elevated admin session", async () => {
   const { db } = createAdminDb({ userId: 1 });

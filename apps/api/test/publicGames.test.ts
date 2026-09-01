@@ -417,6 +417,10 @@ test("game detail projects localized Markdown and serves only current allowliste
         game: {
           ...OFFICIAL.canonical.creatorManifest!.game,
           slug: "localized-guide",
+          localizations: {
+            ko: { title: "현지화 안내", shortDescription: "한국어 요약" },
+            ja: { title: "ローカライズ案内" },
+          },
           description: ["description.md", "description_kr.md"],
           description_images: ["guide/board.png", "guide/empty.png"],
         },
@@ -440,6 +444,10 @@ test("game detail projects localized Markdown and serves only current allowliste
   );
   assert.equal(detailResponse.status, 200);
   const detail = (await detailResponse.json()) as PublicGameJson;
+  assert.deepEqual(detail.localizations, {
+    ko: { title: "현지화 안내", shortDescription: "한국어 요약" },
+    ja: { title: "ローカライズ案内" },
+  });
   assert.deepEqual(detail.descriptions, [
     { locale: "en", path: "description.md", markdown: "# English guide" },
     { locale: "ko", path: "description_kr.md", markdown: "# 한국어 안내" },

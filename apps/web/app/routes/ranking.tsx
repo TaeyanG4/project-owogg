@@ -67,8 +67,8 @@ export default function Ranking() {
   const { games: publicGames } = usePublicGames();
   const leaderboardGames = useMemo(() => filterLeaderboardGames(publicGames), [publicGames]);
   const gameCards = useMemo(
-    () => leaderboardGames.map((game) => publicGameToCard(game)),
-    [leaderboardGames],
+    () => leaderboardGames.map((game) => publicGameToCard(game, locale)),
+    [leaderboardGames, locale],
   );
 
   const [scope, setScope] = useState<RankingScope>("general");
@@ -95,9 +95,9 @@ export default function Ranking() {
     const query = gameSearchQuery.trim().toLowerCase();
     if (!query) return gameCards;
     return gameCards.filter((game) =>
-      getLocalizedGameContent(dict, game).title.toLowerCase().includes(query),
+      getLocalizedGameContent(dict, game, locale).title.toLowerCase().includes(query),
     );
-  }, [dict, gameCards, gameSearchQuery]);
+  }, [dict, gameCards, gameSearchQuery, locale]);
 
   const loadData = useCallback(async () => {
     if (metric === "score" && selectedGameId === "all") {
@@ -331,12 +331,14 @@ export default function Ranking() {
                   >
                     <GameThumbnail
                       thumbnail={game.thumbnail}
-                      title={getLocalizedGameContent(dict, game).title}
+                      title={getLocalizedGameContent(dict, game, locale).title}
                       accent={game.accent}
                       className="h-6 w-6 shrink-0"
                       rounded="rounded-md"
                     />
-                    <span className="truncate">{getLocalizedGameContent(dict, game).title}</span>
+                    <span className="truncate">
+                      {getLocalizedGameContent(dict, game, locale).title}
+                    </span>
                   </button>
                 ))
               )}
@@ -348,7 +350,7 @@ export default function Ranking() {
           {metric === "score" && selectedGameId === "all" ? (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
               {gameCards.map((game) => {
-                const content = getLocalizedGameContent(dict, game);
+                const content = getLocalizedGameContent(dict, game, locale);
                 return (
                   <button
                     key={game.slug}

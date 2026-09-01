@@ -3,11 +3,25 @@
   "schemaVersion": 1,
   "game": {
     "slug": "typing-test",
-    "title": "타자 속도 테스트",
+    "title": "Typing Speed Test",
     "genre": "skill-test",
     "mode": "single",
     "playModes": ["single"],
-    "shortDescription": "90초 동안 한 줄씩 입력하고 서버가 검증한 종합 점수를 기록하세요.",
+    "shortDescription": "Type line by line for 90 seconds and record a server-verified combined score.",
+    "localizations": {
+      "ko": {
+        "title": "타자 속도 테스트",
+        "shortDescription": "90초 동안 한 줄씩 입력하고 서버가 검증한 종합 점수를 기록하세요."
+      },
+      "ja": {
+        "title": "タイピング速度テスト",
+        "shortDescription": "90秒間1行ずつ入力し、サーバー検証済みの総合スコアを記録します。"
+      },
+      "zh": {
+        "title": "打字速度测试",
+        "shortDescription": "在90秒内逐行输入，并记录经服务器验证的综合得分。"
+      }
+    },
     "description": [
       "description.md",
       "description_kr.md",

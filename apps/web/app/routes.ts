@@ -11,6 +11,8 @@ export default [
   route("settings", "routes/settings.tsx"),
   route("api/streamers/verify/:platform", "routes/streamerVerificationRedirect.tsx"),
   route("users/:id", "routes/userProfile.tsx"),
+  route("users/:id/followers", "routes/userFollowers.tsx"),
+  route("users/:id/following", "routes/userFollowing.tsx"),
   route("admin", "routes/admin.tsx"),
   route("admin/streamers", "routes/adminStreamers.tsx"),
   route("admin/creators", "routes/legacyAdminStreamerRedirect.tsx"),

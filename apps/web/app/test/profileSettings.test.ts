@@ -76,6 +76,9 @@ describe("Profile settings (nickname/country) client contracts", () => {
     assert.match(profile, /h-52 overflow-hidden bg-slate-950 sm:h-60 lg:h-72/);
     assert.match(profile, /h-24 w-24.*sm:h-28 sm:w-28 lg:h-32 lg:w-32/);
     assert.match(profile, /border border-white\/\[0\.09\]/);
+    assert.doesNotMatch(profile, /shadow-\[0_28px_90px_rgba\(2,6,23,0\.48\)\]/);
+    assert.match(profile, /icon={<Boxes className="h-4 w-4 text-violet-400" \/>}/);
+    assert.match(profile, /icon={<BadgePlus className="h-4 w-4 text-cyan-400" \/>}/);
     assert.doesNotMatch(profile, /const roleAccent/);
     assert.doesNotMatch(profile, /border-rose-400\/25/);
     assert.match(profile, /<aside className="relative border-b[^\n]+lg:border-r/);
@@ -84,6 +87,10 @@ describe("Profile settings (nickname/country) client contracts", () => {
     assert.match(profile, /max-w-\[1040px\].*border-t border-border pt-6/);
     assert.match(profile, /PROFILE_BANNER_ART/);
     assert.match(profile, /data-profile-experience/);
+    assert.match(profile, /to={`\/users\/\$\{data\.id\}\/followers`}/);
+    assert.match(profile, /to={`\/users\/\$\{data\.id\}\/following`}/);
+    assert.match(profile, /setProfileFollowApi/);
+    assert.match(profile, /aria-pressed={data\.followStats\.viewerIsFollowing}/);
     assert.equal(profile.match(/dict\.userProfile\.contributionsTitle/g)?.length, 1);
     assert.ok(
       profile.indexOf("dict.userProfile.contributionsTitle") < profile.indexOf("<main"),

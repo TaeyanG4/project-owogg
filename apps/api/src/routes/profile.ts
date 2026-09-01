@@ -11,6 +11,9 @@ import {
   UpdateProfilePresentationRequestSchema,
   UpdateProfilePresentationResponseSchema,
   PublicProfileResponseSchema,
+  ProfileConnectionsQuerySchema,
+  ProfileConnectionsResponseSchema,
+  ProfileFollowMutationResponseSchema,
 } from "@owogg/contracts";
 import type { ApiEnv } from "./auth.js";
 import { createContainer, getPublicProfileData } from "../container.js";
@@ -19,11 +22,114 @@ import { resolveAdminEligibility, resolveEffectiveStaffRole } from "../auth/admi
 
 export const profileRouter = new Hono<ApiEnv>();
 
+function parsePositiveUserId(value: string): number | null {
+  const userId = Number(value);
+  return Number.isInteger(userId) && userId > 0 ? userId : null;
+}
+
+profileRouter.get("/public/:userId/followers", async (c) => {
+  const userId = parsePositiveUserId(c.req.param("userId"));
+  if (!userId) return profileError(c, "INVALID_USER_ID", "잘못된 사용자 ID입니다.", 400);
+  if (!c.env?.DB) return c.json({ error: "Database unavailable" }, 500);
+  const query = ProfileConnectionsQuerySchema.safeParse(c.req.query());
+  if (!query.success) {
+    return profileError(c, "INVALID_PAGINATION", "페이지 설정이 올바르지 않습니다.", 400);
+  }
+  const { profileFollowUseCases } = createContainer(c.env.DB);
+  const result = await profileFollowUseCases.listFollowers(
+    userId,
+    query.data.page,
+    query.data.pageSize,
+  );
+  if (!result.ok) return profileError(c, result.code, "사용자를 찾을 수 없습니다.", 404);
+  return c.json(
+    ProfileConnectionsResponseSchema.parse({
+      user: result.user,
+      kind: "FOLLOWERS",
+      ...result.page,
+    }),
+    200,
+  );
+});
+
+profileRouter.get("/public/:userId/following", async (c) => {
+  const userId = parsePositiveUserId(c.req.param("userId"));
+  if (!userId) return profileError(c, "INVALID_USER_ID", "잘못된 사용자 ID입니다.", 400);
+  if (!c.env?.DB) return c.json({ error: "Database unavailable" }, 500);
+  const query = ProfileConnectionsQuerySchema.safeParse(c.req.query());
+  if (!query.success) {
+    return profileError(c, "INVALID_PAGINATION", "페이지 설정이 올바르지 않습니다.", 400);
+  }
+  const { profileFollowUseCases } = createContainer(c.env.DB);
+  const result = await profileFollowUseCases.listFollowing(
+    userId,
+    query.data.page,
+    query.data.pageSize,
+  );
+  if (!result.ok) return profileError(c, result.code, "사용자를 찾을 수 없습니다.", 404);
+  return c.json(
+    ProfileConnectionsResponseSchema.parse({
+      user: result.user,
+      kind: "FOLLOWING",
+      ...result.page,
+    }),
+    200,
+  );
+});
+
+profileRouter.put("/follows/:userId", async (c) => {
+  const viewerId = await getAuthUserId(c);
+  if (!viewerId) return profileError(c, "UNAUTHORIZED", "Unauthenticated", 401);
+  const userId = parsePositiveUserId(c.req.param("userId"));
+  if (!userId) return profileError(c, "INVALID_USER_ID", "잘못된 사용자 ID입니다.", 400);
+  if (!c.env?.DB) return c.json({ error: "Database unavailable" }, 500);
+  const { profileFollowUseCases } = createContainer(c.env.DB);
+  const result = await profileFollowUseCases.follow(viewerId, userId);
+  if (!result.ok) {
+    return profileError(
+      c,
+      result.code,
+      result.code === "USER_NOT_FOUND"
+        ? "사용자를 찾을 수 없습니다."
+        : "자기 자신은 관심 플레이어로 등록할 수 없습니다.",
+      result.code === "USER_NOT_FOUND" ? 404 : 400,
+    );
+  }
+  return c.json(
+    ProfileFollowMutationResponseSchema.parse({ success: true, followStats: result.summary }),
+    200,
+  );
+});
+
+profileRouter.delete("/follows/:userId", async (c) => {
+  const viewerId = await getAuthUserId(c);
+  if (!viewerId) return profileError(c, "UNAUTHORIZED", "Unauthenticated", 401);
+  const userId = parsePositiveUserId(c.req.param("userId"));
+  if (!userId) return profileError(c, "INVALID_USER_ID", "잘못된 사용자 ID입니다.", 400);
+  if (!c.env?.DB) return c.json({ error: "Database unavailable" }, 500);
+  const { profileFollowUseCases } = createContainer(c.env.DB);
+  const result = await profileFollowUseCases.unfollow(viewerId, userId);
+  if (!result.ok) {
+    return profileError(
+      c,
+      result.code,
+      result.code === "USER_NOT_FOUND"
+        ? "사용자를 찾을 수 없습니다."
+        : "자기 자신은 관심 플레이어에서 해제할 수 없습니다.",
+      result.code === "USER_NOT_FOUND" ? 404 : 400,
+    );
+  }
+  return c.json(
+    ProfileFollowMutationResponseSchema.parse({ success: true, followStats: result.summary }),
+    200,
+  );
+});
+
 // GET /api/profile/public/:userId — public profile page data, no auth required. Returns
 // only the public-safe subset (see getPublicProfileData); 404 if the user doesn't exist.
 profileRouter.get("/public/:userId", async (c) => {
-  const userId = Number(c.req.param("userId"));
-  if (!Number.isInteger(userId) || userId <= 0) {
+  const userId = parsePositiveUserId(c.req.param("userId"));
+  if (!userId) {
     return profileError(c, "INVALID_USER_ID", "잘못된 사용자 ID입니다.", 400);
   }
   if (!c.env?.DB) {

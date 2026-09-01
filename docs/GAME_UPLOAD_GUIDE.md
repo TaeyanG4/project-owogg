@@ -51,6 +51,11 @@ description_zh.md
   "game": {
     "slug": "my-game",
     "title": "My Game",
+    "localizations": {
+      "ko": { "title": "내 게임", "shortDescription": "한국어 한 줄 소개" },
+      "ja": { "title": "マイゲーム" },
+      "zh": { "title": "我的游戏" }
+    },
     "genre": "arcade",
     "tags": ["puzzle", "card-board"],
     "mode": "single",
@@ -80,6 +85,8 @@ description_zh.md
   `game.tags`에는 `typing`, `reaction`, `card-board`처럼 세부 규칙·테마를 적습니다. 플랫폼은 고정된
   대표 장르 allowlist를 강제하지 않으며 알려진 넓은 장르는 언어별 이름으로 표시하고 알 수 없는 장르는
   원문을 유지합니다. 기존 세부 official 장르는 호환 정규화 후 장르별 화면에서 함께 묶입니다.
+- top-level `game.title`과 `shortDescription`은 필수 영어 fallback입니다. 번역은
+  `game.localizations.ko|ja|zh`에 `title` 또는 `shortDescription`을 적으며 영어 key는 두지 않습니다.
 - `game.description`을 파일 배열로 선언할 때 영어 기본 문서인 `description.md`는 필수이고,
   `description_kr.md`, `description_ja.md`, `description_zh.md`를 선택적으로 함께 선언합니다. 공개 게임
   상세는 현재 UI 언어 문서를 먼저 사용하고, 없으면 영어, 그마저 없으면 기존 짧은 설명으로
@@ -148,6 +155,11 @@ description_zh.md
 
 게임별 관리 메뉴에서 전체 ZIP 외에 `owogg.json`, 설명 문서 또는 로고만 다시 올릴 수 있습니다.
 제목, 장르, single/multi 모드, 태그와 기본 화면 모드는 핵심 속성 폼에서 직접 고칠 수도 있습니다.
+
+공개 게임 정보의 `수정하기` 버튼은 OWOGG 게임에서는 elevated `games.moderate` 관리자에게만,
+USER 게임에서는 소유 제작자 또는 `sandbox_games.review` 관리자에게만 표시됩니다. 언어 선택 뒤 제목,
+요약, Markdown을 한 번에 저장하면 동일한 immutable version 하나로 처리됩니다. 네 언어와 실행 파일을
+동시에 갱신할 때는 전체 ZIP 업로드가 가장 안전합니다.
 
 - `owogg.json`과 핵심 속성 저장은 기존 게시 파일을 덮어쓰지 않고 현재 source ZIP을 재구성해 새
   `PENDING_REVIEW` version을 만듭니다. 수정본은 다시 승인되어야 live로 전환할 수 있습니다.

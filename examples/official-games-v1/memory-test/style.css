@@ -27,6 +27,8 @@ body {
 body {
   height: 100vh;
   padding: clamp(0.6rem, 1.6vw, 1.25rem);
+  display: grid;
+  place-items: center;
   background: radial-gradient(circle at 50% 0, rgb(16 185 129 / 11%), transparent 32rem), #0b0d14;
 }
 
@@ -35,13 +37,18 @@ button {
 }
 
 .shell {
-  width: 100%;
+  width: min(100%, 68rem);
   height: calc(100vh - clamp(1.2rem, 3.2vw, 2.5rem));
   min-height: 0;
   display: flex;
   flex-direction: column;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid rgb(52 211 153 / 12%);
+  border-radius: clamp(1rem, 2vw, 1.5rem);
   padding: clamp(0.5rem, 2vw, 1.25rem);
   background: linear-gradient(rgb(24 24 27 / 72%), rgb(9 9 11 / 54%));
+  box-shadow: 0 1.5rem 5rem rgb(0 0 0 / 32%);
   user-select: none;
 }
 
@@ -60,19 +67,21 @@ button {
   gap: 0.65rem;
 }
 
-.brain-icon {
-  width: 2.3rem;
-  height: 2.3rem;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgb(16 185 129 / 24%);
-  border-radius: 0.75rem;
-  background: rgb(16 185 129 / 11%);
+.main-mark {
+  display: block;
 }
 
-.brain-icon::before {
-  color: #34d399;
-  content: "◆";
+.header-mark {
+  width: 2.55rem;
+  height: 2.55rem;
+  flex: 0 0 auto;
+  border-radius: 0.8rem;
+}
+
+.title strong {
+  color: #f8fafc;
+  font-size: 1rem;
+  letter-spacing: -0.025em;
 }
 
 .score-boxes {
@@ -120,9 +129,10 @@ button {
 }
 
 .config-panel {
+  width: min(100%, 46rem);
   display: grid;
   gap: 0.6rem;
-  margin-top: 1rem;
+  margin: 1rem auto 0;
   padding: 0.7rem;
   border: 1px solid rgb(255 255 255 / 9%);
   border-radius: 1rem;
@@ -173,24 +183,19 @@ button {
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  padding: clamp(0.75rem, 2.5vw, 2rem);
   text-align: center;
 }
 
-.hero-brain {
-  width: 6rem;
-  height: 6rem;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgb(52 211 153 / 36%);
-  border-radius: 50%;
-  color: #34d399;
-  background: radial-gradient(circle, rgb(16 185 129 / 25%), rgb(99 102 241 / 8%));
-  box-shadow: 0 0 2.5rem rgb(16 185 129 / 20%);
-  font-size: 3rem;
+.hero-mark {
+  width: clamp(6rem, 15vw, 8rem);
+  height: clamp(6rem, 15vw, 8rem);
+  border-radius: clamp(1.25rem, 3vw, 2rem);
+  filter: drop-shadow(0 0 1.8rem rgb(16 185 129 / 18%));
 }
 
 h1 {
-  margin: 1.25rem 0 0.55rem;
+  margin: 1rem 0 0.55rem;
   color: white;
   font-size: clamp(1.6rem, 5vw, 2.25rem);
   letter-spacing: -0.04em;
@@ -228,6 +233,7 @@ h1 {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   padding-top: 1rem;
 }
 
@@ -366,8 +372,9 @@ h1 {
 }
 
 .status {
+  width: min(100%, 36rem);
   min-height: 1.2rem;
-  margin: 0.8rem 0 0;
+  margin: 0.8rem auto 0;
   color: #64748b;
   font-size: 0.75rem;
   text-align: center;
@@ -375,6 +382,50 @@ h1 {
 
 .hidden {
   display: none !important;
+}
+
+@media (max-height: 560px) {
+  .game-header {
+    padding-bottom: 0.65rem;
+  }
+
+  .config-panel {
+    gap: 0.35rem;
+    margin-top: 0.65rem;
+    padding: 0.5rem;
+  }
+
+  .setup,
+  .finished {
+    padding: 0.4rem;
+  }
+
+  .hero-mark {
+    width: 4.75rem;
+    height: 4.75rem;
+    border-radius: 1.2rem;
+  }
+
+  h1 {
+    margin: 0.5rem 0 0.3rem;
+    font-size: 1.5rem;
+  }
+
+  .setup p,
+  .finished p {
+    margin-bottom: 0.65rem;
+    font-size: 0.75rem;
+    line-height: 1.45;
+  }
+
+  .primary {
+    min-height: 2.55rem;
+    padding: 0.55rem 1.35rem;
+  }
+
+  .status {
+    margin-top: 0.35rem;
+  }
 }
 
 @media (max-width: 560px) {
@@ -427,7 +478,7 @@ h1 {
     padding-bottom: 0.45rem;
   }
 
-  .brain-icon {
+  .header-mark {
     width: 1.9rem;
     height: 1.9rem;
   }

@@ -55,7 +55,10 @@ export default function Games() {
   } = useGridColumns();
   const { dict, locale } = useI18n();
   const { games: publicGames, isLoading } = usePublicGames();
-  const gameCards = useMemo(() => publicGames.map(publicGameToCard), [publicGames]);
+  const gameCards = useMemo(
+    () => publicGames.map((game) => publicGameToCard(game, locale)),
+    [locale, publicGames],
+  );
   const { favoriteGameIds } = usePersonalization();
   const resolveLocalizedGenre = useCallback(
     (genre: string | undefined) =>
@@ -94,13 +97,13 @@ export default function Games() {
   const filteredGames = useMemo(
     () =>
       catalogGames.filter((game) => {
-        const localized = getLocalizedGameContent(dict, game);
+        const localized = getLocalizedGameContent(dict, game, locale);
         return matchesGameSearch(game, searchQuery, {
           ...localized,
           genre: resolveLocalizedGenre(game.genre).label,
         });
       }),
-    [catalogGames, dict, resolveLocalizedGenre, searchQuery],
+    [catalogGames, dict, locale, resolveLocalizedGenre, searchQuery],
   );
 
   const allGenreGroups = useMemo(
@@ -117,10 +120,10 @@ export default function Games() {
   );
   const gameMatchesGenreSearch = useCallback(
     (game: (typeof gameCards)[number], genreLabel: string) => {
-      const localized = getLocalizedGameContent(dict, game);
+      const localized = getLocalizedGameContent(dict, game, locale);
       return matchesGameSearch(game, searchQuery, { ...localized, genre: genreLabel });
     },
-    [dict, searchQuery],
+    [dict, locale, searchQuery],
   );
   const searchedGenreGroups = useMemo(
     () =>

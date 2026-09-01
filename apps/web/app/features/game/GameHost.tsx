@@ -24,6 +24,7 @@ import { GamePlayActionBar } from "../../components/game/GamePlayActionBar";
 import { GamePlayAdSlot } from "../../components/game/GamePlayAdSlot";
 import { GameRecommendations } from "../../components/game/GameRecommendations";
 import { GameDescriptionMarkdown } from "../../components/game/GameDescriptionMarkdown";
+import { GameInformationEditor } from "../../components/game/GameInformationEditor";
 import { XIcon } from "../../components/ui/XIcon";
 import { IframeRuntime } from "./runtime/IframeRuntime";
 import {
@@ -49,6 +50,7 @@ import type {
   LeaderRecord,
   MultiplayerGameAvailabilityResponse,
   PublicGame,
+  GameEditorContext,
 } from "@owogg/contracts";
 import type {
   GamePlayMode,
@@ -56,8 +58,9 @@ import type {
   PlayConfigSelection,
   PublicPlayConfigDescriptor,
 } from "@owogg/game-sdk/bridge";
-import { fetchPublicGame, usePublicGames } from "../publicGamesApi";
+import { fetchGameEditorContext, fetchPublicGame, usePublicGames } from "../publicGamesApi";
 import { publicGameToCard } from "../catalog/publicGameAdapter";
+import { localizedPublicGameMetadata } from "../catalog/gameLocalization";
 import { selectRecommendedGameCards } from "./gameRecommendations";
 import {
   ArrowLeft,
@@ -73,6 +76,7 @@ import {
   Smartphone,
   Users,
   X,
+  Pencil,
 } from "lucide-react";
 
 export type SubmissionState = "idle" | "guest" | "submitting" | "success" | "error";
@@ -549,6 +553,8 @@ export function GameHost({ slug }: GameHostProps) {
   }, [result]);
 
   const [game, setGame] = useState<PublicGame | null>(null);
+  const [editorContext, setEditorContext] = useState<GameEditorContext | null>(null);
+  const [isGameInformationEditorOpen, setIsGameInformationEditorOpen] = useState(false);
   const [multiplayerRuntimeResolution, setMultiplayerRuntimeResolution] = useState<{
     readonly gameSlug: string;
     readonly mode: MultiplayerRuntimeResolution;
@@ -569,13 +575,20 @@ export function GameHost({ slug }: GameHostProps) {
     readonly expiresAt: string;
     readonly playMode: "single" | "local-multi";
   } | null>(null);
-  const localizedTitle = game?.title;
-  const catalogCards = useMemo(() => publicGames.map(publicGameToCard), [publicGames]);
+  const localizedMetadata = useMemo(
+    () => (game ? localizedPublicGameMetadata(game, locale) : null),
+    [game, locale],
+  );
+  const localizedTitle = localizedMetadata?.title;
+  const catalogCards = useMemo(
+    () => publicGames.map((candidate) => publicGameToCard(candidate, locale)),
+    [locale, publicGames],
+  );
   const currentGameCard = useMemo(
     () =>
       catalogCards.find((candidate) => candidate.slug === slug) ??
-      (game ? publicGameToCard(game) : undefined),
-    [catalogCards, game, slug],
+      (game ? publicGameToCard(game, locale) : undefined),
+    [catalogCards, game, locale, slug],
   );
   const recommendedGames = useMemo(
     () => selectRecommendedGameCards(catalogCards, currentGameCard, 7),
@@ -950,6 +963,7 @@ export function GameHost({ slug }: GameHostProps) {
     setAuthoritativePlayConfig(null);
     setIsTheaterMode(false);
     setIsMobilePlayOpen(false);
+    setIsGameInformationEditorOpen(false);
     fetchPublicGame(slug)
       .then((resolved) => {
         if (!cancelled) {
@@ -967,6 +981,29 @@ export function GameHost({ slug }: GameHostProps) {
       cancelled = true;
     };
   }, [slug, dict.gamePlay.errorGameNotFound]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refreshEditorContext = () => {
+      if (authLoading || !isAuthenticated || !game) {
+        setEditorContext(null);
+        return;
+      }
+      void fetchGameEditorContext(slug)
+        .then((response) => {
+          if (!cancelled) setEditorContext(response.editor);
+        })
+        .catch(() => {
+          if (!cancelled) setEditorContext(null);
+        });
+    };
+    refreshEditorContext();
+    window.addEventListener("owogg:admin-session-changed", refreshEditorContext);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("owogg:admin-session-changed", refreshEditorContext);
+    };
+  }, [authLoading, game, isAuthenticated, slug]);
 
   // Handle Score Submission (Authenticated Attempts Only)
   const handleResultSubmission = useCallback(
@@ -1913,19 +1950,31 @@ export function GameHost({ slug }: GameHostProps) {
                       </span>
                     </div>
                     <p className="text-sm font-semibold leading-relaxed text-text-secondary">
-                      {game.shortDescription}
+                      {localizedMetadata?.shortDescription ?? game.shortDescription}
                     </p>
                   </div>
 
-                  {game.policy.leaderboard && (
-                    <Link
-                      to={`/games/${slug}/ranking`}
-                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-2 text-xs font-extrabold text-text-secondary transition-colors hover:border-brand/40 hover:text-text-primary"
-                    >
-                      <Trophy className="h-4 w-4 text-accent-yellow" />
-                      {dict.gameRanking.eyebrow}
-                    </Link>
-                  )}
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    {editorContext && (
+                      <button
+                        type="button"
+                        onClick={() => setIsGameInformationEditorOpen((current) => !current)}
+                        aria-expanded={isGameInformationEditorOpen}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-brand/35 bg-brand/10 px-3.5 py-2 text-xs font-extrabold text-brand-light transition-colors hover:bg-brand/20"
+                      >
+                        <Pencil className="h-3.5 w-3.5" /> 수정하기
+                      </button>
+                    )}
+                    {game.policy.leaderboard && (
+                      <Link
+                        to={`/games/${slug}/ranking`}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-2 text-xs font-extrabold text-text-secondary transition-colors hover:border-brand/40 hover:text-text-primary"
+                      >
+                        <Trophy className="h-4 w-4 text-accent-yellow" />
+                        {dict.gameRanking.eyebrow}
+                      </Link>
+                    )}
+                  </div>
                 </div>
 
                 <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 border-y border-border/60 py-3 text-xs font-bold text-text-muted">
@@ -1956,6 +2005,22 @@ export function GameHost({ slug }: GameHostProps) {
                       </span>
                     ))}
                   </div>
+                )}
+
+                {editorContext && isGameInformationEditorOpen && (
+                  <GameInformationEditor
+                    key={`${game.slug}:${game.publishedAt}:panel`}
+                    game={game}
+                    editor={editorContext}
+                    interfaceLocale={locale}
+                    onSaved={async (_message, publishedImmediately) => {
+                      if (!publishedImmediately) return;
+                      const refreshed = await fetchPublicGame(slug);
+                      setGame(refreshed);
+                      setIsGameInformationEditorOpen(false);
+                    }}
+                    onClose={() => setIsGameInformationEditorOpen(false)}
+                  />
                 )}
               </section>
             )}

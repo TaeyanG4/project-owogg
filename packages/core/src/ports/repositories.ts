@@ -133,6 +133,45 @@ export interface PublicProfileInsightsRepository {
   getByUserId(userId: number): Promise<PublicProfileInsights>;
 }
 
+export interface ProfileFollowSummary {
+  followerCount: number;
+  followingCount: number;
+  viewerIsFollowing: boolean;
+}
+
+export interface ProfileFollowConnection {
+  userId: number;
+  nickname: string;
+  avatarUrl: string | null;
+  country: string | null;
+  followedAt: string;
+}
+
+export interface ProfileFollowConnectionPage {
+  items: ProfileFollowConnection[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** Directional public-profile relationships. Implementations must keep follow/unfollow idempotent
+ * and enforce the no-self-follow invariant in storage as a second line of defense. */
+export interface ProfileFollowRepository {
+  getSummary(userId: number, viewerId: number | null): Promise<ProfileFollowSummary>;
+  follow(followerUserId: number, followedUserId: number, createdAt: string): Promise<void>;
+  unfollow(followerUserId: number, followedUserId: number): Promise<void>;
+  listFollowers(
+    userId: number,
+    page: number,
+    pageSize: number,
+  ): Promise<ProfileFollowConnectionPage>;
+  listFollowing(
+    userId: number,
+    page: number,
+    pageSize: number,
+  ): Promise<ProfileFollowConnectionPage>;
+}
+
 export interface SessionRepository {
   createSession(userId: number, ttlDays?: number): Promise<Session>;
   findSession(sessionId: string): Promise<{ session: Session; user: User } | null>;

@@ -42,6 +42,10 @@ Host의 새 검증 시도를 요청합니다.
 복원합니다.
 `v1.0.7`은 실제 대국 화면을 좌측 게임 설정·중앙 오목판·우측 Relay 정보의 대칭 3열로 바꾸고,
 중복되는 차례 상태 상자는 화면에서 제거합니다.
+2026-09-02 localization artifact는 5종 모두 영어 기본 제목·요약과 한국어·일본어·중국어 번역,
+`description.md`, `description_kr.md`, `description_ja.md`, `description_zh.md`를 포함합니다. 새 보관 버전은
+오목 `v1.0.8`, 반응속도 `v1.0.1`, 에임 `v1.0.2`, 타자 `v1.0.3`, 기억력 `v1.0.5`이며, 타자와 기억력은
+각각 기존 `v1.0.1`, `v1.0.3`의 최신 UI를 원본으로 역동기화해 회귀를 막았습니다.
 
 온라인 오목의 payload 규칙과 상태 권위는 ZIP 안의 host-authoritative application protocol이
 소유합니다. 플랫폼 서버에는 오목 driver/ruleset이 없습니다. 반대로 싱글 경쟁 결과 verifier는

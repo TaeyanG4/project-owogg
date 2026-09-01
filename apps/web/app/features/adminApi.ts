@@ -50,6 +50,7 @@ import {
   type UserSuspensionDurationDays,
   type SandboxGameMetadataUpdateRequest,
   type SandboxGameBasicMetadataUpdateRequest,
+  type GameContentUpdateRequest,
   type SandboxGameVisibility,
 } from "@owogg/contracts";
 import { apiFetch } from "../lib/api/client";
@@ -447,6 +448,16 @@ export function patchOfficialGameBasicMetadata(
   );
 }
 
+export function patchOfficialGameContent(slug: string, input: GameContentUpdateRequest) {
+  return refreshCatalogAfter(
+    apiFetch(
+      `/api/admin/games/${encodeURIComponent(slug)}/content`,
+      AdminOfficialGameUploadResponseSchema,
+      { method: "PATCH", body: JSON.stringify(input) },
+    ),
+  );
+}
+
 export function deleteOfficialGame(gameId: string) {
   return refreshCatalogAfter(
     apiFetch(
@@ -667,6 +678,13 @@ export function patchAdminSandboxGameBasicMetadata(
   input: SandboxGameBasicMetadataUpdateRequest,
 ) {
   return apiFetch(`/api/admin/sandbox-games/${id}/basic-metadata`, SandboxGameVersionRecordSchema, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export function patchAdminSandboxGameContent(id: number, input: GameContentUpdateRequest) {
+  return apiFetch(`/api/admin/sandbox-games/${id}/content`, SandboxGameVersionRecordSchema, {
     method: "PATCH",
     body: JSON.stringify(input),
   });

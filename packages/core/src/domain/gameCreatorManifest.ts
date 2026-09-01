@@ -16,6 +16,8 @@ import {
   type OwoggGameScreenMode,
   type OwoggInputMethod,
   type OwoggManifestGame,
+  type OwoggManifestGameLocalization,
+  type OwoggGameTranslationLocale,
   type OwoggManifestPlayConfig,
   type OwoggManifestPresentation,
   type OwoggMetricDefinition,
@@ -56,6 +58,13 @@ export const GAME_DESCRIPTION_FILE_LOCALES = {
   "description_ja.md": "ja",
   "description_zh.md": "zh",
 } as const satisfies Readonly<Record<OwoggDescriptionFile, GameDescriptionLocale>>;
+
+export const GAME_DESCRIPTION_LOCALE_FILES = {
+  en: "description.md",
+  ko: "description_kr.md",
+  ja: "description_ja.md",
+  zh: "description_zh.md",
+} as const satisfies Readonly<Record<GameDescriptionLocale, OwoggDescriptionFile>>;
 
 export const GAME_DESCRIPTION_POLICY = {
   MAX_MARKDOWN_BYTES_PER_FILE: 64 * 1024,
@@ -211,6 +220,7 @@ function parseGame(value: unknown): OwoggManifestGame {
       "genre",
       "mode",
       "shortDescription",
+      "localizations",
       "description",
       "description_images",
       "tags",
@@ -221,6 +231,39 @@ function parseGame(value: unknown): OwoggManifestGame {
   const shortDescription = optionalString(source, "shortDescription", "game", {
     max: SANDBOX_GAME_POLICY.MAX_SHORT_DESCRIPTION_LENGTH,
   });
+  const localizations = (() => {
+    if (source.localizations === undefined) return undefined;
+    const localizedSource = record(source.localizations, "game.localizations");
+    const locales = ["ko", "ja", "zh"] as const satisfies readonly OwoggGameTranslationLocale[];
+    exactKeys(localizedSource, locales, "game.localizations");
+    const output: Partial<Record<OwoggGameTranslationLocale, OwoggManifestGameLocalization>> = {};
+    for (const locale of locales) {
+      if (localizedSource[locale] === undefined) continue;
+      const path = `game.localizations.${locale}`;
+      const localized = record(localizedSource[locale], path);
+      exactKeys(localized, ["title", "shortDescription"], path);
+      const title = optionalString(localized, "title", path, {
+        min: SANDBOX_GAME_POLICY.MIN_TITLE_LENGTH,
+        max: SANDBOX_GAME_POLICY.MAX_TITLE_LENGTH,
+      });
+      const localizedShortDescription = optionalString(localized, "shortDescription", path, {
+        max: SANDBOX_GAME_POLICY.MAX_SHORT_DESCRIPTION_LENGTH,
+      });
+      if (title === undefined && localizedShortDescription === undefined) {
+        invalid(`${path} must contain title or shortDescription`);
+      }
+      output[locale] = {
+        ...(title !== undefined ? { title } : {}),
+        ...(localizedShortDescription !== undefined
+          ? { shortDescription: localizedShortDescription }
+          : {}),
+      };
+    }
+    if (Object.keys(output).length === 0) {
+      invalid("game.localizations must contain at least one translation");
+    }
+    return output;
+  })();
   const description =
     source.description === undefined
       ? undefined
@@ -267,6 +310,7 @@ function parseGame(value: unknown): OwoggManifestGame {
     genre: requiredString(source, "genre", "game", { min: 1 }),
     mode,
     ...(shortDescription !== undefined ? { shortDescription } : {}),
+    ...(localizations !== undefined ? { localizations } : {}),
     ...(description !== undefined ? { description } : {}),
     ...(descriptionImages !== undefined ? { description_images: descriptionImages } : {}),
     ...(tags !== undefined ? { tags } : {}),

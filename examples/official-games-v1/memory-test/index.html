@@ -10,7 +10,31 @@
     <main class="shell">
       <header class="game-header">
         <div class="title">
-          <i class="brain-icon" aria-hidden="true"></i><strong>순서 기억력 패드</strong>
+          <svg class="main-mark header-mark" viewBox="0 0 100 100" aria-hidden="true">
+            <defs>
+              <linearGradient id="official-logo-header-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#18181b" />
+                <stop offset="100%" stop-color="#09090b" />
+              </linearGradient>
+            </defs>
+            <rect
+              x="2"
+              y="2"
+              width="96"
+              height="96"
+              rx="22"
+              fill="url(#official-logo-header-bg)"
+              stroke="#334155"
+              stroke-width="4"
+            />
+            <path d="M18 46A28 28 0 0 1 46 18V46Z" fill="#ef4444" />
+            <path d="M54 18A28 28 0 0 1 82 46H54Z" fill="#10b981" />
+            <path d="M18 54H46V82A28 28 0 0 1 18 54Z" fill="#3b82f6" />
+            <path d="M54 54H82A28 28 0 0 1 54 82Z" fill="#f59e0b" />
+            <circle cx="50" cy="50" r="12" fill="#0b0d14" stroke="#475569" stroke-width="3" />
+            <circle cx="50" cy="50" r="3" fill="#e2e8f0" />
+          </svg>
+          <strong>순서기억력 테스트</strong>
         </div>
         <div class="score-boxes">
           <span>LEVEL <b id="level">0</b></span>
@@ -34,8 +58,31 @@
       </section>
 
       <section id="setup" class="setup">
-        <div class="hero-brain" aria-hidden="true">◇</div>
-        <h1>아케이드 순서 기억력</h1>
+        <svg class="main-mark hero-mark" viewBox="0 0 100 100" aria-hidden="true">
+          <defs>
+            <linearGradient id="official-logo-hero-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#18181b" />
+              <stop offset="100%" stop-color="#09090b" />
+            </linearGradient>
+          </defs>
+          <rect
+            x="2"
+            y="2"
+            width="96"
+            height="96"
+            rx="22"
+            fill="url(#official-logo-hero-bg)"
+            stroke="#334155"
+            stroke-width="4"
+          />
+          <path d="M18 46A28 28 0 0 1 46 18V46Z" fill="#ef4444" />
+          <path d="M54 18A28 28 0 0 1 82 46H54Z" fill="#10b981" />
+          <path d="M18 54H46V82A28 28 0 0 1 18 54Z" fill="#3b82f6" />
+          <path d="M54 54H82A28 28 0 0 1 54 82Z" fill="#f59e0b" />
+          <circle cx="50" cy="50" r="12" fill="#0b0d14" stroke="#475569" stroke-width="3" />
+          <circle cx="50" cy="50" r="3" fill="#e2e8f0" />
+        </svg>
+        <h1>순서기억력 테스트</h1>
         <p>깜빡이는 4색 패드의 패턴을 기억하고 같은 순서로 눌러보세요.</p>
         <button id="start" class="primary" type="button" disabled>게임 시작</button>
       </section>

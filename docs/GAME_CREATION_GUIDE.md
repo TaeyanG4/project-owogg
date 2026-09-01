@@ -114,6 +114,12 @@ owogg.logo.png | .jpg | .jpeg | .webp | .svg
   "game": {
     "slug": "my-game",
     "title": "My Game",
+    "shortDescription": "A short English summary.",
+    "localizations": {
+      "ko": { "title": "내 게임", "shortDescription": "한국어 한 줄 소개" },
+      "ja": { "title": "マイゲーム" },
+      "zh": { "title": "我的游戏" }
+    },
     "genre": "arcade",
     "tags": ["puzzle", "card-board"],
     "mode": "single",
@@ -143,6 +149,10 @@ range는 `min < max`, `outOfRange` 기본값은 `clamp`입니다.
 `game.tags`에는 `typing`, `reaction`, `card-board`처럼 세부 규칙·테마를 자유 문자열 배열로 씁니다.
 고정된 4~5개 장르 allowlist는 없으며, 알려진 넓은 장르는 UI 언어로 번역하고 알 수 없는 장르는 최초
 표기를 유지합니다. 기존 official의 세부 장르는 호환 정규화로 상위 장르에 묶입니다.
+
+`game.title`과 `game.shortDescription`은 영어 기본값입니다. `game.localizations`에는 `ko`, `ja`,
+`zh`만 선택적으로 선언하며 각 locale은 `title` 또는 `shortDescription` 중 하나 이상을 가져야 합니다.
+영어를 별도 translation key로 중복하지 않기 때문에 어떤 UI 언어에서도 영어 fallback이 항상 남습니다.
 
 `playConfig`는 `single` 또는 `local-multi` 경로와 scored leaderboard를 요구합니다. 같은 ZIP에서
 online도 제공하려면 `game.playModes`에 generic 경로와 `online-multi`를 함께 넣고 `multiplayer` 심사
@@ -180,8 +190,9 @@ Game Creator Center와 관리자 게임 관리 화면은 게임별로 다음 작
 | 핵심 속성 폼            | 수정한 manifest로 새 `PENDING_REVIEW` version          | 수정한 manifest로 새 READY/live version          |
 
 핵심 속성 폼은 `game.title`, `shortDescription`, `genre`, `mode`, `tags`와
-`presentation.defaultMode`를 다룹니다. 설명 본문은 지원되는 단일 Markdown 또는 설명 ZIP 업로드로
-관리합니다.
+`presentation.defaultMode`를 다룹니다. 공개 게임 정보의 `수정하기`는 언어를 골라 제목·요약·Markdown을
+직접 편집하거나 `.md`/설명 ZIP을 불러올 수 있습니다. 여러 언어와 실행 파일을 한 번에 맞출 때는 완성된
+standalone 게임 ZIP을 새 버전으로 올리는 것이 권장 경로입니다.
 `slug`는 D1의 영구 identity이므로 수정할 수 없습니다. 매니페스트/폼 수정은 이미 게시된 version prefix의
 `owogg.json`을 덮어쓰지 않고 현재 source archive를 서버에서 재구성하여 새 버전을 만듭니다. 이 규칙으로
 source ZIP, published files, B2 canonical이 서로 다른 내용을 가리키는 상태와 1년 immutable 캐시 오염을

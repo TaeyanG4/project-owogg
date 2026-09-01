@@ -29,9 +29,12 @@ export default function Home() {
     showDescriptions,
     setShowDescriptions,
   } = useGridColumns();
-  const { dict } = useI18n();
+  const { dict, locale } = useI18n();
   const { games: publicGames, isLoading } = usePublicGames();
-  const gameCards = useMemo(() => publicGames.map(publicGameToCard), [publicGames]);
+  const gameCards = useMemo(
+    () => publicGames.map((game) => publicGameToCard(game, locale)),
+    [locale, publicGames],
+  );
   const discoveryGames = useMemo(
     () => sortPublicGameCards(gameCards, sortKey),
     [gameCards, sortKey],

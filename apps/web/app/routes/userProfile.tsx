@@ -13,11 +13,14 @@ import {
   Lock,
   CalendarDays,
   Bug,
-  Compass,
-  Gamepad2,
+  BadgePlus,
+  Boxes,
   Pencil,
   Save,
   Settings,
+  UserRoundPlus,
+  UserRoundCheck,
+  UsersRound,
   X,
 } from "lucide-react";
 import { defaultUrlTransform } from "react-markdown";
@@ -30,6 +33,7 @@ import {
   fetchPublicProfileApi,
   updateAvatarPreferenceApi,
   updateProfilePresentationApi,
+  setProfileFollowApi,
 } from "../features/profile/api";
 import { usePublicGames } from "../features/publicGamesApi";
 import { publicGameToCard } from "../features/catalog/publicGameAdapter";
@@ -110,7 +114,10 @@ export default function UserProfileRoute() {
   const { dict, locale } = useI18n();
   const { user: viewer, refreshUser } = useAuth();
   const { games: publicGames } = usePublicGames();
-  const games = useMemo(() => publicGames.map((game) => publicGameToCard(game)), [publicGames]);
+  const games = useMemo(
+    () => publicGames.map((game) => publicGameToCard(game, locale)),
+    [locale, publicGames],
+  );
 
   const [data, setData] = useState<PublicProfileResponse | null>(null);
   const [state, setState] = useState<LoadState>("loading");
@@ -123,6 +130,8 @@ export default function UserProfileRoute() {
   const [avatarCandidates, setAvatarCandidates] = useState<ConnectedProvider[]>([]);
   const [avatarBusyProvider, setAvatarBusyProvider] = useState<SocialProvider | null>(null);
   const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [followBusy, setFollowBusy] = useState(false);
+  const [followError, setFollowError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -285,6 +294,20 @@ export default function UserProfileRoute() {
     }
   };
 
+  const toggleFollow = async () => {
+    if (!viewer || isOwnProfile || followBusy) return;
+    setFollowBusy(true);
+    setFollowError(null);
+    try {
+      const updated = await setProfileFollowApi(data.id, !data.followStats.viewerIsFollowing);
+      setData((current) => (current ? { ...current, followStats: updated.followStats } : current));
+    } catch {
+      setFollowError(dict.userProfile.followUpdateFailed);
+    } finally {
+      setFollowBusy(false);
+    }
+  };
+
   return (
     <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-4 px-4 py-7 sm:px-6 md:px-8 md:py-9">
       <Link
@@ -295,7 +318,7 @@ export default function UserProfileRoute() {
         {dict.userProfile.backToHome}
       </Link>
 
-      <article className="overflow-hidden rounded-[24px] border border-white/[0.09] bg-surface-raised/55 shadow-[0_28px_90px_rgba(2,6,23,0.48)] ring-1 ring-inset ring-white/[0.035]">
+      <article className="overflow-hidden rounded-[24px] border border-white/[0.09] bg-surface-raised/55 ring-1 ring-inset ring-white/[0.035]">
         <header className="relative h-52 overflow-hidden bg-slate-950 sm:h-60 lg:h-72">
           <ProfileBannerArtwork banner={data.banner} />
           {isOwnProfile && (
@@ -397,6 +420,58 @@ export default function UserProfileRoute() {
                   ))}
                 </div>
               )}
+
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <Link
+                  to={`/users/${data.id}/followers`}
+                  className="inline-flex items-center gap-2 rounded-xl bg-black/25 px-3 py-2 text-[11px] font-bold text-text-muted transition-colors hover:bg-black/40 hover:text-text-primary"
+                >
+                  <UsersRound className="h-3.5 w-3.5" />
+                  <strong className="text-sm tabular-nums text-text-primary">
+                    {data.followStats.followerCount.toLocaleString()}
+                  </strong>
+                  {dict.userProfile.followersLabel}
+                </Link>
+                <Link
+                  to={`/users/${data.id}/following`}
+                  className="inline-flex items-center gap-2 rounded-xl bg-black/25 px-3 py-2 text-[11px] font-bold text-text-muted transition-colors hover:bg-black/40 hover:text-text-primary"
+                >
+                  <strong className="text-sm tabular-nums text-text-primary">
+                    {data.followStats.followingCount.toLocaleString()}
+                  </strong>
+                  {dict.userProfile.followingLabel}
+                </Link>
+              </div>
+
+              {viewer && !isOwnProfile && (
+                <button
+                  type="button"
+                  disabled={followBusy}
+                  aria-pressed={data.followStats.viewerIsFollowing}
+                  onClick={() => void toggleFollow()}
+                  className={`mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-xs font-black transition-colors disabled:opacity-50 ${
+                    data.followStats.viewerIsFollowing
+                      ? "border-brand/35 bg-brand/10 text-brand-light hover:bg-brand/20"
+                      : "border-border bg-surface text-text-secondary hover:border-brand/45 hover:text-text-primary"
+                  }`}
+                >
+                  {followBusy ? (
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  ) : data.followStats.viewerIsFollowing ? (
+                    <UserRoundCheck className="h-3.5 w-3.5" />
+                  ) : (
+                    <UserRoundPlus className="h-3.5 w-3.5" />
+                  )}
+                  {data.followStats.viewerIsFollowing
+                    ? dict.userProfile.followingCta
+                    : dict.userProfile.followCta}
+                </button>
+              )}
+              {followError && (
+                <p role="alert" className="mt-2 text-[10px] font-bold text-accent-red">
+                  {followError}
+                </p>
+              )}
             </div>
 
             <dl className="mt-5 space-y-3 text-[13px]">
@@ -429,12 +504,12 @@ export default function UserProfileRoute() {
                   value={data.contributions.bugAcceptedCount}
                 />
                 <ContributionMetric
-                  icon={<Gamepad2 className="h-4 w-4 text-violet-400" />}
+                  icon={<Boxes className="h-4 w-4 text-violet-400" />}
                   label={dict.userProfile.createdGamesLabel}
                   value={data.contributions.createdGameCount}
                 />
                 <ContributionMetric
-                  icon={<Compass className="h-4 w-4 text-cyan-400" />}
+                  icon={<BadgePlus className="h-4 w-4 text-cyan-400" />}
                   label={dict.userProfile.introducedGamesLabel}
                   value={data.contributions.introducedExternalGameCount}
                 />

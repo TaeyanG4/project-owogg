@@ -3,11 +3,17 @@
   "schemaVersion": 1,
   "game": {
     "slug": "ball-dodge",
-    "title": "공 피하기",
+    "title": "Ball Dodge",
     "genre": "arcade",
     "mode": "single",
     "playModes": ["single"],
-    "shortDescription": "마우스/키보드로 캐릭터를 움직여 떨어지는 공을 피하는 OWOGG API 참조 게임",
+    "shortDescription": "An OWOGG API reference game where you move with mouse or keyboard and dodge falling balls.",
+    "localizations": {
+      "ko": {
+        "title": "공 피하기",
+        "shortDescription": "마우스/키보드로 캐릭터를 움직여 떨어지는 공을 피하는 OWOGG API 참조 게임"
+      }
+    },
     "tags": ["arcade", "survival"]
   },
   "input": ["keyboard", "mouse", "touch"],

@@ -30,9 +30,12 @@ type ServerTab = "alltime" | "weekly" | "games";
  * `max-w-6xl` container. Matching profile's `max-w-4xl` + divider sections fixes both at once:
  * the whitespace reads as intentional instead of like unfinished padding. */
 export default function DiscordServerSlugRoute() {
-  const { dict } = useI18n();
+  const { dict, locale } = useI18n();
   const { games: publicGames } = usePublicGames();
-  const games = useMemo(() => publicGames.map((game) => publicGameToCard(game)), [publicGames]);
+  const games = useMemo(
+    () => publicGames.map((game) => publicGameToCard(game, locale)),
+    [locale, publicGames],
+  );
   const { slug } = useParams<{ slug: string }>();
   const [guild, setGuild] = useState<DiscordGuildDto | null>(null);
   const [isManager, setIsManager] = useState(false);

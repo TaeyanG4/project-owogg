@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
-import { PublicGameListResponseSchema, PublicGameSchema } from "@owogg/contracts";
+import {
+  GameEditorContextResponseSchema,
+  PublicGameListResponseSchema,
+  PublicGameSchema,
+} from "@owogg/contracts";
 import { apiFetch } from "../lib/api/client";
 
 const PUBLIC_GAME_CATALOG_CHANGED_EVENT = "owogg:public-game-catalog-changed";
@@ -17,6 +21,14 @@ export function fetchPublicGame(slug: string) {
 
 export function fetchPublicGames() {
   return apiFetch("/api/games", PublicGameListResponseSchema, { cache: "no-store" });
+}
+
+export function fetchGameEditorContext(slug: string) {
+  return apiFetch(
+    `/api/games/${encodeURIComponent(slug)}/edit-context`,
+    GameEditorContextResponseSchema,
+    { cache: "no-store" },
+  );
 }
 
 /** Signals already-open catalog screens after an admin control-plane mutation. The DOM event

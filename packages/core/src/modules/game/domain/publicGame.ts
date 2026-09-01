@@ -1,7 +1,7 @@
 import type { GameAsset } from "./gameAsset.js";
 import type { GameCanonicalPlayConfig } from "./gameCanonicalDocument.js";
 import type { RuntimeGame } from "./runtimeGame.js";
-import type { OwoggPlayMode } from "@owogg/game-sdk/contracts";
+import type { OwoggManifestGame, OwoggPlayMode } from "@owogg/game-sdk/contracts";
 
 /** A bookmark is a stronger, deliberate signal than opening a game once. The weight is public
  * product policy so every catalog surface ranks games identically. */
@@ -76,6 +76,7 @@ export interface PublicGame {
   readonly stats: PublicGameStats;
   /** Public URL/path only; the D1 object key is intentionally never exposed. */
   readonly mediaUrl: string | null;
+  readonly localizations?: OwoggManifestGame["localizations"] | undefined;
 }
 
 export function publicGamePlayModes(runtime: RuntimeGame): readonly OwoggPlayMode[] {
@@ -120,6 +121,15 @@ export function toPublicGame(
     publishedAt: runtime.identity.createdAt,
     stats,
     mediaUrl,
+    ...(runtime.canonical.creatorManifest?.game.localizations !== undefined
+      ? {
+          localizations: Object.fromEntries(
+            Object.entries(runtime.canonical.creatorManifest.game.localizations).map(
+              ([locale, localized]) => [locale, { ...localized }],
+            ),
+          ) as NonNullable<OwoggManifestGame["localizations"]>,
+        }
+      : {}),
   };
 }
 

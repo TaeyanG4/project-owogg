@@ -17,6 +17,7 @@ import {
   AdminOfficialGameDeleteResponseSchema,
   AdminOfficialGameUploadResponseSchema,
   SandboxGameBasicMetadataUpdateRequestSchema,
+  GameContentUpdateRequestSchema,
   GameLogoUpdateResponseSchema,
 } from "@owogg/contracts";
 import {
@@ -614,6 +615,48 @@ adminGamesRouter.patch(
       const result = await container.officialGameUploadUseCases.updateBasicMetadata({
         slug: c.req.param("gameId"),
         metadata: parsed.data,
+      });
+      await purgePublicGameReadCache(c.req.url, [result.slug], c.env.GAME_ORIGIN);
+      c.header("Clear-Site-Data", '"cache"');
+      return c.json(AdminOfficialGameUploadResponseSchema.parse(result), 201);
+    } catch (error) {
+      const failure = officialUpdateFailure(error);
+      return c.json(failure.body, failure.status);
+    }
+  },
+);
+
+adminGamesRouter.patch(
+  "/:gameId/content",
+  rateLimit({ name: "game-upload", binding: "GAME_UPLOAD_RATE_LIMITER" }),
+  async (c) => {
+    const admin = await requireElevatedAdmin(c);
+    if (isElevatedAdminResponse(admin)) return admin;
+    const denied = requirePermission(admin, "games.moderate");
+    if (denied) return denied;
+    const parsed = GameContentUpdateRequestSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) {
+      return c.json(
+        { error: { code: "INVALID_REQUEST", message: "수정할 게임 정보가 올바르지 않습니다." } },
+        400,
+      );
+    }
+    const container = createContainer(c.env.DB, readB2Config(c.env));
+    if (!container.gameBundlesConfigured) {
+      return c.json(
+        {
+          error: {
+            code: "GAME_BUNDLES_NOT_CONFIGURED",
+            message: "번들 저장소(Backblaze B2)가 아직 이 환경에 구성되지 않았습니다.",
+          },
+        },
+        503,
+      );
+    }
+    try {
+      const result = await container.officialGameUploadUseCases.updateContent({
+        slug: c.req.param("gameId"),
+        content: parsed.data,
       });
       await purgePublicGameReadCache(c.req.url, [result.slug], c.env.GAME_ORIGIN);
       c.header("Clear-Site-Data", '"cache"');

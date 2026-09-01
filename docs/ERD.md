@@ -4,9 +4,9 @@
 
 마지막 검증: 2026-09-02
 
-최신 마이그레이션: `0053_profile_customization_and_streamer_disconnect.sql`
+최신 마이그레이션: `0054_profile_follows.sql`
 
-스키마 요약: 물리 테이블 `70`, 롤링 배포 호환 뷰 `0`
+스키마 요약: 물리 테이블 `71`, 롤링 배포 호환 뷰 `0`
 
 기준 소스:
 
@@ -15,7 +15,7 @@
 - `apps/api/src/container.ts`
 - [데이터베이스 기준 문서](DATABASE.md)
 
-이 문서는 `0000_initial_schema.sql`부터 `0053_profile_customization_and_streamer_disconnect.sql`까지를 빈 SQLite에
+이 문서는 `0000_initial_schema.sql`부터 `0054_profile_follows.sql`까지를 빈 SQLite에
 순서대로 적용한 **최종 D1 schema**를 기준으로 합니다. migration SQL이 유일한 schema 권한
 원천이며, 이 문서는 관계 탐색과 운영 이해를 위한 투영입니다.
 
@@ -129,6 +129,11 @@ erDiagram
     TEXT contribution_type
     TEXT source_key UK
   }
+  user_follows {
+    INTEGER follower_user_id PK, FK
+    INTEGER followed_user_id PK, FK
+    TEXT created_at
+  }
 
   users ||--o{ oauth_accounts : owns
   users ||..o{ oauth_identity_registrations : active_registration
@@ -151,6 +156,8 @@ erDiagram
   users ||--o{ game_creator_applications : applies
   users ||..o{ game_creator_access_audit_log : target
   users ||--o{ profile_contribution_events : contributes
+  users ||--o{ user_follows : follows
+  users ||--o{ user_follows : is_followed
   admin_accounts ||..o{ game_creator_access : grants
   admin_accounts o|--o{ game_creator_applications : reviews
   admin_accounts ||..o{ game_creator_access_audit_log : acts
@@ -161,6 +168,7 @@ erDiagram
 없습니다. 관리자·사용자 제재 감사 원장도 대상 row 삭제 뒤 증거를 보존해야 하는 column은 논리
 참조로 유지합니다. 공개 프로필의 배너와 Markdown 소개는 `users`가 소유하고, 승인된 버그와 공개된
 타 플랫폼 게임 기여 수치는 중복 방지 source key가 있는 `profile_contribution_events`에서 계산합니다.
+`user_follows`는 방향성 복합 PK로 중복을 막고 자기 자신을 향한 관계를 CHECK로 거부합니다.
 
 ## 2. 공통 Game Platform, 결과와 랭킹
 
@@ -796,6 +804,7 @@ D1 콘솔에서 직접 수정하면 감사 로그와 두 저장소의 일관성�
 | `official_game_deletion_audit_log`           | Operations      | 부모 삭제 뒤에도 남는 OWOGG 완전 삭제 감사 원장            |
 | `platform_feature_settings`                  | Operations      | 전체 multiplayer와 타 플랫폼 메뉴의 서버 운영 스위치       |
 | `profile_contribution_events`                | Profile         | 승인된 버그·타 플랫폼 게임 소개 기여의 중복 방지 원장      |
+| `user_follows`                               | Profile         | 방향성 관심 플레이어 관계와 팔로워·팔로잉 목록             |
 | `sandbox_game_review_audit_log`              | Compatibility   | 직전 USER 게임 심사 계약의 append-only 호환 감사           |
 | `sandbox_game_versions`                      | Compatibility   | 직전 Worker용 USER version 호환 미러                       |
 | `sandbox_games`                              | Compatibility   | 직전 Worker용 USER game identity/metadata 호환 미러        |

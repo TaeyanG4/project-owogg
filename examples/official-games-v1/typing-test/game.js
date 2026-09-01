@@ -36,7 +36,7 @@
     ko: Object.freeze({
       name: "타자 속도 테스트",
       preparing: "게임을 준비하는 중입니다.",
-      chooseLanguage: "게임 안에서 언어를 선택하세요. 모든 언어는 긴 지문으로 진행됩니다.",
+      chooseLanguage: "언어를 선택하세요.",
       chooseStatus: "게임 안에서 언어를 선택하고 시작하세요.",
       authorizing: "선택한 언어로 플레이를 준비하고 있습니다.",
       ready: "90초 동안 한 줄씩 정확하게 입력하세요.",
@@ -46,7 +46,6 @@
       checking: "플레이 기록을 안전하게 확인하고 있습니다.",
       failed: "게임을 시작하지 못했습니다. 게임 안에서 다시 시도해 주세요.",
       missing: "게임 준비 정보를 불러오지 못했습니다.",
-      detail: "긴 지문으로 타자 속도를 측정합니다.",
       elapsed: "남은 시간",
       score: "종합 점수",
       wpm: "속도 (WPM)",
@@ -66,7 +65,7 @@
     en: Object.freeze({
       name: "Typing Speed Test",
       preparing: "Preparing the game.",
-      chooseLanguage: "Choose a language inside the game. Every option uses a long passage.",
+      chooseLanguage: "Choose a language.",
       chooseStatus: "Choose a language inside the game to begin.",
       authorizing: "Preparing the selected language.",
       ready: "Type one line at a time for 90 seconds.",
@@ -76,7 +75,6 @@
       checking: "Verifying your play record.",
       failed: "The game could not start. Try again from inside the game.",
       missing: "Game setup information could not be loaded.",
-      detail: "Measure your speed with a long passage.",
       elapsed: "Time left",
       score: "Overall score",
       wpm: "Speed (WPM)",
@@ -146,11 +144,8 @@
   }
 
   function configLabel(item) {
-    if (!config) return { title: "기본", detail: "" };
-    return {
-      title: labelFor(config.variants, item.variantId),
-      detail: text().detail,
-    };
+    if (!config) return "기본";
+    return labelFor(config.variants, item.variantId);
   }
 
   function elapsedMs() {
@@ -308,6 +303,11 @@
         variantId: context.playConfig.variantId,
       });
       if (!challenge) throw new Error("config");
+      passageCard.dataset.variant = context.playConfig.variantId;
+      passage.lang = context.playConfig.variantId;
+      previousLines.lang = context.playConfig.variantId;
+      nextLines.lang = context.playConfig.variantId;
+      input.lang = context.playConfig.variantId;
       completed = false;
       lineIndex = 0;
       completedLines = [];
@@ -342,14 +342,11 @@
     modeOptions.classList.toggle("hidden", !hasChoice);
     modeOptions.replaceChildren(
       ...config.allowedConfigs.map((allowed) => {
-        const labels = configLabel(allowed);
         const button = document.createElement("button");
         button.type = "button";
         const title = document.createElement("strong");
-        const detail = document.createElement("span");
-        title.textContent = labels.title;
-        detail.textContent = labels.detail;
-        button.append(title, detail);
+        title.textContent = configLabel(allowed);
+        button.append(title);
         button.addEventListener("click", () => void begin(allowed));
         return button;
       }),

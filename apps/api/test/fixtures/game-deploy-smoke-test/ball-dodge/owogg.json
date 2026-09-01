@@ -3,11 +3,17 @@
   "schemaVersion": 1,
   "game": {
     "slug": "ball-dodge",
-    "title": "공 피하기",
+    "title": "Ball Dodge",
     "genre": "arcade",
     "mode": "single",
     "playModes": ["single"],
-    "shortDescription": "마우스로 캐릭터를 움직여 떨어지는 공을 피하는 최소 재현 게임"
+    "shortDescription": "A minimal game where you move with the mouse and dodge falling balls.",
+    "localizations": {
+      "ko": {
+        "title": "공 피하기",
+        "shortDescription": "마우스로 캐릭터를 움직여 떨어지는 공을 피하는 최소 재현 게임"
+      }
+    }
   },
   "input": ["keyboard", "mouse", "touch"],
   "progression": { "type": "endless" },

@@ -3,11 +3,25 @@
   "schemaVersion": 1,
   "game": {
     "slug": "official-omok",
-    "title": "오목",
+    "title": "Omok",
     "genre": "board",
     "mode": "multi",
     "playModes": ["local-multi", "online-multi"],
-    "shortDescription": "한 기기 대전과 온라인 Relay 대전을 한 게임에서 선택하는 15×15 오목",
+    "shortDescription": "Play 15×15 Omok locally on one device or online through the shared Relay mode.",
+    "localizations": {
+      "ko": {
+        "title": "오목",
+        "shortDescription": "한 기기 대전과 온라인 Relay 대전을 한 게임에서 선택하는 15×15 오목"
+      },
+      "ja": {
+        "title": "五目並べ",
+        "shortDescription": "1台での対戦とオンラインRelay対戦を選べる15×15の五目並べです。"
+      },
+      "zh": {
+        "title": "五子棋",
+        "shortDescription": "可在同一设备对战或通过在线Relay模式游玩的15×15五子棋。"
+      }
+    },
     "description": [
       "description.md",
       "description_kr.md",

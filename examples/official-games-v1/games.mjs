@@ -18,8 +18,8 @@ export const officialV1Games = Object.freeze([
   ...[
     ["reaction-time", "1.0.1"],
     ["aim-test", "1.0.2"],
-    ["typing-test", "1.0.1"],
-    ["memory-test", "1.0.2"],
+    ["typing-test", "1.0.3"],
+    ["memory-test", "1.0.5"],
   ].map(([slug, artifactVersion]) =>
     Object.freeze({
       slug,

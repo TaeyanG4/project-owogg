@@ -24,13 +24,14 @@ test("generic production migrations avoid Cloudflare-incompatible TEMP table DDL
     "0050_oauth_identity_release_on_unlink.sql",
     "0052_game_content_and_platform_controls.sql",
     "0053_profile_customization_and_streamer_disconnect.sql",
+    "0054_profile_follows.sql",
   ]) {
     const sql = fs.readFileSync(new URL(`../migrations/${filename}`, import.meta.url), "utf8");
     assert.doesNotMatch(sql, /\bCREATE\s+TEMP(?:ORARY)?\s+TABLE\b/i, filename);
   }
 });
 
-test("full production migration chain applies through 0053 with profile and Streamer disconnect controls", () => {
+test("full production migration chain applies through 0054 with profile follows and Streamer disconnect controls", () => {
   const { raw } = createSqliteD1("");
   const migrationUrl = new URL("../migrations/", import.meta.url);
   const filenames = fs
@@ -74,6 +75,11 @@ test("full production migration chain applies through 0053 with profile and Stre
       .prepare(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'profile_contribution_events'",
       )
+      .get(),
+  );
+  assert.ok(
+    raw
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'user_follows'")
       .get(),
   );
   assert.ok(

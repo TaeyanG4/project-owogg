@@ -10,6 +10,8 @@ import {
   UpdateProfilePresentationRequestSchema,
   UpdateProfilePresentationResponseSchema,
   PublicProfileResponseSchema,
+  ProfileConnectionsResponseSchema,
+  ProfileFollowMutationResponseSchema,
   type UpdateNicknameResponse,
   type UpdateAvatarPreferenceResponse,
   type UpdateCountryResponse,
@@ -17,6 +19,8 @@ import {
   type UpdateProfilePresentationResponse,
   type ProfileBanner,
   type PublicProfileResponse,
+  type ProfileConnectionsResponse,
+  type ProfileFollowMutationResponse,
 } from "@owogg/contracts";
 import { apiFetch } from "../../lib/api";
 
@@ -81,4 +85,28 @@ export async function updateProfilePresentationApi(
     method: "PATCH",
     body: JSON.stringify(body),
   });
+}
+
+export async function setProfileFollowApi(
+  userId: number,
+  following: boolean,
+): Promise<ProfileFollowMutationResponse> {
+  return apiFetch(
+    `/api/profile/follows/${encodeURIComponent(String(userId))}`,
+    ProfileFollowMutationResponseSchema,
+    { method: following ? "PUT" : "DELETE" },
+  );
+}
+
+export async function fetchProfileConnectionsApi(
+  userId: number | string,
+  kind: "followers" | "following",
+  page: number,
+  pageSize: 10 | 20 | 30 | 50,
+): Promise<ProfileConnectionsResponse> {
+  const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  return apiFetch(
+    `/api/profile/public/${encodeURIComponent(String(userId))}/${kind}?${query.toString()}`,
+    ProfileConnectionsResponseSchema,
+  );
 }

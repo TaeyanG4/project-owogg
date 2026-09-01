@@ -1,10 +1,12 @@
 import type { PublicGame } from "@owogg/contracts";
+import { localizedPublicGameMetadata } from "./gameLocalization";
 
 export interface PublicGameCard {
   readonly slug: string;
   readonly title: string;
   readonly shortDescription: string;
   readonly description: string;
+  readonly localizations?: PublicGame["localizations"];
   readonly modes: readonly string[];
   readonly thumbnail: string;
   readonly accent?: string | undefined;
@@ -23,13 +25,15 @@ export interface PublicGameCard {
 
 /** Web-only view model. It preserves GENRE_MODE as a real shape: no fake taxonomy categories,
  * tags, thumbnail, or player counts are manufactured for USER games. */
-export function publicGameToCard(game: PublicGame): PublicGameCard {
+export function publicGameToCard(game: PublicGame, locale = "en"): PublicGameCard {
+  const localized = localizedPublicGameMetadata(game, locale);
   if (game.catalog.type === "TAXONOMY") {
     return {
       slug: game.slug,
-      title: game.title,
-      shortDescription: game.shortDescription,
+      title: localized.title,
+      shortDescription: localized.shortDescription,
       description: game.description,
+      localizations: game.localizations,
       modes: game.playModes,
       // `catalog.thumbnail` is retained only as canonical migration metadata. Runtime artwork
       // comes exclusively from the public D1/B2 media projection; an empty value makes the shared
@@ -52,9 +56,10 @@ export function publicGameToCard(game: PublicGame): PublicGameCard {
 
   return {
     slug: game.slug,
-    title: game.title,
-    shortDescription: game.shortDescription,
+    title: localized.title,
+    shortDescription: localized.shortDescription,
     description: game.description,
+    localizations: game.localizations,
     // The top-level projection carries the exact declared topology; the coarse legacy `mode`
     // remains compatibility metadata and must not erase local/online distinctions in discovery.
     modes: game.playModes,

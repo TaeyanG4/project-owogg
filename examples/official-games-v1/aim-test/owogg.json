@@ -3,11 +3,25 @@
   "schemaVersion": 1,
   "game": {
     "slug": "aim-test",
-    "title": "에임 테스트",
+    "title": "Aim Test",
     "genre": "skill-test",
     "mode": "single",
     "playModes": ["single"],
-    "shortDescription": "서버 seed로 생성된 표적을 빠르고 정확하게 클릭하세요.",
+    "shortDescription": "Click server-seeded targets as quickly and accurately as possible.",
+    "localizations": {
+      "ko": {
+        "title": "에임 테스트",
+        "shortDescription": "서버 seed로 생성된 표적을 빠르고 정확하게 클릭하세요."
+      },
+      "ja": {
+        "title": "エイムテスト",
+        "shortDescription": "サーバーseedで生成された標的を素早く正確にクリックします。"
+      },
+      "zh": {
+        "title": "瞄准测试",
+        "shortDescription": "尽可能快速且准确地点击由服务器seed生成的目标。"
+      }
+    },
     "description": [
       "description.md",
       "description_kr.md",

@@ -50,8 +50,8 @@ export default function GameRankingRoute() {
   const [status, setStatus] = useState<LeaderboardState>("loading");
   const [period, setPeriod] = useState<RankingPeriod>("daily");
   const [selectedDifficultyId, setSelectedDifficultyId] = useState("normal");
-  const card = useMemo(() => (game ? publicGameToCard(game) : null), [game]);
-  const content = card ? getLocalizedGameContent(dict, card) : null;
+  const card = useMemo(() => (game ? publicGameToCard(game, locale) : null), [game, locale]);
+  const content = card ? getLocalizedGameContent(dict, card, locale) : null;
 
   useEffect(() => {
     let cancelled = false;
