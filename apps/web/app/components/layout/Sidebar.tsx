@@ -277,7 +277,7 @@ export function Sidebar({ isMobileOpen, onMobileClose, isGamePlayPage }: Sidebar
       >
         <div className="h-[calc(100dvh-4rem)] w-16">
           <div
-            className={`fixed bottom-0 left-0 top-16 flex flex-col border-r border-border/80 bg-surface-sidebar shadow-[14px_0_36px_rgba(0,0,0,0.24)] transition-[width] duration-300 ease-out ${
+            className={`fixed bottom-0 left-0 top-16 flex flex-col overflow-hidden border-r border-border/80 bg-surface-sidebar shadow-[14px_0_36px_rgba(0,0,0,0.24)] transition-[width] duration-300 ease-out ${
               expanded ? "w-56" : "w-16"
             }`}
           >
@@ -298,8 +298,11 @@ export function Sidebar({ isMobileOpen, onMobileClose, isGamePlayPage }: Sidebar
               </button>
             )}
 
-            <div className="flex h-full flex-col overflow-x-hidden overflow-y-auto p-2">
-              <nav className="flex flex-col gap-1.5" aria-label={dict.sidebar.mobileMenuTitle}>
+            <div className="flex h-full min-h-0 flex-col overflow-hidden p-2">
+              <nav
+                className="flex shrink-0 flex-col gap-1.5"
+                aria-label={dict.sidebar.mobileMenuTitle}
+              >
                 {gameNavItems.map((item) => (
                   <DesktopNavItem
                     key={item.label}
@@ -311,23 +314,28 @@ export function Sidebar({ isMobileOpen, onMobileClose, isGamePlayPage }: Sidebar
                 ))}
               </nav>
 
-              <div className="mt-3 flex flex-col gap-1.5 border-t border-border/60 pt-3">
-                <p
-                  className={`overflow-hidden whitespace-nowrap px-3.5 text-[10px] font-bold uppercase tracking-wider text-text-muted transition-all duration-150 ${
-                    expanded ? "h-4 opacity-100" : "h-0 opacity-0"
-                  }`}
-                >
-                  {dict.sidebar.otherHeading}
-                </p>
-                {otherNavItems.map((item) => (
-                  <DesktopNavItem
-                    key={item.label}
-                    item={item}
-                    pathname={location.pathname}
-                    search={location.search}
-                    expanded={expanded}
-                  />
-                ))}
+              <div
+                data-sidebar-secondary-scroll
+                className="mt-3 min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain border-t border-border/60 pt-3"
+              >
+                <div className="flex flex-col gap-1.5">
+                  <p
+                    className={`overflow-hidden whitespace-nowrap px-3.5 text-[10px] font-bold uppercase tracking-wider text-text-muted transition-all duration-150 ${
+                      expanded ? "h-4 opacity-100" : "h-0 opacity-0"
+                    }`}
+                  >
+                    {dict.sidebar.otherHeading}
+                  </p>
+                  {otherNavItems.map((item) => (
+                    <DesktopNavItem
+                      key={item.label}
+                      item={item}
+                      pathname={location.pathname}
+                      search={location.search}
+                      expanded={expanded}
+                    />
+                  ))}
+                </div>
               </div>
             </div>
           </div>

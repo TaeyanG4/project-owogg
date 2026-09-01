@@ -75,6 +75,13 @@ describe("Profile settings (nickname/country) client contracts", () => {
     assert.match(profile, /max-w-\[1280px\]/);
     assert.match(profile, /h-52 overflow-hidden bg-slate-950 sm:h-60 lg:h-72/);
     assert.match(profile, /h-24 w-24.*sm:h-28 sm:w-28 lg:h-32 lg:w-32/);
+    assert.match(profile, /border border-white\/\[0\.09\]/);
+    assert.doesNotMatch(profile, /const roleAccent/);
+    assert.doesNotMatch(profile, /border-rose-400\/25/);
+    assert.match(profile, /<aside className="relative border-b[^\n]+lg:border-r/);
+    assert.doesNotMatch(profile, /<aside className="[^"]*lg:-mt-16/);
+    assert.match(profile, /<div className="relative -mt-12 w-fit lg:-mt-16">/);
+    assert.match(profile, /max-w-\[1040px\].*border-t border-border pt-6/);
     assert.match(profile, /PROFILE_BANNER_ART/);
     assert.match(profile, /data-profile-experience/);
     assert.equal(profile.match(/dict\.userProfile\.contributionsTitle/g)?.length, 1);
