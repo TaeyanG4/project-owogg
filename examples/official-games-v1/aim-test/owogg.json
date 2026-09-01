@@ -4,7 +4,7 @@
   "game": {
     "slug": "aim-test",
     "title": "에임 테스트",
-    "genre": "skill",
+    "genre": "skill-test",
     "mode": "single",
     "playModes": ["single"],
     "shortDescription": "서버 seed로 생성된 표적을 빠르고 정확하게 클릭하세요.",

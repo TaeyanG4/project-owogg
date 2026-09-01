@@ -20,6 +20,7 @@ export function GameDescriptionToggle({
   return (
     <button
       type="button"
+      data-testid="game-description-toggle"
       onClick={() => onChange(!showDescriptions)}
       aria-label={label}
       aria-pressed={showDescriptions}

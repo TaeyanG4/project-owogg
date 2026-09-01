@@ -91,8 +91,9 @@ export interface Dictionary {
   games: {
     eyebrow: string;
     title: string;
-    countSuffix: string;
+    countTemplate: string;
     searchPlaceholder: string;
+    genreSearchPlaceholder: string;
     emptyFavorites: string;
     emptySearch: string;
     genreTitle: string;
@@ -100,6 +101,28 @@ export interface Dictionary {
     multiplayerTitle: string;
     favoritesTitle: string;
     uncategorizedGenre: string;
+    allGenres: string;
+    genreLabels: {
+      skillTest: string;
+      board: string;
+      action: string;
+      adventure: string;
+      arcade: string;
+      casual: string;
+      puzzle: string;
+      strategy: string;
+      party: string;
+      sports: string;
+      racing: string;
+      rhythm: string;
+      simulation: string;
+      rolePlaying: string;
+      shooter: string;
+      fighting: string;
+      platformer: string;
+      educational: string;
+      other: string;
+    };
     showDescriptions: string;
     hideDescriptions: string;
     sortLabel: string;
@@ -1226,8 +1249,9 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
     games: {
       eyebrow: "Game Collection",
       title: "전체 미니게임",
-      countSuffix: "개의 가벼운 미니게임이 준비되어 있습니다.",
+      countTemplate: "{count}개의 가벼운 미니게임이 준비되어 있습니다.",
       searchPlaceholder: "게임 검색...",
+      genreSearchPlaceholder: "장르 또는 게임 검색...",
       emptyFavorites: "아직 즐겨찾기한 게임이 없습니다.",
       emptySearch: "검색 결과와 일치하는 게임이 없습니다.",
       genreTitle: "장르별 게임",
@@ -1235,6 +1259,28 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       multiplayerTitle: "멀티 게임",
       favoritesTitle: "즐겨찾기",
       uncategorizedGenre: "기타",
+      allGenres: "전체 장르",
+      genreLabels: {
+        skillTest: "스킬 테스트",
+        board: "보드게임",
+        action: "액션",
+        adventure: "어드벤처",
+        arcade: "아케이드",
+        casual: "캐주얼",
+        puzzle: "퍼즐",
+        strategy: "전략",
+        party: "파티",
+        sports: "스포츠",
+        racing: "레이싱",
+        rhythm: "리듬",
+        simulation: "시뮬레이션",
+        rolePlaying: "RPG",
+        shooter: "슈팅",
+        fighting: "격투",
+        platformer: "플랫포머",
+        educational: "교육",
+        other: "기타",
+      },
       showDescriptions: "설명 보기",
       hideDescriptions: "설명 숨기기",
       sortLabel: "게임 정렬",
@@ -2495,8 +2541,9 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
     games: {
       eyebrow: "Game Collection",
       title: "All Mini-Games",
-      countSuffix: "lightweight mini-games ready to play.",
+      countTemplate: "{count} lightweight mini-games ready to play.",
       searchPlaceholder: "Search games...",
+      genreSearchPlaceholder: "Search genres or games...",
       emptyFavorites: "You haven't favorited any games yet.",
       emptySearch: "No games match your search.",
       genreTitle: "Games by Genre",
@@ -2504,6 +2551,28 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       multiplayerTitle: "Multiplayer Games",
       favoritesTitle: "Favorites",
       uncategorizedGenre: "Other",
+      allGenres: "All Genres",
+      genreLabels: {
+        skillTest: "Skill Tests",
+        board: "Board Games",
+        action: "Action",
+        adventure: "Adventure",
+        arcade: "Arcade",
+        casual: "Casual",
+        puzzle: "Puzzle",
+        strategy: "Strategy",
+        party: "Party",
+        sports: "Sports",
+        racing: "Racing",
+        rhythm: "Rhythm",
+        simulation: "Simulation",
+        rolePlaying: "Role-Playing",
+        shooter: "Shooter",
+        fighting: "Fighting",
+        platformer: "Platformer",
+        educational: "Educational",
+        other: "Other",
+      },
       showDescriptions: "Show descriptions",
       hideDescriptions: "Hide descriptions",
       sortLabel: "Sort games",
@@ -3788,8 +3857,9 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
     games: {
       eyebrow: "Game Collection",
       title: "全ミニゲーム",
-      countSuffix: "個の軽量ミニゲームが用意されています。",
+      countTemplate: "{count}本のミニゲームをプレイできます。",
       searchPlaceholder: "ゲームを検索...",
+      genreSearchPlaceholder: "ジャンルまたはゲームを検索...",
       emptyFavorites: "まだお気に入りのゲームがありません。",
       emptySearch: "検索結果に一致するゲームがありません。",
       genreTitle: "ジャンル別ゲーム",
@@ -3797,6 +3867,28 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       multiplayerTitle: "マルチゲーム",
       favoritesTitle: "お気に入り",
       uncategorizedGenre: "その他",
+      allGenres: "すべてのジャンル",
+      genreLabels: {
+        skillTest: "スキルテスト",
+        board: "ボードゲーム",
+        action: "アクション",
+        adventure: "アドベンチャー",
+        arcade: "アーケード",
+        casual: "カジュアル",
+        puzzle: "パズル",
+        strategy: "ストラテジー",
+        party: "パーティー",
+        sports: "スポーツ",
+        racing: "レース",
+        rhythm: "リズム",
+        simulation: "シミュレーション",
+        rolePlaying: "RPG",
+        shooter: "シューティング",
+        fighting: "対戦格闘",
+        platformer: "プラットフォーマー",
+        educational: "教育",
+        other: "その他",
+      },
       showDescriptions: "説明を表示",
       hideDescriptions: "説明を非表示",
       sortLabel: "ゲームの並び順",
@@ -5078,8 +5170,9 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
     games: {
       eyebrow: "Game Collection",
       title: "全部小游戏",
-      countSuffix: "款轻量小游戏已就绪。",
+      countTemplate: "已有 {count} 款轻量小游戏可供游玩。",
       searchPlaceholder: "搜索游戏...",
+      genreSearchPlaceholder: "搜索类型或游戏...",
       emptyFavorites: "还没有收藏的游戏。",
       emptySearch: "没有匹配的游戏。",
       genreTitle: "按类型浏览",
@@ -5087,6 +5180,28 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       multiplayerTitle: "多人游戏",
       favoritesTitle: "收藏",
       uncategorizedGenre: "其他",
+      allGenres: "全部类型",
+      genreLabels: {
+        skillTest: "技能测试",
+        board: "桌面游戏",
+        action: "动作",
+        adventure: "冒险",
+        arcade: "街机",
+        casual: "休闲",
+        puzzle: "益智",
+        strategy: "策略",
+        party: "派对",
+        sports: "体育",
+        racing: "竞速",
+        rhythm: "音乐节奏",
+        simulation: "模拟",
+        rolePlaying: "角色扮演",
+        shooter: "射击",
+        fighting: "格斗",
+        platformer: "平台跳跃",
+        educational: "教育",
+        other: "其他",
+      },
       showDescriptions: "显示说明",
       hideDescriptions: "隐藏说明",
       sortLabel: "游戏排序",

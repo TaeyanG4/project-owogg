@@ -4,7 +4,7 @@
   "game": {
     "slug": "reaction-time",
     "title": "반응속도 테스트",
-    "genre": "reaction",
+    "genre": "skill-test",
     "mode": "single",
     "playModes": ["single"],
     "shortDescription": "예측하기 어려운 신호 시점에 얼마나 빠르게 반응하는지 측정합니다.",

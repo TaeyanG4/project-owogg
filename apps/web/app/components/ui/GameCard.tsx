@@ -68,10 +68,11 @@ export function GameCard({
       {/* Top Favorite Action Button */}
       <button
         type="button"
+        data-testid="game-favorite-button"
         onClick={handleFavoriteClick}
         aria-label={favoriteAriaLabel}
         aria-pressed={isFav}
-        className="absolute top-1.5 right-1.5 sm:top-3 sm:right-3 z-30 p-1.5 sm:p-2 rounded-full bg-black/60 hover:bg-black/90 text-white transition-all backdrop-blur-md border border-white/10 hover:scale-110 active:scale-95 cursor-pointer"
+        className="absolute right-1.5 top-1.5 z-30 grid h-7 w-7 cursor-pointer place-items-center rounded-full border border-white/10 bg-black/60 text-white backdrop-blur-md transition-all hover:scale-110 hover:bg-black/90 active:scale-95 sm:right-3 sm:top-3 sm:h-9 sm:w-9"
       >
         <Bookmark
           className={`w-3.5 h-3.5 sm:w-4 sm:h-4 transition-colors ${
@@ -89,11 +90,14 @@ export function GameCard({
           }}
         >
           {/* Top Badges */}
-          <div className="absolute top-1.5 left-1.5 sm:top-3 sm:left-3 z-10 flex gap-1 sm:gap-1.5">
+          <div
+            data-testid="game-mode-badges"
+            className="absolute left-1.5 right-10 top-1.5 z-10 flex flex-wrap gap-1 overflow-hidden sm:left-3 sm:right-14 sm:top-3 sm:gap-1.5"
+          >
             {modes.slice(0, 2).map((mode) => (
               <span
                 key={mode}
-                className="text-[8px] sm:text-[10px] uppercase font-extrabold px-1.5 sm:px-2 py-0.5 rounded-md bg-black/60 text-white backdrop-blur-md border border-white/10 tracking-wider"
+                className="max-w-full truncate rounded-md border border-white/10 bg-black/60 px-1.5 py-0.5 text-[8px] font-extrabold uppercase leading-tight tracking-wider text-white backdrop-blur-md sm:px-2 sm:text-[10px]"
               >
                 {mode}
               </span>

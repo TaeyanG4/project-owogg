@@ -131,9 +131,10 @@ owogg.logo.png | .jpg | .jpeg | .webp | .svg
 `["single"]`만, `mode: "multi"`는 `local-multi` 또는 `online-multi`를 하나 이상 허용합니다.
 range는 `min < max`, `outOfRange` 기본값은 `clamp`입니다.
 
-`game.genre`에는 대표 장르 하나를 자유 문자열로 쓰고, `game.tags`에는 장르·규칙·테마 같은 보조 분류를
-자유 문자열 배열로 씁니다. 고정된 4~5개 장르 allowlist는 없으며 공개 카탈로그는 실제 genre 값을
-공백·대소문자·Unicode 비교용으로만 정규화하고 최초 표기를 화면에 유지합니다.
+`game.genre`에는 `skill-test`, `board`, `puzzle`처럼 넓은 대표 장르 하나를 자유 문자열로 쓰고,
+`game.tags`에는 `typing`, `reaction`, `card-board`처럼 세부 규칙·테마를 자유 문자열 배열로 씁니다.
+고정된 4~5개 장르 allowlist는 없으며, 알려진 넓은 장르는 UI 언어로 번역하고 알 수 없는 장르는 최초
+표기를 유지합니다. 기존 official의 세부 장르는 호환 정규화로 상위 장르에 묶입니다.
 
 `playConfig`는 `single` 또는 `local-multi` 경로와 scored leaderboard를 요구합니다. 같은 ZIP에서
 online도 제공하려면 `game.playModes`에 generic 경로와 `online-multi`를 함께 넣고 `multiplayer` 심사
