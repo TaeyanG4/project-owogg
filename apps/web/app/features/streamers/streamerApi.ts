@@ -1,10 +1,12 @@
 import { z } from "zod";
 import { apiFetch } from "../../lib/api/client";
+import { API_URL } from "../../lib/api/config";
 import {
   StreamerRankEntrySchema,
   StreamerPlatformSchema,
   StreamerProfileDtoSchema,
   StreamerProvidersResponseSchema,
+  type StreamerPlatform,
 } from "@owogg/contracts";
 
 export const StreamerRankingsResponseSchema = z.object({
@@ -18,6 +20,16 @@ export const StreamerRankingsResponseSchema = z.object({
 });
 
 export { StreamerProvidersResponseSchema };
+
+/** OAuth navigation must go directly to the API Worker. A relative `/api/...` link is resolved
+ * against the Web Worker (`stg.owogg.com` in Staging), where this route does not exist and all
+ * providers fail with the same 404 before their OAuth configuration is ever reached. */
+export function streamerVerificationUrl(
+  platform: StreamerPlatform,
+  apiUrl: string = API_URL,
+): string {
+  return `${apiUrl.replace(/\/+$/, "")}/api/streamers/verify/${platform.toLowerCase()}`;
+}
 
 export async function fetchStreamerRankingsApi(
   mode: "score" | "xp" = "score",

@@ -36,6 +36,7 @@ import {
 import {
   fetchMyStreamerProfileApi,
   fetchStreamerProvidersApi,
+  streamerVerificationUrl,
 } from "../features/streamers/streamerApi";
 import {
   STREAMER_UI_PLATFORM_LABELS,
@@ -928,7 +929,7 @@ export default function SettingsPage() {
                 <div className="w-full shrink-0 sm:w-auto">
                   {!ownershipVerified && canConnect ? (
                     <a
-                      href={`/api/streamers/verify/${platform.toLowerCase()}`}
+                      href={streamerVerificationUrl(platform)}
                       className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-brand bg-brand px-4 py-2 text-xs font-bold text-white shadow-md transition-all hover:bg-brand-dark sm:w-auto"
                     >
                       <Video className="h-3.5 w-3.5" />

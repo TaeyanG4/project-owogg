@@ -9,6 +9,7 @@ export default [
   route("ranking", "routes/ranking.tsx"),
   route("profile", "routes/profile.tsx"),
   route("settings", "routes/settings.tsx"),
+  route("api/streamers/verify/:platform", "routes/streamerVerificationRedirect.tsx"),
   route("users/:id", "routes/userProfile.tsx"),
   route("admin", "routes/admin.tsx"),
   route("admin/streamers", "routes/adminStreamers.tsx"),
