@@ -4,7 +4,7 @@
   "game": {
     "slug": "typing-test",
     "title": "타자 속도 테스트",
-    "genre": "typing",
+    "genre": "skill-test",
     "mode": "single",
     "playModes": ["single"],
     "shortDescription": "90초 동안 한 줄씩 입력하고 서버가 검증한 종합 점수를 기록하세요.",

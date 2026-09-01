@@ -4,7 +4,7 @@
   "game": {
     "slug": "memory-test",
     "title": "순서 기억력 테스트",
-    "genre": "brain",
+    "genre": "skill-test",
     "mode": "single",
     "playModes": ["single"],
     "shortDescription": "서버 seed로 정해진 색상 순서를 기억하고 그대로 입력하세요.",

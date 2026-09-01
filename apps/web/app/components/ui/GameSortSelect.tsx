@@ -89,7 +89,11 @@ export function GameSortSelect({ value, onChange, label, options }: GameSortSele
   };
 
   return (
-    <div ref={rootRef} className="relative z-30 shrink-0">
+    <div
+      ref={rootRef}
+      data-testid="game-sort-root"
+      className={`relative shrink-0 ${isOpen ? "z-[60]" : "z-20"}`}
+    >
       <button
         ref={triggerRef}
         type="button"
@@ -100,14 +104,14 @@ export function GameSortSelect({ value, onChange, label, options }: GameSortSele
         aria-controls={listboxId}
         onClick={() => setIsOpen((open) => !open)}
         onKeyDown={handleTriggerKeyDown}
-        className={`group flex h-12 min-w-44 cursor-pointer items-center gap-3 rounded-2xl border px-2.5 pr-3 text-left outline-none transition-all focus-visible:ring-2 focus-visible:ring-brand/40 ${
+        className={`group flex h-9 min-w-40 cursor-pointer items-center gap-2 rounded-xl border px-2 pr-2.5 text-left outline-none transition-all focus-visible:ring-2 focus-visible:ring-brand/40 ${
           isOpen
             ? "border-brand bg-brand/10 shadow-lg shadow-brand/10"
             : "border-border/90 bg-surface-raised hover:border-brand/60 hover:bg-surface-overlay"
         }`}
       >
-        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-brand/15 text-brand-light transition-colors group-hover:bg-brand/20">
-          <SelectedIcon aria-hidden="true" className="h-4 w-4" />
+        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-brand/15 text-brand-light transition-colors group-hover:bg-brand/20">
+          <SelectedIcon aria-hidden="true" className="h-3.5 w-3.5" />
         </span>
         <span className="min-w-0 flex-1 truncate text-sm font-extrabold text-text-primary">
           {options[value]}

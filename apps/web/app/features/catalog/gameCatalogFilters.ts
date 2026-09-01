@@ -1,4 +1,5 @@
 import type { PublicGameCard } from "./publicGameAdapter";
+import type { ResolvedGameGenre } from "./gameGenres";
 
 export type GamePlayModeFilter = "single" | "multi";
 
@@ -16,7 +17,11 @@ export function normalizeCatalogValue(value: string): string {
 export function matchesGameSearch(
   game: PublicGameCard,
   query: string,
-  localized?: { readonly title: string; readonly shortDescription: string },
+  localized?: {
+    readonly title: string;
+    readonly shortDescription: string;
+    readonly genre?: string;
+  },
 ): boolean {
   const normalizedQuery = normalizeCatalogValue(query);
   if (!normalizedQuery) return true;
@@ -26,6 +31,7 @@ export function matchesGameSearch(
     localized?.shortDescription ?? game.shortDescription,
     game.description,
     game.genre ?? "",
+    localized?.genre ?? "",
     ...game.tags,
     ...game.categories,
   ];
@@ -43,18 +49,17 @@ export function matchesGamePlayMode(
 
 export function groupGamesByGenre(
   games: readonly PublicGameCard[],
-  uncategorizedLabel: string,
+  resolveGenre: (genre: string | undefined) => ResolvedGameGenre,
 ): readonly GenreGroup[] {
   const groups = new Map<string, { label: string; games: PublicGameCard[] }>();
 
   for (const game of games) {
-    const displayGenre = game.genre?.normalize("NFC").trim() || uncategorizedLabel;
-    const key = game.genre ? normalizeCatalogValue(game.genre) : "__uncategorized__";
+    const { key, label } = resolveGenre(game.genre);
     const existing = groups.get(key);
     if (existing) {
       existing.games.push(game);
     } else {
-      groups.set(key, { label: displayGenre, games: [game] });
+      groups.set(key, { label, games: [game] });
     }
   }
 

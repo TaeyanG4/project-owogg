@@ -29,8 +29,8 @@ export function GridColumnSwitcher({
   const { dict } = useI18n();
 
   return (
-    <div className="flex items-center gap-2">
-      <div className="flex items-center gap-1 rounded-xl border border-border/80 bg-surface-raised p-1 lg:hidden">
+    <div className="flex items-center gap-2" data-testid="grid-column-switcher">
+      <div className="flex h-9 items-center gap-1 rounded-xl border border-border/80 bg-surface-raised p-1 lg:hidden">
         <Smartphone className="ml-1 h-3.5 w-3.5 text-text-muted" aria-hidden="true" />
         {MOBILE_COLUMN_OPTIONS.map((option) => {
           const isSelected = option === mobileColumns;
@@ -41,7 +41,7 @@ export function GridColumnSwitcher({
               onClick={() => onMobileChange(option)}
               aria-label={`${dict.home.gridColumnsAriaPrefix}${option}${dict.home.gridColumnsAriaSuffix}`}
               aria-pressed={isSelected}
-              className={`px-2 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              className={`h-7 min-w-7 rounded-lg px-2 text-xs font-bold transition-all cursor-pointer ${
                 isSelected
                   ? "bg-brand text-white shadow-sm"
                   : "text-text-secondary hover:text-text-primary hover:bg-surface-overlay"
@@ -53,7 +53,7 @@ export function GridColumnSwitcher({
         })}
       </div>
 
-      <div className="hidden items-center gap-1 rounded-xl border border-border/80 bg-surface-raised p-1 lg:flex">
+      <div className="hidden h-9 items-center gap-1 rounded-xl border border-border/80 bg-surface-raised p-1 lg:flex">
         <Monitor className="ml-1 h-3.5 w-3.5 text-text-muted" aria-hidden="true" />
         {DESKTOP_COLUMN_OPTIONS.map((option) => {
           const isSelected = option === desktopColumns;
@@ -64,7 +64,7 @@ export function GridColumnSwitcher({
               onClick={() => onDesktopChange(option)}
               aria-label={`${dict.home.gridColumnsAriaPrefix}${option}${dict.home.gridColumnsAriaSuffix}`}
               aria-pressed={isSelected}
-              className={`px-2 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              className={`h-7 min-w-7 rounded-lg px-2 text-xs font-bold transition-all cursor-pointer ${
                 isSelected
                   ? "bg-brand text-white shadow-sm"
                   : "text-text-secondary hover:text-text-primary hover:bg-surface-overlay"

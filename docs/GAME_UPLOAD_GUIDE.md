@@ -63,9 +63,10 @@ owogg.logo.<png|jpg|jpeg|webp|svg>
   API URL도 manifest나 게임 코드에 넣지 않습니다.
 - `game.playModes`는 필수입니다. 값은 `single`, `local-multi`, `online-multi`이며, single 게임은
   `["single"]`만 사용하고 multi 게임은 local 또는 online topology를 하나 이상 선언합니다.
-- `game.genre`는 대표 장르 하나를 적는 자유 문자열이고 `game.tags`는 장르·규칙·테마 등을 보조하는
-  자유 문자열 배열입니다. 플랫폼은 고정된 대표 장르 목록을 강제하지 않으며 실제 공개 게임의 genre를
-  정규화해 장르별 화면을 동적으로 구성합니다.
+- `game.genre`는 `skill-test`, `board`, `puzzle`처럼 넓은 대표 장르 하나를 적는 자유 문자열이고,
+  `game.tags`에는 `typing`, `reaction`, `card-board`처럼 세부 규칙·테마를 적습니다. 플랫폼은 고정된
+  대표 장르 allowlist를 강제하지 않으며 알려진 넓은 장르는 언어별 이름으로 표시하고 알 수 없는 장르는
+  원문을 유지합니다. 기존 세부 official 장르는 호환 정규화 후 장르별 화면에서 함께 묶입니다.
 - `online-multi`는 기능 선언일 뿐 서버 실행 권한이 아닙니다. 온라인 활성화에는 별도 승인된 exact
   version profile이 필요합니다.
 - `playConfig + multiplayer`는 `single` 또는 `local-multi`와 `online-multi`가 함께 선언된 hybrid

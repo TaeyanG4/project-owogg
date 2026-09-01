@@ -84,7 +84,7 @@
   "game": {
     "slug": "game-slug",
     "title": "게임 타이틀",
-    "genre": "reaction",
+    "genre": "skill-test",
     "mode": "single",
     "playModes": ["single"],
     "shortDescription": "게임 한 줄 요약",
