@@ -5,7 +5,7 @@ import type { SandboxGameUseCaseFailure } from "@owogg/core";
  * new failure code can't be mapped to different statuses depending on who hit it — and because
  * these are exhaustive `Record`s, adding a code to the union makes both routers fail to compile
  * until it's handled. */
-export type SandboxGameFailureStatus = 400 | 403 | 404 | 409 | 413 | 422 | 500 | 503;
+export type SandboxGameFailureStatus = 400 | 403 | 404 | 409 | 413 | 422 | 429 | 500 | 503;
 
 export const SANDBOX_GAME_FAILURE_STATUS: Record<
   SandboxGameUseCaseFailure["code"],
@@ -26,6 +26,7 @@ export const SANDBOX_GAME_FAILURE_STATUS: Record<
   VERSION_NOT_APPROVED: 409,
   // Publishing failed on our side (storage error), not because of anything wrong with the upload.
   PUBLISH_FAILED: 500,
+  CONTENT_EDIT_COOLDOWN: 429,
   // 422: the request was well-formed and authorized, but the bundle's *contents* are unacceptable.
   BUNDLE_MALFORMED: 422,
   BUNDLE_INVALID_PATH: 422,
@@ -75,6 +76,8 @@ export const SANDBOX_GAME_FAILURE_MESSAGE: Record<SandboxGameUseCaseFailure["cod
     "번들 배포가 완료되지 않은 버전입니다. 재배포 후 다시 시도하거나 새로 업로드하세요.",
   VERSION_NOT_APPROVED: "승인된 버전만 라이브로 지정할 수 있습니다.",
   PUBLISH_FAILED: "번들 배포에 실패했습니다. 잠시 후 재배포를 시도하세요.",
+  CONTENT_EDIT_COOLDOWN:
+    "게임 제작자는 설명 또는 태그를 변경한 뒤 24시간이 지나야 다시 수정할 수 있습니다.",
   BUNDLE_MALFORMED: "ZIP 파일을 읽을 수 없습니다. 정상적인 ZIP으로 다시 압축해 주세요.",
   BUNDLE_INVALID_PATH: "ZIP 안에 허용되지 않는 파일 경로가 있습니다(절대 경로/상위 경로 등).",
   BUNDLE_TOO_MANY_FILES: "ZIP 안의 파일 개수가 허용치를 초과했습니다.",

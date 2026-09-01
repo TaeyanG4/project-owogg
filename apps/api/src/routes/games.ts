@@ -17,6 +17,11 @@ import {
   canonicalizeGameEvidence,
   emptyPublicGameStats,
   evaluateClientAuthoredResultFlow,
+  gameDescriptionFilePaths,
+  gameDescriptionImagePaths,
+  GAME_DESCRIPTION_FILE_LOCALES,
+  GAME_DESCRIPTION_POLICY,
+  publishedObjectKey,
   publicGamePlayModes,
   publicGameMediaUrl,
   resolveBundleContentType,
@@ -40,6 +45,7 @@ import { rateLimit } from "../middleware/rateLimit.js";
 import { readB2Config } from "./devGames.js";
 import { MAX_GAME_RESULT_REQUEST_BYTES, readBoundedJsonBody } from "./boundedJsonBody.js";
 import type { ApiEnv } from "./auth.js";
+import { isMultiplayerFeatureEnabled } from "../multiplayer/config.js";
 
 // Same local requireAuth as streamers.ts/discordGuilds.ts — not shared from auth.ts, matching this
 // codebase's existing per-route-file convention rather than introducing a shared import for it.
@@ -67,13 +73,35 @@ export const gamesRouter = new Hono<ApiEnv>();
 // cache only ever delays the catalog *display* update by up to a minute, never the enforcement.
 gamesRouter.get("/availability", edgeCache({ ttlSeconds: 60, browserTtlSeconds: 0 }), async (c) => {
   if (!c.env?.DB) {
-    return c.json(PublicGameAvailabilityResponseSchema.parse({ disabledGameIds: [] }), 200);
+    return c.json(
+      PublicGameAvailabilityResponseSchema.parse({
+        disabledGameIds: [],
+        multiplayerEnabled: false,
+        externalPlatformGamesVisible: false,
+      }),
+      200,
+    );
   }
 
-  const { gameSettingsUseCases } = createContainer(c.env.DB);
-  const disabledGameIds = await gameSettingsUseCases.getDisabledGameIds();
+  const { gameSettingsUseCases, platformFeatureSettingsUseCases } = createContainer(c.env.DB);
+  const [disabledGameIds, featureSettings] = await Promise.all([
+    gameSettingsUseCases.getDisabledGameIds(),
+    platformFeatureSettingsUseCases.get().catch(() => ({
+      multiplayerEnabled: false,
+      externalPlatformGamesVisible: false,
+    })),
+  ]);
 
-  return c.json(PublicGameAvailabilityResponseSchema.parse({ disabledGameIds }), 200);
+  return c.json(
+    PublicGameAvailabilityResponseSchema.parse({
+      disabledGameIds,
+      multiplayerEnabled:
+        isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED) &&
+        featureSettings.multiplayerEnabled,
+      externalPlatformGamesVisible: featureSettings.externalPlatformGamesVisible,
+    }),
+    200,
+  );
 });
 
 // ── Generic public Game read model ───────────────────────────────────────────
@@ -144,6 +172,60 @@ interface PublicLogoCache {
   put(request: Request, response: Response): Promise<void>;
 }
 
+async function publicDescriptionProjection(
+  c: Context<ApiEnv>,
+  container: AppContainer,
+  runtime: RuntimeGame,
+): Promise<{
+  descriptions: Array<{
+    locale: "en" | "ko" | "ja" | "zh";
+    path: "description.md" | "description_kr.md" | "description_ja.md" | "description_zh.md";
+    markdown: string;
+  }>;
+  descriptionImages: Array<{ path: string; url: string }>;
+}> {
+  const manifest = runtime.canonical.creatorManifest;
+  const versionId = runtime.identity.liveVersionId;
+  if (!manifest || versionId === null) return { descriptions: [], descriptionImages: [] };
+
+  const descriptions = (
+    await Promise.all(
+      gameDescriptionFilePaths(manifest).map(async (path) => {
+        const bytes = await container.gameBundleStorageRepo.getObject(
+          publishedObjectKey(runtime.identity.id, versionId, path),
+        );
+        if (
+          !bytes ||
+          bytes.byteLength === 0 ||
+          bytes.byteLength > GAME_DESCRIPTION_POLICY.MAX_MARKDOWN_BYTES_PER_FILE
+        ) {
+          return null;
+        }
+        try {
+          return {
+            locale: GAME_DESCRIPTION_FILE_LOCALES[path],
+            path,
+            markdown: new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+          };
+        } catch {
+          return null;
+        }
+      }),
+    )
+  ).filter((item): item is NonNullable<typeof item> => item !== null);
+
+  const descriptionImages = gameDescriptionImagePaths(manifest).map((path) => {
+    const endpoint = new URL(
+      `/api/games/${encodeURIComponent(runtime.identity.slug)}/media/description`,
+      c.req.url,
+    );
+    endpoint.searchParams.set("path", path);
+    endpoint.searchParams.set("v", String(versionId));
+    return { path, url: endpoint.toString() };
+  });
+  return { descriptions, descriptionImages };
+}
+
 // Generic public logo bytes. Availability and the exact D1 asset revision are checked BEFORE the
 // B2 byte cache on every request. The logo gate is deliberately D1-only: loading a public image
 // never needs catalog/policy canonical metadata, and fetching that B2 JSON before an already-cached
@@ -210,6 +292,56 @@ gamesRouter.get("/:slug/media/logo", async (c) => {
   }
 });
 
+// Only manifest-allowlisted raster assets from the current live immutable version are public.
+gamesRouter.get("/:slug/media/description", async (c) => {
+  if (!c.env?.DB) return c.text("Not Found", 404);
+  const container = createContainer(c.env.DB, readB2Config(c.env));
+  try {
+    const runtime = await container.publicGameCatalog.findBySlug(c.req.param("slug"));
+    const path = c.req.query("path");
+    const requestedVersion = Number(c.req.query("v"));
+    const manifest = runtime?.canonical.creatorManifest;
+    if (
+      !runtime ||
+      !manifest ||
+      !path ||
+      runtime.identity.liveVersionId === null ||
+      requestedVersion !== runtime.identity.liveVersionId ||
+      !gameDescriptionImagePaths(manifest).includes(path)
+    ) {
+      return c.text("Not Found", 404);
+    }
+    const contentType = resolveBundleContentType(path).contentType;
+    if (
+      !new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]).has(
+        contentType,
+      )
+    ) {
+      return c.text("Not Found", 404);
+    }
+    const bytes = await container.gameBundleStorageRepo.getObject(
+      publishedObjectKey(runtime.identity.id, runtime.identity.liveVersionId, path),
+    );
+    if (
+      !bytes ||
+      bytes.byteLength === 0 ||
+      bytes.byteLength > GAME_DESCRIPTION_POLICY.MAX_IMAGE_BYTES_PER_FILE
+    ) {
+      return c.text("Not Found", 404);
+    }
+    return new Response(bytes, {
+      status: 200,
+      headers: {
+        "Content-Type": contentType,
+        "Cache-Control": "public, max-age=3600, s-maxage=3600",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  } catch {
+    return c.text("Not Found", 404);
+  }
+});
+
 // GET /api/games/:slug — one provider-neutral runtime resolution path for OWOGG and USER.
 gamesRouter.get("/:slug", edgeCache({ ttlSeconds: 60, browserTtlSeconds: 0 }), async (c) => {
   if (!c.env?.DB) return c.text("Not Found", 404);
@@ -224,7 +356,13 @@ gamesRouter.get("/:slug", edgeCache({ ttlSeconds: 60, browserTtlSeconds: 0 }), a
     : undefined;
   const game = await publicGameProjection(c, container, runtime, stats);
   if (!game) return c.text("Not Found", 404);
-  return c.json(PublicGameSchema.parse(game), 200);
+  const descriptionProjection = runtime
+    ? await publicDescriptionProjection(c, container, runtime).catch(() => ({
+        descriptions: [],
+        descriptionImages: [],
+      }))
+    : { descriptions: [], descriptionImages: [] };
+  return c.json(PublicGameSchema.parse({ ...game, ...descriptionProjection }), 200);
 });
 
 // ── Generic Game Session ─────────────────────────────────────────────────────

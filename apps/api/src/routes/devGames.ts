@@ -112,7 +112,13 @@ async function resolveDevSession(c: Context<ApiEnv>): Promise<DevSession | null>
 function failureResponse(err: unknown): { body: unknown; status: SandboxGameFailureStatus } {
   if (!(err instanceof SandboxGameUseCaseFailure)) throw err;
   return {
-    body: { error: { code: err.code, message: SANDBOX_GAME_FAILURE_MESSAGE[err.code] } },
+    body: {
+      error: {
+        code: err.code,
+        message: SANDBOX_GAME_FAILURE_MESSAGE[err.code],
+        ...(err.availableAt ? { availableAt: err.availableAt } : {}),
+      },
+    },
     status: SANDBOX_GAME_FAILURE_STATUS[err.code],
   };
 }
@@ -425,6 +431,55 @@ devGamesRouter.post(
     } catch (err) {
       const { body: errBody, status } = failureResponse(err);
       return c.json(errBody, status);
+    }
+  },
+);
+
+devGamesRouter.post(
+  "/games/:id/description",
+  rateLimit({ name: "game-upload", binding: "GAME_UPLOAD_RATE_LIMITER" }),
+  async (c) => {
+    const session = await resolveDevSession(c);
+    if (!session) {
+      return c.json({ error: { code: "UNAUTHORIZED", message: "로그인이 필요합니다." } }, 401);
+    }
+    const container = createContainer(c.env.DB, readB2Config(c.env));
+    if (!container.gameBundlesConfigured) {
+      return c.json(
+        {
+          error: {
+            code: "GAME_BUNDLES_NOT_CONFIGURED",
+            message: "번들 저장소(Backblaze B2)가 아직 이 환경에 구성되지 않았습니다.",
+          },
+        },
+        503,
+      );
+    }
+    const body = await c.req.parseBody().catch(() => null);
+    const description = body?.description;
+    if (!(description instanceof File)) {
+      return c.json(
+        {
+          error: {
+            code: "INVALID_REQUEST",
+            message: "description Markdown 또는 ZIP 파일이 필요합니다.",
+          },
+        },
+        400,
+      );
+    }
+    try {
+      const version = await container.sandboxGameUseCases.replaceDescriptionPackage({
+        gameId: Number(c.req.param("id")),
+        actingUserId: session.userId,
+        isAdmin: session.isAdmin,
+        fileName: description.name,
+        bytes: await description.arrayBuffer(),
+      });
+      return c.json(SandboxGameVersionRecordSchema.parse(version), 201);
+    } catch (error) {
+      const { body: errorBody, status } = failureResponse(error);
+      return c.json(errorBody, status);
     }
   },
 );

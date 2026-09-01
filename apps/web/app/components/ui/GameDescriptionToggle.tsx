@@ -25,7 +25,7 @@ export function GameDescriptionToggle({
       aria-label={label}
       aria-pressed={showDescriptions}
       title={label}
-      className="flex h-9 items-center gap-2 rounded-xl border border-border/80 bg-surface-raised px-2.5 text-xs font-bold text-text-secondary transition-colors hover:bg-surface-overlay hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+      className="flex h-11 items-center gap-2 rounded-2xl border border-border/80 bg-surface-raised px-3.5 text-xs font-bold text-text-secondary transition-colors hover:bg-surface-overlay hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
     >
       <Icon className="h-3.5 w-3.5" aria-hidden="true" />
       <span className="hidden xl:inline">{label}</span>

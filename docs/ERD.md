@@ -4,9 +4,9 @@
 
 마지막 검증: 2026-09-01
 
-최신 마이그레이션: `0051_streamer_manual_management.sql`
+최신 마이그레이션: `0052_game_content_and_platform_controls.sql`
 
-스키마 요약: 물리 테이블 `66`, 롤링 배포 호환 뷰 `0`
+스키마 요약: 물리 테이블 `68`, 롤링 배포 호환 뷰 `0`
 
 기준 소스:
 
@@ -15,7 +15,7 @@
 - `apps/api/src/container.ts`
 - [데이터베이스 기준 문서](DATABASE.md)
 
-이 문서는 `0000_initial_schema.sql`부터 `0051_streamer_manual_management.sql`까지를 빈 SQLite에
+이 문서는 `0000_initial_schema.sql`부터 `0052_game_content_and_platform_controls.sql`까지를 빈 SQLite에
 순서대로 적용한 **최종 D1 schema**를 기준으로 합니다. migration SQL이 유일한 schema 권한
 원천이며, 이 문서는 관계 탐색과 운영 이해를 위한 투영입니다.
 
@@ -177,6 +177,11 @@ erDiagram
     TEXT kind PK
     TEXT object_key
   }
+  game_content_edit_cooldowns {
+    INTEGER game_id PK, FK
+    INTEGER edited_by_user_id FK
+    TEXT last_edited_at
+  }
   game_attempt_consumptions {
     TEXT attempt_id PK
     INTEGER user_id FK
@@ -238,11 +243,18 @@ erDiagram
     TEXT slug
     INTEGER actor_admin_id
   }
+  platform_feature_settings {
+    TEXT setting_key PK
+    INTEGER enabled
+    INTEGER updated_by_admin_id
+  }
 
   users o|--o{ games : publishes_USER
   games ||--o{ game_versions : versions
   games ||..o| game_versions : live_version
   games ||--o{ game_assets : assets
+  games ||--o| game_content_edit_cooldowns : edit_cooldown
+  users ||--o{ game_content_edit_cooldowns : edits
   users ||--o{ game_attempt_consumptions : consumes
   games ||--o{ game_attempt_consumptions : scopes
   game_versions ||--o{ game_attempt_consumptions : pins
@@ -727,6 +739,7 @@ D1 콘솔에서 직접 수정하면 감사 로그와 두 저장소의 일관성�
 | `discord_server_registration_challenges`     | Discord         | 사용자가 관리 가능한 길드 등록 challenge                   |
 | `game_assets`                                | Game Platform   | 게임별 B2 자산 pointer; 현재 `LOGO` 사용                   |
 | `game_attempt_consumptions`                  | Game Platform   | user/game/version에 고정된 일회성 attempt 소비             |
+| `game_content_edit_cooldowns`                | Game Creator    | USER 설명·태그 변경의 게임별 24시간 원자 쿨다운            |
 | `game_creator_access`                        | Game Creator    | 사용자별 게임 업로드 자격의 현재 상태                      |
 | `game_creator_access_audit_log`              | Game Creator    | 자격 부여·회수·복원 감사 원장                              |
 | `game_creator_applications`                  | Game Creator    | 자격 신청과 관리자 심사 결과                               |
@@ -751,6 +764,7 @@ D1 콘솔에서 직접 수정하면 감사 로그와 두 저장소의 일관성�
 | `oauth_accounts`                             | Identity        | Google/Discord provider identity와 avatar 후보             |
 | `oauth_identity_registrations`               | Identity        | 활성 provider identity의 단일 사용자 연결 예약             |
 | `official_game_deletion_audit_log`           | Operations      | 부모 삭제 뒤에도 남는 OWOGG 완전 삭제 감사 원장            |
+| `platform_feature_settings`                  | Operations      | 전체 multiplayer와 타 플랫폼 메뉴의 서버 운영 스위치       |
 | `sandbox_game_review_audit_log`              | Compatibility   | 직전 USER 게임 심사 계약의 append-only 호환 감사           |
 | `sandbox_game_versions`                      | Compatibility   | 직전 Worker용 USER version 호환 미러                       |
 | `sandbox_games`                              | Compatibility   | 직전 Worker용 USER game identity/metadata 호환 미러        |

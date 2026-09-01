@@ -2,7 +2,7 @@
 
 상태: 가이드
 
-마지막 검증: 2026-08-31
+마지막 검증: 2026-09-01
 
 기준 소스:
 
@@ -35,6 +35,11 @@ ZIP root에 최소 다음 파일을 둡니다.
 index.html
 owogg.json
 owogg.logo.<png|jpg|jpeg|webp|svg>
+description.md
+description_kr.md
+description_ja.md
+description_zh.md
+# description_images에 선언한 raster image (선택, 최대 5개)
 ```
 
 `owogg.json` 최소 예시:
@@ -50,8 +55,16 @@ owogg.logo.<png|jpg|jpeg|webp|svg>
     "tags": ["puzzle", "card-board"],
     "mode": "single",
     "playModes": ["single"],
-    "shortDescription": "한 줄 소개"
+    "shortDescription": "한 줄 소개",
+    "description": [
+      "description.md",
+      "description_kr.md",
+      "description_ja.md",
+      "description_zh.md"
+    ],
+    "description_images": ["docs/how-to-play.webp"]
   },
+  "presentation": { "defaultMode": "default" },
   "progression": { "type": "none" },
   "result": { "score": null }
 }
@@ -67,6 +80,14 @@ owogg.logo.<png|jpg|jpeg|webp|svg>
   `game.tags`에는 `typing`, `reaction`, `card-board`처럼 세부 규칙·테마를 적습니다. 플랫폼은 고정된
   대표 장르 allowlist를 강제하지 않으며 알려진 넓은 장르는 언어별 이름으로 표시하고 알 수 없는 장르는
   원문을 유지합니다. 기존 세부 official 장르는 호환 정규화 후 장르별 화면에서 함께 묶입니다.
+- `game.description`을 파일 배열로 선언할 때 영어 기본 문서인 `description.md`는 필수이고,
+  `description_kr.md`, `description_ja.md`, `description_zh.md`를 선택적으로 함께 선언합니다. 공개 게임
+  상세는 현재 UI 언어 문서를 먼저 사용하고, 없으면 영어, 그마저 없으면 기존 짧은 설명으로
+  폴백합니다. Markdown raw HTML은 실행하지 않습니다.
+- 본문 이미지는 `game.description_images`에 bundle 상대 경로로 명시한 PNG/JPEG/GIF/WebP/AVIF만
+  표시합니다. 최대 5개, 파일당 5 MiB이며 SVG와 외부 이미지 URL은 허용하지 않습니다.
+- `presentation.defaultMode`는 게임 진입 시 `default` 또는 `theater`를 선택합니다. 사용자는 진입 후
+  기존 화면 컨트롤로 모드를 다시 바꿀 수 있습니다.
 - `online-multi`는 기능 선언일 뿐 서버 실행 권한이 아닙니다. 온라인 활성화에는 별도 승인된 exact
   version profile이 필요합니다.
 - `playConfig + multiplayer`는 `single` 또는 `local-multi`와 `online-multi`가 함께 선언된 hybrid
@@ -125,14 +146,21 @@ owogg.logo.<png|jpg|jpeg|webp|svg>
 
 ### 4.1 부분 재업로드
 
-게임별 관리 메뉴에서 전체 ZIP 외에 `owogg.json` 또는 로고만 다시 올릴 수 있습니다. 제목, 장르,
-single/multi 모드와 설명은 핵심 속성 폼에서 직접 고칠 수도 있습니다.
+게임별 관리 메뉴에서 전체 ZIP 외에 `owogg.json`, 설명 문서 또는 로고만 다시 올릴 수 있습니다.
+제목, 장르, single/multi 모드, 태그와 기본 화면 모드는 핵심 속성 폼에서 직접 고칠 수도 있습니다.
 
 - `owogg.json`과 핵심 속성 저장은 기존 게시 파일을 덮어쓰지 않고 현재 source ZIP을 재구성해 새
   `PENDING_REVIEW` version을 만듭니다. 수정본은 다시 승인되어야 live로 전환할 수 있습니다.
 - 로고는 game-level asset이므로 새 version을 만들지 않고 즉시 교체합니다.
+- 설명은 지원되는 단일 `.md` 파일 또는 설명 파일·이미지를 묶은 ZIP으로 제출합니다. 단일 파일은 해당
+  언어 문서만 교체하고, ZIP은 선언된 설명 문서/이미지 전체를 교체합니다. ZIP에는 영어
+  `description.md`가 반드시 있어야 합니다.
 - `slug`는 게임의 영구 identity라서 부분 편집으로 바꿀 수 없습니다.
-- standalone `owogg.json`은 256 KiB, 로고는 2 MiB를 초과할 수 없습니다.
+- 일반 Game Creator가 설명 내용 또는 태그를 실제 변경하면 같은 게임의 다음 설명/태그 변경은
+  24시간 뒤에 가능합니다. 동일 바이트를 다시 제출하는 요청은 변경으로 보지 않습니다. 관리자는
+  운영 복구와 심사를 위해 이 대기 시간을 우회할 수 있습니다.
+- standalone `owogg.json`은 256 KiB, Markdown은 파일당 64 KiB, 설명 이미지는 파일당 5 MiB,
+  로고는 2 MiB를 초과할 수 없습니다.
 
 ## 5. 상태 읽기
 
@@ -165,10 +193,19 @@ READY != APPROVED
 - `POST /api/dev/games/upload`: ZIP으로 새 게임과 첫 version 등록
 - `GET /api/dev/games/:id`: 본인/admin 상세
 - `POST /api/dev/games/:id/versions`: 새 version upload
+- `POST /api/dev/games/:id/description`: 단일 Markdown 또는 설명 ZIP 교체
+- `PATCH /api/dev/games/:id/basic-metadata`: 제목·소개·장르·모드·태그·기본 화면 모드 변경
+- `POST /api/dev/games/:id/manifest`: standalone `owogg.json` 교체
+- `POST /api/dev/games/:id/logo`: 로고 교체
 - `POST /api/dev/games/:id/withdraw`: pending version 철회
 - `DELETE /api/dev/games/:id`: 허용되는 미승인 게임 self-delete
 
 수동 catalog-only 등록 endpoint는 제거됐습니다. 새 게임은 항상 검증된 ZIP으로 등록합니다.
+
+관리자 게임 관리 및 심사 화면은 USER 게임에 대해 동일한 immutable 지원 경로를 제공합니다.
+`PATCH /api/admin/sandbox-games/:id/basic-metadata`와
+`POST /api/admin/sandbox-games/:id/description`은 기존 게시 파일을 직접 덮어쓰지 않고 새
+`PENDING_REVIEW` 버전을 만듭니다. XP·점수 정책 같은 서버 운영값은 별도 metadata 경로로 유지합니다.
 
 ## 7. 승인 후 runtime 제공
 

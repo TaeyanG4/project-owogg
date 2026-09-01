@@ -11,6 +11,7 @@ import {
   Clock3,
   ShieldAlert,
   FileJson,
+  FileText,
   Image,
   Pencil,
 } from "lucide-react";
@@ -27,6 +28,7 @@ import {
   countActiveSubmissions,
   replaceDevGameManifest,
   replaceDevGameLogo,
+  replaceDevGameDescription,
   patchDevGameBasicMetadata,
 } from "../features/devApi";
 import type { GameCreatorMeResponse, SandboxGameRecord } from "@owogg/contracts";
@@ -248,6 +250,17 @@ function ApplicationPanel({
   );
 }
 
+function isCreatorContentEditLocked(game: SandboxGameRecord): boolean {
+  return (
+    game.contentEditAvailableAt !== null && Date.parse(game.contentEditAvailableAt) > Date.now()
+  );
+}
+
+function creatorContentEditUnlockLabel(game: SandboxGameRecord): string | null {
+  if (!isCreatorContentEditLocked(game) || game.contentEditAvailableAt === null) return null;
+  return new Date(game.contentEditAvailableAt).toLocaleString();
+}
+
 function ManageGamesPanel({
   myGames,
   onChanged,
@@ -318,6 +331,19 @@ function ManageGamesPanel({
       onChanged();
     } catch (err) {
       onError(err instanceof Error ? err.message : "로고 재업로드에 실패했습니다.");
+    } finally {
+      setPartBusy(null);
+    }
+  };
+
+  const handleReplaceDescription = async (gameId: number, file: File) => {
+    setPartBusy(`${gameId}:description`);
+    try {
+      await replaceDevGameDescription(gameId, file);
+      setNotice("게임 설명 교체본을 새 버전으로 만들었습니다. 관리자 심사를 기다려주세요.");
+      onChanged();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "게임 설명 업로드에 실패했습니다.");
     } finally {
       setPartBusy(null);
     }
@@ -413,6 +439,14 @@ function ManageGamesPanel({
                         심사 대기 중 (슬롯 {g.reviewSlot})
                       </span>
                     )}
+                    {isCreatorContentEditLocked(g) && (
+                      <span
+                        className="rounded-full bg-brand/10 px-1.5 py-0.5 font-bold text-brand-light"
+                        title={`설명·태그 수정 가능: ${creatorContentEditUnlockLabel(g)}`}
+                      >
+                        설명·태그 24시간 대기
+                      </span>
+                    )}
                     {/* A row can only ever reach this list with deletedAt set via the admin's
                         soft-delete — the Game Creator's own self-delete (deleteOwnGame) is a hard
                         delete that removes the row outright, so it never appears here at all.
@@ -450,7 +484,18 @@ function ManageGamesPanel({
                       철회
                     </button>
                   )}
-                  <label className="flex cursor-pointer items-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-xs font-bold text-text-primary hover:border-brand">
+                  <label
+                    title={
+                      isCreatorContentEditLocked(g)
+                        ? `설명 수정 가능: ${creatorContentEditUnlockLabel(g)}`
+                        : undefined
+                    }
+                    className={`flex items-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-xs font-bold text-text-primary ${
+                      isCreatorContentEditLocked(g)
+                        ? "cursor-not-allowed opacity-50"
+                        : "cursor-pointer hover:border-brand"
+                    }`}
+                  >
                     {uploadingGameId === g.id ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     ) : (
@@ -485,6 +530,25 @@ function ManageGamesPanel({
                         const file = e.target.files?.[0];
                         e.target.value = "";
                         if (file) void handleReplaceManifest(g.id, file);
+                      }}
+                    />
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-xs font-bold text-text-primary hover:border-brand">
+                    {partBusy === `${g.id}:description` ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <FileText className="h-3.5 w-3.5" />
+                    )}
+                    게임 설명
+                    <input
+                      type="file"
+                      accept=".md,.zip,text/markdown,application/zip"
+                      className="hidden"
+                      disabled={partBusy !== null || isCreatorContentEditLocked(g)}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = "";
+                        if (file) void handleReplaceDescription(g.id, file);
                       }}
                     />
                   </label>
@@ -568,10 +632,14 @@ function CreatorGameMetadataEditor({
 }) {
   const [title, setTitle] = useState(game.title);
   const [shortDescription, setShortDescription] = useState(game.shortDescription ?? "");
-  const [description, setDescription] = useState(game.description ?? "");
   const [genre, setGenre] = useState(game.genre);
   const [mode, setMode] = useState<"single" | "multi">(game.mode);
+  const [tags, setTags] = useState(game.tags.join(", "));
+  const [defaultScreenMode, setDefaultScreenMode] = useState<"default" | "theater">(
+    game.defaultScreenMode,
+  );
   const [busy, setBusy] = useState(false);
+  const contentEditUnlockLabel = creatorContentEditUnlockLabel(game);
 
   return (
     <div className="space-y-4 rounded-2xl border border-brand/30 bg-surface p-4">
@@ -602,15 +670,29 @@ function CreatorGameMetadataEditor({
             maxLength={200}
           />
         </Field>
+        <Field label="기본 게임 화면">
+          <select
+            value={defaultScreenMode}
+            onChange={(e) => setDefaultScreenMode(e.target.value as "default" | "theater")}
+          >
+            <option value="default">기본 모드</option>
+            <option value="theater">영화관 모드</option>
+          </select>
+        </Field>
       </div>
-      <Field label="상세 설명">
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          maxLength={4000}
-          rows={4}
+      <Field label="태그 (쉼표로 구분, 최대 20개)">
+        <input
+          value={tags}
+          disabled={contentEditUnlockLabel !== null}
+          title={contentEditUnlockLabel ? `태그 수정 가능: ${contentEditUnlockLabel}` : undefined}
+          onChange={(e) => setTags(e.target.value)}
         />
       </Field>
+      <p className="text-[11px] leading-relaxed text-text-muted">
+        상세 설명은 게임 설명 버튼에서 description.md 또는 ZIP으로 제출합니다. 태그나 설명을 변경한
+        게임 제작자는 24시간 동안 다시 수정할 수 없습니다.
+        {contentEditUnlockLabel ? ` 다음 수정 가능 시각: ${contentEditUnlockLabel}` : ""}
+      </p>
       <button
         type="button"
         disabled={busy || !title.trim() || !genre.trim()}
@@ -620,9 +702,13 @@ function CreatorGameMetadataEditor({
             await patchDevGameBasicMetadata(game.id, {
               title: title.trim(),
               shortDescription: shortDescription.trim() || null,
-              description: description.trim() || null,
               genre: genre.trim(),
               mode,
+              tags: tags
+                .split(",")
+                .map((tag) => tag.trim())
+                .filter(Boolean),
+              defaultScreenMode,
             });
             onSaved();
           } catch (err) {
@@ -646,7 +732,7 @@ function CreatorGameMetadataEditor({
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="flex flex-col gap-1 text-[11px] font-bold text-text-muted [&_input]:rounded-xl [&_input]:border [&_input]:border-border [&_input]:bg-surface-raised [&_input]:px-3 [&_input]:py-2 [&_input]:text-sm [&_input]:text-text-primary [&_select]:rounded-xl [&_select]:border [&_select]:border-border [&_select]:bg-surface-raised [&_select]:px-3 [&_select]:py-2 [&_select]:text-sm [&_select]:text-text-primary [&_textarea]:rounded-xl [&_textarea]:border [&_textarea]:border-border [&_textarea]:bg-surface-raised [&_textarea]:px-3 [&_textarea]:py-2 [&_textarea]:text-sm [&_textarea]:text-text-primary">
+    <label className="flex flex-col gap-1 text-[11px] font-bold text-text-muted [&_input]:rounded-xl [&_input]:border [&_input]:border-border [&_input]:bg-surface-raised [&_input]:px-3 [&_input]:py-2 [&_input]:text-sm [&_input]:text-text-primary [&_input:disabled]:cursor-not-allowed [&_input:disabled]:opacity-50 [&_select]:rounded-xl [&_select]:border [&_select]:border-border [&_select]:bg-surface-raised [&_select]:px-3 [&_select]:py-2 [&_select]:text-sm [&_select]:text-text-primary [&_textarea]:rounded-xl [&_textarea]:border [&_textarea]:border-border [&_textarea]:bg-surface-raised [&_textarea]:px-3 [&_textarea]:py-2 [&_textarea]:text-sm [&_textarea]:text-text-primary">
       {label}
       {children}
     </label>

@@ -16,6 +16,8 @@ import {
   AdminGameCatalogRoleResponseSchema,
   type AdminGameCatalogRole,
   AdminGameToggleResponseSchema,
+  PlatformFeatureSettingsResponseSchema,
+  type AdminPlatformFeatureSettingsUpdateRequest,
   AdminManagedMultiplayerExactVersionResponseSchema,
   AdminManagedMultiplayerProfileReviewResponseSchema,
   AdminManagedMultiplayerProfileActivationResponseSchema,
@@ -248,6 +250,19 @@ export function fetchAdminGames(
   );
 }
 
+export function fetchAdminPlatformFeatureSettings() {
+  return apiFetch("/api/admin/games/platform-settings", PlatformFeatureSettingsResponseSchema);
+}
+
+export function patchAdminPlatformFeatureSettings(
+  input: AdminPlatformFeatureSettingsUpdateRequest,
+) {
+  return apiFetch("/api/admin/games/platform-settings", PlatformFeatureSettingsResponseSchema, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
 export function fetchManagedMultiplayerExactVersion(gameSlug: string) {
   return apiFetch(
     `/api/admin/games/${encodeURIComponent(gameSlug)}/multiplayer-control`,
@@ -339,7 +354,7 @@ export async function uploadOfficialGame(file: File) {
 
 async function uploadAdminGameFile<T>(input: {
   url: string;
-  field: "bundle" | "manifest" | "logo";
+  field: "bundle" | "manifest" | "logo" | "description";
   file: File;
   parse: (value: unknown) => T;
 }): Promise<T> {
@@ -407,6 +422,15 @@ export function replaceOfficialGameLogo(slug: string, file: File) {
     field: "logo",
     file,
     parse: (value) => GameLogoUpdateResponseSchema.parse(value),
+  });
+}
+
+export function replaceOfficialGameDescription(slug: string, file: File) {
+  return uploadAdminGameFile({
+    url: `/api/admin/games/${encodeURIComponent(slug)}/description`,
+    field: "description",
+    file,
+    parse: (value) => AdminOfficialGameUploadResponseSchema.parse(value),
   });
 }
 
@@ -582,6 +606,15 @@ export function replaceAdminSandboxGameManifest(id: number, file: File) {
   });
 }
 
+export function replaceAdminSandboxGameDescription(id: number, file: File) {
+  return uploadAdminGameFile({
+    url: `/api/admin/sandbox-games/${id}/description`,
+    field: "description",
+    file,
+    parse: (value) => SandboxGameVersionRecordSchema.parse(value),
+  });
+}
+
 export function replaceAdminSandboxGameLogo(id: number, file: File) {
   return uploadAdminGameFile({
     url: `/api/admin/sandbox-games/${id}/logo`,
@@ -627,6 +660,16 @@ export function patchSandboxGameMetadata(id: number, input: SandboxGameMetadataU
       body: JSON.stringify(input),
     }),
   );
+}
+
+export function patchAdminSandboxGameBasicMetadata(
+  id: number,
+  input: SandboxGameBasicMetadataUpdateRequest,
+) {
+  return apiFetch(`/api/admin/sandbox-games/${id}/basic-metadata`, SandboxGameVersionRecordSchema, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
 }
 
 export function patchSandboxGameVisibility(id: number, visibility: SandboxGameVisibility) {

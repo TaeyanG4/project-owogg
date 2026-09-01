@@ -118,8 +118,8 @@ export async function uploadDevGameVersion(gameId: number, file: File) {
 
 async function uploadDevGamePart<T>(input: {
   gameId: number;
-  path: "manifest" | "logo";
-  field: "manifest" | "logo";
+  path: "manifest" | "logo" | "description";
+  field: "manifest" | "logo" | "description";
   file: File;
   parse: (value: unknown) => T;
 }): Promise<T> {
@@ -169,6 +169,16 @@ export function replaceDevGameLogo(gameId: number, file: File) {
     field: "logo",
     file,
     parse: (value) => GameLogoUpdateResponseSchema.parse(value),
+  });
+}
+
+export function replaceDevGameDescription(gameId: number, file: File) {
+  return uploadDevGamePart({
+    gameId,
+    path: "description",
+    field: "description",
+    file,
+    parse: (value) => SandboxGameVersionRecordSchema.parse(value),
   });
 }
 

@@ -147,16 +147,41 @@ function createFakeArchiveReader(
   };
 }
 
+function createMarkerArchiveReader(
+  entriesByMarker: ReadonlyMap<number, Record<string, Uint8Array>>,
+): BundleArchiveReader {
+  const entriesFor = (archive: ArrayBuffer) => {
+    const marker = new Uint8Array(archive)[0] ?? -1;
+    const entries = entriesByMarker.get(marker);
+    if (!entries) throw new Error(`unknown archive marker ${marker}`);
+    return entries;
+  };
+  return {
+    readMetadata(archive) {
+      return Object.entries(entriesFor(archive)).map(([path, value]) => ({
+        path,
+        declaredSize: value.byteLength,
+        compressedSize: value.byteLength,
+      }));
+    },
+    read(archive) {
+      return entriesFor(archive);
+    },
+  };
+}
+
 function createFakeRepo(): SandboxGameRepository & {
   games: Map<number, SandboxGameRecord>;
   versions: Map<number, SandboxGameVersionRecord>;
   auditActions: string[];
   reservedSlugs: Set<string>;
+  contentClaims: Map<number, { userId: number; claimedAt: string }>;
 } {
   const games = new Map<number, SandboxGameRecord>();
   const versions = new Map<number, SandboxGameVersionRecord>();
   const auditActions: string[] = [];
   const reservedSlugs = new Set<string>();
+  const contentClaims = new Map<number, { userId: number; claimedAt: string }>();
   let nextGameId = 1;
   let nextVersionId = 1;
 
@@ -165,6 +190,7 @@ function createFakeRepo(): SandboxGameRepository & {
     versions,
     auditActions,
     reservedSlugs,
+    contentClaims,
     async findById(id) {
       return games.get(id) ?? null;
     },
@@ -210,6 +236,9 @@ function createFakeRepo(): SandboxGameRepository & {
         description: input.description,
         genre: input.genre,
         mode: input.mode,
+        tags: input.tags ?? [],
+        defaultScreenMode: input.defaultScreenMode ?? "default",
+        contentEditAvailableAt: null,
         logoKey: null,
         xpPerCompletion: 0,
         scoreUnit: null,
@@ -380,6 +409,32 @@ function createFakeRepo(): SandboxGameRepository & {
     },
     async listReviewAudit() {
       return [];
+    },
+    async claimContentEdit(input) {
+      const existing = contentClaims.get(input.gameId);
+      if (existing && existing.claimedAt > input.cutoffIso) {
+        return {
+          claimed: false,
+          availableAt: new Date(Date.parse(existing.claimedAt) + 24 * 60 * 60 * 1000).toISOString(),
+        };
+      }
+      contentClaims.set(input.gameId, { userId: input.userId, claimedAt: input.nowIso });
+      const game = games.get(input.gameId);
+      if (game) {
+        games.set(input.gameId, {
+          ...game,
+          contentEditAvailableAt: new Date(
+            Date.parse(input.nowIso) + 24 * 60 * 60 * 1000,
+          ).toISOString(),
+        });
+      }
+      return { claimed: true, availableAt: null };
+    },
+    async releaseContentEditClaim(input) {
+      const existing = contentClaims.get(input.gameId);
+      if (existing?.userId === input.userId && existing.claimedAt === input.claimedAt) {
+        contentClaims.delete(input.gameId);
+      }
     },
     async isSlugPermanentlyReserved(slug) {
       return reservedSlugs.has(slug);
@@ -811,6 +866,156 @@ test("uploadVersion allows an admin to upload on the developer's behalf", async 
   });
   assert.equal(version.status, "PENDING_REVIEW");
   assert.ok(storage.putKeys.some((k) => k.startsWith(`uploads/${game.id}/`)));
+});
+
+test("a creator can change description or tags only once per 24 hours while admins bypass the cooldown", async () => {
+  const versionEntries = (tags: string[], markdown: string) => ({
+    "index.html": bytes("<h1>content cooldown</h1>"),
+    "owogg.json": creatorManifestBytes({
+      slug: "cooldown-game",
+      title: "Cooldown Game",
+      genre: "puzzle",
+      mode: "single",
+      tags,
+      description: ["description.md"],
+    }),
+    "description.md": bytes(markdown),
+  });
+  const reader = createMarkerArchiveReader(
+    new Map([
+      [1, versionEntries(["first"], "First description")],
+      [2, versionEntries(["second"], "Second description")],
+      [3, versionEntries(["second"], "Second description")],
+      [4, versionEntries(["third"], "Third description")],
+    ]),
+  );
+  const repo = createFakeRepo();
+  const storage = createFakeStorage();
+  const canonicalRepo = createFakeCanonicalRepo();
+  const publisher = new GamePublicationService(
+    new SandboxGameVersionPublicationRepository(repo),
+    storage,
+    reader,
+  );
+  const useCases = new SandboxGameUseCases(repo, storage, publisher, canonicalRepo);
+  const game = await useCases.createGame({
+    slug: "cooldown-game",
+    developerUserId: 1,
+    title: "Cooldown Game",
+    shortDescription: null,
+    description: null,
+    genre: "puzzle",
+    mode: "single",
+  });
+  const archive = (marker: number) => new Uint8Array([marker]).buffer as ArrayBuffer;
+
+  await useCases.uploadVersion({
+    gameId: game.id,
+    actingUserId: 1,
+    isAdmin: false,
+    bytes: archive(1),
+  });
+  await useCases.uploadVersion({
+    gameId: game.id,
+    actingUserId: 1,
+    isAdmin: false,
+    bytes: archive(2),
+  });
+  assert.equal(repo.contentClaims.size, 1);
+
+  // Re-uploading identical managed content is not a re-edit and remains possible.
+  await useCases.uploadVersion({
+    gameId: game.id,
+    actingUserId: 1,
+    isAdmin: false,
+    bytes: archive(3),
+  });
+  await assert.rejects(
+    () =>
+      useCases.uploadVersion({
+        gameId: game.id,
+        actingUserId: 1,
+        isAdmin: false,
+        bytes: archive(4),
+      }),
+    (error: unknown) =>
+      error instanceof SandboxGameUseCaseFailure &&
+      error.code === "CONTENT_EDIT_COOLDOWN" &&
+      typeof error.availableAt === "string",
+  );
+
+  const adminVersion = await useCases.uploadVersion({
+    gameId: game.id,
+    actingUserId: 999,
+    isAdmin: true,
+    bytes: archive(4),
+  });
+  assert.equal(adminVersion.status, "PENDING_REVIEW");
+});
+
+test("basic metadata revisions preserve newer pending description and tags instead of reviving the live canonical", async () => {
+  const sourceManifestBytes = creatorManifestBytes({
+    slug: "my-game",
+    title: "Pending title",
+    genre: "puzzle",
+    mode: "single",
+    tags: ["pending-tag"],
+    description: ["description.md"],
+  });
+  const { useCases, archives, canonicalRepo, repo } = createUseCases({
+    ...MINIMAL_BUNDLE,
+    [OWOGG_GAME_CREATOR_MANIFEST_FILENAME]: sourceManifestBytes,
+    "description.md": bytes("# Pending description"),
+  });
+  const game = await useCases.createGame({
+    slug: "my-game",
+    developerUserId: 1,
+    title: "Pending title",
+    shortDescription: null,
+    description: null,
+    genre: "puzzle",
+    mode: "single",
+  });
+  await useCases.uploadVersion({
+    gameId: game.id,
+    actingUserId: 1,
+    isAdmin: false,
+    bytes: new ArrayBuffer(10),
+  });
+
+  canonicalRepo.documents.set(game.slug, {
+    ...fixtureCanonicalDoc(game.slug),
+    creatorManifest: JSON.parse(
+      new TextDecoder().decode(
+        creatorManifestBytes({
+          slug: "my-game",
+          title: "Old live title",
+          genre: "puzzle",
+          mode: "single",
+          tags: ["old-live-tag"],
+        }),
+      ),
+    ),
+  });
+
+  await useCases.updateBasicMetadataAsVersion({
+    gameId: game.id,
+    actingUserId: 1,
+    isAdmin: false,
+    metadata: { title: "Renamed pending title" },
+  });
+
+  const revisedManifest = JSON.parse(
+    new TextDecoder().decode(archives.entries[OWOGG_GAME_CREATOR_MANIFEST_FILENAME]),
+  ) as { game: { title: string; tags?: string[]; description?: string[] } };
+  assert.equal(revisedManifest.game.title, "Renamed pending title");
+  assert.deepEqual(revisedManifest.game.tags, ["pending-tag"]);
+  assert.deepEqual(revisedManifest.game.description, ["description.md"]);
+  assert.equal(
+    repo.contentClaims.size,
+    0,
+    "title-only edits must not consume the content cooldown",
+  );
 });
 
 test("uploadVersion rejects a bundle over the size cap without ever touching storage", async () => {

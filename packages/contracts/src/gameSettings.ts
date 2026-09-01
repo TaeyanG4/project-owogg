@@ -15,6 +15,8 @@ export const GameAvailabilityDtoSchema = z.object({
   description: z.string().nullable(),
   genre: z.string().nullable(),
   mode: z.enum(["single", "multi"]).nullable(),
+  tags: z.array(z.string()),
+  defaultScreenMode: z.enum(["default", "theater"]),
   latestUploadedAt: z.string().nullable(),
   publisherType: z.enum(["OWOGG", "USER"]),
   catalogRole: AdminGameCatalogRoleSchema,
@@ -73,5 +75,23 @@ export type AdminGameCatalogRoleResponse = z.infer<typeof AdminGameCatalogRoleRe
 // GET /api/games/availability — public, no auth. Just the disabled set, nothing about who/why.
 export const PublicGameAvailabilityResponseSchema = z.object({
   disabledGameIds: z.array(z.string()),
+  multiplayerEnabled: z.boolean(),
+  externalPlatformGamesVisible: z.boolean(),
 });
 export type PublicGameAvailabilityResponse = z.infer<typeof PublicGameAvailabilityResponseSchema>;
+
+export const AdminPlatformFeatureSettingsUpdateRequestSchema = z
+  .object({
+    multiplayerEnabled: z.boolean().optional(),
+    externalPlatformGamesVisible: z.boolean().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, { message: "변경할 설정이 필요합니다." });
+export type AdminPlatformFeatureSettingsUpdateRequest = z.infer<
+  typeof AdminPlatformFeatureSettingsUpdateRequestSchema
+>;
+
+export const PlatformFeatureSettingsResponseSchema = z.object({
+  multiplayerEnabled: z.boolean(),
+  externalPlatformGamesVisible: z.boolean(),
+});
+export type PlatformFeatureSettingsResponse = z.infer<typeof PlatformFeatureSettingsResponseSchema>;

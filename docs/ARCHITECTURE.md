@@ -2,7 +2,7 @@
 
 상태: 기준 문서
 
-마지막 검증: 2026-08-25
+마지막 검증: 2026-09-01
 
 기준 소스:
 
@@ -50,6 +50,9 @@ Browser
 - React Router SPA와 catalog/profile/admin/streamer UI를 제공합니다.
 - API 계약을 통해 데이터를 가져오며 D1 repository를 직접 사용하지 않습니다.
 - `GameHost`가 public game, signed game session, 결과/리더보드 흐름을 조정합니다.
+- 게임 상세 설명은 현재 live bundle의 locale별 Markdown을 사용합니다. raw HTML은 제거하고 manifest가
+  최대 5개로 allowlist한 raster image만 API URL로 치환합니다. `presentation.defaultMode`가
+  `theater`인 게임은 첫 진입만 영화관 모드로 시작합니다.
 - `IframeRuntime`과 host-side Bridge가 격리된 standalone bundle을 연결합니다.
 - 홈과 전체 게임 목록은 공개 catalog의 서버 업로드 시각·고유 플레이 사용자·현재 북마크 수를 이용해
   신규·조회·북마크·가중 인기 순으로 정렬합니다. 별도 정적 게임 목록이나 프런트 전용 통계 원장을
@@ -72,6 +75,9 @@ Browser
 - Hono route, 인증/인가 middleware, rate limit, edge cache, Cloudflare binding을 조립합니다.
 - `apps/api/src/container.ts`가 core port와 D1/B2 adapter를 연결하는 composition root입니다.
 - 공개 게임 API, immutable bundle serving, 점수 접수, USER upload/review, 관리자 기능을 제공합니다.
+- 관리자 운영 설정은 D1의 전체 multiplayer admission 스위치와 타 플랫폼 게임 메뉴 노출 스위치를
+  제공합니다. 환경의 `MULTIPLAYER_ENABLED`와 D1 값이 모두 true일 때만 새 multiplayer admission을
+  허용하며, 타 플랫폼 surface는 실제 구현 전까지 기본 비노출입니다.
 - route는 정책을 재구현하지 않고 core use case를 호출합니다.
 
 ## 패키지의 책임
@@ -124,6 +130,8 @@ USER 게임도 generic tables를 제어 권한 원천으로 사용합니다.
 - `sandbox_games`, `sandbox_game_versions`: 이전 Worker를 위한 임시 호환 미러(별도 모델 아님)
 - Game Creator 프로그램 자격, review queue, audit trail, approve/reject/revoke/republish
 - 사용자별 동시 심사 slot 최대 2개
+- 설명/태그 변경은 서버 소유 publisher 관계를 검사하며 일반 USER 제작자는 실제 변경 뒤 24시간 동안
+  같은 게임을 다시 변경할 수 없습니다. 관리자는 이 운영 쿨다운을 우회합니다.
 
 Migration trigger와 repository compatibility write가 롤링 배포 중 구 Worker와 generic authority를
 수렴시킵니다. 수렴은 심사를 제거하지 않습니다. Publication `READY`는 bundle이 완전하게 기록된

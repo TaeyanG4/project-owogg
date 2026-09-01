@@ -8,6 +8,7 @@ import {
   type PreparedBundle,
 } from "../domain/sandboxGameBundle.js";
 import {
+  defaultGameDescription,
   extractGameCreatorManifest,
   getMultiplayerRuntimeProfileRequestV1,
   parseGameCreatorManifestBytes,
@@ -33,6 +34,7 @@ import type {
 import { EMPTY_GAME_VERIFIER_REGISTRY, type GameVerifierCatalog } from "../ports/gameVerifier.js";
 import { GamePublicationService } from "./gamePublicationService.js";
 import {
+  buildGameDescriptionRevision,
   patchGameCreatorManifestBasicMetadata,
   rebuildGameBundleArchive,
   serializeGameCreatorManifest,
@@ -255,6 +257,7 @@ export class OfficialGameUploadUseCases {
       manifest,
       publisherOfficial: true,
       updatedAt: nowIso,
+      defaultDescription: defaultGameDescription(manifest, prepared.files),
     });
     const logo = findGameLogoFile(prepared.files);
     if (!logo) throw new OfficialGameUploadFailure("LOGO_REQUIRED");
@@ -469,6 +472,57 @@ export class OfficialGameUploadUseCases {
       slug: input.slug,
       bytes: serializeGameCreatorManifest(manifest).buffer as ArrayBuffer,
     });
+  }
+
+  /** Adds/replaces one localized Markdown file, or replaces the complete description set from a
+   * ZIP containing supported Markdown files and up to five allowlisted raster images. */
+  async replaceDescriptionPackage(input: {
+    slug: string;
+    fileName: string;
+    bytes: ArrayBuffer;
+  }): Promise<OfficialGameUploadResult> {
+    if (
+      input.bytes.byteLength === 0 ||
+      input.bytes.byteLength > SANDBOX_GAME_POLICY.MAX_BUNDLE_BYTES
+    ) {
+      throw new OfficialGameUploadFailure("BUNDLE_INVALID");
+    }
+    const base = await this.revisionBase(input.slug);
+    const replaceAll = input.fileName.toLowerCase().endsWith(".zip");
+    let packageFiles: PreparedBundle["files"];
+    try {
+      if (replaceAll) {
+        packageFiles = this.publication.prepareArchiveFiles(input.bytes).files;
+      } else {
+        const path = input.fileName.replace(/\\/g, "/").split("/").at(-1) ?? "";
+        const { contentType, contentEncoding } = resolveBundleContentType(path);
+        packageFiles = [
+          {
+            path,
+            bytes: new Uint8Array(input.bytes),
+            contentType,
+            contentEncoding,
+          },
+        ];
+      }
+      const revision = buildGameDescriptionRevision({
+        manifest: base.manifest,
+        packageFiles,
+        replaceAll,
+      });
+      const archive = rebuildGameBundleArchive({
+        prepared: base.prepared,
+        writer: this.archiveWriter as BundleArchiveWriter,
+        manifestBytes: serializeGameCreatorManifest(revision.manifest),
+        currentLogo: base.currentLogo,
+        removePaths: revision.removePaths,
+        replacementFiles: revision.replacementFiles,
+      });
+      return await this.upload({ bytes: archive, contentType: "application/zip" });
+    } catch (error) {
+      if (error instanceof OfficialGameUploadFailure) throw error;
+      throw new OfficialGameUploadFailure("MANIFEST_INVALID");
+    }
   }
 
   async replaceLogo(input: {

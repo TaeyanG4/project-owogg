@@ -142,6 +142,7 @@ const MIME_TYPES: Record<string, string> = {
   txt: "text/plain; charset=utf-8",
   xml: "application/xml; charset=utf-8",
   map: "application/json; charset=utf-8",
+  md: "text/markdown; charset=utf-8",
 };
 
 /** `br`/`gz` are transport encodings, not formats: Unity's Brotli WebGL build emits
@@ -244,6 +245,11 @@ export interface PreparedBundleFile {
 export interface PreparedBundle {
   files: PreparedBundleFile[];
   entry: string;
+  totalSize: number;
+}
+
+export interface PreparedArchiveFiles {
+  files: PreparedBundleFile[];
   totalSize: number;
 }
 
@@ -363,6 +369,18 @@ export function prepareBundleFromArchive(
  * defense in depth, not as the primary zip-bomb guard.
  */
 export function prepareBundleEntries(entries: Record<string, Uint8Array>): PreparedBundle {
+  const prepared = prepareArchiveFileEntries(entries);
+  if (!prepared.files.some((file) => file.path === BUNDLE_ENTRY_PATH)) {
+    throw new SandboxBundleRejectionError("BUNDLE_MISSING_ENTRY", BUNDLE_ENTRY_PATH);
+  }
+  return { ...prepared, entry: BUNDLE_ENTRY_PATH };
+}
+
+/** Validates and normalizes a ZIP file set without requiring the playable index.html entry.
+ * Used only by tightly-scoped partial uploads whose caller applies its own file allowlist. */
+export function prepareArchiveFileEntries(
+  entries: Record<string, Uint8Array>,
+): PreparedArchiveFiles {
   const named: Array<{ path: string; bytes: Uint8Array }> = [];
   for (const [rawName, bytes] of Object.entries(entries)) {
     if (isDirectoryEntry(rawName)) continue;
@@ -392,12 +410,7 @@ export function prepareBundleEntries(entries: Record<string, Uint8Array>): Prepa
     ? named.map((f) => ({ ...f, path: f.path.slice(prefix.length) }))
     : named.slice();
 
-  if (!rooted.some((f) => f.path === BUNDLE_ENTRY_PATH)) {
-    throw new SandboxBundleRejectionError("BUNDLE_MISSING_ENTRY", BUNDLE_ENTRY_PATH);
-  }
-
   return {
-    entry: BUNDLE_ENTRY_PATH,
     totalSize,
     files: rooted.map((file) => {
       const { contentType, contentEncoding } = resolveBundleContentType(file.path);

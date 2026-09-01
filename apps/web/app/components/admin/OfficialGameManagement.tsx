@@ -6,6 +6,7 @@ import {
   Clock3,
   FileArchive,
   FileJson,
+  FileText,
   FlaskConical,
   Gamepad2,
   Image,
@@ -21,19 +22,24 @@ import type {
   AdminGameListResponse,
   AdminGameCatalogRole,
   GameAvailabilityDto,
+  PlatformFeatureSettingsResponse,
 } from "@owogg/contracts";
 import {
   deleteOfficialGame,
   fetchAdminGames,
+  fetchAdminPlatformFeatureSettings,
+  patchAdminPlatformFeatureSettings,
   postAdminGameCatalogRole,
   postToggleAdminGame,
   uploadOfficialGame,
   replaceOfficialGameBundle,
   replaceOfficialGameManifest,
   replaceOfficialGameLogo,
+  replaceOfficialGameDescription,
   patchOfficialGameBasicMetadata,
 } from "../../features/adminApi";
 import { useAuth } from "../../features/auth/AuthContext";
+import { publishPlatformFeatureSettings } from "../../features/catalog/gameAvailability";
 import { ApiClientError } from "../../lib/api";
 import { GameBundleDropzone } from "../game/GameBundleDropzone";
 import {
@@ -137,6 +143,13 @@ export function OfficialGameManagement() {
   const [pageSize, setPageSize] = useState<AdminGamePageSize>(10);
   const [catalogRole, setCatalogRole] = useState<AdminGameCatalogRole>("GAME");
   const [listLoading, setListLoading] = useState(false);
+  const [platformSettings, setPlatformSettings] = useState<PlatformFeatureSettingsResponse | null>(
+    null,
+  );
+  const [platformSettingsBusy, setPlatformSettingsBusy] = useState<
+    keyof PlatformFeatureSettingsResponse | null
+  >(null);
+  const [platformSettingsError, setPlatformSettingsError] = useState<string | null>(null);
   const listRequestIdRef = useRef(0);
   const deletedGameIdsRef = useRef<Set<string>>(new Set());
   const uploadListContextRef = useRef({ page, pageSize, catalogRole });
@@ -202,6 +215,43 @@ export function OfficialGameManagement() {
     void loadGames(page, pageSize, catalogRole);
   }, [catalogRole, loadGames, page, pageSize]);
 
+  useEffect(() => {
+    let active = true;
+    void fetchAdminPlatformFeatureSettings()
+      .then((settings) => {
+        if (active) setPlatformSettings(settings);
+      })
+      .catch((err) => {
+        if (active) {
+          setPlatformSettingsError(
+            err instanceof Error ? err.message : "플랫폼 운영 설정을 불러오지 못했습니다.",
+          );
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handlePlatformSetting = async (
+    key: keyof PlatformFeatureSettingsResponse,
+    enabled: boolean,
+  ) => {
+    setPlatformSettingsBusy(key);
+    setPlatformSettingsError(null);
+    try {
+      const updated = await patchAdminPlatformFeatureSettings({ [key]: enabled });
+      setPlatformSettings(updated);
+      publishPlatformFeatureSettings(updated);
+    } catch (err) {
+      setPlatformSettingsError(
+        err instanceof Error ? err.message : "플랫폼 운영 설정을 변경하지 못했습니다.",
+      );
+    } finally {
+      setPlatformSettingsBusy(null);
+    }
+  };
+
   const handleToggle = async (gameId: string, nextEnabled: boolean) => {
     const reason = nextEnabled ? null : (reasons[gameId]?.trim() ?? "") || null;
     setBusyGameId(gameId);
@@ -265,7 +315,7 @@ export function OfficialGameManagement() {
 
   const handlePartUpload = async (
     gameId: string,
-    kind: "bundle" | "manifest" | "logo",
+    kind: "bundle" | "manifest" | "logo" | "description",
     file: File,
   ) => {
     setPartBusy(`${gameId}:${kind}`);
@@ -274,10 +324,11 @@ export function OfficialGameManagement() {
       if (kind === "bundle") await replaceOfficialGameBundle(gameId, file);
       if (kind === "manifest") await replaceOfficialGameManifest(gameId, file);
       if (kind === "logo") await replaceOfficialGameLogo(gameId, file);
+      if (kind === "description") await replaceOfficialGameDescription(gameId, file);
       setUploadMessage(
         kind === "logo"
           ? `${gameId} 로고를 교체했습니다.`
-          : `${gameId} ${kind === "bundle" ? "전체 ZIP" : "owogg.json"}을 새 공식 버전으로 게시했습니다.`,
+          : `${gameId} ${kind === "bundle" ? "전체 ZIP" : kind === "manifest" ? "owogg.json" : "설명 파일"}을 새 공식 버전으로 게시했습니다.`,
       );
       await loadGames(page, pageSize, catalogRole);
     } catch (err) {
@@ -325,6 +376,49 @@ export function OfficialGameManagement() {
 
   return (
     <section className="space-y-4">
+      <div className="rounded-2xl border border-border bg-surface-raised p-4 sm:p-5">
+        <div className="flex items-start gap-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand/10 text-brand-light">
+            <Settings2 className="h-[18px] w-[18px]" aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-sm font-black text-text-primary">플랫폼 운영 설정</h2>
+            <p className="mt-1 text-xs leading-relaxed text-text-muted">
+              배포 없이 즉시 적용되는 운영 스위치입니다. 전체 멀티플레이는 OWOGG 게임에만 적용되고,
+              타 플랫폼 게임은 별도의 메뉴 노출만 제어합니다.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-2 lg:grid-cols-2">
+          <PlatformSettingToggle
+            icon={<Power className="h-4 w-4" aria-hidden="true" />}
+            title="전체 멀티플레이 서버"
+            description="신규 대기실·매칭·게임방 진입을 한 번에 차단합니다. 이미 열린 연결은 자연 종료되며, 배포 환경 스위치가 꺼져 있으면 여기서 켜도 실행되지 않습니다."
+            enabled={platformSettings?.multiplayerEnabled ?? false}
+            loading={platformSettings === null}
+            busy={platformSettingsBusy === "multiplayerEnabled"}
+            onChange={(enabled) => void handlePlatformSetting("multiplayerEnabled", enabled)}
+          />
+          <PlatformSettingToggle
+            icon={<Gamepad2 className="h-4 w-4" aria-hidden="true" />}
+            title="타 플랫폼 게임 메뉴"
+            description="준비 중인 외부 플랫폼 게임 링크만 표시하거나 숨깁니다. OWOGG 멀티플레이 서버에는 영향을 주지 않습니다."
+            enabled={platformSettings?.externalPlatformGamesVisible ?? false}
+            loading={platformSettings === null}
+            busy={platformSettingsBusy === "externalPlatformGamesVisible"}
+            onChange={(enabled) =>
+              void handlePlatformSetting("externalPlatformGamesVisible", enabled)
+            }
+          />
+        </div>
+        {platformSettingsError && (
+          <p className="mt-3 text-xs font-semibold text-accent-red" role="alert">
+            {platformSettingsError}
+          </p>
+        )}
+      </div>
+
       <div>
         <h2 className="flex items-center gap-1.5 text-sm font-black text-text-primary">
           <ShieldCheck className="h-4 w-4" /> OWOGG 공식 게임 업로드
@@ -597,6 +691,16 @@ export function OfficialGameManagement() {
                                 }
                               />
                               <PartUploadLabel
+                                busy={partBusy === `${game.gameId}:description`}
+                                icon={<FileText className="h-3.5 w-3.5" />}
+                                label="게임 설명"
+                                accept=".md,.zip,text/markdown,application/zip"
+                                disabled={partBusy !== null}
+                                onFile={(file) =>
+                                  void handlePartUpload(game.gameId, "description", file)
+                                }
+                              />
+                              <PartUploadLabel
                                 busy={partBusy === `${game.gameId}:logo`}
                                 icon={<Image className="h-3.5 w-3.5" />}
                                 label="로고"
@@ -770,6 +874,61 @@ export function OfficialGameManagement() {
   );
 }
 
+function PlatformSettingToggle({
+  icon,
+  title,
+  description,
+  enabled,
+  loading,
+  busy,
+  onChange,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  enabled: boolean;
+  loading: boolean;
+  busy: boolean;
+  onChange: (enabled: boolean) => void;
+}) {
+  const disabled = loading || busy;
+  return (
+    <div className="flex min-w-0 items-center gap-3 rounded-2xl border border-border/80 bg-surface px-3.5 py-3">
+      <span
+        className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl ${
+          enabled ? "bg-accent-green/10 text-accent-green" : "bg-surface-overlay text-text-muted"
+        }`}
+      >
+        {icon}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-extrabold text-text-primary">{title}</p>
+        <p className="mt-0.5 text-[11px] leading-relaxed text-text-muted">{description}</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={enabled}
+        aria-label={`${title} ${enabled ? "끄기" : "켜기"}`}
+        disabled={disabled}
+        onClick={() => onChange(!enabled)}
+        className={`relative h-7 w-12 shrink-0 rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 disabled:cursor-wait disabled:opacity-60 ${
+          enabled ? "border-accent-green/50 bg-accent-green/25" : "border-border bg-surface-overlay"
+        }`}
+      >
+        <span
+          className={`absolute top-1 h-[18px] w-[18px] rounded-full shadow-sm transition-all ${
+            enabled ? "left-6 bg-accent-green" : "left-1 bg-text-muted"
+          }`}
+        />
+        {busy && (
+          <Loader2 className="absolute inset-0 m-auto h-3.5 w-3.5 animate-spin text-text-primary" />
+        )}
+      </button>
+    </div>
+  );
+}
+
 function PartUploadLabel({
   busy,
   icon,
@@ -815,9 +974,12 @@ function OfficialMetadataEditor({
 }) {
   const [title, setTitle] = useState(game.title);
   const [shortDescription, setShortDescription] = useState(game.shortDescription ?? "");
-  const [description, setDescription] = useState(game.description ?? "");
   const [genre, setGenre] = useState(game.genre ?? "");
   const [mode, setMode] = useState<"single" | "multi">(game.mode ?? "single");
+  const [tags, setTags] = useState(game.tags.join(", "));
+  const [defaultScreenMode, setDefaultScreenMode] = useState<"default" | "theater">(
+    game.defaultScreenMode,
+  );
   const [busy, setBusy] = useState(false);
 
   return (
@@ -848,15 +1010,22 @@ function OfficialMetadataEditor({
             maxLength={200}
           />
         </AdminField>
+        <AdminField label="기본 게임 화면">
+          <select
+            value={defaultScreenMode}
+            onChange={(e) => setDefaultScreenMode(e.target.value as "default" | "theater")}
+          >
+            <option value="default">기본 모드</option>
+            <option value="theater">영화관 모드</option>
+          </select>
+        </AdminField>
       </div>
-      <AdminField label="상세 설명">
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          maxLength={4000}
-          rows={4}
-        />
+      <AdminField label="태그 (쉼표로 구분, 최대 20개)">
+        <input value={tags} onChange={(e) => setTags(e.target.value)} />
       </AdminField>
+      <p className="text-[11px] leading-relaxed text-text-muted">
+        상세 설명은 위의 게임 설명 버튼에서 description.md 또는 설명 ZIP으로 관리합니다.
+      </p>
       <button
         type="button"
         disabled={busy || !title.trim() || !genre.trim()}
@@ -866,9 +1035,13 @@ function OfficialMetadataEditor({
             const result = await patchOfficialGameBasicMetadata(game.gameId, {
               title: title.trim(),
               shortDescription: shortDescription.trim() || null,
-              description: description.trim() || null,
               genre: genre.trim(),
               mode,
+              tags: tags
+                .split(",")
+                .map((tag) => tag.trim())
+                .filter(Boolean),
+              defaultScreenMode,
             });
             await onSaved(`${result.slug} 핵심 속성을 새 공식 버전으로 게시했습니다.`);
           } catch (err) {

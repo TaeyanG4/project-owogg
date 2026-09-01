@@ -23,6 +23,7 @@ import { GameThumbnail } from "../../components/ui/GameThumbnail";
 import { GamePlayActionBar } from "../../components/game/GamePlayActionBar";
 import { GamePlayAdSlot } from "../../components/game/GamePlayAdSlot";
 import { GameRecommendations } from "../../components/game/GameRecommendations";
+import { GameDescriptionMarkdown } from "../../components/game/GameDescriptionMarkdown";
 import { XIcon } from "../../components/ui/XIcon";
 import { IframeRuntime } from "./runtime/IframeRuntime";
 import {
@@ -482,6 +483,7 @@ function toGamePresentation(input: PublicGame["presentation"]): GamePresentation
       support: input.mobile.support,
       ...(input.mobile.orientation !== undefined ? { orientation: input.mobile.orientation } : {}),
     },
+    ...(input.defaultMode !== undefined ? { defaultMode: input.defaultMode } : {}),
   };
 }
 
@@ -510,7 +512,7 @@ function toScoreConfig(input: PublicGame["policy"]["score"]): ScoreConfig | unde
 export function GameHost({ slug }: GameHostProps) {
   const navigate = useNavigate();
   const { user, isAuthenticated, isLoading: authLoading, openLoginModal } = useAuth();
-  const { dict } = useI18n();
+  const { dict, locale } = useI18n();
   const { recordRecentPlay, isFavorite, toggleFavorite } = usePersonalization();
   const { games: publicGames } = usePublicGames();
 
@@ -950,7 +952,10 @@ export function GameHost({ slug }: GameHostProps) {
     setIsMobilePlayOpen(false);
     fetchPublicGame(slug)
       .then((resolved) => {
-        if (!cancelled) setGame(resolved);
+        if (!cancelled) {
+          setGame(resolved);
+          setIsTheaterMode(resolved.presentation?.defaultMode === "theater");
+        }
       })
       .catch(() => {
         if (!cancelled) setError(dict.gamePlay.errorGameNotFound);
@@ -1938,11 +1943,7 @@ export function GameHost({ slug }: GameHostProps) {
                   </span>
                 </div>
 
-                {game.description && (
-                  <p className="mt-4 whitespace-pre-line text-sm leading-7 text-text-secondary">
-                    {game.description}
-                  </p>
-                )}
+                <GameDescriptionMarkdown game={game} locale={locale} />
 
                 {gameTags.length > 0 && (
                   <div className="mt-5 flex flex-wrap gap-2">

@@ -4,7 +4,7 @@
 
 마지막 검증: 2026-08-31
 
-최신 마이그레이션: `0051_streamer_manual_management.sql`
+최신 마이그레이션: `0052_game_content_and_platform_controls.sql`
 
 기준 소스:
 
@@ -16,7 +16,7 @@
 - [`ERD.md`](ERD.md) — 도메인별 관계도와 전체 물리 테이블·호환 뷰 사전
 
 Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 권한 원천입니다. 이 문서는
-현재 `0000_initial_schema.sql`부터 `0051_streamer_manual_management.sql`까지의 역할을 설명합니다.
+현재 `0000_initial_schema.sql`부터 `0052_game_content_and_platform_controls.sql`까지의 역할을 설명합니다.
 
 ## 마이그레이션 범위
 
@@ -51,6 +51,7 @@ Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 
 | `0049`        | 활성 OAuth identity의 in-place 소유자 이전을 금지하는 DB guard              |
 | `0050`        | 연결 해제 시 OAuth 등록 예약 해제와 기존 고아 예약 정리                     |
 | `0051`        | 단일 Streamer, 플랫폼별 수동 심사·정책·OAuth intent·Provider 운영·감사 원장 |
+| `0052`        | 게임 태그·기본 화면 모드, 제작자 편집 쿨다운, 플랫폼 운영 스위치            |
 
 기존 migration은 변경, squash, 삭제하지 않습니다. 프로덕션 배포는 먼저 Repository variable
 `PRODUCTION_D1_DATABASE_ID`를 read-only 원격 D1 목록과 committed `owogg-d1` binding에 대조한 뒤,
@@ -83,6 +84,7 @@ Generic game identity의 권한 원천입니다.
 - 현재 `live_version_id`
 - 현재 live version에 종속된 `leaderboard_generation`
 - USER control-plane metadata와 review slot
+- 자유 문자열 태그 JSON과 `default | theater` 기본 화면 모드
 
 DB trigger는 live version이 같은 game의 `game_versions` row를 가리키도록 강제합니다. OWOGG
 publisher authority는 서버/배포 과정이 기록하는 relational fact이며 이름이나 slug로 추론하지
@@ -231,6 +233,19 @@ fail-closed로 막는다. 삭제/익명화 정책이나 공식 게임 purge는 a
 권한 쓰기는 `games`, `game_versions`, `game_assets`를 사용합니다. 구 테이블 쓰기도 같은 D1 batch에
 미러링하며, 이전 Worker의 구 테이블 쓰기는 trigger가 generic authority로 수렴시킵니다.
 
+### `game_content_edit_cooldowns`
+
+일반 USER 제작자의 설명 파일 또는 태그 실제 변경 시각을 게임별 한 건으로 저장합니다. repository는
+24시간 cutoff를 포함한 `INSERT ... ON CONFLICT ... WHERE ... RETURNING` 한 문장으로 claim하므로 동시
+요청도 하나만 성공합니다. 권한 원천은 계속 `games.publisher_user_id`이며, 이 표는 소유권이나 심사
+상태를 대신하지 않습니다. 관리자 변경은 운영 복구를 위해 claim을 만들지 않습니다.
+
+### `platform_feature_settings`
+
+`MULTIPLAYER`와 `EXTERNAL_PLATFORM_GAMES` 두 서버 소유 boolean 설정을 저장합니다. Multiplayer는 환경
+스위치와 D1 스위치를 모두 통과해야 신규 HTTP/WebSocket admission이 가능하고, 타 플랫폼 메뉴는 실제
+surface 구현 전까지 기본값 false입니다. 변경 actor와 시각을 함께 보존합니다.
+
 ## 두 개의 독립 상태축
 
 ```text
@@ -293,7 +308,8 @@ D1 migration이 새 Worker보다 먼저 실행되는 동안 이전 Worker가 깨
 - **Streamer**: 단일 프로그램 profile, 플랫폼별 소유권·승인, 수동 심사, 해시된 일회성 OAuth intent,
   버전 정책, Provider 운영과 감사. 현재 YouTube·CHZZK·Twitch 플랫폼 OAuth만 열고, 안전한 callback
   결박이 없는 SOOP 연결은 fail-closed로 보류합니다.
-- **Operations**: game kill switch, moderation, monitoring indexes, staff/program entitlement
+- **Operations**: game kill switch, 전체 multiplayer admission, 타 플랫폼 메뉴 노출, moderation,
+  monitoring indexes, staff/program entitlement
 
 관계와 전체 물리 테이블·호환 뷰 사전은 [D1 ERD](ERD.md)를 확인합니다. 정확한 column, index,
 foreign key, trigger는 해당 migration과 `packages/db/src/d1` query를 확인해야 합니다. 이 문서는 SQL

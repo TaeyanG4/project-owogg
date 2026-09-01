@@ -56,8 +56,26 @@ function limiter(success = true) {
   };
 }
 
+function platformSettingsDb(multiplayerEnabled = true) {
+  return {
+    prepare() {
+      return {
+        async all() {
+          return {
+            results: [
+              { setting_key: "MULTIPLAYER", enabled: multiplayerEnabled ? 1 : 0 },
+              { setting_key: "EXTERNAL_PLATFORM_GAMES", enabled: 0 },
+            ],
+          };
+        },
+      };
+    },
+  };
+}
+
 function runtimeEnv(overrides: Record<string, unknown> = {}) {
   return {
+    DB: platformSettingsDb(),
     MULTIPLAYER_ENABLED: "true",
     MULTIPLAYER_TICKET_KEY_ID: KEY_ID,
     MULTIPLAYER_TICKET_SECRET: SECRET,
@@ -172,6 +190,20 @@ test("enabled flag still reports NOT_READY and fails closed when a mandatory con
     env as any,
   );
   assert.equal(response.status, 503);
+});
+
+test("the operator D1 switch disables new multiplayer admissions without a deployment", async () => {
+  const env = runtimeEnv({ DB: platformSettingsDb(false) });
+  const status = await app.request("http://localhost/api/multiplayer/status", {}, env as any);
+  assert.deepEqual(await status.json(), { status: "DISABLED", protocolVersion: 1 });
+
+  const socket = await app.request(
+    `http://localhost/api/multiplayer/instances/${INSTANCE_ID}/socket`,
+    socketRequest(await websocketTicket()),
+    env as any,
+  );
+  assert.equal(socket.status, 503);
+  assert.equal((await socket.json()).error.code, "MULTIPLAYER_UNAVAILABLE");
 });
 
 test("socket edge rejects Origin and ticket failures before Durable Object lookup", async () => {

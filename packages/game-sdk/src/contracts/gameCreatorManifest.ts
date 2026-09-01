@@ -30,6 +30,13 @@ export type OwoggAchievementSource = "score" | "outcome" | "progression" | "metr
 export type OwoggAchievementAggregate = "max" | "min" | "sum" | "count";
 export type OwoggComparisonOperator = "==" | "!=" | ">" | ">=" | "<" | "<=";
 export type OwoggPlayMode = "single" | "local-multi" | "online-multi";
+export type OwoggGameScreenMode = "default" | "theater";
+
+/** Localized Markdown sources stored inside the same immutable game bundle. `description.md` is
+ * always the English/default document; the suffixes intentionally match the public v1 filename
+ * contract rather than browser locale spellings. */
+export type OwoggDescriptionFile =
+  "description.md" | "description_kr.md" | "description_ja.md" | "description_zh.md";
 
 export interface OwoggRangeDefinition {
   readonly min: number;
@@ -46,13 +53,19 @@ export interface OwoggManifestGame {
   /** Explicit runtime topology. This is required for every manifest v1 game. */
   readonly playModes: readonly OwoggPlayMode[];
   readonly shortDescription?: string | undefined;
-  readonly description?: string | undefined;
+  /** New manifests use localized Markdown filenames. A string remains readable only so an
+   * already-published v1 canonical document can be revised without becoming unparsable. */
+  readonly description?: readonly OwoggDescriptionFile[] | string | undefined;
+  /** Bundle-relative raster images that Markdown descriptions may embed. Maximum five. */
+  readonly description_images?: readonly string[] | undefined;
   readonly tags?: readonly string[] | undefined;
 }
 
 export interface OwoggManifestPresentation {
   readonly orientation?: OwoggOrientation | undefined;
   readonly aspectRatio?: string | undefined;
+  /** Initial host layout after selecting the game. Players may still toggle it at runtime. */
+  readonly defaultMode?: OwoggGameScreenMode | undefined;
 }
 
 export interface OwoggDifficultyDefinition {

@@ -2,7 +2,7 @@
 
 상태: 가이드
 
-마지막 검증: 2026-08-29
+마지막 검증: 2026-09-01
 
 기준 소스:
 
@@ -117,8 +117,16 @@ owogg.logo.png | .jpg | .jpeg | .webp | .svg
     "genre": "arcade",
     "tags": ["puzzle", "card-board"],
     "mode": "single",
-    "playModes": ["single"]
+    "playModes": ["single"],
+    "description": [
+      "description.md",
+      "description_kr.md",
+      "description_ja.md",
+      "description_zh.md"
+    ],
+    "description_images": ["docs/how-to-play.webp"]
   },
+  "presentation": { "defaultMode": "default" },
   "progression": { "type": "none" },
   "result": { "score": null }
 }
@@ -168,10 +176,12 @@ Game Creator Center와 관리자 게임 관리 화면은 게임별로 다음 작
 | 전체 ZIP                | 새 `PENDING_REVIEW` numeric version                    | 대상 slug 검증 후 새 READY/live version          |
 | `owogg.json`만 재업로드 | 현재 source ZIP을 재구성한 새 `PENDING_REVIEW` version | 현재 source ZIP을 재구성한 새 READY/live version |
 | 로고만 재업로드         | game-level asset 즉시 교체                             | game-level asset 즉시 교체                       |
+| 설명 Markdown/ZIP       | 설명 파일을 교체한 새 `PENDING_REVIEW` version         | 설명 파일을 교체한 새 READY/live version         |
 | 핵심 속성 폼            | 수정한 manifest로 새 `PENDING_REVIEW` version          | 수정한 manifest로 새 READY/live version          |
 
-핵심 속성 폼은 `game.title`, `shortDescription`, `description`, `genre`, `mode`만 다룹니다.
-`tags`를 바꾸려면 현재는 `owogg.json` 재업로드 또는 전체 ZIP 업로드를 사용합니다.
+핵심 속성 폼은 `game.title`, `shortDescription`, `genre`, `mode`, `tags`와
+`presentation.defaultMode`를 다룹니다. 설명 본문은 지원되는 단일 Markdown 또는 설명 ZIP 업로드로
+관리합니다.
 `slug`는 D1의 영구 identity이므로 수정할 수 없습니다. 매니페스트/폼 수정은 이미 게시된 version prefix의
 `owogg.json`을 덮어쓰지 않고 현재 source archive를 서버에서 재구성하여 새 버전을 만듭니다. 이 규칙으로
 source ZIP, published files, B2 canonical이 서로 다른 내용을 가리키는 상태와 1년 immutable 캐시 오염을
@@ -182,19 +192,47 @@ D1 `game_assets` 포인터를 전환한 뒤 이전 객체를 정리합니다. �
 leaderboard generation은 바뀌지 않습니다. 반대로 공식 전체 ZIP/manifest/핵심 속성 변경은 새 live
 version을 만들므로 기존 version 변경 규칙에 따라 leaderboard generation도 전환됩니다.
 
-### 3.4 현재 bundle 안전 제한
+### 3.4 다국어 Markdown 설명
+
+파일 기반 설명은 아래 고정된 이름만 허용합니다. `description.md`가 영어 기본값이며 배열 선언에 반드시
+포함되어야 합니다.
+
+| locale | bundle 파일         |
+| ------ | ------------------- |
+| 영어   | `description.md`    |
+| 한국어 | `description_kr.md` |
+| 일본어 | `description_ja.md` |
+| 중국어 | `description_zh.md` |
+
+공개 상세 API는 현재 live numeric version의 B2 객체에서 이 파일들을 읽습니다. Web은 현재 locale,
+영어, 기존 canonical 문자열 순서로 폴백하고 CommonMark를 렌더링하되 raw HTML을 제거합니다. 본문 이미지는
+`game.description_images`에 정확히 선언된 bundle 상대 경로만 서버 allowlist endpoint로 변환합니다.
+PNG/JPEG/GIF/WebP/AVIF만 허용하며 SVG와 선언되지 않은 객체, 과거 version 요청은 404입니다.
+
+Game Creator와 관리자는 각각 자신에게 허용된 게임만 수정할 수 있습니다. USER 게임은 D1의 relational
+publisher user ID로 소유권을 검사하고, OWOGG 공식 게임은 elevated admin의 `games.moderate` 권한만
+허용합니다. 일반 Game Creator가 설명 바이트 또는 태그를 실제 변경한 시각은
+`game_content_edit_cooldowns`에 원자적으로 기록되어 같은 게임의 다음 변경을 24시간 동안 막습니다.
+관리자는 심사·복구를 위해 쿨다운을 우회합니다.
+
+`presentation.defaultMode`는 `default | theater`이며 첫 플레이 화면만 결정합니다. 플레이 중 사용자의
+화면 모드 변경 권한은 유지됩니다.
+
+### 3.5 현재 bundle 안전 제한
 
 `SANDBOX_GAME_POLICY`가 현재 다음 제한을 강제합니다.
 
-| 항목                                 |    제한 |
-| ------------------------------------ | ------: |
-| compressed upload                    |  20 MiB |
-| extracted bytes                      |  50 MiB |
-| file count                           |     300 |
-| path depth                           |      16 |
-| new-game logo                        |   2 MiB |
-| standalone `owogg.json`              | 256 KiB |
-| Game Creator concurrent review slots |       2 |
+| 항목                                 |                   제한 |
+| ------------------------------------ | ---------------------: |
+| compressed upload                    |                 20 MiB |
+| extracted bytes                      |                 50 MiB |
+| file count                           |                    300 |
+| path depth                           |                     16 |
+| new-game logo                        |                  2 MiB |
+| standalone `owogg.json`              |                256 KiB |
+| description Markdown                 |          파일당 64 KiB |
+| description raster image             | 파일당 5 MiB, 최대 5개 |
+| Game Creator concurrent review slots |                      2 |
 
 절대 경로, drive path, `..`, 비정상 압축 비율, 누락된 `index.html`은 거부됩니다. publication은
 request-time unzip serving을 하지 않고 검증된 파일을 version prefix에 개별 객체로 기록합니다.

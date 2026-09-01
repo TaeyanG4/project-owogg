@@ -752,6 +752,10 @@ END;
   fs.readFileSync(
     new URL("../../migrations/0034_unified_game_control_plane.sql", import.meta.url),
     "utf8",
+  ) +
+  fs.readFileSync(
+    new URL("../../migrations/0052_game_content_and_platform_controls.sql", import.meta.url),
+    "utf8",
   );
 
 /** Schema for generic games table tests (migration 0029) — includes users, sandbox_games, and games. */

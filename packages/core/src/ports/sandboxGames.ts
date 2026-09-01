@@ -13,6 +13,10 @@ export interface SandboxGameRecord {
   shortDescription: string | null;
   description: string | null;
   genre: string;
+  tags: readonly string[];
+  defaultScreenMode: "default" | "theater";
+  /** Null when the creator may edit immediately; admins always bypass this projection. */
+  contentEditAvailableAt: string | null;
   /** "single" | "multi" (2026-08-18) — required on every game created via
    * createGameFromBundle, the only registration path since the manual form was removed. */
   mode: SandboxGameMode;
@@ -95,6 +99,8 @@ export interface SandboxGameMetadataInput {
   description?: string | null | undefined;
   genre?: string | undefined;
   mode?: SandboxGameMode | undefined;
+  tags?: readonly string[] | undefined;
+  defaultScreenMode?: "default" | "theater" | undefined;
   xpPerCompletion?: number | undefined;
   scoreUnit?: string | null | undefined;
   scoreDirection?: "asc" | "desc" | null | undefined;
@@ -108,7 +114,7 @@ export interface SandboxGameMetadataInput {
  * than mutating an already-published immutable version in place. */
 export type SandboxGameBasicMetadataInput = Pick<
   SandboxGameMetadataInput,
-  "title" | "shortDescription" | "description" | "genre" | "mode"
+  "title" | "shortDescription" | "description" | "genre" | "mode" | "tags" | "defaultScreenMode"
 >;
 
 export interface SandboxGamePendingVersionsPage {
@@ -163,6 +169,8 @@ export interface SandboxGameRepository {
     description: string | null;
     genre: string;
     mode: SandboxGameMode;
+    tags: readonly string[];
+    defaultScreenMode: "default" | "theater";
     nowIso: string;
   }): Promise<SandboxGameRecord | null>;
 
@@ -275,6 +283,19 @@ export interface SandboxGameRepository {
   }): Promise<void>;
 
   listReviewAudit(gameId: number, limit: number): Promise<SandboxGameReviewAuditEntry[]>;
+
+  /** Atomic cooldown claim. `availableAt` is populated when a concurrent/recent creator edit won. */
+  claimContentEdit(input: {
+    gameId: number;
+    userId: number;
+    nowIso: string;
+    cutoffIso: string;
+  }): Promise<{ claimed: boolean; availableAt: string | null }>;
+  releaseContentEditClaim(input: {
+    gameId: number;
+    userId: number;
+    claimedAt: string;
+  }): Promise<void>;
 
   /** True when D1's durable reservation authority owns this slug. Approval creates the
    * reservation atomically at the database boundary; review rows and audit entries may later be

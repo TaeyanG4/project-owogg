@@ -90,6 +90,22 @@ function runtimeReady(env: ApiEnv["Bindings"]): boolean {
   );
 }
 
+/** The deployment variable remains the emergency infrastructure cap, while the D1 switch lets an
+ * elevated operator stop new multiplayer HTTP/WebSocket admissions without a deployment. A read
+ * failure fails closed because an unavailable kill-switch authority must never leave the realtime
+ * surface accidentally open. */
+async function isMultiplayerOperational(c: Context<ApiEnv>): Promise<boolean> {
+  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED)) return false;
+  try {
+    const { multiplayerEnabled } = await createContainer(
+      c.env.DB,
+    ).platformFeatureSettingsUseCases.get();
+    return multiplayerEnabled;
+  } catch {
+    return false;
+  }
+}
+
 async function takeRateLimit(
   env: ApiEnv["Bindings"],
   key: string,
@@ -312,8 +328,8 @@ async function leaveThroughDurableObject(
 
 export const multiplayerRouter = new Hono<ApiEnv>();
 
-multiplayerRouter.get("/status", (c) => {
-  const enabled = isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED);
+multiplayerRouter.get("/status", async (c) => {
+  const enabled = await isMultiplayerOperational(c);
   return c.json(
     MultiplayerRuntimeStatusResponseSchema.parse({
       status: !enabled ? "DISABLED" : runtimeReady(c.env) ? "READY" : "NOT_READY",
@@ -334,7 +350,7 @@ multiplayerRouter.get("/games/:gameSlug", async (c) => {
       200,
     );
   };
-  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED) || !runtimeReady(c.env)) {
+  if (!(await isMultiplayerOperational(c)) || !runtimeReady(c.env)) {
     return unavailable();
   }
   const gameSlug = c.req.param("gameSlug");
@@ -390,7 +406,7 @@ multiplayerRouter.get("/games/:gameSlug", async (c) => {
 });
 
 multiplayerRouter.post("/instances", async (c) => {
-  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED)) {
+  if (!(await isMultiplayerOperational(c))) {
     return failure(c, "MULTIPLAYER_UNAVAILABLE");
   }
   if (!runtimeReady(c.env)) return failure(c, "MULTIPLAYER_UNAVAILABLE");
@@ -434,7 +450,7 @@ multiplayerRouter.post("/instances", async (c) => {
 });
 
 multiplayerRouter.post("/instances/join", async (c) => {
-  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED)) {
+  if (!(await isMultiplayerOperational(c))) {
     return failure(c, "MULTIPLAYER_UNAVAILABLE");
   }
   if (!runtimeReady(c.env)) return failure(c, "MULTIPLAYER_UNAVAILABLE");
@@ -493,7 +509,7 @@ multiplayerRouter.post("/instances/join", async (c) => {
 });
 
 multiplayerRouter.get("/instances/:instanceId/roster", async (c) => {
-  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED) || !runtimeReady(c.env)) {
+  if (!(await isMultiplayerOperational(c)) || !runtimeReady(c.env)) {
     return failure(c, "MULTIPLAYER_UNAVAILABLE");
   }
   const rateLimit = await takeRateLimit(c.env, requestRateKey(c, "roster"), "RECOVERY");
@@ -530,7 +546,7 @@ multiplayerRouter.get("/instances/:instanceId/roster", async (c) => {
 });
 
 multiplayerRouter.post("/instances/:instanceId/ready", async (c) => {
-  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED) || !runtimeReady(c.env)) {
+  if (!(await isMultiplayerOperational(c)) || !runtimeReady(c.env)) {
     return failure(c, "MULTIPLAYER_UNAVAILABLE");
   }
   const rateLimit = await takeRateLimit(c.env, requestRateKey(c, "ready"));
@@ -579,7 +595,7 @@ multiplayerRouter.post("/instances/:instanceId/ready", async (c) => {
 });
 
 multiplayerRouter.post("/instances/:instanceId/start", async (c) => {
-  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED) || !runtimeReady(c.env)) {
+  if (!(await isMultiplayerOperational(c)) || !runtimeReady(c.env)) {
     return failure(c, "MULTIPLAYER_UNAVAILABLE");
   }
   const rateLimit = await takeRateLimit(c.env, requestRateKey(c, "start"));
@@ -628,7 +644,7 @@ multiplayerRouter.post("/instances/:instanceId/start", async (c) => {
 });
 
 multiplayerRouter.post("/instances/:instanceId/leave", async (c) => {
-  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED)) {
+  if (!(await isMultiplayerOperational(c))) {
     return failure(c, "MULTIPLAYER_UNAVAILABLE");
   }
   if (!runtimeReady(c.env)) return failure(c, "MULTIPLAYER_UNAVAILABLE");
@@ -743,7 +759,7 @@ multiplayerRouter.post("/instances/:instanceId/leave", async (c) => {
 });
 
 multiplayerRouter.post("/instances/:instanceId/invites", async (c) => {
-  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED)) {
+  if (!(await isMultiplayerOperational(c))) {
     return failure(c, "MULTIPLAYER_UNAVAILABLE");
   }
   const config = readMultiplayerRuntimeConfig(c.env);
@@ -787,7 +803,7 @@ multiplayerRouter.post("/instances/:instanceId/invites", async (c) => {
 });
 
 multiplayerRouter.get("/instances/:instanceId/lobby-signal", async (c) => {
-  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED)) {
+  if (!(await isMultiplayerOperational(c))) {
     return failure(c, "MULTIPLAYER_UNAVAILABLE");
   }
   const config = readMultiplayerRuntimeConfig(c.env);
@@ -861,7 +877,7 @@ multiplayerRouter.get("/instances/:instanceId/lobby-signal", async (c) => {
 });
 
 multiplayerRouter.post("/instances/:instanceId/ticket", async (c) => {
-  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED)) {
+  if (!(await isMultiplayerOperational(c))) {
     return failure(c, "MULTIPLAYER_UNAVAILABLE");
   }
   const config = readMultiplayerRuntimeConfig(c.env);
@@ -911,7 +927,7 @@ multiplayerRouter.post("/instances/:instanceId/ticket", async (c) => {
 });
 
 multiplayerRouter.get("/instances/:instanceId/socket", async (c) => {
-  if (!isMultiplayerFeatureEnabled(c.env.MULTIPLAYER_ENABLED)) {
+  if (!(await isMultiplayerOperational(c))) {
     return failure(c, "MULTIPLAYER_UNAVAILABLE");
   }
   const config = readMultiplayerRuntimeConfig(c.env);

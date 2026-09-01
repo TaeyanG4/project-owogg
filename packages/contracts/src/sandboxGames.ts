@@ -37,6 +37,9 @@ export const SandboxGameRecordSchema = z.object({
   description: z.string().nullable(),
   genre: z.string(),
   mode: SandboxGameModeSchema,
+  tags: z.array(z.string().min(1).max(40)).max(20),
+  defaultScreenMode: z.enum(["default", "theater"]),
+  contentEditAvailableAt: z.string().datetime().nullable(),
   /** Whether GET /api/games/sandbox/:slug/logo will actually return an image. The raw B2 storage
    * key it is derived from (`logoKey`) is deliberately never on the wire — mirrors how
    * `objectKey`/`manifestKey` are kept off SandboxGameVersionRecordSchema. */
@@ -197,9 +200,10 @@ export type SandboxGameVersionDecisionRequest = z.infer<
 export const SandboxGameMetadataUpdateRequestSchema = z.object({
   title: z.string().trim().min(1).max(60).optional(),
   shortDescription: z.string().trim().max(200).nullable().optional(),
-  description: z.string().trim().max(4000).nullable().optional(),
   genre: z.string().trim().min(1).max(40).optional(),
   mode: SandboxGameModeSchema.optional(),
+  tags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
+  defaultScreenMode: z.enum(["default", "theater"]).optional(),
   xpPerCompletion: z.number().int().min(0).max(100_000).optional(),
   scoreUnit: z.string().trim().max(20).nullable().optional(),
   scoreDirection: z.enum(["asc", "desc"]).nullable().optional(),
@@ -218,9 +222,10 @@ export const SandboxGameBasicMetadataUpdateRequestSchema = z
   .object({
     title: z.string().trim().min(1).max(60).optional(),
     shortDescription: z.string().trim().max(200).nullable().optional(),
-    description: z.string().trim().max(4000).nullable().optional(),
     genre: z.string().trim().min(1).max(40).optional(),
     mode: SandboxGameModeSchema.optional(),
+    tags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
+    defaultScreenMode: z.enum(["default", "theater"]).optional(),
   })
   .refine((value) => Object.keys(value).length > 0, { message: "변경할 속성이 필요합니다." });
 export type SandboxGameBasicMetadataUpdateRequest = z.infer<

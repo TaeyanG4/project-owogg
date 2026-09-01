@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildGameDescriptionRevision,
   patchGameCreatorManifestBasicMetadata,
   rebuildGameBundleArchive,
   serializeGameCreatorManifest,
@@ -79,4 +80,64 @@ test("bundle rebuild replaces owogg.json and stale embedded logo with the curren
   assert.equal(new TextDecoder().decode(captured["owogg.logo.webp"]), "current-logo");
   assert.equal(new TextDecoder().decode(captured["owogg.json"]), '{"replacement":true}');
   assert.equal(new TextDecoder().decode(captured["index.html"]), "<html/>");
+});
+
+test("a description ZIP replaces the localized Markdown and image allowlists as one set", () => {
+  const base = parseGameCreatorManifest({
+    ...manifest(),
+    game: {
+      ...manifest().game,
+      description: ["description.md", "description_kr.md"],
+      description_images: ["old-guide.png"],
+    },
+  });
+  const replacementFiles = [
+    {
+      path: "description_zh.md",
+      bytes: bytes("Chinese"),
+      contentType: "text/markdown; charset=utf-8",
+    },
+    {
+      path: "description.md",
+      bytes: bytes("English"),
+      contentType: "text/markdown; charset=utf-8",
+    },
+    { path: "new-guide.webp", bytes: bytes("image"), contentType: "image/webp" },
+  ];
+
+  const revision = buildGameDescriptionRevision({
+    manifest: base,
+    packageFiles: replacementFiles,
+    replaceAll: true,
+  });
+  assert.deepEqual(revision.manifest.game.description, ["description.md", "description_zh.md"]);
+  assert.deepEqual(revision.manifest.game.description_images, ["new-guide.webp"]);
+  assert.deepEqual(revision.removePaths, ["description.md", "description_kr.md", "old-guide.png"]);
+});
+
+test("description packages require English Markdown and reject every unrelated file", () => {
+  assert.throws(
+    () =>
+      buildGameDescriptionRevision({
+        manifest: manifest(),
+        packageFiles: [
+          {
+            path: "description_kr.md",
+            bytes: bytes("Korean only"),
+            contentType: "text/markdown; charset=utf-8",
+          },
+        ],
+        replaceAll: true,
+      }),
+    /description\.md is required/,
+  );
+  assert.throws(
+    () =>
+      buildGameDescriptionRevision({
+        manifest: manifest(),
+        packageFiles: [{ path: "notes.txt", bytes: bytes("no"), contentType: "text/plain" }],
+        replaceAll: true,
+      }),
+    /unsupported file/,
+  );
 });

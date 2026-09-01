@@ -16,13 +16,15 @@ const USER_GAME_SELECT = `
   SELECT
     g.id, g.slug, g.publisher_user_id AS developer_user_id,
     g.title, g.short_description, g.description, g.genre, g.mode,
+    g.tags_json, g.default_screen_mode, cooldown.last_edited_at AS content_last_edited_at,
     a.object_key AS logo_key,
     g.xp_per_completion, g.score_unit, g.score_direction, g.score_min, g.score_max,
     g.score_display_prefix, g.score_display_suffix,
     g.visibility, g.live_version_id, g.review_slot, g.deleted_at, g.deleted_by_admin_id,
     g.created_at, g.updated_at
   FROM games g
-  LEFT JOIN game_assets a ON a.game_id = g.id AND a.kind = 'LOGO'`;
+  LEFT JOIN game_assets a ON a.game_id = g.id AND a.kind = 'LOGO'
+  LEFT JOIN game_content_edit_cooldowns cooldown ON cooldown.game_id = g.id`;
 
 const USER_VERSION_SELECT = `
   SELECT
@@ -34,6 +36,15 @@ const USER_VERSION_SELECT = `
   JOIN games g ON g.id = gv.game_id AND g.publisher_type = 'USER'`;
 
 function mapGameRow(row: Record<string, unknown>): SandboxGameRecord {
+  let tags: string[] = [];
+  try {
+    const parsed: unknown = JSON.parse(String(row.tags_json ?? "[]"));
+    if (Array.isArray(parsed))
+      tags = parsed.filter((tag): tag is string => typeof tag === "string");
+  } catch {
+    tags = [];
+  }
+  const lastEditedAt = row.content_last_edited_at ? String(row.content_last_edited_at) : null;
   return {
     id: Number(row.id),
     slug: String(row.slug),
@@ -42,6 +53,11 @@ function mapGameRow(row: Record<string, unknown>): SandboxGameRecord {
     shortDescription: row.short_description ? String(row.short_description) : null,
     description: row.description ? String(row.description) : null,
     genre: String(row.genre),
+    tags,
+    defaultScreenMode: row.default_screen_mode === "theater" ? "theater" : "default",
+    contentEditAvailableAt: lastEditedAt
+      ? new Date(Date.parse(lastEditedAt) + 24 * 60 * 60 * 1000).toISOString()
+      : null,
     // Falls back to "single" for pre-2026-08-18 rows inserted before this column existed with a
     // NOT NULL DEFAULT (migration 0027) — the DB default already covers this, `?? "single"` here
     // is just defense in depth against a row read through a stale schema.
@@ -133,6 +149,8 @@ function buildMetadataAssignments(input: SandboxGameMetadataInput): {
   if (input.description !== undefined) push("description", input.description);
   if (input.genre !== undefined) push("genre", input.genre.trim());
   if (input.mode !== undefined) push("mode", input.mode);
+  if (input.tags !== undefined) push("tags_json", JSON.stringify(input.tags));
+  if (input.defaultScreenMode !== undefined) push("default_screen_mode", input.defaultScreenMode);
   if (input.xpPerCompletion !== undefined) push("xp_per_completion", input.xpPerCompletion);
   if (input.scoreUnit !== undefined) push("score_unit", input.scoreUnit);
   if (input.scoreDirection !== undefined) push("score_direction", input.scoreDirection);
@@ -285,6 +303,8 @@ export class D1SandboxGameRepository implements SandboxGameRepository {
     description: string | null;
     genre: string;
     mode: SandboxGameMode;
+    tags: readonly string[];
+    defaultScreenMode: "default" | "theater";
     nowIso: string;
   }): Promise<SandboxGameRecord | null> {
     // Shared numeric ID namespace allocation:
@@ -300,8 +320,9 @@ export class D1SandboxGameRepository implements SandboxGameRepository {
         .prepare(
           `INSERT INTO games
              (slug, publisher_type, publisher_user_id, visibility, live_version_id, created_at, updated_at,
-              title, short_description, description, genre, mode, xp_per_completion, review_slot)
-           SELECT ?, 'USER', ?, 'PRIVATE', NULL, ?, ?, ?, ?, ?, ?, ?, 0, available.slot
+              title, short_description, description, genre, mode, tags_json, default_screen_mode,
+              xp_per_completion, review_slot)
+           SELECT ?, 'USER', ?, 'PRIVATE', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, available.slot
            FROM (
              SELECT MIN(s.slot) AS slot
              FROM (SELECT 1 AS slot UNION ALL SELECT 2) s
@@ -322,14 +343,16 @@ export class D1SandboxGameRepository implements SandboxGameRepository {
           input.description,
           input.genre,
           input.mode,
+          JSON.stringify(input.tags ?? []),
+          input.defaultScreenMode ?? "default",
           input.developerUserId,
         ),
       this.db
         .prepare(
           `INSERT INTO sandbox_games
              (id, slug, developer_user_id, title, short_description, description, genre, mode,
-              review_slot, created_at, updated_at)
-           SELECT g.id, ?, ?, ?, ?, ?, ?, ?, g.review_slot, ?, ?
+              tags_json, default_screen_mode, review_slot, created_at, updated_at)
+           SELECT g.id, ?, ?, ?, ?, ?, ?, ?, ?, ?, g.review_slot, ?, ?
            FROM games g
            WHERE g.slug = ? AND g.publisher_type = 'USER' AND g.review_slot IS NOT NULL`,
         )
@@ -341,6 +364,8 @@ export class D1SandboxGameRepository implements SandboxGameRepository {
           input.description,
           input.genre,
           input.mode,
+          JSON.stringify(input.tags ?? []),
+          input.defaultScreenMode ?? "default",
           input.nowIso,
           input.nowIso,
           input.slug,
@@ -725,6 +750,52 @@ export class D1SandboxGameRepository implements SandboxGameRepository {
       .bind(gameId, limit)
       .all<Record<string, unknown>>();
     return (res.results || []).map(mapAuditRow);
+  }
+
+  async claimContentEdit(input: {
+    gameId: number;
+    userId: number;
+    nowIso: string;
+    cutoffIso: string;
+  }): Promise<{ claimed: boolean; availableAt: string | null }> {
+    const claimed = await this.db
+      .prepare(
+        `INSERT INTO game_content_edit_cooldowns (game_id, edited_by_user_id, last_edited_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(game_id) DO UPDATE SET
+           edited_by_user_id = excluded.edited_by_user_id,
+           last_edited_at = excluded.last_edited_at
+         WHERE game_content_edit_cooldowns.last_edited_at <= ?
+         RETURNING last_edited_at`,
+      )
+      .bind(input.gameId, input.userId, input.nowIso, input.cutoffIso)
+      .first<{ last_edited_at: string }>();
+    if (claimed) return { claimed: true, availableAt: null };
+
+    const existing = await this.db
+      .prepare(`SELECT last_edited_at FROM game_content_edit_cooldowns WHERE game_id = ?`)
+      .bind(input.gameId)
+      .first<{ last_edited_at: string }>();
+    return {
+      claimed: false,
+      availableAt: existing
+        ? new Date(Date.parse(existing.last_edited_at) + 24 * 60 * 60 * 1000).toISOString()
+        : null,
+    };
+  }
+
+  async releaseContentEditClaim(input: {
+    gameId: number;
+    userId: number;
+    claimedAt: string;
+  }): Promise<void> {
+    await this.db
+      .prepare(
+        `DELETE FROM game_content_edit_cooldowns
+         WHERE game_id = ? AND edited_by_user_id = ? AND last_edited_at = ?`,
+      )
+      .bind(input.gameId, input.userId, input.claimedAt)
+      .run();
   }
 
   async isSlugPermanentlyReserved(slug: string): Promise<boolean> {

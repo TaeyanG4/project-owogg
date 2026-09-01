@@ -36,6 +36,7 @@ import {
   D1MultiplayerProfileRequestRepository,
   D1MultiplayerInstanceRepository,
   D1MultiplayerMatchRepository,
+  D1PlatformFeatureSettingsRepository,
   BackblazeB2GameBundleRepository,
   UnconfiguredGameBundleRepository,
   B2GameCanonicalRepository,
@@ -79,6 +80,7 @@ import {
   ManagedMultiplayerProfileReviewUseCases,
   MultiplayerRoomUseCases,
   SelectedTopologyAuthorityGate,
+  PlatformFeatureSettingsUseCases,
   type UserRepository,
   type SessionRepository,
   type ScoreRepository,
@@ -118,6 +120,7 @@ import {
   type MultiplayerProfileRequestRepository,
   type MultiplayerInstanceRepository,
   type MultiplayerMatchRepository,
+  type PlatformFeatureSettingsRepository,
 } from "@owogg/core";
 import type { D1Database } from "@cloudflare/workers-types";
 import { FflateBundleArchiveReader } from "./infrastructure/games/FflateBundleArchiveReader.js";
@@ -140,6 +143,7 @@ export interface AppContainer {
   adminAuthRepo: AdminAuthRepository;
   adminAccountRepo: AdminAccountRepository;
   gameSettingsRepo: GameSettingsRepository;
+  platformFeatureSettingsRepo: PlatformFeatureSettingsRepository;
   adminMonitoringRepo: AdminMonitoringRepository;
   userModerationRepo: UserModerationRepository;
   /** Implements both GameCreatorAccessRepository and GameCreatorApplicationRepository — see
@@ -196,6 +200,7 @@ export interface AppContainer {
   adminAuthUseCases: AdminAuthUseCases;
   adminAccountUseCases: AdminAccountUseCases;
   gameSettingsUseCases: GameSettingsUseCases;
+  platformFeatureSettingsUseCases: PlatformFeatureSettingsUseCases;
   userModerationUseCases: UserModerationUseCases;
   gameCreatorUseCases: GameCreatorUseCases;
   sandboxGameUseCases: SandboxGameUseCases;
@@ -238,6 +243,7 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
   const adminAuthRepo = new D1AdminAuthRepository(db);
   const adminAccountRepo = new D1AdminAccountRepository(db);
   const gameSettingsRepo = new D1GameSettingsRepository(db);
+  const platformFeatureSettingsRepo = new D1PlatformFeatureSettingsRepository(db);
   const adminGameCatalogRepo = new D1AdminGameCatalogRepository(db);
   const publicGameMetricsRepo = new D1PublicGameMetricsRepository(db);
   const publicRankingRepo = new D1PublicRankingRepository(db);
@@ -338,6 +344,9 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     gameCanonicalRepo,
     adminGameCatalogRepo,
   );
+  const platformFeatureSettingsUseCases = new PlatformFeatureSettingsUseCases(
+    platformFeatureSettingsRepo,
+  );
   const userModerationUseCases = new UserModerationUseCases(
     userModerationRepo,
     sessionRepo,
@@ -422,6 +431,7 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     adminAuthRepo,
     adminAccountRepo,
     gameSettingsRepo,
+    platformFeatureSettingsRepo,
     adminMonitoringRepo,
     userModerationRepo,
     gameCreatorRepo,
@@ -468,6 +478,7 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
     adminAuthUseCases,
     adminAccountUseCases,
     gameSettingsUseCases,
+    platformFeatureSettingsUseCases,
     userModerationUseCases,
     gameCreatorUseCases,
     sandboxGameUseCases,

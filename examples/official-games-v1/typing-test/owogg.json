@@ -8,11 +8,16 @@
     "mode": "single",
     "playModes": ["single"],
     "shortDescription": "90초 동안 한 줄씩 입력하고 서버가 검증한 종합 점수를 기록하세요.",
-    "description": "한국어·영어 UI를 독립적으로 전환하고, 게임 안에서 한국어·영어·일본어·중국어 긴 지문 중 하나를 선택합니다. 서버 challenge seed가 지문 순서를 정하고 verifier가 90초 입력 증거와 서버 경과 시간을 대조해 WPM, CPM, 정확도 및 이들을 함께 반영한 종합 점수를 계산합니다.",
+    "description": [
+      "description.md",
+      "description_kr.md",
+      "description_ja.md",
+      "description_zh.md"
+    ],
     "tags": ["typing", "brain", "verified"]
   },
   "input": ["keyboard"],
-  "presentation": { "orientation": "landscape", "aspectRatio": "16:9" },
+  "presentation": { "orientation": "landscape", "aspectRatio": "16:9", "defaultMode": "default" },
   "playConfig": {
     "version": 1,
     "rulesetRevision": 3,

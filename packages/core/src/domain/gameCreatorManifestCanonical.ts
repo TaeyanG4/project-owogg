@@ -45,6 +45,7 @@ function presentation(manifest: OwoggGameCreatorManifest): GamePresentation | un
       support: manifest.input?.includes("touch") ? "supported" : "unsupported",
       ...(declared.orientation !== undefined ? { orientation: declared.orientation } : {}),
     },
+    ...(declared.defaultMode !== undefined ? { defaultMode: declared.defaultMode } : {}),
   };
 }
 
@@ -53,6 +54,8 @@ export function mapGameCreatorManifestToCanonical(input: {
   manifest: OwoggGameCreatorManifest;
   publisherOfficial: boolean;
   updatedAt: string;
+  /** Validated English Markdown loaded from description.md in the same prepared bundle. */
+  defaultDescription?: string | undefined;
   previous?: GameCanonicalDocument | null | undefined;
 }): GameCanonicalDocument {
   const { manifest, previous } = input;
@@ -73,7 +76,12 @@ export function mapGameCreatorManifestToCanonical(input: {
     slug: manifest.game.slug,
     title: manifest.game.title,
     shortDescription: manifest.game.shortDescription ?? "",
-    description: manifest.game.description ?? "",
+    description:
+      input.defaultDescription ??
+      (typeof manifest.game.description === "string" ? manifest.game.description : undefined) ??
+      previous?.description ??
+      manifest.game.shortDescription ??
+      "",
     publisher: { official: input.publisherOfficial },
     policy: {
       score,

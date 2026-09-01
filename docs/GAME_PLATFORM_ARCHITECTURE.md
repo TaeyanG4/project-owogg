@@ -1,8 +1,8 @@
 # OwOGG Game Platform 아키텍처
 
-상태: 기준 문서
+상태: **게임 기능 단일 기준 문서(SSOT)**
 
-마지막 검증: 2026-08-29
+마지막 검증: 2026-09-01
 
 기준 소스:
 
@@ -21,10 +21,34 @@
 - `packages/db/migrations/0035_creator_manifest_results.sql`
 - `packages/db/migrations/0043_game_result_verification_claims.sql`
 - `packages/db/migrations/0044_verified_result_score_semantics.sql`
+- `packages/db/migrations/0052_game_content_and_platform_controls.sql`
 
 이 문서는 현재 저장소 tree의 게임 identity, publication, runtime, score 경계를 설명합니다. USER와
 OWOGG는 같은 runtime/storage 모델을 사용하지만 authorization과 publication control plane은 서로
 다릅니다. Phase 5-E 변경은 로컬 구현이며 별도 승인 전에는 Staging/Production 상태를 뜻하지 않습니다.
+
+## 현재 구현 경계
+
+2026-09-01 tree에서 다음 항목은 코드와 migration에 구현되어 있습니다.
+
+| 영역           | 현재 구현                                                                                           |
+| -------------- | --------------------------------------------------------------------------------------------------- |
+| 탐색 컨트롤    | 정렬 선택기는 텍스트와 선택 표시만 사용하고 열 수·설명 표시 컨트롤과 같은 높이를 사용               |
+| 다국어 설명    | 영어 기본 Markdown과 한국어·일본어·중국어 파일, 안전한 CommonMark, 선언 raster 이미지 최대 5개      |
+| 수정 권한      | USER는 D1 publisher 소유자, 공식 게임은 `games.moderate`, 관리자 USER 지원은 `sandbox_games.review` |
+| USER 수정 제한 | 실제 설명/이미지/태그 변경에만 게임별 24시간 D1 원자 쿨다운, 관리자는 우회                          |
+| 기본 화면      | manifest `presentation.defaultMode`의 `default` 또는 `theater`를 첫 화면에 반영                     |
+| 관리·심사      | 설명 단일 파일/ZIP과 기본 속성 변경은 기존 bundle을 덮어쓰지 않고 새 immutable version 생성         |
+| 운영 스위치    | 신규 OWOGG 멀티플레이 진입과 타 플랫폼 메뉴 노출을 D1에서 독립 제어                                 |
+
+`examples/official-games-v1`의 5개 공식 게임에는 네 locale 설명 원본과 각 기본 화면이 선언되어 있지만,
+예제 파일은 runtime authority가 아닙니다. 실제 서비스 반영은 관리자 게시 경로가 D1/B2 numeric version을
+만든 뒤에만 성립합니다.
+
+이 구현 상태는 로컬 tree 기준입니다. migration `0052_game_content_and_platform_controls.sql`의 Staging
+원격 적용, 같은 SHA의 Staging 배포, 실제 계정과 브라우저 acceptance가 끝나기 전에는 **Staging 배포
+완료**나 **Staging 검증 완료**를 뜻하지 않습니다. Production은 Staging 검증과 별도 승격 승인 전까지
+변경하지 않습니다. 정확한 Gate와 승격 절차는 `STAGING.md`를 따릅니다.
 
 ```text
 OwOGG Game Platform
@@ -58,6 +82,9 @@ OwOGG Game Platform
   projection에는 포함하지 않습니다. 소유권/인가, live-version 상태, 환경 URL, secret은 소유하지
   않습니다. USER 경로는 항상 `official: false`, 인증·인가된 관리자 업로드만 `official: true`를
   기록합니다. 출시 전 실험 규격은 호환하지 않고 현재 v1만 읽습니다.
+- Manifest의 `game.description`은 기존 문자열 또는 `description.md`를 기본으로 하는 고정 locale 파일
+  배열을 받습니다. 파일 기반 설명과 최대 5개의 `description_images`는 live immutable version에서만
+  공개되고, `presentation.defaultMode`는 첫 게임 화면의 기본/영화관 모드를 결정합니다.
 - `GamePublicationService`는 유일한 file/manifest publication loop입니다. manifest를 마지막에 쓰고,
   검증한 동일 publication target에만 READY를 표시합니다.
 - `RuntimeGameRegistry`, `GameHost`, `IframeRuntime`, `window.OWOGG` Bridge, signed Game Session,

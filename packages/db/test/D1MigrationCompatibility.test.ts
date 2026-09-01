@@ -22,13 +22,14 @@ test("generic production migrations avoid Cloudflare-incompatible TEMP table DDL
     "0048_oauth_identity_registration_guard.sql",
     "0049_oauth_identity_owner_immutable.sql",
     "0050_oauth_identity_release_on_unlink.sql",
+    "0052_game_content_and_platform_controls.sql",
   ]) {
     const sql = fs.readFileSync(new URL(`../migrations/${filename}`, import.meta.url), "utf8");
     assert.doesNotMatch(sql, /\bCREATE\s+TEMP(?:ORARY)?\s+TABLE\b/i, filename);
   }
 });
 
-test("full production migration chain applies through 0051 with manual Streamer review authority", () => {
+test("full production migration chain applies through 0052 with game content controls", () => {
   const { raw } = createSqliteD1("");
   const migrationUrl = new URL("../migrations/", import.meta.url);
   const filenames = fs
@@ -59,7 +60,28 @@ test("full production migration chain applies through 0051 with manual Streamer 
   const gameSettingColumns = raw.prepare("PRAGMA table_info(game_settings)").all() as Array<{
     name: string;
   }>;
+  const sandboxGameColumns = raw.prepare("PRAGMA table_info(sandbox_games)").all() as Array<{
+    name: string;
+  }>;
   assert.ok(gameColumns.some((column) => column.name === "leaderboard_generation"));
+  assert.ok(gameColumns.some((column) => column.name === "tags_json"));
+  assert.ok(gameColumns.some((column) => column.name === "default_screen_mode"));
+  assert.ok(sandboxGameColumns.some((column) => column.name === "tags_json"));
+  assert.ok(sandboxGameColumns.some((column) => column.name === "default_screen_mode"));
+  assert.ok(
+    raw
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'game_content_edit_cooldowns'",
+      )
+      .get(),
+  );
+  assert.ok(
+    raw
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'platform_feature_settings'",
+      )
+      .get(),
+  );
   assert.ok(scoreColumns.some((column) => column.name === "leaderboard_generation"));
   assert.ok(scoreColumns.some((column) => column.name === "variant_id"));
   assert.ok(scoreColumns.some((column) => column.name === "ruleset_revision"));

@@ -23,11 +23,11 @@ const frozenGameSlugs = [
   "typing-test",
 ];
 const expectedArtifactVersions = new Map([
-  ["aim-test", "1.0.1"],
-  ["memory-test", "1.0.1"],
-  ["official-omok", "1.0.7"],
-  ["reaction-time", "1.0.0"],
-  ["typing-test", "1.0.0"],
+  ["aim-test", "1.0.2"],
+  ["memory-test", "1.0.2"],
+  ["official-omok", "1.0.8"],
+  ["reaction-time", "1.0.1"],
+  ["typing-test", "1.0.1"],
 ]);
 
 function read(relativePath: string): string {
@@ -68,7 +68,14 @@ test("Phase 7 source covers exactly every frozen Staging GAME identity", () => {
     );
     assert.equal(manifest.schemaVersion, 1);
     assert.equal(manifest.game.slug, game.slug);
+    assert.deepEqual(manifest.game.description, [
+      "description.md",
+      "description_kr.md",
+      "description_ja.md",
+      "description_zh.md",
+    ]);
     assert.equal(manifest.presentation?.aspectRatio, "16:9", `${game.slug}: 16:9 viewport`);
+    assert.ok(manifest.presentation?.defaultMode, `${game.slug}: explicit default screen mode`);
   }
 });
 

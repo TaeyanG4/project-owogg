@@ -23,6 +23,8 @@ export interface GamePresentation {
   readonly viewport: GamePresentationViewport;
   readonly fullscreen: GamePresentationFullscreen;
   readonly mobile: GamePresentationMobile;
+  /** Host layout selected on first load. This is a preference and never removes the player toggle. */
+  readonly defaultMode?: "default" | "theater" | undefined;
 }
 
 /**
