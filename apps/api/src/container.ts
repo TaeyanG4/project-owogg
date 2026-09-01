@@ -1,5 +1,6 @@
 import {
   D1UserRepository,
+  D1PublicProfileInsightsRepository,
   D1SessionRepository,
   D1ScoreRepository,
   D1PersonalizationRepository,
@@ -82,6 +83,7 @@ import {
   SelectedTopologyAuthorityGate,
   PlatformFeatureSettingsUseCases,
   type UserRepository,
+  type PublicProfileInsightsRepository,
   type SessionRepository,
   type ScoreRepository,
   type PersonalizationRepository,
@@ -128,6 +130,7 @@ import { createTrustedGameVerifierRegistry } from "./infrastructure/games/Static
 
 export interface AppContainer {
   userRepo: UserRepository;
+  publicProfileInsightsRepo: PublicProfileInsightsRepository;
   sessionRepo: SessionRepository;
   scoreRepo: ScoreRepository;
   personalizationRepo: PersonalizationRepository;
@@ -228,6 +231,7 @@ export interface AppContainer {
  */
 export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): AppContainer {
   const userRepo = new D1UserRepository(db);
+  const publicProfileInsightsRepo = new D1PublicProfileInsightsRepository(db);
   const sessionRepo = new D1SessionRepository(db);
   const scoreRepo = new D1ScoreRepository(db);
   const personalizationRepo = new D1PersonalizationRepository(db);
@@ -416,6 +420,7 @@ export function createContainer(db: D1Database, b2Config?: BackblazeB2Config): A
   const gameAchievementUseCases = new GameAchievementUseCases(gameAchievementRepo);
   return {
     userRepo,
+    publicProfileInsightsRepo,
     sessionRepo,
     scoreRepo,
     personalizationRepo,
@@ -556,12 +561,17 @@ export async function getPublicProfileData(
    * whether to include the owner's visibilitySettings. */
   viewerId: number | null,
   now: Date = new Date(),
+  staffRole: import("@owogg/core").StaffRole | null = null,
 ): Promise<{
   id: number;
   nickname: string;
   avatarUrl: string | null;
   country: string | null;
   joinedAt: string;
+  banner: import("@owogg/core").ProfileBannerType;
+  bioMarkdown: string;
+  roles: Array<"ADMIN" | "OPERATOR" | "STREAMER">;
+  contributions: import("@owogg/core").PublicProfileInsights;
   progression: import("@owogg/core").ProgressionSummary;
   globalRank: number | null;
   currentStreak: number;
@@ -606,6 +616,7 @@ export async function getPublicProfileData(
     streamerProfile,
     personalization,
     dailyCompletionCounts,
+    contributions,
   ] = await Promise.all([
     container.progressionUseCases.getProgressionSummary(userId),
     container.progressionUseCases.getGlobalXpRank(userId),
@@ -620,6 +631,7 @@ export async function getPublicProfileData(
           endExclusiveIso: activityWindow.endExclusiveIso,
         })
       : null,
+    container.publicProfileInsightsRepo.getByUserId(userId),
   ]);
 
   const nowIso = now.toISOString();
@@ -640,6 +652,10 @@ export async function getPublicProfileData(
       channelUrl: a.channelUrl,
       channelHandle: a.channelHandle,
     }));
+  const roles: Array<"ADMIN" | "OPERATOR" | "STREAMER"> = [];
+  if (staffRole === "ADMIN") roles.push("ADMIN");
+  if (staffRole === "OPERATOR") roles.push("OPERATOR");
+  if (streamerBadges.length > 0) roles.push("STREAMER");
 
   return {
     id: user.id,
@@ -647,6 +663,10 @@ export async function getPublicProfileData(
     avatarUrl: user.avatar_url,
     country: user.country ?? null,
     joinedAt: user.created_at,
+    banner: user.profile_banner ?? "AURORA",
+    bioMarkdown: user.profile_bio_markdown ?? "",
+    roles,
+    contributions,
     progression: progress.summary,
     globalRank,
     currentStreak: user.current_streak ?? 0,

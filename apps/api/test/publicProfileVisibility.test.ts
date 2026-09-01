@@ -55,6 +55,13 @@ function fakeContainer(user: User, streamerProfile: unknown = null): AppContaine
     },
     scoreReadUseCases: { getUserBestsFormatted: async () => [] },
     streamerUseCases: { getStreamerProfileByUserId: async () => streamerProfile },
+    publicProfileInsightsRepo: {
+      getByUserId: async () => ({
+        bugAcceptedCount: 2,
+        createdGameCount: 3,
+        introducedExternalGameCount: 4,
+      }),
+    },
     personalizationUseCases: {
       getPersonalizationState: async () => ({
         favoriteGameIds: FAVORITES,
@@ -253,4 +260,29 @@ test("public streamer badges never expose the reserved SOOP platform", async () 
     data?.streamerBadges.map((badge) => badge.platform),
     ["YOUTUBE"],
   );
+});
+
+test("public profile presentation, contribution counts, and effective roles are returned", async () => {
+  const data = await getPublicProfileData(
+    fakeContainer(
+      baseUser({
+        profile_banner: "SUNSET",
+        profile_bio_markdown: "## 방송 소개",
+      }),
+      streamerProfile(),
+    ),
+    7,
+    null,
+    new Date("2026-09-01T00:00:00.000Z"),
+    "ADMIN",
+  );
+
+  assert.equal(data?.banner, "SUNSET");
+  assert.equal(data?.bioMarkdown, "## 방송 소개");
+  assert.deepEqual(data?.roles, ["ADMIN", "STREAMER"]);
+  assert.deepEqual(data?.contributions, {
+    bugAcceptedCount: 2,
+    createdGameCount: 3,
+    introducedExternalGameCount: 4,
+  });
 });

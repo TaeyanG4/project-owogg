@@ -82,6 +82,7 @@ const ACTION_PERMISSION: Record<StreamerAdminAction, PermissionValue> = {
   CREATE_RECONSIDERATION: "streamers.review",
   REVOKE_STREAMER_APPROVAL: "streamers.manage",
   INVALIDATE_OWNERSHIP: "streamers.manage",
+  DISCONNECT_PLATFORM_ACCOUNT: "streamers.manage",
   SUSPEND_STREAMER: "streamers.manage",
   RESTORE_STREAMER: "streamers.manage",
   SAVE_POLICY: "streamers.policy.manage",

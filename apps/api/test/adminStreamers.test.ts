@@ -108,7 +108,7 @@ function env(db: unknown, adminUserIds = "1") {
 }
 
 function actionBody(
-  action: "APPROVE_STREAMER" | "REJECT_STREAMER",
+  action: "APPROVE_STREAMER" | "REJECT_STREAMER" | "DISCONNECT_PLATFORM_ACCOUNT",
   targetId: number,
   expectedVersion = 0,
 ) {
@@ -119,7 +119,9 @@ function actionBody(
     reason:
       action === "APPROVE_STREAMER"
         ? "소유권과 기준을 확인했습니다."
-        : "심사 기준을 충족하지 못했습니다.",
+        : action === "DISCONNECT_PLATFORM_ACCOUNT"
+          ? "계정 소유자의 연결 해제 요청을 확인했습니다."
+          : "심사 기준을 충족하지 못했습니다.",
     internalNote: null,
     effectiveAt: null,
     policyValues: null,
@@ -269,6 +271,56 @@ test("two platforms owned by one user receive independent manual decisions", asy
   assert.equal(
     raw.prepare("SELECT COUNT(*) AS total FROM streamer_admin_audit_log").get()?.total,
     2,
+  );
+});
+
+test("streamers.manage can disconnect a platform through the administrator API", async () => {
+  const { db, raw } = createMigratedD1();
+  await seedElevatedSession(raw);
+  const applicant = seedApplicant(raw, "admin-api-disconnect", ["YOUTUBE", "TWITCH"]);
+
+  for (const reviewId of applicant.reviewIds) {
+    const approved = await app.request(
+      "/api/admin/streamers/actions",
+      adminPost(actionBody("APPROVE_STREAMER", reviewId)),
+      env(db),
+    );
+    assert.equal(approved.status, 200);
+  }
+
+  const disconnected = await app.request(
+    "/api/admin/streamers/actions",
+    adminPost(actionBody("DISCONNECT_PLATFORM_ACCOUNT", applicant.accountIds[0]!, 1)),
+    env(db),
+  );
+  assert.equal(disconnected.status, 200);
+  assert.equal(
+    ((await disconnected.json()) as Record<string, unknown>).action,
+    "DISCONNECT_PLATFORM_ACCOUNT",
+  );
+  assert.deepEqual(
+    raw
+      .prepare(
+        `SELECT platform FROM streamer_platform_accounts
+         WHERE streamer_id = ? ORDER BY platform`,
+      )
+      .all(applicant.streamerId)
+      .map((row) => String(row.platform)),
+    ["TWITCH"],
+  );
+  assert.equal(
+    raw.prepare("SELECT status FROM streamer_profiles WHERE id = ?").get(applicant.streamerId)
+      ?.status,
+    "VERIFIED",
+  );
+  assert.equal(
+    raw
+      .prepare(
+        `SELECT COUNT(*) AS count FROM streamer_platform_connection_history
+         WHERE disconnect_actor_type = 'ADMIN' AND disconnected_by_user_id = 1`,
+      )
+      .get()?.count,
+    1,
   );
 });
 

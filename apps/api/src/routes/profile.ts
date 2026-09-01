@@ -8,11 +8,14 @@ import {
   UpdateCountryRequestSchema,
   UpdateLocaleRequestSchema,
   UpdateVisibilityRequestSchema,
+  UpdateProfilePresentationRequestSchema,
+  UpdateProfilePresentationResponseSchema,
   PublicProfileResponseSchema,
 } from "@owogg/contracts";
 import type { ApiEnv } from "./auth.js";
 import { createContainer, getPublicProfileData } from "../container.js";
 import { readB2Config } from "./devGames.js";
+import { resolveAdminEligibility, resolveEffectiveStaffRole } from "../auth/adminEligibility.js";
 
 export const profileRouter = new Hono<ApiEnv>();
 
@@ -29,12 +32,66 @@ profileRouter.get("/public/:userId", async (c) => {
 
   const container = createContainer(c.env.DB, readB2Config(c.env));
   const viewerId = await getAuthUserId(c);
-  const data = await getPublicProfileData(container, userId, viewerId);
+  const staffRole = resolveEffectiveStaffRole(
+    await resolveAdminEligibility(userId, c.env.ADMIN_USER_IDS, container.adminAccountUseCases),
+  );
+  const data = await getPublicProfileData(container, userId, viewerId, new Date(), staffRole);
   if (!data) {
     return profileError(c, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다.", 404);
   }
 
   return c.json(PublicProfileResponseSchema.parse(data), 200);
+});
+
+// PATCH /api/profile/presentation — owner-only predefined banner + CommonMark biography.
+profileRouter.patch("/presentation", async (c) => {
+  const userId = await getAuthUserId(c);
+  if (!userId) {
+    return profileError(c, "UNAUTHORIZED", "Unauthenticated", 401);
+  }
+  if (!c.env?.DB) {
+    return c.json({ error: "Database unavailable" }, 500);
+  }
+
+  const parsed = UpdateProfilePresentationRequestSchema.safeParse(
+    await c.req.json().catch(() => null),
+  );
+  if (!parsed.success) {
+    const bioTooLong = parsed.error.issues.some((issue) => issue.path[0] === "bioMarkdown");
+    return profileError(
+      c,
+      bioTooLong ? "INVALID_PROFILE_BIO" : "INVALID_PROFILE_BANNER",
+      bioTooLong ? "자기소개는 2,000자 이하여야 합니다." : "지원하지 않는 프로필 배너입니다.",
+      400,
+    );
+  }
+
+  const { profileUseCases } = createContainer(c.env.DB);
+  const result = await profileUseCases.updatePresentation(
+    userId,
+    parsed.data.banner,
+    parsed.data.bioMarkdown,
+  );
+  if (!result.ok) {
+    return profileError(
+      c,
+      result.code,
+      result.code === "USER_NOT_FOUND"
+        ? "계정을 찾을 수 없습니다."
+        : "프로필 표시 정보를 저장할 수 없습니다.",
+      result.code === "USER_NOT_FOUND" ? 404 : 400,
+    );
+  }
+
+  return c.json(
+    UpdateProfilePresentationResponseSchema.parse({
+      success: true,
+      banner: result.user.profile_banner ?? parsed.data.banner,
+      bioMarkdown: result.user.profile_bio_markdown ?? parsed.data.bioMarkdown,
+      updatedAt: result.user.updated_at,
+    }),
+    200,
+  );
 });
 
 // PATCH /api/profile/avatar — select one of the current user's verified, linked OAuth avatars.

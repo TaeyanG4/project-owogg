@@ -992,7 +992,12 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
         : null;
     }
     if (
-      ["CREATE_REVIEW", "REVOKE_STREAMER_APPROVAL", "INVALIDATE_OWNERSHIP"].includes(input.action)
+      [
+        "CREATE_REVIEW",
+        "REVOKE_STREAMER_APPROVAL",
+        "INVALIDATE_OWNERSHIP",
+        "DISCONNECT_PLATFORM_ACCOUNT",
+      ].includes(input.action)
     ) {
       const row = await this.db
         .prepare(
@@ -1199,6 +1204,10 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
 
     if (input.action === "REVOKE_STREAMER_APPROVAL" || input.action === "INVALIDATE_OWNERSHIP") {
       return this.changePlatformLifecycle(input, target, policy);
+    }
+
+    if (input.action === "DISCONNECT_PLATFORM_ACCOUNT") {
+      return this.disconnectPlatformAccount(input, target, policy);
     }
 
     if (input.action === "SUSPEND_STREAMER" || input.action === "RESTORE_STREAMER") {
@@ -1662,6 +1671,139 @@ export class D1StreamerAdminRepository implements StreamerAdminRepository {
       applied,
       ...(applied ? {} : { code: "CONFLICT" as const }),
       rowVersion: applied ? (input.expectedVersion ?? 0) + 1 : null,
+    };
+  }
+
+  private async disconnectPlatformAccount(
+    input: StreamerAdminActionInput,
+    target: {
+      id: number;
+      label: string;
+      streamerId: number | null;
+      platformAccountId: number | null;
+    },
+    policy: StreamerPolicyVersion,
+  ): Promise<StreamerAdminActionResult> {
+    if (!target.streamerId || !target.platformAccountId) {
+      return { applied: false, code: "NOT_FOUND", rowVersion: null };
+    }
+
+    const archive = this.db
+      .prepare(
+        `INSERT INTO streamer_platform_connection_history
+           (streamer_profile_id, user_id, platform_account_id, platform, platform_user_id,
+            channel_name, channel_handle, channel_url, avatar_url, verification_status,
+            verified_at, ownership_expires_at, approval_status, approval_reason_code,
+            approved_at, audience_count, channel_created_at, metrics_synced_at, connected_at,
+            last_updated_at, review_snapshot_json, disconnected_by_user_id,
+            disconnect_actor_type, disconnect_reason, disconnected_at, correlation_id)
+         SELECT profile.id, profile.user_id, account.id, account.platform,
+                account.platform_user_id, account.channel_name, account.channel_handle,
+                account.channel_url, account.avatar_url, account.verification_status,
+                account.verified_at, account.ownership_expires_at, account.approval_status,
+                account.approval_reason_code, account.approved_at,
+                CASE WHEN account.audience_count_known = 1 THEN account.audience_count ELSE NULL END,
+                account.channel_created_at, account.metrics_synced_at, account.created_at,
+                account.updated_at,
+                COALESCE((
+                  SELECT json_group_array(json_object(
+                    'id', review.id,
+                    'reviewType', review.review_type,
+                    'requestedBy', review.requested_by,
+                    'workState', review.work_state,
+                    'decisionCode', review.decision_code,
+                    'publicReasonCode', review.public_reason_code,
+                    'internalNote', review.internal_note,
+                    'policyVersion', review.policy_version,
+                    'createdAt', review.created_at,
+                    'updatedAt', review.updated_at,
+                    'completedAt', review.completed_at
+                  ))
+                  FROM streamer_platform_reviews review
+                  WHERE review.streamer_platform_account_id = account.id
+                ), '[]'),
+                ?, 'ADMIN', ?, ?, ?
+         FROM streamer_platform_accounts account
+         JOIN streamer_profiles profile ON profile.id = account.streamer_id
+         WHERE account.id = ? AND account.row_version = ?
+           AND account.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})`,
+      )
+      .bind(
+        input.actorUserId,
+        input.reason,
+        input.nowIso,
+        input.correlationId,
+        target.platformAccountId,
+        input.expectedVersion ?? -1,
+      );
+    const removeActiveConnection = this.db
+      .prepare(
+        `DELETE FROM streamer_platform_accounts
+         WHERE id = ? AND EXISTS (
+           SELECT 1 FROM streamer_platform_connection_history history
+           WHERE history.correlation_id = ? AND history.platform_account_id = ?
+         )`,
+      )
+      .bind(target.platformAccountId, input.correlationId, target.platformAccountId);
+    const recomputeProfile = this.db
+      .prepare(
+        `UPDATE streamer_profiles
+         SET status = CASE
+               WHEN status = 'SUSPENDED'
+                 AND (suspended_until IS NULL OR datetime(suspended_until) IS NULL
+                   OR datetime(suspended_until) > datetime(?))
+                 THEN status
+               WHEN EXISTS (
+                 SELECT 1 FROM streamer_platform_accounts approved
+                 WHERE approved.streamer_id = streamer_profiles.id
+                   AND approved.platform IN (${MANAGED_STREAMER_PLATFORMS_SQL})
+                   AND approved.verification_status = 'VERIFIED'
+                   AND approved.approval_status = 'APPROVED'
+                   AND approved.ownership_expires_at IS NOT NULL
+                   AND datetime(approved.ownership_expires_at) > datetime(?)
+               ) THEN 'VERIFIED'
+               ELSE 'UNVERIFIED'
+             END,
+             updated_at = ?, row_version = row_version + 1, last_correlation_id = ?
+         WHERE id = ? AND EXISTS (
+           SELECT 1 FROM streamer_platform_connection_history history
+           WHERE history.correlation_id = ? AND history.streamer_profile_id = streamer_profiles.id
+         )`,
+      )
+      .bind(
+        input.nowIso,
+        input.nowIso,
+        input.nowIso,
+        input.correlationId,
+        target.streamerId,
+        input.correlationId,
+      );
+    const audit = this.auditStatement({
+      actorUserId: input.actorUserId,
+      action: input.action,
+      targetType: "PLATFORM_ACCOUNT",
+      targetId: String(target.platformAccountId),
+      targetLabel: target.label,
+      publicReasonCode: input.reason,
+      internalNote: input.internalNote,
+      changeSummary:
+        "활성 플랫폼 연결을 해제했습니다. 기존 점수는 유지되고 현재 Streamer 랭킹 자격만 다시 계산됩니다.",
+      policyVersion: policy.version,
+      correlationId: input.correlationId,
+      nowIso: input.nowIso,
+      guardSql:
+        "EXISTS (SELECT 1 FROM streamer_platform_connection_history WHERE correlation_id = ?)",
+      guardBinds: [input.correlationId],
+    });
+
+    const results = await this.db.batch([archive, removeActiveConnection, recomputeProfile, audit]);
+    const applied = Number(results[1]?.meta?.changes ?? 0) > 0;
+    return {
+      applied,
+      ...(applied ? {} : { code: "CONFLICT" as const }),
+      // The active row no longer exists, so returning a synthetic next row version would be
+      // misleading. The client refreshes the roster after every mutation.
+      rowVersion: null,
     };
   }
 

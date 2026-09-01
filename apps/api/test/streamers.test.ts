@@ -471,3 +471,106 @@ test("GET /api/streamers/me returns independent platform approval states and met
   assert.equal(json.profile.platformAccounts[1].platform, "TWITCH");
   assert.equal(json.profile.platformAccounts[1].approvalStatus, "APPROVED");
 });
+
+test("DELETE /api/streamers/connections/:platform unlinks only the owner account and preserves scores", async () => {
+  const { db, raw } = createMigratedD1();
+  await seedSession(raw);
+  const profileInfo = raw
+    .prepare(
+      `INSERT INTO streamer_profiles (user_id, status, created_at, updated_at)
+       VALUES (7, 'VERIFIED', ?, ?)`,
+    )
+    .run(NOW, NOW);
+  const streamerId = Number(profileInfo.lastInsertRowid);
+  raw
+    .prepare(
+      `INSERT INTO streamer_platform_accounts
+         (streamer_id, platform, platform_user_id, channel_name, channel_url,
+          verification_status, verified_at, ownership_expires_at, approval_status,
+          approval_reason_code, approved_at, created_at, updated_at)
+       VALUES (?, 'CHZZK', 'chzzk-owner', 'Owner channel',
+               'https://chzzk.naver.com/owner', 'VERIFIED', ?, ?, 'APPROVED',
+               'MANUAL_REVIEW_APPROVED', ?, ?, ?)`,
+    )
+    .run(streamerId, NOW, FUTURE, NOW, NOW, NOW);
+  raw
+    .prepare(
+      `INSERT INTO scores (user_id, nickname, game_id, score, created_at)
+       VALUES (7, 'Tester 7', 'reaction-time', 321, ?)`,
+    )
+    .run(NOW);
+
+  const res = await app.request(
+    "/api/streamers/connections/chzzk",
+    {
+      method: "DELETE",
+      headers: { Cookie: COOKIE, Origin: "http://localhost:3000" },
+    },
+    { DB: db, FRONTEND_URL: "http://localhost:3000" } as any,
+  );
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), {
+    disconnected: true,
+    platform: "CHZZK",
+    remainingConnections: 0,
+  });
+  assert.equal(
+    raw.prepare("SELECT COUNT(*) AS count FROM streamer_platform_accounts").get()?.count,
+    0,
+  );
+  assert.equal(raw.prepare("SELECT COUNT(*) AS count FROM scores").get()?.count, 1);
+  assert.equal(
+    raw.prepare("SELECT status FROM streamer_profiles WHERE id = ?").get(streamerId)?.status,
+    "UNVERIFIED",
+  );
+
+  const repeated = await app.request(
+    "/api/streamers/connections/chzzk",
+    {
+      method: "DELETE",
+      headers: { Cookie: COOKIE, Origin: "http://localhost:3000" },
+    },
+    { DB: db, FRONTEND_URL: "http://localhost:3000" } as any,
+  );
+  assert.equal(repeated.status, 404);
+});
+
+test("DELETE /api/streamers/connections/:platform cannot target another user's connection", async () => {
+  const { db, raw } = createMigratedD1();
+  await seedSession(raw, 7, SESSION_TOKEN);
+  await seedSession(raw, 8, SECOND_SESSION_TOKEN);
+  const profileInfo = raw
+    .prepare(
+      `INSERT INTO streamer_profiles (user_id, status, created_at, updated_at)
+       VALUES (8, 'VERIFIED', ?, ?)`,
+    )
+    .run(NOW, NOW);
+  raw
+    .prepare(
+      `INSERT INTO streamer_platform_accounts
+         (streamer_id, platform, platform_user_id, channel_name, channel_url,
+          verification_status, verified_at, ownership_expires_at, approval_status,
+          approved_at, created_at, updated_at)
+       VALUES (?, 'YOUTUBE', 'victim-channel', 'Victim channel',
+               'https://youtube.com/@victim', 'VERIFIED', ?, ?, 'APPROVED', ?, ?, ?)`,
+    )
+    .run(Number(profileInfo.lastInsertRowid), NOW, FUTURE, NOW, NOW, NOW);
+
+  const res = await app.request(
+    "/api/streamers/connections/youtube",
+    {
+      method: "DELETE",
+      headers: { Cookie: COOKIE, Origin: "http://localhost:3000" },
+    },
+    { DB: db, FRONTEND_URL: "http://localhost:3000" } as any,
+  );
+  assert.equal(res.status, 404);
+  assert.equal(
+    raw.prepare("SELECT COUNT(*) AS count FROM streamer_platform_accounts").get()?.count,
+    1,
+  );
+  assert.equal(
+    raw.prepare("SELECT COUNT(*) AS count FROM streamer_platform_connection_history").get()?.count,
+    0,
+  );
+});

@@ -174,6 +174,34 @@ class MemoryStreamerRepo implements StreamerRepository {
     return updated;
   }
 
+  async disconnectPlatformAccount(
+    input: Parameters<StreamerRepository["disconnectPlatformAccount"]>[0],
+  ) {
+    const profile = await this.findProfileByUserId(input.userId);
+    if (!profile) return false;
+    const account = profile.platformAccounts.find((item) => item.platform === input.platform);
+    if (!account) return false;
+    this.platformAccounts = this.platformAccounts.filter((item) => item.id !== account.id);
+    const stored = this.profiles.get(profile.id);
+    if (stored && stored.status !== "SUSPENDED") {
+      const nowMs = Date.parse(input.nowIso);
+      const hasCurrentApproval = this.platformAccounts.some(
+        (item) =>
+          item.streamerId === profile.id &&
+          item.verificationStatus === "VERIFIED" &&
+          item.approvalStatus === "APPROVED" &&
+          Boolean(item.ownershipExpiresAt && Date.parse(item.ownershipExpiresAt) > nowMs),
+      );
+      this.profiles.set(profile.id, {
+        ...stored,
+        status: hasCurrentApproval ? "VERIFIED" : "UNVERIFIED",
+        rowVersion: stored.rowVersion + 1,
+        updatedAt: input.nowIso,
+      });
+    }
+    return true;
+  }
+
   async getStreamerRankings(): Promise<{ entries: StreamerRankEntry[]; total: number }> {
     return { entries: [], total: 0 };
   }

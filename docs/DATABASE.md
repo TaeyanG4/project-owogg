@@ -2,9 +2,9 @@
 
 상태: 기준 문서
 
-마지막 검증: 2026-08-31
+마지막 검증: 2026-09-02
 
-최신 마이그레이션: `0052_game_content_and_platform_controls.sql`
+최신 마이그레이션: `0053_profile_customization_and_streamer_disconnect.sql`
 
 기준 소스:
 
@@ -16,7 +16,7 @@
 - [`ERD.md`](ERD.md) — 도메인별 관계도와 전체 물리 테이블·호환 뷰 사전
 
 Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 권한 원천입니다. 이 문서는
-현재 `0000_initial_schema.sql`부터 `0052_game_content_and_platform_controls.sql`까지의 역할을 설명합니다.
+현재 `0000_initial_schema.sql`부터 `0053_profile_customization_and_streamer_disconnect.sql`까지의 역할을 설명합니다.
 
 ## 마이그레이션 범위
 
@@ -52,6 +52,7 @@ Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 
 | `0050`        | 연결 해제 시 OAuth 등록 예약 해제와 기존 고아 예약 정리                     |
 | `0051`        | 단일 Streamer, 플랫폼별 수동 심사·정책·OAuth intent·Provider 운영·감사 원장 |
 | `0052`        | 게임 태그·기본 화면 모드, 제작자 편집 쿨다운, 플랫폼 운영 스위치            |
+| `0053`        | 프로필 배너·Markdown 소개·기여 원장과 Streamer 연결 해제 불변 이력          |
 
 기존 migration은 변경, squash, 삭제하지 않습니다. 프로덕션 배포는 먼저 Repository variable
 `PRODUCTION_D1_DATABASE_ID`를 read-only 원격 D1 목록과 committed `owogg-d1` binding에 대조한 뒤,
@@ -292,6 +293,12 @@ D1 migration이 새 Worker보다 먼저 실행되는 동안 이전 Worker가 깨
   거부합니다. 사용자가 provider 연결을 정상 해제하면 활성 row와 예약이 함께 삭제되어, 이후 같은
   identity를 다른 OwOGG 계정에 연결할 수 있습니다. 계정 통합은 활성 OAuth identity를 이전하지
   않으며, OAuth identity가 있는 Secondary 계정은 병합을 거부합니다.
+- `users.profile_banner`는 코드가 소유한 preset enum이며 custom upload는 아직 허용하지 않습니다.
+  `users.profile_bio_markdown`은 최대 2,000자의 공개 CommonMark 원문입니다. Web은 raw HTML과 Markdown
+  이미지를 렌더링하지 않습니다.
+- 공개 기여 수치는 편집 가능한 숫자 column이 아닙니다. 공개된 USER 게임 수는 `games`의 현재
+  public/live row에서 계산하고, 승인된 버그 기여와 소개한 타 플랫폼 게임은 중복 방지 source key가 있는
+  `profile_contribution_events`에서 계산합니다.
 - 점수 row의 nickname/avatar snapshot은 감사·이력용으로 유지하되, 현재 leaderboard는 `users`를
   join하여 최신 별명과 선택 avatar를 표시합니다.
 
@@ -306,7 +313,9 @@ D1 migration이 새 Worker보다 먼저 실행되는 동안 이전 Worker가 깨
   인덱스로 공개 조회를 지원합니다. 인기 점수는 Core 정책인 `playerCount + bookmarkCount × 3`입니다.
 - **Discord**: link challenges, guild registration/manager, play context, guild XP attribution
 - **Streamer**: 단일 프로그램 profile, 플랫폼별 소유권·승인, 수동 심사, 해시된 일회성 OAuth intent,
-  버전 정책, Provider 운영과 감사. 현재 YouTube·CHZZK·Twitch 플랫폼 OAuth만 열고, 안전한 callback
+  버전 정책, Provider 운영과 감사. 사용자가 직접 또는 `streamers.manage` 관리자가 활성 연결을 해제하면
+  채널·심사 snapshot을 `streamer_platform_connection_history`에 불변 보존하고 현재 랭킹 자격만
+  재계산하며 기존 점수는 유지합니다. 현재 YouTube·CHZZK·Twitch 플랫폼 OAuth만 열고, 안전한 callback
   결박이 없는 SOOP 연결은 fail-closed로 보류합니다.
 - **Operations**: game kill switch, 전체 multiplayer admission, 타 플랫폼 메뉴 노출, moderation,
   monitoring indexes, staff/program entitlement

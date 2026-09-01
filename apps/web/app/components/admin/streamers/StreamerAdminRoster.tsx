@@ -1,4 +1,4 @@
-import { ExternalLink, Search, ShieldOff, UserRoundCheck } from "lucide-react";
+import { ExternalLink, Search, ShieldOff, Unplug, UserRoundCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import type {
   StreamerAdminWorkspaceData,
@@ -355,6 +355,24 @@ function StreamerDetail({
                   }
                 >
                   소유권 무효화
+                </StreamerActionButton>
+                <StreamerActionButton
+                  tone="danger"
+                  disabled={!actions.isActionEnabled("DISCONNECT_PLATFORM_ACCOUNT")}
+                  disabledReason={actions.actionDisabledReason("DISCONNECT_PLATFORM_ACCOUNT")}
+                  onClick={() =>
+                    request({
+                      action: "DISCONNECT_PLATFORM_ACCOUNT",
+                      targetId: String(account.id),
+                      expectedVersion: account.rowVersion,
+                      title: "플랫폼 연결 해제",
+                      description:
+                        "활성 연결과 진행 중 심사를 제거하고 이력으로 보관합니다. 기존 게임 기록은 삭제하지 않으며, 남은 승인 플랫폼이 없다면 이후 스트리머 랭킹 집계에서 제외됩니다.",
+                      danger: true,
+                    })
+                  }
+                >
+                  <Unplug className="h-3.5 w-3.5" /> 연결 해제
                 </StreamerActionButton>
               </div>
             </div>

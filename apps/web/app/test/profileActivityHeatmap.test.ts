@@ -60,4 +60,9 @@ test("heatmap renders summaries, every day, exact counts, and a non-color-only l
   assert.match(html, /2026년 9월 1일 · 7판/);
   assert.match(html, /aria-label="출석일수 4일, 총 플레이 17판"/);
   assert.match(html, /게임을 1판 이상 완료한 날을 출석으로 계산합니다/);
+  assert.doesNotMatch(
+    html,
+    /rounded-2xl border border-border bg-surface-raised/,
+    "play activity must not restore the old boxed summary container",
+  );
 });

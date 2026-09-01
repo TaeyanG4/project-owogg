@@ -31,7 +31,13 @@ export interface User {
    * rejects them first) — an otherwise-ACTIVE user can still be blocked from submitting new
    * scores. See UserModerationRepository. Defaults to false/absent for untouched accounts. */
   score_submission_blocked?: boolean;
+  /** Code-owned banner preset; custom uploaded banners are intentionally unsupported for now. */
+  profile_banner?: ProfileBannerType;
+  /** Public CommonMark biography. Raw HTML is not part of the rendering contract. */
+  profile_bio_markdown?: string;
 }
+
+export type ProfileBannerType = "AURORA" | "SUNSET" | "MIDNIGHT" | "MINT";
 
 export interface OAuthAccount {
   id: number;
@@ -108,6 +114,23 @@ export interface UserRepository {
     showRecentPlays: boolean,
     updatedAt: string,
   ): Promise<User>;
+  updateProfilePresentation(
+    userId: number,
+    banner: ProfileBannerType,
+    bioMarkdown: string,
+    updatedAt: string,
+  ): Promise<User>;
+}
+
+export interface PublicProfileInsights {
+  bugAcceptedCount: number;
+  createdGameCount: number;
+  introducedExternalGameCount: number;
+}
+
+/** Read-only public-profile aggregation that deliberately excludes pending/private game data. */
+export interface PublicProfileInsightsRepository {
+  getByUserId(userId: number): Promise<PublicProfileInsights>;
 }
 
 export interface SessionRepository {
@@ -659,6 +682,17 @@ export interface StreamerRepository {
       syncedAt: string;
     },
   ): Promise<StreamerPlatformAccount>;
+  /** Releases the active provider identity while archiving an immutable ownership/review
+   * snapshot. Scores are deliberately outside this operation. */
+  disconnectPlatformAccount(input: {
+    userId: number;
+    platform: StreamerPlatformType;
+    actorUserId: number;
+    actorType: "SELF";
+    reason: string;
+    correlationId: string;
+    nowIso: string;
+  }): Promise<boolean>;
   getStreamerRankings(options: {
     mode: "score" | "xp";
     gameId?: string;
