@@ -89,6 +89,15 @@ describe("Profile settings (nickname/country) client contracts", () => {
     assert.match(profile, /data-profile-experience/);
     assert.match(profile, /to={`\/users\/\$\{data\.id\}\/followers`}/);
     assert.match(profile, /to={`\/users\/\$\{data\.id\}\/following`}/);
+    assert.match(profile, /mt-4 flex w-full flex-wrap items-center justify-center gap-2/);
+    assert.match(
+      profile,
+      /to={`\/users\/\$\{data\.id\}\/followers`}[\s\S]{0,400}<UsersRound className="h-3\.5 w-3\.5"/,
+    );
+    assert.match(
+      profile,
+      /to={`\/users\/\$\{data\.id\}\/following`}[\s\S]{0,400}<UserRoundCheck className="h-3\.5 w-3\.5"/,
+    );
     assert.match(profile, /setProfileFollowApi/);
     assert.match(profile, /aria-pressed={data\.followStats\.viewerIsFollowing}/);
     assert.equal(profile.match(/dict\.userProfile\.contributionsTitle/g)?.length, 1);

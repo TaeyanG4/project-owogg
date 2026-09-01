@@ -421,10 +421,10 @@ export default function UserProfileRoute() {
                 </div>
               )}
 
-              <div className="mt-4 flex flex-wrap items-center gap-2">
+              <div className="mt-4 flex w-full flex-wrap items-center justify-center gap-2">
                 <Link
                   to={`/users/${data.id}/followers`}
-                  className="inline-flex items-center gap-2 rounded-xl bg-black/25 px-3 py-2 text-[11px] font-bold text-text-muted transition-colors hover:bg-black/40 hover:text-text-primary"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-black/25 px-3 py-2 text-[11px] font-bold text-text-muted transition-colors hover:bg-black/40 hover:text-text-primary"
                 >
                   <UsersRound className="h-3.5 w-3.5" />
                   <strong className="text-sm tabular-nums text-text-primary">
@@ -434,8 +434,9 @@ export default function UserProfileRoute() {
                 </Link>
                 <Link
                   to={`/users/${data.id}/following`}
-                  className="inline-flex items-center gap-2 rounded-xl bg-black/25 px-3 py-2 text-[11px] font-bold text-text-muted transition-colors hover:bg-black/40 hover:text-text-primary"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-black/25 px-3 py-2 text-[11px] font-bold text-text-muted transition-colors hover:bg-black/40 hover:text-text-primary"
                 >
+                  <UserRoundCheck className="h-3.5 w-3.5" />
                   <strong className="text-sm tabular-nums text-text-primary">
                     {data.followStats.followingCount.toLocaleString()}
                   </strong>
