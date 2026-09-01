@@ -513,6 +513,86 @@ test("platform lifecycle actions never remove another platform approval", async 
   );
 });
 
+test("an administrator can disconnect one platform without deleting scores or another platform", async () => {
+  const { db, raw } = migratedDb();
+  raw.prepare("INSERT INTO users (id, nickname) VALUES (1, 'operator')").run();
+  const applicant = seedApplicant(raw, "admin-disconnect", ["YOUTUBE", "TWITCH"]);
+  raw
+    .prepare(
+      `INSERT INTO scores (user_id, nickname, game_id, score, created_at)
+       VALUES (?, 'applicant', 'reaction-time', 900, '2026-08-31T00:30:00.000Z')`,
+    )
+    .run(applicant.userId);
+  const repository = new D1StreamerAdminRepository(db);
+
+  for (const [reviewId, correlationId] of [
+    [applicant.reviewIds[0]!, "approve-before-disconnect-youtube"],
+    [applicant.reviewIds[1]!, "approve-before-disconnect-twitch"],
+  ] as const) {
+    assert.equal(
+      (await repository.applyAction(actionInput("APPROVE_STREAMER", reviewId, correlationId)))
+        .applied,
+      true,
+    );
+  }
+
+  const result = await repository.applyAction(
+    actionInput(
+      "DISCONNECT_PLATFORM_ACCOUNT",
+      applicant.accountIds[0]!,
+      "admin-disconnect-youtube",
+      {
+        expectedVersion: 1,
+        reason: "account owner requested administrator disconnect",
+        internalNote: "verified support request",
+      },
+    ),
+  );
+  assert.deepEqual(result, { applied: true, rowVersion: null });
+  assert.deepEqual(
+    raw
+      .prepare(
+        `SELECT platform, approval_status FROM streamer_platform_accounts
+         WHERE streamer_id = ? ORDER BY platform`,
+      )
+      .all(applicant.streamerId)
+      .map((row) => ({ ...row })),
+    [{ platform: "TWITCH", approval_status: "APPROVED" }],
+  );
+  assert.equal(
+    raw.prepare("SELECT status FROM streamer_profiles WHERE id = ?").get(applicant.streamerId)
+      ?.status,
+    "VERIFIED",
+  );
+  assert.equal(raw.prepare("SELECT COUNT(*) AS count FROM scores").get()?.count, 1);
+  assert.deepEqual(
+    {
+      ...raw
+        .prepare(
+          `SELECT disconnect_actor_type, disconnected_by_user_id, disconnect_reason
+           FROM streamer_platform_connection_history
+           WHERE correlation_id = 'admin-disconnect-youtube'`,
+        )
+        .get(),
+    },
+    {
+      disconnect_actor_type: "ADMIN",
+      disconnected_by_user_id: 1,
+      disconnect_reason: "account owner requested administrator disconnect",
+    },
+  );
+  assert.equal(
+    raw
+      .prepare(
+        `SELECT COUNT(*) AS count FROM streamer_admin_audit_log
+         WHERE correlation_id = 'admin-disconnect-youtube'
+           AND action = 'DISCONNECT_PLATFORM_ACCOUNT'`,
+      )
+      .get()?.count,
+    1,
+  );
+});
+
 test("program suspension and provider pause are reversible compare-and-swap operations", async () => {
   const { db, raw } = migratedDb();
   raw.prepare("INSERT INTO users (id, nickname) VALUES (1, 'operator')").run();

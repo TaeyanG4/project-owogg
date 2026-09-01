@@ -2,11 +2,11 @@
 
 상태: 기준 문서
 
-마지막 검증: 2026-09-01
+마지막 검증: 2026-09-02
 
-최신 마이그레이션: `0052_game_content_and_platform_controls.sql`
+최신 마이그레이션: `0053_profile_customization_and_streamer_disconnect.sql`
 
-스키마 요약: 물리 테이블 `68`, 롤링 배포 호환 뷰 `0`
+스키마 요약: 물리 테이블 `70`, 롤링 배포 호환 뷰 `0`
 
 기준 소스:
 
@@ -15,7 +15,7 @@
 - `apps/api/src/container.ts`
 - [데이터베이스 기준 문서](DATABASE.md)
 
-이 문서는 `0000_initial_schema.sql`부터 `0052_game_content_and_platform_controls.sql`까지를 빈 SQLite에
+이 문서는 `0000_initial_schema.sql`부터 `0053_profile_customization_and_streamer_disconnect.sql`까지를 빈 SQLite에
 순서대로 적용한 **최종 D1 schema**를 기준으로 합니다. migration SQL이 유일한 schema 권한
 원천이며, 이 문서는 관계 탐색과 운영 이해를 위한 투영입니다.
 
@@ -38,6 +38,8 @@ erDiagram
     INTEGER id PK
     TEXT nickname
     TEXT avatar_provider
+    TEXT profile_banner
+    TEXT profile_bio_markdown
   }
   oauth_accounts {
     INTEGER id PK
@@ -121,6 +123,12 @@ erDiagram
     INTEGER reviewed_by_admin_id FK
     TEXT status
   }
+  profile_contribution_events {
+    INTEGER id PK
+    INTEGER user_id FK
+    TEXT contribution_type
+    TEXT source_key UK
+  }
 
   users ||--o{ oauth_accounts : owns
   users ||..o{ oauth_identity_registrations : active_registration
@@ -142,6 +150,7 @@ erDiagram
   users ||--o| game_creator_access : entitled
   users ||--o{ game_creator_applications : applies
   users ||..o{ game_creator_access_audit_log : target
+  users ||--o{ profile_contribution_events : contributes
   admin_accounts ||..o{ game_creator_access : grants
   admin_accounts o|--o{ game_creator_applications : reviews
   admin_accounts ||..o{ game_creator_access_audit_log : acts
@@ -150,7 +159,8 @@ erDiagram
 `admin_sessions`, step-up challenge와 login attempt의 `user_id`는 인증 정리와 감사 조회에 사용하는
 논리 참조입니다. 사용자 삭제 시 별도 보존/정리 정책을 적용할 수 있도록 migration에는 FK가
 없습니다. 관리자·사용자 제재 감사 원장도 대상 row 삭제 뒤 증거를 보존해야 하는 column은 논리
-참조로 유지합니다.
+참조로 유지합니다. 공개 프로필의 배너와 Markdown 소개는 `users`가 소유하고, 승인된 버그와 공개된
+타 플랫폼 게임 기여 수치는 중복 방지 source key가 있는 `profile_contribution_events`에서 계산합니다.
 
 ## 2. 공통 Game Platform, 결과와 랭킹
 
@@ -580,6 +590,17 @@ erDiagram
     TEXT approval_status
     INTEGER row_version
   }
+  streamer_platform_connection_history {
+    INTEGER id PK
+    INTEGER streamer_profile_id
+    INTEGER user_id
+    INTEGER platform_account_id
+    TEXT platform
+    TEXT platform_user_id
+    INTEGER disconnected_by_user_id
+    TEXT disconnect_actor_type
+    TEXT correlation_id
+  }
   streamer_verification_intents {
     TEXT state_hash PK
     INTEGER user_id FK
@@ -629,6 +650,9 @@ erDiagram
   users ||--o| streamer_profiles : owns
   users ||--o{ streamer_verification_intents : starts_oauth
   streamer_profiles ||--o{ streamer_platform_accounts : links
+  users o|..o{ streamer_platform_connection_history : archived_owner_snapshot
+  users o|..o{ streamer_platform_connection_history : disconnected_actor
+  streamer_profiles o|..o{ streamer_platform_connection_history : archived_profile_snapshot
   streamer_platform_accounts ||--o{ streamer_platform_reviews : reviewed_independently
   streamer_policy_versions ||--o{ streamer_platform_reviews : fixes_policy
   streamer_policy_versions ||--o| streamer_policy_state : active_pointer
@@ -642,6 +666,12 @@ erDiagram
 `streamer_verification_intents`는 YouTube·Twitch·CHZZK OAuth 요청의 raw credential이 아닌
 state/session SHA-256 hash만 저장하며 user·session·platform·만료시각 일치 시 한 번만 소비됩니다.
 SOOP은 안전한 callback 결박 계약이 없어 이 table을 사용하는 연결 경로 자체가 보류 상태입니다.
+사용자 또는 관리자가 활성 플랫폼 연결을 끊으면 연결과 심사 snapshot을
+`streamer_platform_connection_history`에 먼저 기록한 뒤 활성 row만 제거합니다. 이 원장은 계정
+병합·삭제 뒤에도 증거를 보존하도록 식별자 FK를 의도적으로 두지 않고 update/delete trigger로
+불변성을 강제합니다. 기존 `scores`는 삭제하지 않으며 승인된 활성 연결이 하나도 없어진 사용자만
+현재 Streamer 랭킹 대상에서 제외합니다. 한 사용자·플랫폼에 과거 미승인 시도와 현재 승인 연결이
+함께 있으면 한 해제 요청의 `correlation_id` 아래 모든 활성 row를 각각 snapshot으로 보존합니다.
 `streamer_admin_audit_log`는 append-only이며 대상 삭제와 독립적으로 보존하도록 논리 target을
 사용합니다. 이전 등급값과 자동 심사 이력은 `streamer_legacy_*` archive table에만 보존되고 현재
 runtime authority나 관리자 조회 대상이 아닙니다.
@@ -765,6 +795,7 @@ D1 콘솔에서 직접 수정하면 감사 로그와 두 저장소의 일관성�
 | `oauth_identity_registrations`               | Identity        | 활성 provider identity의 단일 사용자 연결 예약             |
 | `official_game_deletion_audit_log`           | Operations      | 부모 삭제 뒤에도 남는 OWOGG 완전 삭제 감사 원장            |
 | `platform_feature_settings`                  | Operations      | 전체 multiplayer와 타 플랫폼 메뉴의 서버 운영 스위치       |
+| `profile_contribution_events`                | Profile         | 승인된 버그·타 플랫폼 게임 소개 기여의 중복 방지 원장      |
 | `sandbox_game_review_audit_log`              | Compatibility   | 직전 USER 게임 심사 계약의 append-only 호환 감사           |
 | `sandbox_game_versions`                      | Compatibility   | 직전 Worker용 USER version 호환 미러                       |
 | `sandbox_games`                              | Compatibility   | 직전 Worker용 USER game identity/metadata 호환 미러        |
@@ -775,6 +806,7 @@ D1 콘솔에서 직접 수정하면 감사 로그와 두 저장소의 일관성�
 | `streamer_legacy_automated_review_jobs`      | Archive         | 폐기된 자동 심사의 과거 작업 row                           |
 | `streamer_legacy_tier_state_archive`         | Archive         | 제거된 과거 등급 컬럼의 보존 snapshot                      |
 | `streamer_platform_accounts`                 | Streamer        | 플랫폼 채널 identity, 소유권·승인 상태·metrics             |
+| `streamer_platform_connection_history`       | Streamer        | 연결 해제된 채널·심사 snapshot의 변경 불가 감사 원장       |
 | `streamer_verification_intents`              | Streamer        | 해시된 OAuth state/session의 단기·일회성 결박              |
 | `streamer_platform_reviews`                  | Streamer        | 플랫폼별 독립 수동 심사 작업과 결정                        |
 | `streamer_policy_constraints`                | Streamer        | 변경 가능한 정책값의 단위·최솟값·최댓값·step               |
@@ -808,7 +840,7 @@ D1 콘솔에서 직접 수정하면 감사 로그와 두 저장소의 일관성�
   부모가 사라지면 의미가 없는 종속 row에 사용합니다.
 - `ON DELETE SET NULL`: 과거 score의 탈퇴 사용자, 관리자 계정 감사의 actor/target, score의 선택적
   result projection처럼 사실은 보존하되 현재 부모 연결만 끊는 관계에 사용합니다.
-- FK 없음: 완전 삭제 감사, moderation/access/streamer 감사, polymorphic source, TEXT slug 호환,
+- FK 없음: 완전 삭제 감사, moderation/access/streamer 감사와 연결 해제 snapshot, polymorphic source, TEXT slug 호환,
   forward-cycle live pointer처럼 삭제 후 보존 또는 배포 호환이 우선인 관계입니다.
 - audit table에는 API update/delete 경로를 만들지 않으며 주요 원장은 trigger로 변경·삭제를
   거부합니다.

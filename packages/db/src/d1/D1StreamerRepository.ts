@@ -92,7 +92,16 @@ export class D1StreamerRepository implements StreamerRepository {
     const profileId = Number(row.id);
 
     const accRes = await this.db
-      .prepare(`SELECT * FROM streamer_platform_accounts WHERE streamer_id = ? ORDER BY id ASC`)
+      .prepare(
+        `SELECT * FROM streamer_platform_accounts
+         WHERE streamer_id = ?
+         ORDER BY CASE
+                    WHEN verification_status = 'VERIFIED' THEN 0
+                    WHEN approval_status <> 'REJECTED' THEN 1
+                    ELSE 2
+                  END,
+                  id ASC`,
+      )
       .bind(profileId)
       .all<Record<string, unknown>>();
 
@@ -123,7 +132,16 @@ export class D1StreamerRepository implements StreamerRepository {
     if (!row) return null;
 
     const accRes = await this.db
-      .prepare(`SELECT * FROM streamer_platform_accounts WHERE streamer_id = ? ORDER BY id ASC`)
+      .prepare(
+        `SELECT * FROM streamer_platform_accounts
+         WHERE streamer_id = ?
+         ORDER BY CASE
+                    WHEN verification_status = 'VERIFIED' THEN 0
+                    WHEN approval_status <> 'REJECTED' THEN 1
+                    ELSE 2
+                  END,
+                  id ASC`,
+      )
       .bind(streamerId)
       .all<Record<string, unknown>>();
 
@@ -198,6 +216,111 @@ export class D1StreamerRepository implements StreamerRepository {
     const updated = await this.findPlatformAccountById(platformAccountId);
     if (!updated) throw new Error("Failed to update platform account metrics");
     return updated;
+  }
+
+  async disconnectPlatformAccount(input: {
+    userId: number;
+    platform: StreamerPlatformType;
+    actorUserId: number;
+    actorType: "SELF";
+    reason: string;
+    correlationId: string;
+    nowIso: string;
+  }): Promise<boolean> {
+    const archive = this.db
+      .prepare(
+        `INSERT INTO streamer_platform_connection_history
+           (streamer_profile_id, user_id, platform_account_id, platform, platform_user_id,
+            channel_name, channel_handle, channel_url, avatar_url, verification_status,
+            verified_at, ownership_expires_at, approval_status, approval_reason_code,
+            approved_at, audience_count, channel_created_at, metrics_synced_at, connected_at,
+            last_updated_at, review_snapshot_json, disconnected_by_user_id,
+            disconnect_actor_type, disconnect_reason, disconnected_at, correlation_id)
+         SELECT profile.id, profile.user_id, account.id, account.platform,
+                account.platform_user_id, account.channel_name, account.channel_handle,
+                account.channel_url, account.avatar_url, account.verification_status,
+                account.verified_at, account.ownership_expires_at, account.approval_status,
+                account.approval_reason_code, account.approved_at,
+                CASE WHEN account.audience_count_known = 1 THEN account.audience_count ELSE NULL END,
+                account.channel_created_at, account.metrics_synced_at, account.created_at,
+                account.updated_at,
+                COALESCE((
+                  SELECT json_group_array(json_object(
+                    'id', review.id,
+                    'reviewType', review.review_type,
+                    'requestedBy', review.requested_by,
+                    'workState', review.work_state,
+                    'decisionCode', review.decision_code,
+                    'publicReasonCode', review.public_reason_code,
+                    'internalNote', review.internal_note,
+                    'policyVersion', review.policy_version,
+                    'createdAt', review.created_at,
+                    'updatedAt', review.updated_at,
+                    'completedAt', review.completed_at
+                  ))
+                  FROM streamer_platform_reviews review
+                  WHERE review.streamer_platform_account_id = account.id
+                ), '[]'),
+                ?, ?, ?, ?, ?
+         FROM streamer_platform_accounts account
+         JOIN streamer_profiles profile ON profile.id = account.streamer_id
+         WHERE profile.user_id = ? AND account.platform = ?
+           AND account.platform IN ('YOUTUBE', 'CHZZK', 'TWITCH')`,
+      )
+      .bind(
+        input.actorUserId,
+        input.actorType,
+        input.reason,
+        input.nowIso,
+        input.correlationId,
+        input.userId,
+        input.platform,
+      );
+    const removeActiveConnection = this.db
+      .prepare(
+        `DELETE FROM streamer_platform_accounts
+         WHERE id IN (
+           SELECT platform_account_id FROM streamer_platform_connection_history
+           WHERE correlation_id = ?
+         )`,
+      )
+      .bind(input.correlationId);
+    const recomputeProfile = this.db
+      .prepare(
+        `UPDATE streamer_profiles
+         SET status = CASE
+               WHEN status = 'SUSPENDED'
+                 AND (suspended_until IS NULL OR datetime(suspended_until) IS NULL
+                   OR datetime(suspended_until) > datetime(?))
+                 THEN status
+               WHEN EXISTS (
+                 SELECT 1 FROM streamer_platform_accounts approved
+                 WHERE approved.streamer_id = streamer_profiles.id
+                   AND approved.platform IN ('YOUTUBE', 'CHZZK', 'TWITCH')
+                   AND approved.verification_status = 'VERIFIED'
+                   AND approved.approval_status = 'APPROVED'
+                   AND approved.ownership_expires_at IS NOT NULL
+                   AND datetime(approved.ownership_expires_at) > datetime(?)
+               ) THEN 'VERIFIED'
+               ELSE 'UNVERIFIED'
+             END,
+             updated_at = ?, row_version = row_version + 1, last_correlation_id = ?
+         WHERE user_id = ? AND EXISTS (
+           SELECT 1 FROM streamer_platform_connection_history history
+           WHERE history.correlation_id = ? AND history.user_id = streamer_profiles.user_id
+         )`,
+      )
+      .bind(
+        input.nowIso,
+        input.nowIso,
+        input.nowIso,
+        input.correlationId,
+        input.userId,
+        input.correlationId,
+      );
+
+    const results = await this.db.batch([archive, removeActiveConnection, recomputeProfile]);
+    return Number(results[1]?.meta?.changes ?? 0) > 0;
   }
 
   async upsertProfile(input: {

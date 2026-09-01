@@ -1,6 +1,7 @@
 import {
   OAuthIdentityConflictError,
   type OAuthAccount,
+  type ProfileBannerType,
   type User,
   type UserRepository,
 } from "@owogg/core";
@@ -63,6 +64,10 @@ export class D1UserRepository implements UserRepository {
       last_active_date: row.last_active_date ? String(row.last_active_date) : null,
       show_favorites: Boolean(Number(row.show_favorites ?? 0)),
       show_recent_plays: Boolean(Number(row.show_recent_plays ?? 0)),
+      profile_banner: (row.profile_banner
+        ? String(row.profile_banner)
+        : "AURORA") as ProfileBannerType,
+      profile_bio_markdown: row.profile_bio_markdown ? String(row.profile_bio_markdown) : "",
     };
   }
 
@@ -565,6 +570,28 @@ export class D1UserRepository implements UserRepository {
     const updated = await this.findById(userId);
     if (!updated) {
       throw new Error(`User ${userId} not found after visibility update`);
+    }
+    return updated;
+  }
+
+  async updateProfilePresentation(
+    userId: number,
+    banner: ProfileBannerType,
+    bioMarkdown: string,
+    updatedAt: string,
+  ): Promise<User> {
+    await this.db
+      .prepare(
+        `UPDATE users
+         SET profile_banner = ?, profile_bio_markdown = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .bind(banner, bioMarkdown, updatedAt, userId)
+      .run();
+
+    const updated = await this.findById(userId);
+    if (!updated) {
+      throw new Error(`User ${userId} not found after profile presentation update`);
     }
     return updated;
   }

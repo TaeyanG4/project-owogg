@@ -36,12 +36,14 @@ import {
 import {
   fetchMyStreamerProfileApi,
   fetchStreamerProvidersApi,
+  disconnectStreamerPlatformApi,
   streamerVerificationUrl,
 } from "../features/streamers/streamerApi";
 import {
   STREAMER_UI_PLATFORM_LABELS,
   STREAMER_UI_PLATFORMS,
 } from "../features/streamers/streamerPlatforms";
+import type { StreamerUiPlatform } from "../features/streamers/streamerPlatforms";
 import { fetchDevMe } from "../features/devApi";
 import { COUNTRY_OPTIONS } from "../lib/countries";
 import type {
@@ -105,6 +107,7 @@ export default function SettingsPage() {
   >(null);
 
   const [streamerProfile, setStreamerProfile] = useState<StreamerProfileDto | null>(null);
+  const [busyStreamerPlatform, setBusyStreamerPlatform] = useState<StreamerUiPlatform | null>(null);
   const [streamerProviders, setStreamerProviders] = useState<StreamerProvidersResponse>({
     YOUTUBE: {
       configured: false,
@@ -333,6 +336,26 @@ export default function SettingsPage() {
       }
     } finally {
       setBusyProvider(null);
+    }
+  };
+
+  const handleStreamerDisconnect = async (platform: StreamerUiPlatform) => {
+    if (busyStreamerPlatform) return;
+    if (!window.confirm(dict.profile.streamerUnlinkConfirm)) return;
+
+    setBusyStreamerPlatform(platform);
+    try {
+      await disconnectStreamerPlatformApi(platform);
+      await refreshStreamerProfile();
+      setStatusMessage(dict.profile.streamerUnlinkSuccess);
+    } catch (err: unknown) {
+      setStatusMessage(
+        err instanceof ApiClientError && err.detail
+          ? err.detail
+          : dict.profile.streamerUnlinkFailed,
+      );
+    } finally {
+      setBusyStreamerPlatform(null);
     }
   };
 
@@ -926,7 +949,7 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                <div className="w-full shrink-0 sm:w-auto">
+                <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row">
                   {!ownershipVerified && canConnect ? (
                     <a
                       href={streamerVerificationUrl(platform)}
@@ -935,11 +958,26 @@ export default function SettingsPage() {
                       <Video className="h-3.5 w-3.5" />
                       <span>{dict.profile.verifyChannelCta}</span>
                     </a>
-                  ) : !ownershipVerified ? (
+                  ) : !ownershipVerified && !platformAccount ? (
                     <div className="w-full rounded-xl border border-border bg-surface px-4 py-2 text-center text-xs font-bold text-text-muted sm:w-auto">
                       {unavailableLabel}
                     </div>
                   ) : null}
+                  {platformAccount && (
+                    <button
+                      type="button"
+                      onClick={() => void handleStreamerDisconnect(platform)}
+                      disabled={busyStreamerPlatform !== null}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-accent-red/30 bg-accent-red/10 px-4 py-2 text-xs font-bold text-accent-red transition-colors hover:bg-accent-red/20 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                    >
+                      {busyStreamerPlatform === platform ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Unlink className="h-3.5 w-3.5" />
+                      )}
+                      {dict.profile.unlinkButton}
+                    </button>
+                  )}
                 </div>
               </div>
             );

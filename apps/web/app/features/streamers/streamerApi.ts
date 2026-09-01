@@ -6,7 +6,9 @@ import {
   StreamerPlatformSchema,
   StreamerProfileDtoSchema,
   StreamerProvidersResponseSchema,
+  StreamerDisconnectResponseSchema,
   type StreamerPlatform,
+  type StreamerDisconnectResponse,
 } from "@owogg/contracts";
 
 export const StreamerRankingsResponseSchema = z.object({
@@ -54,4 +56,14 @@ export async function fetchStreamerProvidersApi() {
 
 export async function fetchMyStreamerProfileApi() {
   return apiFetch("/api/streamers/me", z.object({ profile: StreamerProfileDtoSchema.nullable() }));
+}
+
+export async function disconnectStreamerPlatformApi(
+  platform: StreamerPlatform,
+): Promise<StreamerDisconnectResponse> {
+  return apiFetch(
+    `/api/streamers/connections/${encodeURIComponent(platform.toLowerCase())}`,
+    StreamerDisconnectResponseSchema,
+    { method: "DELETE" },
+  );
 }

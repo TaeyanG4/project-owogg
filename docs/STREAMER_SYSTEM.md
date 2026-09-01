@@ -14,6 +14,10 @@ OwOGG에는 하나의 **Streamer** 상태만 존재합니다. 별도의 등급·
 - canonical 채널은 최초 연결 사용자의 심사·감사 이력에 고정하며 다른 사용자에게 조용히 재할당하지 않습니다.
 - 하나 이상의 플랫폼 계정이 승인되면 사용자 프로필은 Streamer입니다.
 - 다른 플랫폼의 승인·거절은 이미 승인된 플랫폼의 결정을 덮어쓰지 않습니다.
+- 사용자는 YouTube·CHZZK·Twitch 연결을 언제든 해제할 수 있고, `streamers.manage` 권한이 있는
+  관리자는 계정 소유자의 요청이나 운영상 필요에 따라 같은 연결을 해제할 수 있습니다.
+- 연결 해제는 과거 게임 점수·XP를 삭제하지 않습니다. 활성 플랫폼 연결이 하나도 남지 않으면 공개
+  Streamer 배지와 이후 현재 Streamer 랭킹 자격만 즉시 사라집니다.
 - 예약 실행 기반 심사는 현재 범위에서 동작하지 않습니다. 수동 흐름을 완성한 뒤 별도 요구사항과 실제
   provider 계약을 검토해 마지막 단계로 설계합니다.
 
@@ -95,6 +99,22 @@ OwOGG에는 하나의 **Streamer** 상태만 존재합니다. 별도의 등급·
   유지합니다.
 - 거절된 플랫폼의 OAuth를 다시 실행하는 것만으로는 새 심사를 만들지 않으며 정식 재심 흐름을 거칩니다.
 
+### 3.4 플랫폼 연결 해제와 재연결
+
+- 사용자 연결 해제 API는 인증된 자신의 `user_id`와 요청 platform을 함께 조건으로 사용합니다. 클라이언트가
+  platform account id나 다른 사용자 id를 제출해 타인의 연결을 끊는 방식은 제공하지 않습니다.
+- 관리자 연결 해제는 elevated admin session, trusted Origin, `streamers.manage`, 대상 account의 현재
+  `row_version`을 모두 확인합니다.
+- 삭제 전에 채널 identity, 소유권·승인 상태, 관련 심사 row를
+  `streamer_platform_connection_history`에 immutable snapshot으로 저장합니다. 관리자 작업은 기존
+  `streamer_admin_audit_log`에도 같은 correlation id로 남깁니다.
+- 활성 `streamer_platform_accounts` row와 그에 종속된 심사만 제거합니다. `scores`, `xp_events`, 일반
+  랭킹 이력은 이 작업의 mutation 범위가 아닙니다.
+- 남은 유효 승인 플랫폼이 있으면 사용자 Streamer 상태는 `VERIFIED`를 유지하고, 없으면
+  `UNVERIFIED`로 재계산합니다. 따라서 현재 Streamer 랭킹 query는 연결 해제 직후 해당 사용자를 제외합니다.
+- 활성 identity unique row가 제거되므로 같은 사용자는 이후 공식 OAuth를 다시 수행할 수 있습니다. 과거
+  승인은 자동 복원하지 않고 새 연결과 플랫폼별 수동 심사를 다시 거칩니다.
+
 ## 4. 정책
 
 정책값은 D1의 immutable version과 singleton active pointer로 관리합니다. JSX, API route, Cron 또는
@@ -152,14 +172,14 @@ OwOGG에는 하나의 **Streamer** 상태만 존재합니다. 별도의 등급·
 
 `/admin/streamers`는 다음 여섯 영역을 제공합니다.
 
-| 영역          | 기능                                                         |
-| ------------- | ------------------------------------------------------------ |
-| 운영 개요     | 상태 집계와 긴급 수동 심사 목록                              |
-| 스트리머 목록 | 사용자·플랫폼·승인 상태 검색, 상세, 정지·복구·소유권 관리    |
-| 심사 작업함   | 플랫폼별 작업, claim/release/hold, 지표 갱신, 승인·거절·재심 |
-| 정책 설정     | 수동 심사 기준과 운영시간 값 변경, version history           |
-| Provider 운영 | 연결 capability와 credential 상태, 신규 연결 pause/resume    |
-| 감사 이력     | 공개 사유와 내부 메모를 분리한 append-only 원장              |
+| 영역          | 기능                                                                |
+| ------------- | ------------------------------------------------------------------- |
+| 운영 개요     | 상태 집계와 긴급 수동 심사 목록                                     |
+| 스트리머 목록 | 사용자·플랫폼·승인 상태 검색, 상세, 연결 해제·정지·복구·소유권 관리 |
+| 심사 작업함   | 플랫폼별 작업, claim/release/hold, 지표 갱신, 승인·거절·재심        |
+| 정책 설정     | 수동 심사 기준과 운영시간 값 변경, version history                  |
+| Provider 운영 | 연결 capability와 credential 상태, 신규 연결 pause/resume           |
+| 감사 이력     | 공개 사유와 내부 메모를 분리한 append-only 원장                     |
 
 ### 6.1 Pagination
 
@@ -175,13 +195,13 @@ OwOGG에는 하나의 **Streamer** 상태만 존재합니다. 별도의 등급·
 
 ## 7. 권한
 
-| 권한                          | 허용 범위                                       |
-| ----------------------------- | ----------------------------------------------- |
-| `streamers.view`              | dashboard, 목록, 상세, 감사 읽기                |
-| `streamers.review`            | claim, hold, 지표 갱신, 플랫폼별 승인·거절·재심 |
-| `streamers.manage`            | 승인 철회, 소유권 무효화, 프로그램 정지·복구    |
-| `streamers.policy.manage`     | 수동 심사 정책 저장                             |
-| `streamers.operations.manage` | Provider 신규 연결 pause/resume                 |
+| 권한                          | 허용 범위                                               |
+| ----------------------------- | ------------------------------------------------------- |
+| `streamers.view`              | dashboard, 목록, 상세, 감사 읽기                        |
+| `streamers.review`            | claim, hold, 지표 갱신, 플랫폼별 승인·거절·재심         |
+| `streamers.manage`            | 연결 해제, 승인 철회, 소유권 무효화, 프로그램 정지·복구 |
+| `streamers.policy.manage`     | 수동 심사 정책 저장                                     |
+| `streamers.operations.manage` | Provider 신규 연결 pause/resume                         |
 
 `ADMIN`은 모든 권한을 가집니다. 초기 role policy는 `MODERATOR`에 view/review, `OPERATOR`에 다섯 권한을
 부여하며 `SYSTEM_DEVELOPER`에는 자동 부여하지 않습니다.
@@ -193,12 +213,16 @@ OwOGG에는 하나의 **Streamer** 상태만 존재합니다. 별도의 등급·
 - `POST /api/admin/streamers/actions`
   - typed action, target, reason, internal note, expected row version을 검증합니다.
   - mutation은 trusted Origin과 elevated admin session을 먼저 확인합니다.
+- `DELETE /api/streamers/connections/:platform`
+  - 로그인 사용자의 해당 YouTube·CHZZK·Twitch 활성 연결만 해제합니다.
+  - SOOP이나 알 수 없는 platform은 거부하며, 없는 연결은 `404`로 실패합니다.
 
 주요 action은 다음과 같습니다.
 
 - review: create, cancel, claim, release, hold, approve, reject, request reauth, refresh metrics,
   create reconsideration
-- platform/program: revoke approval, invalidate ownership, suspend, restore
+- platform/program: disconnect platform account, revoke approval, invalidate ownership, suspend,
+  restore
 - policy: save a new version
 - provider: pause/resume new connections
 
@@ -224,6 +248,8 @@ OwOGG에는 하나의 **Streamer** 상태만 존재합니다. 별도의 등급·
 - OAuth intent에는 raw state/session을 저장하지 않으며, 사용 완료 row는 재사용할 수 없습니다.
 - 새 관리 API의 유일한 작업·감사 원장은 `streamer_platform_reviews`와
   `streamer_admin_audit_log`입니다.
+- `0053`은 활성 연결에서 분리된 immutable `streamer_platform_connection_history`를 추가합니다. 이
+  snapshot identifier에는 FK를 두지 않아 계정 병합·삭제가 과거 증거를 수정하거나 지우지 않습니다.
 
 ## 11. 검증 Gate
 
@@ -318,6 +344,8 @@ callback은 provider 콘솔과 GitHub Variable에 정확히 같은 값을 등록
 - 재인증 시 기존 승인을 `PENDING`으로 되돌리고 `OWNERSHIP_REVERIFY` 심사를 별도로 생성하는 테스트 통과
 - SOOP legacy row의 관리자 count/pagination/action과 공개 프로필·랭킹 노출 차단 테스트 통과
 - 기간제 프로그램 중단 만료 후 상태·관리자 집계·공개/전용 랭킹 복구 및 재중단 테스트 통과
+- 본인·관리자 연결 해제가 심사 snapshot을 보존하고 점수를 삭제하지 않으며, 마지막 연결 해제 시 현재
+  Streamer 랭킹에서 제외되고 같은 canonical identity를 다시 연결할 수 있는 테스트 통과
 - 전체 `pnpm verify` 통과
 - 스트리머 인증 Wiki의 데스크톱·390px 모바일 렌더와 브라우저 오류 없음 확인
 

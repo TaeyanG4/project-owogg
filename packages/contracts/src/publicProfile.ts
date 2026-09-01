@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ProgressionSummarySchema, AchievementCodeSchema } from "./progression.js";
 import { StreamerPlatformSchema } from "./streamer.js";
 import { RecentPlaySchema } from "./personalization.js";
+import { ProfileBannerSchema } from "./profile.js";
 
 // Public-facing profile ("/users/:id"). A strict subset of what /api/profile/* and
 // /api/progression/* expose to the account owner — never includes email, linked-provider
@@ -42,6 +43,18 @@ export const PublicProfilePlayActivitySchema = z.object({
 });
 export type PublicProfilePlayActivity = z.infer<typeof PublicProfilePlayActivitySchema>;
 
+export const PublicProfileRoleSchema = z.enum(["ADMIN", "OPERATOR", "STREAMER"]);
+export type PublicProfileRole = z.infer<typeof PublicProfileRoleSchema>;
+
+export const PublicProfileContributionsSchema = z
+  .object({
+    bugAcceptedCount: z.number().int().nonnegative(),
+    createdGameCount: z.number().int().nonnegative(),
+    introducedExternalGameCount: z.number().int().nonnegative(),
+  })
+  .strict();
+export type PublicProfileContributions = z.infer<typeof PublicProfileContributionsSchema>;
+
 export const PublicProfileResponseSchema = z.object({
   id: z.number(),
   nickname: z.string(),
@@ -49,6 +62,14 @@ export const PublicProfileResponseSchema = z.object({
   /** Self-reported ISO 3166-1 alpha-2 code, or null if unset — same field as the private profile. */
   country: z.string().nullable(),
   joinedAt: z.string(),
+  banner: ProfileBannerSchema.default("AURORA"),
+  bioMarkdown: z.string().max(2000).default(""),
+  roles: z.array(PublicProfileRoleSchema).default([]),
+  contributions: PublicProfileContributionsSchema.default({
+    bugAcceptedCount: 0,
+    createdGameCount: 0,
+    introducedExternalGameCount: 0,
+  }),
   progression: ProgressionSummarySchema,
   globalRank: z.number().int().min(1).nullable(),
   currentStreak: z.number().int().min(0),

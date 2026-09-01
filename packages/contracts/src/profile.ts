@@ -9,6 +9,8 @@ export const ProfileErrorCodeSchema = z.enum([
   "INVALID_AVATAR_PROVIDER",
   "AVATAR_PROVIDER_NOT_LINKED",
   "AVATAR_UNAVAILABLE",
+  "INVALID_PROFILE_BANNER",
+  "INVALID_PROFILE_BIO",
   "USER_NOT_FOUND",
 ]);
 export type ProfileErrorCode = z.infer<typeof ProfileErrorCodeSchema>;
@@ -65,3 +67,31 @@ export const UpdateVisibilityResponseSchema = z.object({
   showRecentPlays: z.boolean(),
 });
 export type UpdateVisibilityResponse = z.infer<typeof UpdateVisibilityResponseSchema>;
+
+/** Predefined, code-owned profile banners. Custom uploads remain deliberately out of scope until
+ * a moderated media pipeline exists. */
+export const ProfileBannerSchema = z.enum(["AURORA", "SUNSET", "MIDNIGHT", "MINT"]);
+export type ProfileBanner = z.infer<typeof ProfileBannerSchema>;
+
+export const UpdateProfilePresentationRequestSchema = z
+  .object({
+    banner: ProfileBannerSchema,
+    /** CommonMark only. Raw HTML is never rendered by the Web client. */
+    bioMarkdown: z.string().max(2000),
+  })
+  .strict();
+export type UpdateProfilePresentationRequest = z.infer<
+  typeof UpdateProfilePresentationRequestSchema
+>;
+
+export const UpdateProfilePresentationResponseSchema = z
+  .object({
+    success: z.literal(true),
+    banner: ProfileBannerSchema,
+    bioMarkdown: z.string().max(2000),
+    updatedAt: z.string(),
+  })
+  .strict();
+export type UpdateProfilePresentationResponse = z.infer<
+  typeof UpdateProfilePresentationResponseSchema
+>;

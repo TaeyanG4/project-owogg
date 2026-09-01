@@ -4,6 +4,7 @@ import {
   UpdateNicknameRequestSchema,
   UpdateCountryRequestSchema,
   UpdateAvatarPreferenceRequestSchema,
+  UpdateProfilePresentationRequestSchema,
 } from "@owogg/contracts";
 import { COUNTRY_OPTIONS, countryLabel } from "../lib/countries.js";
 
@@ -33,6 +34,30 @@ describe("Profile settings (nickname/country) client contracts", () => {
       true,
     );
     assert.equal(UpdateAvatarPreferenceRequestSchema.safeParse({ provider: "url" }).success, false);
+  });
+
+  it("profile presentation accepts presets and caps the CommonMark biography", () => {
+    assert.equal(
+      UpdateProfilePresentationRequestSchema.safeParse({
+        banner: "SUNSET",
+        bioMarkdown: "## 소개",
+      }).success,
+      true,
+    );
+    assert.equal(
+      UpdateProfilePresentationRequestSchema.safeParse({
+        banner: "CUSTOM",
+        bioMarkdown: "not allowed",
+      }).success,
+      false,
+    );
+    assert.equal(
+      UpdateProfilePresentationRequestSchema.safeParse({
+        banner: "AURORA",
+        bioMarkdown: "x".repeat(2001),
+      }).success,
+      false,
+    );
   });
 
   it("COUNTRY_OPTIONS entries are unique two-letter codes with a Korean label", () => {

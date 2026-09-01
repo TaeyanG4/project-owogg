@@ -1,4 +1,4 @@
-import type { User, UserRepository } from "../ports/repositories.js";
+import type { ProfileBannerType, User, UserRepository } from "../ports/repositories.js";
 import {
   NICKNAME_COOLDOWN_DAYS,
   COUNTRY_COOLDOWN_DAYS,
@@ -33,6 +33,15 @@ export type UpdateAvatarPreferenceResult =
   | { ok: false; code: "USER_NOT_FOUND" }
   | { ok: false; code: "AVATAR_PROVIDER_NOT_LINKED" }
   | { ok: false; code: "AVATAR_UNAVAILABLE" };
+
+export type UpdateProfilePresentationResult =
+  | { ok: true; user: User }
+  | { ok: false; code: "USER_NOT_FOUND" }
+  | { ok: false; code: "INVALID_PROFILE_BANNER" }
+  | { ok: false; code: "INVALID_PROFILE_BIO" };
+
+const PROFILE_BANNERS = new Set<ProfileBannerType>(["AURORA", "SUNSET", "MIDNIGHT", "MINT"]);
+const PROFILE_BIO_MAX_LENGTH = 2000;
 
 export class ProfileUseCases {
   constructor(private userRepo: UserRepository) {}
@@ -129,6 +138,29 @@ export class ProfileUseCases {
       userId,
       showFavorites,
       showRecentPlays,
+      new Date().toISOString(),
+    );
+    return { ok: true, user: updated };
+  }
+
+  async updatePresentation(
+    userId: number,
+    banner: ProfileBannerType,
+    bioMarkdown: string,
+  ): Promise<UpdateProfilePresentationResult> {
+    const user = await this.userRepo.findById(userId);
+    if (!user) return { ok: false, code: "USER_NOT_FOUND" };
+    if (!PROFILE_BANNERS.has(banner)) {
+      return { ok: false, code: "INVALID_PROFILE_BANNER" };
+    }
+    if (bioMarkdown.length > PROFILE_BIO_MAX_LENGTH) {
+      return { ok: false, code: "INVALID_PROFILE_BIO" };
+    }
+
+    const updated = await this.userRepo.updateProfilePresentation(
+      userId,
+      banner,
+      bioMarkdown,
       new Date().toISOString(),
     );
     return { ok: true, user: updated };

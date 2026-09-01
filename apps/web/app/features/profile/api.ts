@@ -7,11 +7,15 @@ import {
   UpdateCountryResponseSchema,
   UpdateVisibilityRequestSchema,
   UpdateVisibilityResponseSchema,
+  UpdateProfilePresentationRequestSchema,
+  UpdateProfilePresentationResponseSchema,
   PublicProfileResponseSchema,
   type UpdateNicknameResponse,
   type UpdateAvatarPreferenceResponse,
   type UpdateCountryResponse,
   type UpdateVisibilityResponse,
+  type UpdateProfilePresentationResponse,
+  type ProfileBanner,
   type PublicProfileResponse,
 } from "@owogg/contracts";
 import { apiFetch } from "../../lib/api";
@@ -66,4 +70,15 @@ export async function fetchPublicProfileApi(
     `/api/profile/public/${encodeURIComponent(String(userId))}`,
     PublicProfileResponseSchema,
   );
+}
+
+export async function updateProfilePresentationApi(
+  banner: ProfileBanner,
+  bioMarkdown: string,
+): Promise<UpdateProfilePresentationResponse> {
+  const body = UpdateProfilePresentationRequestSchema.parse({ banner, bioMarkdown });
+  return apiFetch("/api/profile/presentation", UpdateProfilePresentationResponseSchema, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
 }

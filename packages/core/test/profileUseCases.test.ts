@@ -87,6 +87,24 @@ class FakeUserRepository implements UserRepository {
     this.users.set(userId, updated);
     return updated;
   }
+
+  async updateProfilePresentation(
+    userId: number,
+    banner: Parameters<UserRepository["updateProfilePresentation"]>[1],
+    bioMarkdown: string,
+    updatedAt: string,
+  ): Promise<User> {
+    const user = this.users.get(userId);
+    if (!user) throw new Error("user not found");
+    const updated: User = {
+      ...user,
+      profile_banner: banner,
+      profile_bio_markdown: bioMarkdown,
+      updated_at: updatedAt,
+    };
+    this.users.set(userId, updated);
+    return updated;
+  }
 }
 
 function baseUser(overrides: Partial<User> = {}): User {
@@ -322,4 +340,43 @@ test("updateVisibility reports USER_NOT_FOUND for a missing user", async () => {
   const result = await useCases.updateVisibility(999, true, true);
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.code, "USER_NOT_FOUND");
+});
+
+test("updatePresentation saves a predefined banner and CommonMark biography", async () => {
+  const repo = new FakeUserRepository();
+  repo.seed(baseUser());
+
+  const result = await new ProfileUseCases(repo).updatePresentation(
+    1,
+    "MIDNIGHT",
+    "## 소개\n\n게임을 만드는 스트리머입니다.",
+  );
+
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.user.profile_banner, "MIDNIGHT");
+    assert.equal(result.user.profile_bio_markdown, "## 소개\n\n게임을 만드는 스트리머입니다.");
+  }
+});
+
+test("updatePresentation rejects an unsupported banner without changing the user", async () => {
+  const repo = new FakeUserRepository();
+  repo.seed(baseUser({ profile_banner: "AURORA" }));
+
+  const result = await new ProfileUseCases(repo).updatePresentation(
+    1,
+    "CUSTOM" as never,
+    "not saved",
+  );
+
+  assert.deepEqual(result, { ok: false, code: "INVALID_PROFILE_BANNER" });
+  assert.equal(repo.users.get(1)?.profile_banner, "AURORA");
+});
+
+test("updatePresentation rejects a biography longer than 2,000 characters", async () => {
+  const repo = new FakeUserRepository();
+  repo.seed(baseUser());
+
+  const result = await new ProfileUseCases(repo).updatePresentation(1, "MINT", "x".repeat(2001));
+  assert.deepEqual(result, { ok: false, code: "INVALID_PROFILE_BIO" });
 });

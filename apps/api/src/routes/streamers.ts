@@ -3,7 +3,12 @@ import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
 import { createContainer } from "../container.js";
 import type { ApiEnv } from "./auth.js";
-import { StreamerRankingQuerySchema, type StreamerPlatform } from "@owogg/contracts";
+import {
+  StreamerDisconnectResponseSchema,
+  StreamerPlatformSchema,
+  StreamerRankingQuerySchema,
+  type StreamerPlatform,
+} from "@owogg/contracts";
 import type { StreamerPlatformType } from "@owogg/core";
 import { getStreamerProviderAdapters } from "../infrastructure/streamers/index.js";
 import { readB2Config } from "./devGames.js";
@@ -155,6 +160,43 @@ streamersRouter.get("/me", async (c) => {
         }
       : null,
   });
+});
+
+// DELETE /api/streamers/connections/:platform — release the current user's active provider
+// identity. The repository snapshots ownership/review history and never touches `scores`, while
+// current Streamer ranking eligibility disappears as soon as the last approved connection is
+// gone.
+streamersRouter.delete("/connections/:platform", async (c) => {
+  const auth = await requireAuth(c);
+  if (!auth) {
+    return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required" } }, 401);
+  }
+
+  const parsedPlatform = StreamerPlatformSchema.safeParse(c.req.param("platform").toUpperCase());
+  if (!parsedPlatform.success || parsedPlatform.data === "SOOP") {
+    return c.json(
+      { error: { code: "INVALID_PLATFORM", message: "지원하지 않는 스트리머 플랫폼입니다." } },
+      400,
+    );
+  }
+
+  const { streamerUseCases } = createContainer(c.env.DB);
+  const result = await streamerUseCases.disconnectPlatform(auth.userId, parsedPlatform.data);
+  if (!result.ok) {
+    return c.json(
+      { error: { code: result.code, message: "연결된 스트리머 채널을 찾을 수 없습니다." } },
+      result.code === "CONNECTION_NOT_FOUND" ? 404 : 400,
+    );
+  }
+
+  return c.json(
+    StreamerDisconnectResponseSchema.parse({
+      disconnected: true,
+      platform: parsedPlatform.data,
+      remainingConnections: result.remainingConnections,
+    }),
+    200,
+  );
 });
 
 // GET /api/streamers/verify/:platform — initiate OAuth ownership verification

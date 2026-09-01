@@ -87,6 +87,39 @@ class MockStreamerRepo implements StreamerRepository {
     return this.platformAccounts[idx];
   }
 
+  async disconnectPlatformAccount(
+    input: Parameters<StreamerRepository["disconnectPlatformAccount"]>[0],
+  ): Promise<boolean> {
+    const profile = Array.from(this.profiles.values()).find((item) => item.userId === input.userId);
+    if (!profile) return false;
+    const accountIndex = this.platformAccounts.findIndex(
+      (item) => item.streamerId === profile.id && item.platform === input.platform,
+    );
+    if (accountIndex < 0) return false;
+
+    this.platformAccounts.splice(accountIndex, 1);
+    const nowMs = Date.parse(input.nowIso);
+    const hasCurrentApproval = this.platformAccounts.some(
+      (item) =>
+        item.streamerId === profile.id &&
+        item.verificationStatus === "VERIFIED" &&
+        item.approvalStatus === "APPROVED" &&
+        Boolean(item.ownershipExpiresAt && Date.parse(item.ownershipExpiresAt) > nowMs),
+    );
+    this.profiles.set(profile.id, {
+      ...profile,
+      status:
+        profile.status === "SUSPENDED"
+          ? "SUSPENDED"
+          : hasCurrentApproval
+            ? "VERIFIED"
+            : "UNVERIFIED",
+      rowVersion: profile.rowVersion + 1,
+      updatedAt: input.nowIso,
+    });
+    return true;
+  }
+
   async upsertProfile(input: {
     userId: number;
     status: StreamerStatusType;
@@ -481,4 +514,64 @@ test("Phase D Streamer Domain & Ranking Invariants", async (t) => {
     assert.equal(repo.lastRankingOptions?.rulesetRevision, 7);
     assert.equal(repo.lastRankingOptions?.direction, "asc");
   });
+
+  await t.test(
+    "8. Disconnecting the final channel preserves scores but removes ranking eligibility",
+    async () => {
+      const profile = await repo.upsertProfile({ userId: 2, status: "VERIFIED" });
+      await repo.addPlatformAccount({
+        streamerId: profile.id,
+        platform: "YOUTUBE",
+        platformUserId: "yt_disconnect",
+        channelName: "Disconnect channel",
+        channelUrl: "https://youtube.com/@disconnect",
+      });
+      const scoreSnapshot = structuredClone(repo.scores);
+
+      const before = await useCases.getStreamerRankings({ mode: "score", gameId: "aim-test" });
+      assert.equal(before.total, 1);
+
+      const disconnected = await useCases.disconnectPlatform(
+        2,
+        "YOUTUBE",
+        new Date("2026-09-01T00:00:00.000Z"),
+        "self-disconnect",
+      );
+      assert.deepEqual(disconnected, { ok: true, remainingConnections: 0 });
+      assert.deepEqual(repo.scores, scoreSnapshot);
+
+      const after = await useCases.getStreamerRankings({ mode: "score", gameId: "aim-test" });
+      assert.equal(after.total, 0);
+      assert.equal((await repo.findProfileByUserId(2))?.status, "UNVERIFIED");
+    },
+  );
+
+  await t.test(
+    "9. Disconnecting one of two channels keeps the other channel eligible",
+    async () => {
+      const profile = await repo.upsertProfile({ userId: 3, status: "VERIFIED" });
+      for (const [platform, id] of [
+        ["YOUTUBE", "yt_multi"],
+        ["TWITCH", "tw_multi"],
+      ] as const) {
+        await repo.addPlatformAccount({
+          streamerId: profile.id,
+          platform,
+          platformUserId: id,
+          channelName: `${platform} multi channel`,
+          channelUrl: `https://example.com/${id}`,
+        });
+      }
+
+      const disconnected = await useCases.disconnectPlatform(
+        3,
+        "YOUTUBE",
+        new Date("2026-09-01T00:00:00.000Z"),
+        "partial-disconnect",
+      );
+      assert.deepEqual(disconnected, { ok: true, remainingConnections: 1 });
+      assert.equal((await repo.findProfileByUserId(3))?.status, "VERIFIED");
+      assert.equal((await useCases.getStreamerRankings({ mode: "score" })).total, 1);
+    },
+  );
 });

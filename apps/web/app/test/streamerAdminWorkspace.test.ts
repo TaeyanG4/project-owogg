@@ -95,6 +95,14 @@ test("review, management, policy, and provider actions keep separate permissions
   assert.equal(canPerformStreamerAdminAction(["streamers.review"], "APPROVE_STREAMER"), true);
   assert.equal(canPerformStreamerAdminAction(["streamers.review"], "SUSPEND_STREAMER"), false);
   assert.equal(canPerformStreamerAdminAction(["streamers.manage"], "SUSPEND_STREAMER"), true);
+  assert.equal(
+    canPerformStreamerAdminAction(["streamers.manage"], "DISCONNECT_PLATFORM_ACCOUNT"),
+    true,
+  );
+  assert.equal(
+    canPerformStreamerAdminAction(["streamers.review"], "DISCONNECT_PLATFORM_ACCOUNT"),
+    false,
+  );
   assert.equal(canPerformStreamerAdminAction(["streamers.policy.manage"], "SAVE_POLICY"), true);
   assert.equal(
     canPerformStreamerAdminAction(["streamers.operations.manage"], "PAUSE_PROVIDER_CONNECTIONS"),

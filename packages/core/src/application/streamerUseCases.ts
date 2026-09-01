@@ -14,6 +14,7 @@ import type { PublicGameCatalog } from "./publicGameCatalog.js";
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
+const MANAGED_STREAMER_PLATFORMS = new Set<StreamerPlatformType>(["YOUTUBE", "CHZZK", "TWITCH"]);
 
 function channelAgeDays(channelCreatedAt: string | null, nowMs: number): number | null {
   if (!channelCreatedAt) return null;
@@ -157,6 +158,40 @@ export class StreamerUseCases {
     userId: number,
   ): Promise<(StreamerProfile & { platformAccounts: StreamerPlatformAccount[] }) | null> {
     return this.streamerRepo.findProfileByUserId(userId);
+  }
+
+  async disconnectPlatform(
+    userId: number,
+    platform: StreamerPlatformType,
+    now = new Date(),
+    correlationId = crypto.randomUUID(),
+  ): Promise<
+    | { ok: true; remainingConnections: number }
+    | { ok: false; code: "INVALID_PLATFORM" | "CONNECTION_NOT_FOUND" }
+  > {
+    if (!MANAGED_STREAMER_PLATFORMS.has(platform)) {
+      return { ok: false, code: "INVALID_PLATFORM" };
+    }
+
+    const disconnected = await this.streamerRepo.disconnectPlatformAccount({
+      userId,
+      platform,
+      actorUserId: userId,
+      actorType: "SELF",
+      reason: "USER_REQUEST",
+      correlationId,
+      nowIso: now.toISOString(),
+    });
+    if (!disconnected) return { ok: false, code: "CONNECTION_NOT_FOUND" };
+
+    const current = await this.streamerRepo.findProfileByUserId(userId);
+    return {
+      ok: true,
+      remainingConnections:
+        current?.platformAccounts.filter((account) =>
+          MANAGED_STREAMER_PLATFORMS.has(account.platform),
+        ).length ?? 0,
+    };
   }
 
   async verifyChannelOwnership(

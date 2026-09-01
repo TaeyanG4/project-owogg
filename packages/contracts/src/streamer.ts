@@ -75,6 +75,15 @@ export const StreamerProfileDtoSchema = z.object({
 });
 export type StreamerProfileDto = z.infer<typeof StreamerProfileDtoSchema>;
 
+export const StreamerDisconnectResponseSchema = z
+  .object({
+    disconnected: z.literal(true),
+    platform: StreamerPlatformSchema,
+    remainingConnections: z.number().int().nonnegative(),
+  })
+  .strict();
+export type StreamerDisconnectResponse = z.infer<typeof StreamerDisconnectResponseSchema>;
+
 export const StreamerRankEntrySchema = z.object({
   userId: z.number(),
   nickname: z.string(),

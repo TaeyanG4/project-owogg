@@ -281,6 +281,9 @@ export interface Dictionary {
     streamerApprovalHint: string;
     streamerVerifyPaused: string;
     streamerVerifyDeferred: string;
+    streamerUnlinkConfirm: string;
+    streamerUnlinkSuccess: string;
+    streamerUnlinkFailed: string;
     achievedSuffix: string;
     myGameRecordsTitle: string;
     challengeSuffix: string;
@@ -1108,6 +1111,7 @@ export interface Dictionary {
     joinedPrefix: string;
     levelLabel: string;
     globalRankPrefix: string;
+    globalRankLabel: string;
     streakLabel: string;
     streakDaysSuffix: string;
     longestStreakPrefix: string;
@@ -1138,6 +1142,28 @@ export interface Dictionary {
      * section isn't part of what visitors get. */
     onlyVisibleToYou: string;
     settingsCta: string;
+    editProfileCta: string;
+    avatarSettingsCta: string;
+    editProfileTitle: string;
+    editProfileHint: string;
+    bannerLabel: string;
+    bannerAurora: string;
+    bannerSunset: string;
+    bannerMidnight: string;
+    bannerMint: string;
+    bioLabel: string;
+    bioPlaceholder: string;
+    bioTitle: string;
+    bioEmptyOwner: string;
+    bioEmptyViewer: string;
+    presentationUpdateFailed: string;
+    contributionsTitle: string;
+    bugContributionsLabel: string;
+    createdGamesLabel: string;
+    introducedGamesLabel: string;
+    roleAdmin: string;
+    roleOperator: string;
+    roleStreamer: string;
   };
   /** Header icon that lists PUBLIC-visibility registered Discord servers (lives next to
    * favorites/language selector) — fetched lazily on first open, not on every page load. */
@@ -1455,6 +1481,10 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       streamerVerifyPaused: "운영자가 이 플랫폼의 신규 채널 연결을 일시 중지했습니다.",
       streamerVerifyDeferred:
         "안전한 플랫폼 OAuth 연동을 지원할 때까지 이 플랫폼 인증은 보류됩니다.",
+      streamerUnlinkConfirm:
+        "이 스트리머 채널 연결을 해제할까요? 기존 게임 기록은 유지되지만 다시 연결하기 전까지 스트리머 랭킹에는 집계되지 않습니다.",
+      streamerUnlinkSuccess: "스트리머 채널 연결을 해제했습니다.",
+      streamerUnlinkFailed: "스트리머 채널 연결을 해제하지 못했습니다.",
       achievedSuffix: "달성",
       myGameRecordsTitle: "내 게임별 최고 기록",
       challengeSuffix: "도전",
@@ -2415,6 +2445,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       joinedPrefix: "가입일",
       levelLabel: "레벨",
       globalRankPrefix: "전체 XP 랭킹 #",
+      globalRankLabel: "전체 XP 순위",
       streakLabel: "연속 출석",
       streakDaysSuffix: "일째",
       longestStreakPrefix: "최고 기록",
@@ -2443,6 +2474,29 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       itemsCountSuffix: "개",
       onlyVisibleToYou: "나만 보기",
       settingsCta: "설정에서 변경",
+      editProfileCta: "프로필 편집",
+      avatarSettingsCta: "프로필 사진 및 계정 설정",
+      editProfileTitle: "프로필 표시 설정",
+      editProfileHint:
+        "준비된 배너 중 하나를 고르고 CommonMark 문법으로 자기소개를 작성할 수 있습니다.",
+      bannerLabel: "프로필 배너",
+      bannerAurora: "오로라",
+      bannerSunset: "선셋",
+      bannerMidnight: "미드나이트",
+      bannerMint: "민트",
+      bioLabel: "자기소개 (Markdown)",
+      bioPlaceholder: "게임, 관심사, 활동을 소개해보세요.",
+      bioTitle: "자기소개",
+      bioEmptyOwner: "프로필 편집에서 자기소개를 작성해보세요.",
+      bioEmptyViewer: "아직 작성된 자기소개가 없습니다.",
+      presentationUpdateFailed: "프로필 표시 정보를 저장하지 못했습니다.",
+      contributionsTitle: "기여 및 제작",
+      bugContributionsLabel: "승인된 버그 기여",
+      createdGamesLabel: "공개 제작 게임",
+      introducedGamesLabel: "소개한 타 플랫폼 게임",
+      roleAdmin: "관리자",
+      roleOperator: "운영자",
+      roleStreamer: "스트리머",
     },
     registeredServers: {
       ariaLabel: "등록된 Discord 서버",
@@ -2758,6 +2812,10 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       streamerVerifyPaused: "New channel connections for this platform are temporarily paused.",
       streamerVerifyDeferred:
         "Verification is deferred until this platform supports a securely bound OAuth flow.",
+      streamerUnlinkConfirm:
+        "Unlink this streamer channel? Existing game records remain, but it will not count toward Streamer rankings until reconnected.",
+      streamerUnlinkSuccess: "The streamer channel has been unlinked.",
+      streamerUnlinkFailed: "Failed to unlink the streamer channel.",
       achievedSuffix: "unlocked",
       myGameRecordsTitle: "My Best Records by Game",
       challengeSuffix: "attempted",
@@ -3741,6 +3799,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       joinedPrefix: "Joined",
       levelLabel: "Level",
       globalRankPrefix: "Global XP Rank #",
+      globalRankLabel: "Global XP rank",
       streakLabel: "Current streak",
       streakDaysSuffix: " days",
       longestStreakPrefix: "Best",
@@ -3769,6 +3828,28 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       itemsCountSuffix: "",
       onlyVisibleToYou: "Only you",
       settingsCta: "Change in settings",
+      editProfileCta: "Edit profile",
+      avatarSettingsCta: "Profile picture & account settings",
+      editProfileTitle: "Profile appearance",
+      editProfileHint: "Choose one of the prepared banners and write a biography using CommonMark.",
+      bannerLabel: "Profile banner",
+      bannerAurora: "Aurora",
+      bannerSunset: "Sunset",
+      bannerMidnight: "Midnight",
+      bannerMint: "Mint",
+      bioLabel: "Bio (Markdown)",
+      bioPlaceholder: "Share your games, interests, and activity.",
+      bioTitle: "About",
+      bioEmptyOwner: "Use Edit profile to add a bio.",
+      bioEmptyViewer: "This user hasn't added a bio yet.",
+      presentationUpdateFailed: "Couldn't save the profile appearance.",
+      contributionsTitle: "Contributions & creations",
+      bugContributionsLabel: "Accepted bug contributions",
+      createdGamesLabel: "Published games",
+      introducedGamesLabel: "Introduced external games",
+      roleAdmin: "Admin",
+      roleOperator: "Operator",
+      roleStreamer: "Streamer",
     },
     registeredServers: {
       ariaLabel: "Registered Discord servers",
@@ -4087,6 +4168,10 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       streamerVerifyPaused: "このプラットフォームの新規チャンネル連携は一時停止中です。",
       streamerVerifyDeferred:
         "安全に関連付けられるOAuthフローが提供されるまで、このプラットフォームの認証は保留です。",
+      streamerUnlinkConfirm:
+        "このストリーマーチャンネルの連携を解除しますか？既存のゲーム記録は残りますが、再連携するまでストリーマーランキングには集計されません。",
+      streamerUnlinkSuccess: "ストリーマーチャンネルの連携を解除しました。",
+      streamerUnlinkFailed: "ストリーマーチャンネルの連携を解除できませんでした。",
       achievedSuffix: "達成",
       myGameRecordsTitle: "自分のゲーム別最高記録",
       challengeSuffix: "挑戦",
@@ -5065,6 +5150,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       joinedPrefix: "登録日",
       levelLabel: "レベル",
       globalRankPrefix: "全体XPランキング #",
+      globalRankLabel: "全体XP順位",
       streakLabel: "連続ログイン",
       streakDaysSuffix: "日目",
       longestStreakPrefix: "最高記録",
@@ -5093,6 +5179,28 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       itemsCountSuffix: "件",
       onlyVisibleToYou: "自分のみ",
       settingsCta: "設定で変更",
+      editProfileCta: "プロフィールを編集",
+      avatarSettingsCta: "プロフィール画像・アカウント設定",
+      editProfileTitle: "プロフィール表示設定",
+      editProfileHint: "用意されたバナーから選択し、CommonMarkで自己紹介を作成できます。",
+      bannerLabel: "プロフィールバナー",
+      bannerAurora: "オーロラ",
+      bannerSunset: "サンセット",
+      bannerMidnight: "ミッドナイト",
+      bannerMint: "ミント",
+      bioLabel: "自己紹介（Markdown）",
+      bioPlaceholder: "ゲーム、興味、活動について紹介しましょう。",
+      bioTitle: "自己紹介",
+      bioEmptyOwner: "プロフィール編集から自己紹介を追加できます。",
+      bioEmptyViewer: "まだ自己紹介がありません。",
+      presentationUpdateFailed: "プロフィール表示情報を保存できませんでした。",
+      contributionsTitle: "貢献と制作",
+      bugContributionsLabel: "承認済みバグ貢献",
+      createdGamesLabel: "公開したゲーム",
+      introducedGamesLabel: "紹介した外部ゲーム",
+      roleAdmin: "管理者",
+      roleOperator: "運営者",
+      roleStreamer: "ストリーマー",
     },
     registeredServers: {
       ariaLabel: "登録済みDiscordサーバー",
@@ -5404,6 +5512,10 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         "所有批准对象统一称为主播。连接多个平台时，每个平台都会按相同标准单独审核。",
       streamerVerifyPaused: "该平台的新频道连接已暂时停止。",
       streamerVerifyDeferred: "在该平台支持可安全绑定的 OAuth 流程之前，认证将暂缓。",
+      streamerUnlinkConfirm:
+        "要解除该主播频道的关联吗？已有游戏记录会保留，但重新关联前不会计入主播排行榜。",
+      streamerUnlinkSuccess: "已解除主播频道关联。",
+      streamerUnlinkFailed: "无法解除主播频道关联。",
       achievedSuffix: "已达成",
       myGameRecordsTitle: "我的各游戏最高记录",
       challengeSuffix: "已挑战",
@@ -6334,6 +6446,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       joinedPrefix: "加入日期",
       levelLabel: "等级",
       globalRankPrefix: "全站经验排名 #",
+      globalRankLabel: "全站经验排名",
       streakLabel: "连续登录",
       streakDaysSuffix: "天",
       longestStreakPrefix: "最高纪录",
@@ -6362,6 +6475,28 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       itemsCountSuffix: "个",
       onlyVisibleToYou: "仅自己可见",
       settingsCta: "在设置中修改",
+      editProfileCta: "编辑资料",
+      avatarSettingsCta: "头像与账户设置",
+      editProfileTitle: "个人资料显示设置",
+      editProfileHint: "从预设横幅中选择一个，并使用 CommonMark 编写自我介绍。",
+      bannerLabel: "个人资料横幅",
+      bannerAurora: "极光",
+      bannerSunset: "日落",
+      bannerMidnight: "午夜",
+      bannerMint: "薄荷",
+      bioLabel: "自我介绍（Markdown）",
+      bioPlaceholder: "介绍你的游戏、兴趣和活动。",
+      bioTitle: "自我介绍",
+      bioEmptyOwner: "可通过编辑资料添加自我介绍。",
+      bioEmptyViewer: "该用户尚未填写自我介绍。",
+      presentationUpdateFailed: "无法保存个人资料显示信息。",
+      contributionsTitle: "贡献与创作",
+      bugContributionsLabel: "已采纳的错误贡献",
+      createdGamesLabel: "已公开制作游戏",
+      introducedGamesLabel: "已介绍的外部游戏",
+      roleAdmin: "管理员",
+      roleOperator: "运营者",
+      roleStreamer: "主播",
     },
     registeredServers: {
       ariaLabel: "已注册的 Discord 服务器",
