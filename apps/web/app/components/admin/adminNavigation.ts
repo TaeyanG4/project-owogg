@@ -38,6 +38,7 @@ export const ADMIN_NAVIGATION_GROUPS: AdminNavigationGroup[] = [
         label: "대시보드",
         description: "운영 현황과 주요 작업 요약",
         path: "/admin",
+        elevatedOnly: true,
       },
     ],
   },

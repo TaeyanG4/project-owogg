@@ -108,13 +108,15 @@ export function Header({ onToggleMobileSidebar, isAdminWorkspace = false }: Head
       <div className="flex h-16 w-full items-center justify-between gap-2 px-3 sm:gap-4 sm:px-4">
         {/* Left: Mobile Toggle & Brand Logo */}
         <div className="flex items-center gap-2 sm:gap-3">
-          <button
-            className="cursor-pointer rounded-xl p-2 text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-primary lg:hidden"
-            onClick={onToggleMobileSidebar}
-            aria-label={dict.sidebar.openMenuAria}
-          >
-            <Menu className="w-6 h-6" />
-          </button>
+          {!isAdminWorkspace && (
+            <button
+              className="cursor-pointer rounded-xl p-2 text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-primary lg:hidden"
+              onClick={onToggleMobileSidebar}
+              aria-label={dict.sidebar.openMenuAria}
+            >
+              <Menu className="w-6 h-6" />
+            </button>
+          )}
 
           <Link to="/" className="flex items-center gap-2 group">
             <OwoWordmarkIcon className="h-9 w-9 transition-transform duration-200 group-hover:scale-105" />
@@ -130,9 +132,11 @@ export function Header({ onToggleMobileSidebar, isAdminWorkspace = false }: Head
         {/* Center: Search Bar */}
         {isAdminWorkspace ? (
           <div className="hidden flex-1 items-center sm:flex">
-            <span className="inline-flex items-center gap-2 rounded-full border border-brand/25 bg-brand/10 px-3 py-1.5 text-xs font-black text-brand-light">
-              <ShieldCheck className="h-3.5 w-3.5" /> 관리자 워크스페이스
-            </span>
+            {staffCenter && (
+              <span className="inline-flex items-center gap-2 rounded-full border border-brand/25 bg-brand/10 px-3 py-1.5 text-xs font-black text-brand-light">
+                <ShieldCheck className="h-3.5 w-3.5" /> 관리자 워크스페이스
+              </span>
+            )}
           </div>
         ) : (
           <form

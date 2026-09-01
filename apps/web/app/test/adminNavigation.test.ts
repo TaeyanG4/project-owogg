@@ -56,11 +56,11 @@ test("any Streamer workspace permission exposes the unified management entry", (
   }
 });
 
-test("non-elevated visitors only see the dashboard entry", () => {
+test("non-elevated visitors see no administrator navigation", () => {
   const ids = flattenIds(
     getVisibleAdminNavigation({ elevated: false, role: null, permissions: [] }),
   );
-  assert.deepEqual(ids, ["dashboard"]);
+  assert.deepEqual(ids, []);
 });
 
 test("admin navigation search matches labels and descriptions", () => {
@@ -76,7 +76,7 @@ test("legacy sandbox route resolves to the unified games navigation entry", () =
   assert.equal(item ? isAdminNavigationItemActive(item, "/admin/sandbox-games/42") : false, true);
 });
 
-test("admin routes keep the service sidebar and use a separate mobile admin drawer", () => {
+test("admin routes replace the service sidebar with the isolated admin workspace", () => {
   const layout = readFileSync(
     fileURLToPath(new URL("../components/layout/Layout.tsx", import.meta.url)),
     "utf8",
@@ -85,13 +85,29 @@ test("admin routes keep the service sidebar and use a separate mobile admin draw
     fileURLToPath(new URL("../components/admin/AdminWorkspace.tsx", import.meta.url)),
     "utf8",
   );
+  const header = readFileSync(
+    fileURLToPath(new URL("../components/layout/Header.tsx", import.meta.url)),
+    "utf8",
+  );
 
-  const serviceSidebarIndex = layout.indexOf("<Sidebar");
   const adminConditionalIndex = layout.indexOf("{isAdminWorkspace ? (");
-  assert.ok(serviceSidebarIndex > -1 && serviceSidebarIndex < adminConditionalIndex);
+  const adminWorkspaceIndex = layout.indexOf("<AdminWorkspace", adminConditionalIndex);
+  const serviceSidebarIndex = layout.indexOf("<Sidebar", adminWorkspaceIndex);
+  assert.ok(adminConditionalIndex > -1);
+  assert.ok(adminWorkspaceIndex > adminConditionalIndex);
+  assert.ok(serviceSidebarIndex > adminWorkspaceIndex);
   assert.match(layout, /isMobileAdminSidebarOpen/);
   assert.doesNotMatch(layout, /reserveExpandedWidth/);
+  assert.match(workspace, /if \(stage !== "ready"\)/);
+  assert.match(workspace, /<Navigate to="\/admin" replace \/>/);
+  assert.match(workspace, /data-admin-access-stage="loading"/);
+  assert.match(workspace, /setStage\("loading"\);\s+setRole\(null\);\s+setPermissions\(\[\]\);/);
   assert.match(workspace, /aria-label="관리자 메뉴 열기"/);
+  assert.match(header, /\{!isAdminWorkspace && \(\s*<button/);
+  assert.match(
+    header,
+    /\{staffCenter && \(\s*<span[^>]*>\s*<ShieldCheck[^>]*\/> 관리자 워크스페이스/,
+  );
 });
 
 test("admin workspace places the service return link at the top of its navigation", () => {

@@ -198,6 +198,31 @@ test("DELETE /api/admin/games/:slug requires an elevated admin session", async (
   assert.equal(response.status, 401);
 });
 
+test("GET /api/admin/games exposes no catalog to guests or ordinary login sessions", async () => {
+  const guest = createAdminDb({ userId: 1 });
+  const guestResponse = await app.request("/api/admin/games", {}, {
+    DB: guest.db,
+    ADMIN_USER_IDS: "1",
+  } as any);
+  assert.equal(guestResponse.status, 401);
+  assert.equal(guest.queriedGames.length, 0);
+
+  const ordinaryLogin = createAdminDb({ userId: 1 });
+  const ordinaryLoginResponse = await app.request(
+    "/api/admin/games",
+    { headers: { Cookie: `owogg_session=${OWOGG_SESSION_RAW_TOKEN}` } },
+    { DB: ordinaryLogin.db, ADMIN_USER_IDS: "1" } as any,
+  );
+  assert.equal(ordinaryLoginResponse.status, 403);
+  assert.deepEqual(await ordinaryLoginResponse.json(), {
+    error: {
+      code: "ADMIN_SESSION_REQUIRED",
+      message: "관리자 로그인이 필요합니다.",
+    },
+  });
+  assert.equal(ordinaryLogin.queriedGames.length, 0);
+});
+
 test("official hard delete requires both games.moderate and sandbox_games.delete", async () => {
   const { db, queriedGames } = createAdminDb({
     userId: 7,

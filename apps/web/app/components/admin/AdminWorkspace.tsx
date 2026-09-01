@@ -6,7 +6,7 @@ import {
   type ComponentType,
   type ReactNode,
 } from "react";
-import { Link, useLocation } from "react-router";
+import { Link, Navigate, useLocation } from "react-router";
 import {
   Activity,
   ArrowLeft,
@@ -29,6 +29,7 @@ import { ADMIN_SESSION_CHANGED_EVENT, fetchAdminMe } from "../../features/adminA
 import { fetchMyAccess } from "../../features/myAccess";
 import {
   findAdminNavigationItem,
+  canAccessAdminNavigationItem,
   getVisibleAdminNavigation,
   isAdminNavigationItemActive,
   type AdminNavigationItem,
@@ -85,7 +86,12 @@ export function AdminWorkspace({
       return;
     }
 
-    setStage((current) => (current === "ready" ? current : "loading"));
+    // Revalidation is fail-closed. Keeping the previous ready state during focus, reconnect, or
+    // an admin-session change would leave protected route components mounted while the server is
+    // still deciding whether that elevated session remains valid.
+    setStage("loading");
+    setRole(null);
+    setPermissions([]);
     try {
       const me = await fetchAdminMe();
       setRole(me.role);
@@ -139,6 +145,36 @@ export function AdminWorkspace({
   const groups = useMemo(() => getVisibleAdminNavigation(access, query), [access, query]);
   const currentItem = findAdminNavigationItem(location.pathname);
   const sessionLabel = getSessionLabel(stage, role);
+
+  // Never mount a protected admin route until the elevated session has been verified. Route
+  // components start their own data requests in effects, so merely hiding their visual output
+  // would still let unauthorized visitors instantiate management screens. The /admin landing
+  // route is the sole exception because it owns the ordinary-login, eligibility, and step-up UI.
+  if (stage !== "ready") {
+    if (location.pathname !== "/admin" && location.pathname !== "/admin/") {
+      if (stage !== "loading") return <Navigate to="/admin" replace />;
+      return (
+        <main
+          data-admin-access-stage="loading"
+          className="grid min-w-0 flex-1 place-items-center bg-surface px-4 py-24"
+        >
+          <p className="text-sm font-bold text-text-muted">접근 권한을 확인하는 중...</p>
+        </main>
+      );
+    }
+
+    return (
+      <main data-admin-access-stage={stage} className="min-w-0 flex-1 bg-surface">
+        {children}
+      </main>
+    );
+  }
+
+  // An elevated staff session does not imply permission for every workspace. Direct URLs are
+  // filtered with the same registry used by the navigation, before their route component mounts.
+  if (currentItem && !canAccessAdminNavigationItem(currentItem, access)) {
+    return <Navigate to="/admin" replace />;
+  }
 
   const navigation = (
     <div className="flex h-full min-h-0 flex-col">

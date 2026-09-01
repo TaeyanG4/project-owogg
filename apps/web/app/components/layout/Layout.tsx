@@ -42,26 +42,27 @@ export function Layout({ children }: LayoutProps) {
       <Header onToggleMobileSidebar={toggleMobileSidebar} isAdminWorkspace={isAdminWorkspace} />
 
       <div className="flex w-full flex-1">
-        <Sidebar
-          isMobileOpen={isMobileSidebarOpen}
-          onMobileClose={closeMobileSidebar}
-          isGamePlayPage={isGamePlayWorkspace}
-        />
-        <div className="flex min-w-0 flex-1 flex-col">
-          {isAdminWorkspace ? (
-            <AdminWorkspace
-              isMobileOpen={isMobileAdminSidebarOpen}
-              onMobileOpen={openMobileAdminSidebar}
-              onMobileClose={closeMobileAdminSidebar}
-            >
-              {children}
-            </AdminWorkspace>
-          ) : (
-            <main className="flex w-full min-w-0 flex-1 flex-col">{children}</main>
-          )}
-
-          {!isAdminWorkspace && !isGamePlayWorkspace && <Footer />}
-        </div>
+        {isAdminWorkspace ? (
+          <AdminWorkspace
+            isMobileOpen={isMobileAdminSidebarOpen}
+            onMobileOpen={openMobileAdminSidebar}
+            onMobileClose={closeMobileAdminSidebar}
+          >
+            {children}
+          </AdminWorkspace>
+        ) : (
+          <>
+            <Sidebar
+              isMobileOpen={isMobileSidebarOpen}
+              onMobileClose={closeMobileSidebar}
+              isGamePlayPage={isGamePlayWorkspace}
+            />
+            <div className="flex min-w-0 flex-1 flex-col">
+              <main className="flex w-full min-w-0 flex-1 flex-col">{children}</main>
+              {!isGamePlayWorkspace && <Footer />}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

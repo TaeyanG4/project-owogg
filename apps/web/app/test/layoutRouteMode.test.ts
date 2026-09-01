@@ -25,7 +25,8 @@ test("desktop pages reserve the expanded rail while gameplay keeps a persisted m
 
   assert.match(layout, /isGamePlayPage=\{isGamePlayWorkspace\}/);
   assert.match(layout, /<div className="flex min-w-0 flex-1 flex-col">/);
-  assert.match(layout, /!isAdminWorkspace && !isGamePlayWorkspace && <Footer \/>/);
+  assert.match(layout, /isAdminWorkspace \? \(/);
+  assert.match(layout, /!isGamePlayWorkspace && <Footer \/>/);
   assert.match(sidebar, /onMouseEnter=\{openAutoSidebar\}/);
   assert.match(sidebar, /expanded \? "w-56" : "w-16"/);
   assert.match(sidebar, /fixed bottom-0 left-0 top-16/);
