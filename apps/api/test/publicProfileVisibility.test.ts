@@ -9,6 +9,10 @@ import type { User } from "@owogg/core";
 
 const FAVORITES = ["aim-test", "reaction-time"];
 const RECENT_PLAYS = [{ gameId: "aim-test", lastPlayedAt: "2026-08-14T00:00:00.000Z" }];
+const ACTIVITY_DAYS = [
+  { date: "2025-09-02", playCount: 2 },
+  { date: "2026-09-01", playCount: 4 },
+];
 
 function baseUser(overrides: Partial<User> = {}): User {
   return {
@@ -44,6 +48,7 @@ function fakeContainer(user: User, streamerProfile: unknown = null): AppContaine
         eligibleCompletions: 15,
       }),
       getGlobalXpRank: async () => 4,
+      getDailyCompletionCounts: async () => ACTIVITY_DAYS,
     },
     achievementUseCases: {
       getSummary: async () => ({ unlockedCodes: ["FIRST_PLAY"], totalAchievements: 7 }),
@@ -102,6 +107,7 @@ test("a guest viewer sees neither list while both flags are private", async () =
   assert.ok(data);
   assert.equal(data.favoriteGameIds, null);
   assert.equal(data.recentPlays, null);
+  assert.equal(data.playActivity, null);
   // visibilitySettings is the owner's own toggle state and must never leak to other viewers.
   assert.equal(data.visibilitySettings, null);
 });
@@ -112,6 +118,7 @@ test("a different logged-in viewer is treated exactly like a guest", async () =>
   assert.ok(data);
   assert.equal(data.favoriteGameIds, null);
   assert.equal(data.recentPlays, null);
+  assert.equal(data.playActivity, null);
   assert.equal(data.visibilitySettings, null);
 });
 
@@ -124,6 +131,7 @@ test("each flag opens exactly one list, not both", async () => {
   assert.ok(favOnly);
   assert.deepEqual(favOnly.favoriteGameIds, FAVORITES);
   assert.equal(favOnly.recentPlays, null);
+  assert.equal(favOnly.playActivity, null);
 
   const recentOnly = await getPublicProfileData(
     fakeContainer(baseUser({ show_recent_plays: true })),
@@ -133,6 +141,7 @@ test("each flag opens exactly one list, not both", async () => {
   assert.ok(recentOnly);
   assert.equal(recentOnly.favoriteGameIds, null);
   assert.deepEqual(recentOnly.recentPlays, RECENT_PLAYS);
+  assert.ok(recentOnly.playActivity);
 });
 
 test("the owner sees their own lists even with both flags private, plus the toggle state", async () => {
@@ -141,7 +150,27 @@ test("the owner sees their own lists even with both flags private, plus the togg
   assert.ok(data);
   assert.deepEqual(data.favoriteGameIds, FAVORITES);
   assert.deepEqual(data.recentPlays, RECENT_PLAYS);
+  assert.ok(data.playActivity);
   assert.deepEqual(data.visibilitySettings, { showFavorites: false, showRecentPlays: false });
+});
+
+test("the owner receives an exact sparse 365-day UTC completion summary", async () => {
+  const data = await getPublicProfileData(
+    fakeContainer(baseUser()),
+    7,
+    7,
+    new Date("2026-09-01T23:59:59.000Z"),
+  );
+
+  assert.deepEqual(data?.playActivity, {
+    periodStart: "2025-09-02",
+    periodEnd: "2026-09-01",
+    timeZone: "UTC",
+    activeDays: 2,
+    totalPlays: 6,
+    todayPlays: 4,
+    days: ACTIVITY_DAYS,
+  });
 });
 
 test("visibilitySettings reflects the owner's actual saved flags", async () => {

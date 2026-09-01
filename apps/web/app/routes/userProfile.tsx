@@ -11,6 +11,7 @@ import {
   Bookmark,
   Clock,
   Lock,
+  CalendarDays,
 } from "lucide-react";
 import { useAuth } from "../features/auth";
 import { useI18n } from "../features/i18n/I18nContext";
@@ -19,6 +20,7 @@ import { usePublicGames } from "../features/publicGamesApi";
 import { publicGameToCard } from "../features/catalog/publicGameAdapter";
 import { GameThumbnail } from "../components/ui/GameThumbnail";
 import { GameFavoriteCard, GameActivityCard } from "../components/ui/GameLinkCard";
+import { ProfileActivityHeatmap } from "../components/profile/ProfileActivityHeatmap";
 import { ACHIEVEMENT_DEFINITIONS, formatPublicUserTag, type AchievementCode } from "@owogg/core";
 import { ApiClientError } from "../lib/api";
 import type { PublicProfileResponse } from "@owogg/contracts";
@@ -49,13 +51,14 @@ type LoadState = "loading" | "success" | "notFound" | "error";
  * grid-of-bordered-cards; leans on generous whitespace, type hierarchy, and thin dividers so it
  * reads as one continuous page instead of stacked boxes. Account settings (nickname, connected
  * logins, streamer verification, visibility toggles) live separately at /settings — this page is
- * display-only. Favorites/recent-plays are gated server-side per viewer (see
+ * display-only. Favorites/recent-plays and the exact daily activity calendar are gated
+ * server-side per viewer (see
  * getPublicProfileData's viewerId param): `null` means hidden from the CURRENT viewer, which
  * for a guest or another user can mean either "set private" or "empty" — those aren't
  * distinguished on purpose, since revealing "private but non-empty" is itself a small leak. */
 export default function UserProfileRoute() {
   const { id } = useParams();
-  const { dict } = useI18n();
+  const { dict, locale } = useI18n();
   const { user: viewer } = useAuth();
   const { games: publicGames } = usePublicGames();
   const games = useMemo(() => publicGames.map((game) => publicGameToCard(game)), [publicGames]);
@@ -244,6 +247,42 @@ export default function UserProfileRoute() {
           </p>
         )}
       </div>
+
+      {/* Accepted game completions rendered as a GitHub-style UTC activity calendar. Exact
+          daily activity follows the existing recent-play visibility preference. */}
+      {data.playActivity !== null && (
+        <section className="flex flex-col gap-3 border-t border-border pt-6">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="flex items-center gap-2 text-sm font-black uppercase tracking-wide text-text-primary">
+                <CalendarDays className="h-4 w-4 text-emerald-400" />
+                {dict.userProfile.activityTitle}
+              </h2>
+              <p className="mt-1 text-[11px] font-semibold text-text-muted">
+                {dict.userProfile.activityRangeLabel}
+              </p>
+            </div>
+            {isOwnProfile && !data.visibilitySettings?.showRecentPlays && (
+              <PrivateBadge label={dict.userProfile.onlyVisibleToYou} />
+            )}
+          </div>
+          <ProfileActivityHeatmap
+            activity={data.playActivity}
+            locale={locale}
+            labels={{
+              activeDays: dict.userProfile.activityActiveDaysLabel,
+              totalPlays: dict.userProfile.activityTotalPlaysLabel,
+              today: dict.userProfile.activityTodayLabel,
+              daysSuffix: dict.userProfile.activityDaysSuffix,
+              playsSuffix: dict.userProfile.activityPlaysSuffix,
+              less: dict.userProfile.activityLessLabel,
+              more: dict.userProfile.activityMoreLabel,
+              definition: dict.userProfile.activityDefinition,
+              utcHint: dict.userProfile.activityUtcHint,
+            }}
+          />
+        </section>
+      )}
 
       {/* Achievements — wrapped pill row, same non-boxed pattern as /profile's list. */}
       <section className="flex flex-col gap-3 border-t border-border pt-6">

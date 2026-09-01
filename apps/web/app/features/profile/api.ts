@@ -43,8 +43,8 @@ export async function updateCountryApi(country: string | null): Promise<UpdateCo
   });
 }
 
-/** Controls whether favorites/recent-plays show on the PUBLIC profile to other viewers — both
- * are already stored server-side either way; this only changes disclosure. */
+/** Controls whether favorites or recent-play activity (list + daily calendar) shows on the
+ * PUBLIC profile to other viewers. Data is stored either way; this only changes disclosure. */
 export async function updateVisibilityApi(
   showFavorites: boolean,
   showRecentPlays: boolean,

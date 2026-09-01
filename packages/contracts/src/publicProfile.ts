@@ -22,6 +22,26 @@ export const PublicStreamerBadgeSchema = z.object({
 });
 export type PublicStreamerBadge = z.infer<typeof PublicStreamerBadgeSchema>;
 
+const UtcCalendarDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+export const PublicProfileActivityDaySchema = z.object({
+  date: UtcCalendarDateSchema,
+  playCount: z.number().int().min(1),
+});
+export type PublicProfileActivityDay = z.infer<typeof PublicProfileActivityDaySchema>;
+
+export const PublicProfilePlayActivitySchema = z.object({
+  periodStart: UtcCalendarDateSchema,
+  periodEnd: UtcCalendarDateSchema,
+  timeZone: z.literal("UTC"),
+  activeDays: z.number().int().min(0),
+  totalPlays: z.number().int().min(0),
+  todayPlays: z.number().int().min(0),
+  /** Sparse list: dates with zero accepted completions are omitted. */
+  days: z.array(PublicProfileActivityDaySchema),
+});
+export type PublicProfilePlayActivity = z.infer<typeof PublicProfilePlayActivitySchema>;
+
 export const PublicProfileResponseSchema = z.object({
   id: z.number(),
   nickname: z.string(),
@@ -33,6 +53,10 @@ export const PublicProfileResponseSchema = z.object({
   globalRank: z.number().int().min(1).nullable(),
   currentStreak: z.number().int().min(0),
   longestStreak: z.number().int().min(0),
+  /** Exact daily completion counts follow the existing recent-play visibility preference.
+   * Owners always receive the data; null means hidden from this viewer. The default keeps the
+   * Web compatible with an older API response during a rolling Staging deployment. */
+  playActivity: PublicProfilePlayActivitySchema.nullable().default(null),
   unlockedAchievementCodes: z.array(AchievementCodeSchema),
   totalAchievements: z.number().int().min(0),
   gameBests: z.array(PublicGameBestSchema),
