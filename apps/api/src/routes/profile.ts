@@ -226,9 +226,9 @@ profileRouter.post("/locale", async (c) => {
   return c.json({ success: true, locale: result.user.locale ?? parsed.data.locale }, 200);
 });
 
-// PATCH /api/profile/visibility — controls whether favorites/recent-plays (already stored
-// server-side either way) are disclosed to OTHER viewers on the public profile. No cooldown —
-// this only changes disclosure, not any stored data.
+// PATCH /api/profile/visibility — controls whether favorites or recent-play activity (list plus
+// exact daily calendar, already stored server-side either way) is disclosed to OTHER viewers.
+// No cooldown — this only changes disclosure, not any stored data.
 profileRouter.patch("/visibility", async (c) => {
   const userId = await getAuthUserId(c);
   if (!userId) {

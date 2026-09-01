@@ -524,15 +524,38 @@ export async function evaluateAchievementsForUser(
  * linked-provider list, or unverified/pending streamer platform attempts.
  */
 const PUBLIC_STREAMER_PLATFORMS = new Set(["YOUTUBE", "CHZZK", "TWITCH"]);
+const PUBLIC_PROFILE_ACTIVITY_DAYS = 365;
+
+function publicProfileActivityWindow(now: Date): {
+  periodStart: string;
+  periodEnd: string;
+  startIso: string;
+  endExclusiveIso: string;
+} {
+  const periodEndUtc = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+  const periodStartUtc = new Date(periodEndUtc);
+  periodStartUtc.setUTCDate(periodStartUtc.getUTCDate() - (PUBLIC_PROFILE_ACTIVITY_DAYS - 1));
+  const endExclusiveUtc = new Date(periodEndUtc);
+  endExclusiveUtc.setUTCDate(endExclusiveUtc.getUTCDate() + 1);
+
+  return {
+    periodStart: periodStartUtc.toISOString().slice(0, 10),
+    periodEnd: periodEndUtc.toISOString().slice(0, 10),
+    startIso: periodStartUtc.toISOString(),
+    endExclusiveIso: endExclusiveUtc.toISOString(),
+  };
+}
 
 export async function getPublicProfileData(
   container: AppContainer,
   userId: number,
-  /** The currently-authenticated viewer's user id, if any — null for guests. Used only to
-   * decide (a) whether to bypass the owner's own favorites/recent-plays privacy flags (owners
-   * always see their own lists) and (b) whether to include visibilitySettings at all (only
-   * ever returned to the owner). Never affects any other field. */
+  /** The currently-authenticated viewer's user id, if any — null for guests. Decides whether
+   * to bypass favorites/recent-play disclosure (which includes exact daily play activity) and
+   * whether to include the owner's visibilitySettings. */
   viewerId: number | null,
+  now: Date = new Date(),
 ): Promise<{
   id: number;
   nickname: string;
@@ -543,6 +566,15 @@ export async function getPublicProfileData(
   globalRank: number | null;
   currentStreak: number;
   longestStreak: number;
+  playActivity: {
+    periodStart: string;
+    periodEnd: string;
+    timeZone: "UTC";
+    activeDays: number;
+    totalPlays: number;
+    todayPlays: number;
+    days: Array<{ date: string; playCount: number }>;
+  } | null;
   unlockedAchievementCodes: string[];
   totalAchievements: number;
   gameBests: Array<{ gameId: string; score: number; formattedScore: string }>;
@@ -563,20 +595,34 @@ export async function getPublicProfileData(
   const showFavorites = user.show_favorites ?? false;
   const showRecentPlays = user.show_recent_plays ?? false;
   const needsPersonalization = isOwner || showFavorites || showRecentPlays;
+  const canSeePlayActivity = isOwner || showRecentPlays;
+  const activityWindow = publicProfileActivityWindow(now);
 
-  const [progress, globalRank, achievements, gameBests, streamerProfile, personalization] =
-    await Promise.all([
-      container.progressionUseCases.getProgressionSummary(userId),
-      container.progressionUseCases.getGlobalXpRank(userId),
-      container.achievementUseCases.getSummary(userId),
-      container.scoreReadUseCases.getUserBestsFormatted(userId),
-      container.streamerUseCases.getStreamerProfileByUserId(userId),
-      needsPersonalization
-        ? container.personalizationUseCases.getPersonalizationState(userId)
-        : null,
-    ]);
+  const [
+    progress,
+    globalRank,
+    achievements,
+    gameBests,
+    streamerProfile,
+    personalization,
+    dailyCompletionCounts,
+  ] = await Promise.all([
+    container.progressionUseCases.getProgressionSummary(userId),
+    container.progressionUseCases.getGlobalXpRank(userId),
+    container.achievementUseCases.getSummary(userId),
+    container.scoreReadUseCases.getUserBestsFormatted(userId),
+    container.streamerUseCases.getStreamerProfileByUserId(userId),
+    needsPersonalization ? container.personalizationUseCases.getPersonalizationState(userId) : null,
+    canSeePlayActivity
+      ? container.progressionUseCases.getDailyCompletionCounts({
+          userId,
+          startIso: activityWindow.startIso,
+          endExclusiveIso: activityWindow.endExclusiveIso,
+        })
+      : null,
+  ]);
 
-  const now = new Date().toISOString();
+  const nowIso = now.toISOString();
   const streamerBadges = (
     streamerProfile?.status === "VERIFIED" ? streamerProfile.platformAccounts : []
   )
@@ -586,7 +632,7 @@ export async function getPublicProfileData(
         a.verificationStatus === "VERIFIED" &&
         a.approvalStatus === "APPROVED" &&
         a.ownershipExpiresAt !== null &&
-        a.ownershipExpiresAt > now,
+        a.ownershipExpiresAt > nowIso,
     )
     .map((a) => ({
       platform: a.platform,
@@ -605,6 +651,20 @@ export async function getPublicProfileData(
     globalRank,
     currentStreak: user.current_streak ?? 0,
     longestStreak: user.longest_streak ?? 0,
+    playActivity:
+      dailyCompletionCounts === null
+        ? null
+        : {
+            periodStart: activityWindow.periodStart,
+            periodEnd: activityWindow.periodEnd,
+            timeZone: "UTC",
+            activeDays: dailyCompletionCounts.length,
+            totalPlays: dailyCompletionCounts.reduce((total, day) => total + day.playCount, 0),
+            todayPlays:
+              dailyCompletionCounts.find((day) => day.date === activityWindow.periodEnd)
+                ?.playCount ?? 0,
+            days: dailyCompletionCounts,
+          },
     unlockedAchievementCodes: achievements.unlockedCodes,
     totalAchievements: achievements.totalAchievements,
     gameBests,

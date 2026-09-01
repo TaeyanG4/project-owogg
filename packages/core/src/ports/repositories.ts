@@ -22,9 +22,9 @@ export interface User {
   current_streak?: number;
   longest_streak?: number;
   last_active_date?: string | null;
-  /** Whether favorites/recent-plays (already stored server-side regardless) are disclosed on
-   * the PUBLIC profile (/users/:id) to viewers other than the account owner. Both default to
-   * false — see migration 0021_profile_visibility.sql for why. */
+  /** Whether favorites or recent-play activity (list + daily calendar, already stored
+   * server-side regardless) is disclosed on the PUBLIC profile (/users/:id) to viewers other
+   * than the account owner. Both default to false — see migration 0021_profile_visibility.sql. */
   show_favorites?: boolean;
   show_recent_plays?: boolean;
   /** Independent of login access (SUSPENDED/BANNED users never reach this far — findSession
@@ -245,6 +245,12 @@ export interface XpLeaderboardEntry {
   totalXp: number;
 }
 
+/** One non-empty UTC calendar day of accepted, authenticated game completions. */
+export interface DailyCompletionCount {
+  date: string;
+  playCount: number;
+}
+
 export interface ProgressionRepository {
   /**
    * Records one accepted, authenticated, XP-eligible game completion. Idempotent by
@@ -266,6 +272,16 @@ export interface ProgressionRepository {
   getXpLeaderboard(limit: number): Promise<XpLeaderboardEntry[]>;
   /** 1-based global rank by total_xp, or null if the user has no progress row yet. */
   getGlobalXpRank(userId: number): Promise<number | null>;
+  /**
+   * Sparse UTC-day aggregation of the same idempotent GAME_COMPLETION ledger that advances
+   * progression. The end boundary is exclusive so callers can request exact calendar windows
+   * without relying on SQLite date/time-zone coercion.
+   */
+  getDailyCompletionCounts(input: {
+    userId: number;
+    startIso: string;
+    endExclusiveIso: string;
+  }): Promise<DailyCompletionCount[]>;
 }
 
 // ---------------------------------------------------------------------------

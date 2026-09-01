@@ -1,4 +1,5 @@
 import type {
+  DailyCompletionCount,
   ProgressionRepository,
   RecordCompletionOutcome,
   UserProgress,
@@ -169,5 +170,33 @@ export class D1ProgressionRepository implements ProgressionRepository {
       .first<{ ahead: number }>();
 
     return Number(row?.ahead ?? 0) + 1;
+  }
+
+  async getDailyCompletionCounts(input: {
+    userId: number;
+    startIso: string;
+    endExclusiveIso: string;
+  }): Promise<DailyCompletionCount[]> {
+    const result = await this.db
+      .prepare(
+        `SELECT substr(created_at, 1, 10) AS activity_date, COUNT(*) AS play_count
+         FROM xp_events
+         WHERE user_id = ?
+           AND reason = 'GAME_COMPLETION'
+           AND created_at >= ?
+           AND created_at < ?
+         GROUP BY substr(created_at, 1, 10)
+         ORDER BY activity_date ASC`,
+      )
+      .bind(input.userId, input.startIso, input.endExclusiveIso)
+      .all<Record<string, unknown>>();
+
+    return result.results.flatMap((row) => {
+      const date = typeof row.activity_date === "string" ? row.activity_date : "";
+      const playCount = Number(row.play_count);
+      return /^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isSafeInteger(playCount) && playCount > 0
+        ? [{ date, playCount }]
+        : [];
+    });
   }
 }

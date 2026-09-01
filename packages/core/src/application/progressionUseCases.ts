@@ -1,4 +1,8 @@
-import type { ProgressionRepository, XpLeaderboardEntry } from "../ports/repositories.js";
+import type {
+  DailyCompletionCount,
+  ProgressionRepository,
+  XpLeaderboardEntry,
+} from "../ports/repositories.js";
 import {
   XP_PER_ACCEPTED_COMPLETION,
   XP_DAILY_CAP_COMPLETIONS_PER_GAME,
@@ -68,5 +72,13 @@ export class ProgressionUseCases {
 
   async getGlobalXpRank(userId: number): Promise<number | null> {
     return this.repo.getGlobalXpRank(userId);
+  }
+
+  async getDailyCompletionCounts(input: {
+    userId: number;
+    startIso: string;
+    endExclusiveIso: string;
+  }): Promise<DailyCompletionCount[]> {
+    return this.repo.getDailyCompletionCounts(input);
   }
 }

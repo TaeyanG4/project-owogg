@@ -50,9 +50,9 @@ export const UpdateCountryResponseSchema = z.object({
 });
 export type UpdateCountryResponse = z.infer<typeof UpdateCountryResponseSchema>;
 
-// Controls disclosure of favorites/recent-plays on the PUBLIC profile — both are already
-// stored server-side regardless of these flags; this only decides whether other viewers see
-// them. No cooldown (see ProfileUseCases.updateVisibility).
+// Controls disclosure of favorites and recent-play activity (list + daily calendar) on the
+// PUBLIC profile. Data is stored regardless; this only decides whether other viewers see it.
+// No cooldown (see ProfileUseCases.updateVisibility).
 export const UpdateVisibilityRequestSchema = z.object({
   showFavorites: z.boolean(),
   showRecentPlays: z.boolean(),

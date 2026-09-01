@@ -1111,6 +1111,17 @@ export interface Dictionary {
     streakLabel: string;
     streakDaysSuffix: string;
     longestStreakPrefix: string;
+    activityTitle: string;
+    activityRangeLabel: string;
+    activityActiveDaysLabel: string;
+    activityTotalPlaysLabel: string;
+    activityTodayLabel: string;
+    activityDaysSuffix: string;
+    activityPlaysSuffix: string;
+    activityLessLabel: string;
+    activityMoreLabel: string;
+    activityDefinition: string;
+    activityUtcHint: string;
     achievementsTitle: string;
     achievementsEmpty: string;
     achievedSuffix: string;
@@ -1345,7 +1356,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       visibilityTitle: "공개 범위",
       visibilitySubtitle: "각 항목을 다른 사람의 프로필 방문 시 보여줄지 선택합니다.",
       visibilityFavoritesLabel: "즐겨찾기",
-      visibilityRecentPlaysLabel: "최근 플레이",
+      visibilityRecentPlaysLabel: "최근 플레이 및 활동",
       visibilityPublicOption: "공개",
       visibilityPrivateOption: "비공개",
       visibilityUpdated: "공개 범위를 저장했습니다.",
@@ -2407,6 +2418,17 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       streakLabel: "연속 출석",
       streakDaysSuffix: "일째",
       longestStreakPrefix: "최고 기록",
+      activityTitle: "플레이 활동",
+      activityRangeLabel: "최근 1년",
+      activityActiveDaysLabel: "출석일수",
+      activityTotalPlaysLabel: "1년 플레이",
+      activityTodayLabel: "오늘",
+      activityDaysSuffix: "일",
+      activityPlaysSuffix: "판",
+      activityLessLabel: "적음",
+      activityMoreLabel: "많음",
+      activityDefinition: "게임을 1판 이상 완료한 날을 출석으로 계산합니다.",
+      activityUtcHint: "UTC 기준",
       achievementsTitle: "도전과제",
       achievementsEmpty: "아직 달성한 도전과제가 없습니다.",
       achievedSuffix: "달성",
@@ -2637,7 +2659,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       visibilityTitle: "Visibility",
       visibilitySubtitle: "Choose what visitors see when they open your profile.",
       visibilityFavoritesLabel: "Favorites",
-      visibilityRecentPlaysLabel: "Recent Plays",
+      visibilityRecentPlaysLabel: "Recent Plays & Activity",
       visibilityPublicOption: "Public",
       visibilityPrivateOption: "Private",
       visibilityUpdated: "Visibility saved.",
@@ -3722,6 +3744,17 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       streakLabel: "Current streak",
       streakDaysSuffix: " days",
       longestStreakPrefix: "Best",
+      activityTitle: "Play Activity",
+      activityRangeLabel: "Past year",
+      activityActiveDaysLabel: "Active days",
+      activityTotalPlaysLabel: "Year total",
+      activityTodayLabel: "Today",
+      activityDaysSuffix: " days",
+      activityPlaysSuffix: " plays",
+      activityLessLabel: "Less",
+      activityMoreLabel: "More",
+      activityDefinition: "A day counts as active after at least one completed game.",
+      activityUtcHint: "UTC",
       achievementsTitle: "Achievements",
       achievementsEmpty: "No achievements unlocked yet.",
       achievedSuffix: "unlocked",
@@ -3953,7 +3986,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       visibilityTitle: "公開範囲",
       visibilitySubtitle: "他の人がプロフィールを開いたときに表示する項目を選びます。",
       visibilityFavoritesLabel: "お気に入り",
-      visibilityRecentPlaysLabel: "最近のプレイ",
+      visibilityRecentPlaysLabel: "最近のプレイと活動",
       visibilityPublicOption: "公開",
       visibilityPrivateOption: "非公開",
       visibilityUpdated: "公開範囲を保存しました。",
@@ -5035,6 +5068,17 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       streakLabel: "連続ログイン",
       streakDaysSuffix: "日目",
       longestStreakPrefix: "最高記録",
+      activityTitle: "プレイ履歴",
+      activityRangeLabel: "過去1年間",
+      activityActiveDaysLabel: "プレイ日数",
+      activityTotalPlaysLabel: "年間プレイ",
+      activityTodayLabel: "今日",
+      activityDaysSuffix: "日",
+      activityPlaysSuffix: "回",
+      activityLessLabel: "少ない",
+      activityMoreLabel: "多い",
+      activityDefinition: "ゲームを1回以上完了した日をプレイ日として集計します。",
+      activityUtcHint: "UTC基準",
       achievementsTitle: "実績",
       achievementsEmpty: "まだ達成した実績がありません。",
       achievedSuffix: "達成",
@@ -5265,7 +5309,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       visibilityTitle: "公开范围",
       visibilitySubtitle: "选择他人访问你的资料页时可以看到的内容。",
       visibilityFavoritesLabel: "收藏",
-      visibilityRecentPlaysLabel: "最近游玩",
+      visibilityRecentPlaysLabel: "最近游玩与活动",
       visibilityPublicOption: "公开",
       visibilityPrivateOption: "私密",
       visibilityUpdated: "已保存公开范围。",
@@ -6293,6 +6337,17 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       streakLabel: "连续登录",
       streakDaysSuffix: "天",
       longestStreakPrefix: "最高纪录",
+      activityTitle: "游玩活动",
+      activityRangeLabel: "过去一年",
+      activityActiveDaysLabel: "活跃天数",
+      activityTotalPlaysLabel: "年度总游玩",
+      activityTodayLabel: "今天",
+      activityDaysSuffix: "天",
+      activityPlaysSuffix: "局",
+      activityLessLabel: "较少",
+      activityMoreLabel: "较多",
+      activityDefinition: "当天至少完成一局游戏即计为活跃一天。",
+      activityUtcHint: "以 UTC 为准",
       achievementsTitle: "成就",
       achievementsEmpty: "尚未解锁任何成就。",
       achievedSuffix: "已解锁",

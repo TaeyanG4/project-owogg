@@ -86,6 +86,10 @@ class FakeProgressionRepository implements ProgressionRepository {
     ).length;
     return ahead + 1;
   }
+
+  async getDailyCompletionCounts(): Promise<[]> {
+    return [];
+  }
 }
 
 test("recordAcceptedGameCompletion awards XP for an accepted authenticated completion", async () => {

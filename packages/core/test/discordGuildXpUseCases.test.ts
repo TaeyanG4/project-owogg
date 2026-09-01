@@ -494,6 +494,9 @@ class MockProgressionRepo implements ProgressionRepository {
   async getGlobalXpRank(): Promise<number | null> {
     return 1;
   }
+  async getDailyCompletionCounts(): Promise<[]> {
+    return [];
+  }
 }
 
 // ---------------------------------------------------------------------------
