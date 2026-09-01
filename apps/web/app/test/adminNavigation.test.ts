@@ -90,7 +90,7 @@ test("admin routes keep the service sidebar and use a separate mobile admin draw
   const adminConditionalIndex = layout.indexOf("{isAdminWorkspace ? (");
   assert.ok(serviceSidebarIndex > -1 && serviceSidebarIndex < adminConditionalIndex);
   assert.match(layout, /isMobileAdminSidebarOpen/);
-  assert.match(layout, /reserveExpandedWidth=\{isAdminWorkspace\}/);
+  assert.doesNotMatch(layout, /reserveExpandedWidth/);
   assert.match(workspace, /aria-label="관리자 메뉴 열기"/);
 });
 
