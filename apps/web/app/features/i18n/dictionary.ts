@@ -35,17 +35,16 @@ export interface Dictionary {
     mobileMenuTitle: string;
     home: string;
     allGames: string;
-    popularGames: string;
+    genreGames: string;
+    singleGames: string;
+    multiplayerGames: string;
+    externalGames: string;
+    comingSoon: string;
     rankingRecords: string;
     /** Divider label between the game-related nav group and everything else (Discord hub,
      * changelog) — games always come first, this heading marks where "the rest" starts. */
     otherHeading: string;
     discordHub: string;
-    /** Divider label above the drawer's secondary actions (favorites/Discord servers/language) —
-     * the items narrow phones can't fit in the header itself. See Header.tsx's comment for why
-     * this split exists. */
-    moreHeading: string;
-    favorites: string;
     discordServers: string;
   };
   footer: {
@@ -62,17 +61,11 @@ export interface Dictionary {
     heroTitle: string;
     heroSubtitle: string;
     browseGames: string;
-    lineupTitle: string;
-    itemsCountSuffix: string;
-    popularTitle: string;
     recentPlaysTitle: string;
     favoritesTitle: string;
     emptyCategory: string;
     gridColumnsAriaPrefix: string;
     gridColumnsAriaSuffix: string;
-    teaserTitle: string;
-    teaserBody: string;
-    teaserCta: string;
   };
   language: {
     label: string;
@@ -102,6 +95,13 @@ export interface Dictionary {
     searchPlaceholder: string;
     emptyFavorites: string;
     emptySearch: string;
+    genreTitle: string;
+    singleTitle: string;
+    multiplayerTitle: string;
+    favoritesTitle: string;
+    uncategorizedGenre: string;
+    showDescriptions: string;
+    hideDescriptions: string;
     sortLabel: string;
     sortOptions: {
       popular: string;
@@ -111,15 +111,6 @@ export interface Dictionary {
     };
     playerCountLabel: string;
     bookmarkCountLabel: string;
-    categories: {
-      all: string;
-      popular: string;
-      reaction: string;
-      brain: string;
-      aim: string;
-      typing: string;
-      favorites: string;
-    };
     addFavoriteAriaPrefix: string;
     addFavoriteAriaSuffix: string;
     removeFavoriteAriaPrefix: string;
@@ -1187,12 +1178,14 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       mobileMenuTitle: "메뉴",
       home: "홈",
       allGames: "전체 게임",
-      popularGames: "인기 게임",
+      genreGames: "장르별 게임",
+      singleGames: "싱글 게임",
+      multiplayerGames: "멀티 게임",
+      externalGames: "타 플랫폼 게임",
+      comingSoon: "추후 업데이트",
       rankingRecords: "랭킹 & 기록",
       otherHeading: "기타",
       discordHub: "Discord",
-      moreHeading: "더보기",
-      favorites: "즐겨찾기",
       discordServers: "등록된 디스코드 서버",
     },
     footer: {
@@ -1209,18 +1202,11 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       heroTitle: "심심할 틈 없이, 게임을 한곳에",
       heroSubtitle: "가벼운 웹 미니게임을 모아 즐기고, 친구들과 기록을 겨뤄보세요.",
       browseGames: "게임 둘러보기",
-      lineupTitle: "미니게임 라인업",
-      itemsCountSuffix: "개",
-      popularTitle: "인기 게임",
       recentPlaysTitle: "최근 플레이",
       favoritesTitle: "내 즐겨찾기",
       emptyCategory: "해당 카테고리에 준비된 게임이 없습니다.",
       gridColumnsAriaPrefix: "",
       gridColumnsAriaSuffix: "열로 보기",
-      teaserTitle: "실시간 랭킹 & 멀티플레이어 업데이트 예정",
-      teaserBody:
-        "친구와 링크 하나로 접속해 함께 실시간 대결을 펼칠 수 있는 멀티 모드가 곧 출시됩니다.",
-      teaserCta: "게임 미리보기",
     },
     language: { label: "언어", ko: "한국어", en: "English", ja: "日本語", zh: "简体中文" },
     loginModal: {
@@ -1244,6 +1230,13 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       searchPlaceholder: "게임 검색...",
       emptyFavorites: "아직 즐겨찾기한 게임이 없습니다.",
       emptySearch: "검색 결과와 일치하는 게임이 없습니다.",
+      genreTitle: "장르별 게임",
+      singleTitle: "싱글 게임",
+      multiplayerTitle: "멀티 게임",
+      favoritesTitle: "즐겨찾기",
+      uncategorizedGenre: "기타",
+      showDescriptions: "설명 보기",
+      hideDescriptions: "설명 숨기기",
       sortLabel: "게임 정렬",
       sortOptions: {
         popular: "인기 순",
@@ -1253,15 +1246,6 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       },
       playerCountLabel: "플레이한 유저",
       bookmarkCountLabel: "북마크한 유저",
-      categories: {
-        all: "전체",
-        popular: "인기",
-        reaction: "순발력",
-        brain: "두뇌",
-        aim: "에임",
-        typing: "타자",
-        favorites: "즐겨찾기",
-      },
       addFavoriteAriaPrefix: "",
       addFavoriteAriaSuffix: " 즐겨찾기 추가",
       removeFavoriteAriaPrefix: "",
@@ -2463,12 +2447,14 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       mobileMenuTitle: "Menu",
       home: "Home",
       allGames: "All Games",
-      popularGames: "Popular Games",
+      genreGames: "Games by Genre",
+      singleGames: "Single-player Games",
+      multiplayerGames: "Multiplayer Games",
+      externalGames: "Other-platform Games",
+      comingSoon: "Coming later",
       rankingRecords: "Ranking & Records",
       otherHeading: "Other",
       discordHub: "Discord",
-      moreHeading: "More",
-      favorites: "Favorites",
       discordServers: "Registered Discord Servers",
     },
     footer: {
@@ -2485,18 +2471,11 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       heroTitle: "Never a dull moment — all your games in one place",
       heroSubtitle: "Play light web mini-games and compete for the best record with friends.",
       browseGames: "Browse games",
-      lineupTitle: "Mini-Game Lineup",
-      itemsCountSuffix: "",
-      popularTitle: "Popular Games",
       recentPlaysTitle: "Recently Played",
       favoritesTitle: "My Favorites",
       emptyCategory: "No games available in this category yet.",
       gridColumnsAriaPrefix: "View in ",
       gridColumnsAriaSuffix: " columns",
-      teaserTitle: "Real-Time Rankings & Multiplayer Coming Soon",
-      teaserBody:
-        "A multiplayer mode where you and your friends can join with a single link and compete in real time is coming soon.",
-      teaserCta: "Preview games",
     },
     language: { label: "Language", ko: "한국어", en: "English", ja: "日本語", zh: "简体中文" },
     loginModal: {
@@ -2520,6 +2499,13 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       searchPlaceholder: "Search games...",
       emptyFavorites: "You haven't favorited any games yet.",
       emptySearch: "No games match your search.",
+      genreTitle: "Games by Genre",
+      singleTitle: "Single-player Games",
+      multiplayerTitle: "Multiplayer Games",
+      favoritesTitle: "Favorites",
+      uncategorizedGenre: "Other",
+      showDescriptions: "Show descriptions",
+      hideDescriptions: "Hide descriptions",
       sortLabel: "Sort games",
       sortOptions: {
         popular: "Popularity",
@@ -2529,15 +2515,6 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       },
       playerCountLabel: "Players",
       bookmarkCountLabel: "Bookmarks",
-      categories: {
-        all: "All",
-        popular: "Popular",
-        reaction: "Reaction",
-        brain: "Brain",
-        aim: "Aim",
-        typing: "Typing",
-        favorites: "Favorites",
-      },
       addFavoriteAriaPrefix: "Add ",
       addFavoriteAriaSuffix: " to favorites",
       removeFavoriteAriaPrefix: "Remove ",
@@ -3763,12 +3740,14 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       mobileMenuTitle: "メニュー",
       home: "ホーム",
       allGames: "全ゲーム",
-      popularGames: "人気ゲーム",
+      genreGames: "ジャンル別ゲーム",
+      singleGames: "シングルゲーム",
+      multiplayerGames: "マルチゲーム",
+      externalGames: "他プラットフォームのゲーム",
+      comingSoon: "今後対応予定",
       rankingRecords: "ランキング＆記録",
       otherHeading: "その他",
       discordHub: "Discord",
-      moreHeading: "もっと見る",
-      favorites: "お気に入り",
       discordServers: "登録済みDiscordサーバー",
     },
     footer: {
@@ -3785,18 +3764,11 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       heroTitle: "退屈する暇なし、ゲームを一か所に",
       heroSubtitle: "軽量なWebミニゲームを集めて楽しみ、友達と記録を競いましょう。",
       browseGames: "ゲームを見る",
-      lineupTitle: "ミニゲームラインナップ",
-      itemsCountSuffix: "個",
-      popularTitle: "人気ゲーム",
       recentPlaysTitle: "最近プレイ",
       favoritesTitle: "お気に入り",
       emptyCategory: "このカテゴリにはまだ用意されたゲームがありません。",
       gridColumnsAriaPrefix: "",
       gridColumnsAriaSuffix: "列で表示",
-      teaserTitle: "リアルタイムランキング＆マルチプレイヤーアップデート予定",
-      teaserBody:
-        "友達と1つのリンクで参加し、リアルタイムで対戦できるマルチプレイヤーモードが近日公開予定です。",
-      teaserCta: "ゲームをプレビュー",
     },
     language: { label: "言語", ko: "한국어", en: "English", ja: "日本語", zh: "简体中文" },
     loginModal: {
@@ -3820,6 +3792,13 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       searchPlaceholder: "ゲームを検索...",
       emptyFavorites: "まだお気に入りのゲームがありません。",
       emptySearch: "検索結果に一致するゲームがありません。",
+      genreTitle: "ジャンル別ゲーム",
+      singleTitle: "シングルゲーム",
+      multiplayerTitle: "マルチゲーム",
+      favoritesTitle: "お気に入り",
+      uncategorizedGenre: "その他",
+      showDescriptions: "説明を表示",
+      hideDescriptions: "説明を非表示",
       sortLabel: "ゲームの並び順",
       sortOptions: {
         popular: "人気順",
@@ -3829,15 +3808,6 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       },
       playerCountLabel: "プレイしたユーザー",
       bookmarkCountLabel: "お気に入りユーザー",
-      categories: {
-        all: "すべて",
-        popular: "人気",
-        reaction: "反射神経",
-        brain: "頭脳",
-        aim: "エイム",
-        typing: "タイピング",
-        favorites: "お気に入り",
-      },
       addFavoriteAriaPrefix: "",
       addFavoriteAriaSuffix: "をお気に入りに追加",
       removeFavoriteAriaPrefix: "",
@@ -5060,12 +5030,14 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       mobileMenuTitle: "菜单",
       home: "首页",
       allGames: "全部游戏",
-      popularGames: "热门游戏",
+      genreGames: "按类型浏览",
+      singleGames: "单人游戏",
+      multiplayerGames: "多人游戏",
+      externalGames: "其他平台游戏",
+      comingSoon: "后续更新",
       rankingRecords: "排行榜和记录",
       otherHeading: "其他",
       discordHub: "Discord",
-      moreHeading: "更多",
-      favorites: "收藏",
       discordServers: "已注册的 Discord 服务器",
     },
     footer: {
@@ -5082,17 +5054,11 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       heroTitle: "告别无聊，好玩游戏尽在一处",
       heroSubtitle: "畅玩轻量网页小游戏，与好友一较高下。",
       browseGames: "浏览游戏",
-      lineupTitle: "小游戏阵容",
-      itemsCountSuffix: "个",
-      popularTitle: "热门游戏",
       recentPlaysTitle: "最近游玩",
       favoritesTitle: "我的收藏",
       emptyCategory: "该分类下暂无游戏。",
       gridColumnsAriaPrefix: "以",
       gridColumnsAriaSuffix: "列显示",
-      teaserTitle: "实时排行榜与多人模式即将上线",
-      teaserBody: "即将推出多人模式，你和朋友只需一个链接即可加入，实时展开对决。",
-      teaserCta: "预览游戏",
     },
     language: { label: "语言", ko: "한국어", en: "English", ja: "日本語", zh: "简体中文" },
     loginModal: {
@@ -5116,6 +5082,13 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       searchPlaceholder: "搜索游戏...",
       emptyFavorites: "还没有收藏的游戏。",
       emptySearch: "没有匹配的游戏。",
+      genreTitle: "按类型浏览",
+      singleTitle: "单人游戏",
+      multiplayerTitle: "多人游戏",
+      favoritesTitle: "收藏",
+      uncategorizedGenre: "其他",
+      showDescriptions: "显示说明",
+      hideDescriptions: "隐藏说明",
       sortLabel: "游戏排序",
       sortOptions: {
         popular: "热门排序",
@@ -5125,15 +5098,6 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       },
       playerCountLabel: "游玩用户",
       bookmarkCountLabel: "收藏用户",
-      categories: {
-        all: "全部",
-        popular: "热门",
-        reaction: "反应力",
-        brain: "益智",
-        aim: "瞄准",
-        typing: "打字",
-        favorites: "收藏",
-      },
       addFavoriteAriaPrefix: "将",
       addFavoriteAriaSuffix: "加入收藏",
       removeFavoriteAriaPrefix: "将",

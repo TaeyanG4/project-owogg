@@ -2,28 +2,35 @@ import { expect, test } from "@playwright/test";
 
 test.describe("home catalog controls", () => {
   test.beforeEach(async ({ page }) => {
-    await page.addInitScript(() => window.localStorage.setItem("owogg_locale", "ko-KR"));
+    await page.addInitScript(() => {
+      window.localStorage.setItem("owogg_locale", "ko-KR");
+      window.localStorage.removeItem("owogg_game_card_descriptions");
+    });
   });
 
-  test("places sort at the left and category filters at the upper right", async ({ page }) => {
+  test("keeps sort, density, and description controls in the upper toolbar", async ({ page }) => {
     await page.goto("/");
 
     const toolbar = page.getByTestId("game-catalog-toolbar");
     const sortTrigger = page.getByTestId("game-sort-trigger").first();
-    const categoryFilters = toolbar.getByTestId("game-category-filters");
+    const hideDescriptions = toolbar.getByRole("button", { name: "설명 숨기기" });
 
     await expect(toolbar).toBeVisible();
     await expect(sortTrigger).toContainText("인기 순");
-    await expect(categoryFilters.getByRole("button", { name: "전체" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    await expect(hideDescriptions).toBeVisible();
+    await expect(page.getByTestId("game-category-filters")).toHaveCount(0);
 
     const sortBox = await sortTrigger.boundingBox();
-    const categoryBox = await categoryFilters.boundingBox();
+    const descriptionBox = await hideDescriptions.boundingBox();
     expect(sortBox).not.toBeNull();
-    expect(categoryBox).not.toBeNull();
-    expect(sortBox!.x).toBeLessThan(categoryBox!.x);
+    expect(descriptionBox).not.toBeNull();
+    expect(sortBox!.x).toBeLessThan(descriptionBox!.x);
+
+    await hideDescriptions.click();
+    await expect(toolbar.getByRole("button", { name: "설명 보기" })).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(() => window.localStorage.getItem("owogg_game_card_descriptions")))
+      .toBe("false");
   });
 
   test("uses the styled listbox with the renamed sort options", async ({ page }) => {

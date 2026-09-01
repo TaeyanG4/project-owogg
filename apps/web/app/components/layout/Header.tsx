@@ -16,7 +16,7 @@ import { useAuth } from "../../features/auth";
 import { useI18n } from "../../features/i18n/I18nContext";
 import { LanguageSelector } from "../ui/LanguageSelector";
 import { OwoWordmarkIcon } from "../ui/OwoWordmarkIcon";
-import { RegisteredServersMenu } from "../ui/RegisteredServersMenu";
+import { DiscordIcon } from "../ui/DiscordIcon";
 import { useClickOutside } from "../../hooks/useClickOutside";
 import { fetchMyAccess } from "../../features/myAccess";
 import { ApiClientError } from "../../lib/api/errors.js";
@@ -105,9 +105,9 @@ export function Header({ onToggleMobileSidebar, isAdminWorkspace = false }: Head
 
   return (
     <header className="sticky top-0 z-40 w-full backdrop-blur-xl bg-surface/90 border-b border-border/80 transition-all select-none">
-      <div className="w-full px-4 h-16 flex items-center justify-between gap-4">
+      <div className="flex h-16 w-full items-center justify-between gap-2 px-3 sm:gap-4 sm:px-4">
         {/* Left: Mobile Toggle & Brand Logo */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           <button
             className="cursor-pointer rounded-xl p-2 text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-primary lg:hidden"
             onClick={onToggleMobileSidebar}
@@ -117,8 +117,8 @@ export function Header({ onToggleMobileSidebar, isAdminWorkspace = false }: Head
           </button>
 
           <Link to="/" className="flex items-center gap-2 group">
-            <OwoWordmarkIcon className="h-9 w-9 group-hover:scale-105 transition-transform duration-200" />
-            <span className="font-extrabold text-xl tracking-tight text-text-primary">
+            <OwoWordmarkIcon className="h-9 w-9 transition-transform duration-200 group-hover:scale-105" />
+            <span className="hidden text-xl font-extrabold tracking-tight text-text-primary min-[480px]:inline">
               OwO
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-light to-accent-purple">
                 GG
@@ -150,23 +150,16 @@ export function Header({ onToggleMobileSidebar, isAdminWorkspace = false }: Head
           </form>
         )}
 
-        {/* Right: Quick Actions & Auth.
-            Growth rule for this row: on narrow phones (<sm), the header only ever shows the
-            small, fixed set of actions every visitor needs on every page — search and
-            profile/login. Everything else (favorites, Discord servers, language, and whatever
-            gets added next) lives in the `hidden sm:flex` cluster below, which is free to grow
-            since sm+ viewports have the width for it, PLUS a matching entry in the mobile
-            drawer's "more" section (Sidebar.tsx) so it's never actually unreachable on phones —
-            just one tap behind the hamburger instead of a 6th icon fighting for header space.
-            A horizontal icon row has a hard width ceiling; a vertical drawer list doesn't, so
-            new features should default to the drawer rather than squeezing into this row. */}
-        <div className="flex items-center gap-2.5">
+        {/* Right: compact global shortcuts. Discord remains visible on narrow phones; bookmark,
+            ranking, and locale join it once the header has enough room. Registered servers are a
+            catalog destination in the sidebar rather than a second Discord menu in this row. */}
+        <div className="flex items-center gap-1 sm:gap-2.5">
           {/* Search is a full input on sm+ (above); below that there's no room for it, so this
               icon links to /games where the search input lives instead of hiding search entirely. */}
           {!isAdminWorkspace && (
             <Link
               to="/games"
-              className="sm:hidden p-2.5 rounded-full text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors cursor-pointer"
+              className="rounded-full p-2 text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-primary sm:hidden"
               title={dict.nav.searchPlaceholder}
               aria-label={dict.nav.searchPlaceholder}
             >
@@ -175,19 +168,45 @@ export function Header({ onToggleMobileSidebar, isAdminWorkspace = false }: Head
           )}
 
           {!isAdminWorkspace && (
-            <div className="hidden sm:flex items-center gap-2.5">
+            <>
+              <div className="hidden items-center gap-1 sm:flex">
+                <Link
+                  to="/games?view=favorites"
+                  onClick={(event) => {
+                    if (!isAuthenticated) {
+                      event.preventDefault();
+                      openLoginModal();
+                    }
+                  }}
+                  className="relative rounded-full p-2.5 text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-primary"
+                  title={dict.nav.favorites}
+                  aria-label={dict.nav.favorites}
+                >
+                  <Bookmark className="h-5 w-5" aria-hidden="true" />
+                </Link>
+                <Link
+                  to="/ranking"
+                  className="rounded-full p-2.5 text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-primary"
+                  title={dict.sidebar.rankingRecords}
+                  aria-label={dict.sidebar.rankingRecords}
+                >
+                  <Trophy className="h-5 w-5" aria-hidden="true" />
+                </Link>
+              </div>
+
               <Link
-                to="/games?category=favorites"
-                className="p-2.5 rounded-full text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors relative cursor-pointer"
-                title={dict.nav.favorites}
+                to="/discord"
+                className="rounded-full p-2 text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-primary sm:p-2.5"
+                title={dict.sidebar.discordHub}
+                aria-label={dict.sidebar.discordHub}
               >
-                <Bookmark className="w-5 h-5" />
+                <DiscordIcon className="h-5 w-5" />
               </Link>
 
-              <RegisteredServersMenu />
-
-              <LanguageSelector />
-            </div>
+              <div className="hidden sm:block">
+                <LanguageSelector />
+              </div>
+            </>
           )}
 
           {isAuthenticated && user ? (
@@ -325,10 +344,11 @@ export function Header({ onToggleMobileSidebar, isAdminWorkspace = false }: Head
           ) : (
             <button
               onClick={openLoginModal}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-gradient-to-r from-brand to-brand-dark rounded-full hover:shadow-lg hover:shadow-brand/30 hover:scale-105 transition-all cursor-pointer"
+              aria-label={dict.nav.login}
+              className="flex cursor-pointer items-center gap-2 rounded-full bg-gradient-to-r from-brand to-brand-dark p-2.5 text-sm font-bold text-white transition-all hover:scale-105 hover:shadow-lg hover:shadow-brand/30 sm:px-4 sm:py-2"
             >
               <User className="w-4 h-4" />
-              <span>{dict.nav.login}</span>
+              <span className="hidden whitespace-nowrap sm:inline">{dict.nav.login}</span>
             </button>
           )}
         </div>

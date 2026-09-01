@@ -42,7 +42,11 @@ export function Layout({ children }: LayoutProps) {
       <Header onToggleMobileSidebar={toggleMobileSidebar} isAdminWorkspace={isAdminWorkspace} />
 
       <div className="flex-1 flex w-full">
-        <Sidebar isMobileOpen={isMobileSidebarOpen} onMobileClose={closeMobileSidebar} />
+        <Sidebar
+          isMobileOpen={isMobileSidebarOpen}
+          onMobileClose={closeMobileSidebar}
+          isGamePlayPage={isGamePlayWorkspace}
+        />
         {isAdminWorkspace ? (
           <AdminWorkspace
             isMobileOpen={isMobileAdminSidebarOpen}

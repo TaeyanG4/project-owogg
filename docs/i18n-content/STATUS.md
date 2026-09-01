@@ -51,7 +51,7 @@ manifest 위에 오버레이합니다(항목이 없으면 manifest의 한국어 
 
 - 마지막 스냅샷 갱신 시점 기준(2026-09-01): Streamer OAuth 지원/보류 상태를 포함한 위키 본문 309개
   키 일치 확인.
-- `dict.legal`, `dict.games.categories`, `dict.gameContent`, `dict.wiki.catPolicy*`는 아직 이
+- `dict.legal`, `dict.gameContent`, `dict.wiki.catPolicy*`는 아직 이
   자동 감시 대상에 포함되지 않았습니다(스냅샷 도구는 현재 `wikiBody`만 봄) — 범위를 넓히는 건
   별도 작업으로 남김.
 

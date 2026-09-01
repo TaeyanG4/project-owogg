@@ -1,13 +1,4 @@
 {
-  "categories": {
-    "all": "全部",
-    "popular": "热门",
-    "reaction": "反应力",
-    "brain": "益智",
-    "aim": "瞄准",
-    "typing": "打字",
-    "favorites": "收藏"
-  },
   "games": {
     "reactionTime": {
       "title": "反应速度测试",

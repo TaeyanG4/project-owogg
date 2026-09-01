@@ -31,13 +31,9 @@ interface GameGridProps {
   emptyMessage?: React.ReactNode;
   loading?: boolean;
   loadingMessage?: React.ReactNode;
-  /** Clips the grid to exactly this many visual rows regardless of column count — used by the
-   * home page's 최근 플레이(1 row)/즐겨찾기(2 rows) sections so they read as a compact preview
-   * rather than a full section, without needing to know how many columns are currently active
-   * (2/3/4 on mobile, 4/5/6 on desktop) to compute an item-count slice. Pure CSS: an explicit
-   * `grid-template-rows` sizes the rows we want visible normally, `grid-auto-rows: 0` collapses
-   * any further (implicit) rows the extra items would otherwise auto-place into, and
-   * overflow-hidden clips the residual. Omit for the full, unclipped grid (e.g. /games). */
+  showDescriptions?: boolean;
+  /** Renders at most this many rows. Mobile and desktop slices are rendered in mutually exclusive
+   * breakpoint containers so cards beyond the limit do not remain hidden-but-focusable. */
   maxRows?: 1 | 2;
 }
 
@@ -51,26 +47,42 @@ export function GameGrid({
   emptyMessage,
   loading = false,
   loadingMessage,
+  showDescriptions = true,
   maxRows,
 }: GameGridProps) {
-  const rowClampClass =
-    maxRows === 1
-      ? "[grid-template-rows:repeat(1,auto)] [grid-auto-rows:0] overflow-hidden"
-      : maxRows === 2
-        ? "[grid-template-rows:repeat(2,auto)] [grid-auto-rows:0] overflow-hidden"
-        : "";
+  const renderCards = (visibleGames: readonly GameCardProps[]) =>
+    visibleGames.map((game) => (
+      <GameCard key={game.slug} {...game} showDescription={showDescriptions} />
+    ));
+
+  const emptyState = games.length === 0 && (loading ? loadingMessage : emptyMessage) && (
+    <div className="col-span-full py-16 text-center text-text-muted bg-surface-raised rounded-3xl border border-border border-dashed">
+      {loading ? loadingMessage : emptyMessage}
+    </div>
+  );
+
+  if (maxRows !== undefined) {
+    const mobileGames = games.slice(0, mobileColumns * maxRows);
+    const desktopGames = games.slice(0, desktopColumns * maxRows);
+
+    return (
+      <>
+        <div className={`${GRID_CLASSES[mobileColumns][desktopColumns]} lg:hidden`}>
+          {renderCards(mobileGames)}
+          {emptyState}
+        </div>
+        <div className={`${GRID_CLASSES[mobileColumns][desktopColumns]} hidden lg:grid`}>
+          {renderCards(desktopGames)}
+          {emptyState}
+        </div>
+      </>
+    );
+  }
 
   return (
-    <div className={`${GRID_CLASSES[mobileColumns][desktopColumns]} ${rowClampClass}`}>
-      {games.map((game) => (
-        <GameCard key={game.slug} {...game} />
-      ))}
-
-      {games.length === 0 && (loading ? loadingMessage : emptyMessage) && (
-        <div className="col-span-full py-16 text-center text-text-muted bg-surface-raised rounded-3xl border border-border border-dashed">
-          {loading ? loadingMessage : emptyMessage}
-        </div>
-      )}
+    <div className={GRID_CLASSES[mobileColumns][desktopColumns]}>
+      {renderCards(games)}
+      {emptyState}
     </div>
   );
 }

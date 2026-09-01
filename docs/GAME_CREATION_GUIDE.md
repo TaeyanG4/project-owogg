@@ -115,6 +115,7 @@ owogg.logo.png | .jpg | .jpeg | .webp | .svg
     "slug": "my-game",
     "title": "My Game",
     "genre": "arcade",
+    "tags": ["puzzle", "card-board"],
     "mode": "single",
     "playModes": ["single"]
   },
@@ -129,6 +130,10 @@ owogg.logo.png | .jpg | .jpeg | .webp | .svg
 `single`, `local-multi`, `online-multi` 중 실제 지원 topology를 선언합니다. `mode: "single"`은
 `["single"]`만, `mode: "multi"`는 `local-multi` 또는 `online-multi`를 하나 이상 허용합니다.
 range는 `min < max`, `outOfRange` 기본값은 `clamp`입니다.
+
+`game.genre`에는 대표 장르 하나를 자유 문자열로 쓰고, `game.tags`에는 장르·규칙·테마 같은 보조 분류를
+자유 문자열 배열로 씁니다. 고정된 4~5개 장르 allowlist는 없으며 공개 카탈로그는 실제 genre 값을
+공백·대소문자·Unicode 비교용으로만 정규화하고 최초 표기를 화면에 유지합니다.
 
 `playConfig`는 `single` 또는 `local-multi` 경로와 scored leaderboard를 요구합니다. 같은 ZIP에서
 online도 제공하려면 `game.playModes`에 generic 경로와 `online-multi`를 함께 넣고 `multiplayer` 심사
@@ -165,6 +170,7 @@ Game Creator Center와 관리자 게임 관리 화면은 게임별로 다음 작
 | 핵심 속성 폼            | 수정한 manifest로 새 `PENDING_REVIEW` version          | 수정한 manifest로 새 READY/live version          |
 
 핵심 속성 폼은 `game.title`, `shortDescription`, `description`, `genre`, `mode`만 다룹니다.
+`tags`를 바꾸려면 현재는 `owogg.json` 재업로드 또는 전체 ZIP 업로드를 사용합니다.
 `slug`는 D1의 영구 identity이므로 수정할 수 없습니다. 매니페스트/폼 수정은 이미 게시된 version prefix의
 `owogg.json`을 덮어쓰지 않고 현재 source archive를 서버에서 재구성하여 새 버전을 만듭니다. 이 규칙으로
 source ZIP, published files, B2 canonical이 서로 다른 내용을 가리키는 상태와 1년 immutable 캐시 오염을

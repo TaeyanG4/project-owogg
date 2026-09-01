@@ -1,13 +1,4 @@
 {
-  "categories": {
-    "all": "All",
-    "popular": "Popular",
-    "reaction": "Reaction",
-    "brain": "Brain",
-    "aim": "Aim",
-    "typing": "Typing",
-    "favorites": "Favorites"
-  },
   "games": {
     "reactionTime": {
       "title": "Reaction Time Test",
