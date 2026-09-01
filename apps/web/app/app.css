@@ -22,13 +22,12 @@
   --color-border-subtle: #182030;
 }
 
-/* Mobile browsers sometimes treat <html> (not <body>) as the actual scroll container, so
-   overflow-x: hidden on body alone doesn't reliably stop horizontal drag/slide on phones —
-   both elements need it. overscroll-behavior-x additionally blocks the edge-swipe rubber-band
-   some mobile browsers apply even when there's no real overflowing content. The site is a
-   vertical-scroll layout by design, so locking out horizontal motion entirely is safe. */
+/* Mobile browsers sometimes treat <html> (not <body>) as the actual scroll container, so both
+   elements must reject horizontal overflow. `clip` is intentional here: `hidden` creates a
+   scrolling ancestor and prevents the sticky global header from staying pinned while the page
+   scrolls. overscroll-behavior-x additionally blocks edge-swipe rubber-banding. */
 html {
-  overflow-x: hidden;
+  overflow-x: clip;
   overscroll-behavior-x: none;
   width: 100%;
 }
@@ -41,7 +40,7 @@ body {
     system-ui,
     -apple-system,
     sans-serif;
-  overflow-x: hidden;
+  overflow-x: clip;
   overscroll-behavior-x: none;
   width: 100%;
 }

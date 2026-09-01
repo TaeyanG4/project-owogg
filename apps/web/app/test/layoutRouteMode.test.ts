@@ -21,6 +21,7 @@ test("desktop pages reserve the expanded rail while gameplay keeps a persisted m
     fileURLToPath(new URL("../components/layout/Sidebar.tsx", import.meta.url)),
     "utf8",
   );
+  const styles = readFileSync(fileURLToPath(new URL("../app.css", import.meta.url)), "utf8");
 
   assert.match(layout, /isGamePlayPage=\{isGamePlayWorkspace\}/);
   assert.match(layout, /<div className="flex min-w-0 flex-1 flex-col">/);
@@ -28,6 +29,10 @@ test("desktop pages reserve the expanded rail while gameplay keeps a persisted m
   assert.match(sidebar, /onMouseEnter=\{openAutoSidebar\}/);
   assert.match(sidebar, /expanded \? "w-56" : "w-16"/);
   assert.match(sidebar, /fixed bottom-0 left-0 top-16/);
+  assert.match(sidebar, /flex h-full min-h-0 flex-col overflow-hidden p-2/);
+  assert.match(sidebar, /flex shrink-0 flex-col gap-1\.5/);
+  assert.match(sidebar, /data-sidebar-secondary-scroll/);
+  assert.match(sidebar, /min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain/);
   assert.match(sidebar, /data-expanded=\{expanded\}/);
   assert.doesNotMatch(sidebar, /reserveExpandedWidth/);
   assert.match(sidebar, /GAMEPLAY_EXPANDED_KEY/);
@@ -39,4 +44,6 @@ test("desktop pages reserve the expanded rail while gameplay keeps a persisted m
   assert.doesNotMatch(sidebar, /dict\.sidebar\.favorites/);
   assert.match(sidebar, /dict\.sidebar\.discordServers/);
   assert.doesNotMatch(sidebar, /SUPPORTED_LOCALES\.map/);
+  assert.equal(styles.match(/overflow-x: clip;/g)?.length, 2);
+  assert.doesNotMatch(styles, /overflow-x: hidden;/);
 });

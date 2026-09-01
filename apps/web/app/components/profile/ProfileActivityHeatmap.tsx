@@ -118,8 +118,8 @@ export function ProfileActivityHeatmap({
   const summaryLabel = `${labels.activeDays} ${numberFormatter.format(activity.activeDays)}${labels.daysSuffix}, ${labels.totalPlays} ${numberFormatter.format(activity.totalPlays)}${labels.playsSuffix}`;
 
   return (
-    <div className="min-w-0">
-      <div className="flex flex-wrap items-end gap-x-7 gap-y-3">
+    <div className="mx-auto min-w-0 w-full max-w-[960px]">
+      <div className="flex flex-wrap items-end justify-center gap-x-10 gap-y-3 sm:gap-x-16">
         <ActivityMetric
           label={labels.activeDays}
           value={numberFormatter.format(activity.activeDays)}
@@ -138,12 +138,12 @@ export function ProfileActivityHeatmap({
       </div>
 
       <div className="pt-4">
-        <p className="mb-4 text-[11px] leading-relaxed text-text-muted">
+        <p className="mb-4 text-center text-[11px] leading-relaxed text-text-muted">
           {labels.definition} · {labels.utcHint}
         </p>
 
         <div className="overflow-x-auto pb-1" role="img" aria-label={summaryLabel}>
-          <div className="w-max min-w-full">
+          <div className="mx-auto w-max">
             <div className="mb-1.5 grid grid-cols-[2rem_auto] gap-2">
               <span aria-hidden="true" />
               <div
@@ -251,7 +251,7 @@ function ActivityMetric({
   suffix: string;
 }) {
   return (
-    <div className="flex min-w-0 items-baseline gap-2">
+    <div className="flex min-w-0 items-baseline justify-center gap-2">
       <span className="truncate text-[10px] font-bold text-text-muted sm:text-[11px]">{label}</span>
       <span className="text-lg font-black tabular-nums text-text-primary sm:text-xl">
         {value}

@@ -285,14 +285,6 @@ export default function UserProfileRoute() {
     }
   };
 
-  const roleAccent = data.roles.includes("ADMIN")
-    ? "border-rose-400/25"
-    : data.roles.includes("OPERATOR")
-      ? "border-cyan-300/25"
-      : data.roles.includes("STREAMER")
-        ? "border-violet-300/25"
-        : "border-white/[0.08]";
-
   return (
     <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-4 px-4 py-7 sm:px-6 md:px-8 md:py-9">
       <Link
@@ -303,9 +295,7 @@ export default function UserProfileRoute() {
         {dict.userProfile.backToHome}
       </Link>
 
-      <article
-        className={`overflow-hidden rounded-[24px] border bg-surface-raised/55 shadow-[0_22px_70px_rgba(0,0,0,0.22)] ring-1 ring-white/[0.025] ${roleAccent}`}
-      >
+      <article className="overflow-hidden rounded-[24px] border border-white/[0.09] bg-surface-raised/55 shadow-[0_28px_90px_rgba(2,6,23,0.48)] ring-1 ring-inset ring-white/[0.035]">
         <header className="relative h-52 overflow-hidden bg-slate-950 sm:h-60 lg:h-72">
           <ProfileBannerArtwork banner={data.banner} />
           {isOwnProfile && (
@@ -320,8 +310,8 @@ export default function UserProfileRoute() {
         </header>
 
         <div className="grid lg:grid-cols-[250px_minmax(0,1fr)] xl:grid-cols-[270px_minmax(0,1fr)]">
-          <aside className="relative border-b border-border/60 px-5 pb-7 lg:-mt-16 lg:border-b-0 lg:border-r lg:px-6">
-            <div className="relative -mt-12 w-fit lg:mt-0">
+          <aside className="relative border-b border-border/60 px-5 pb-7 lg:border-b-0 lg:border-r lg:px-6">
+            <div className="relative -mt-12 w-fit lg:-mt-16">
               <div className="h-24 w-24 overflow-hidden rounded-full border-[3px] border-surface-raised/95 bg-surface text-2xl font-black text-brand shadow-[0_12px_32px_rgba(0,0,0,0.35)] ring-1 ring-white/25 sm:h-28 sm:w-28 lg:h-32 lg:w-32">
                 {data.avatarUrl ? (
                   <img
@@ -618,7 +608,7 @@ export default function UserProfileRoute() {
             {/* Accepted game completions rendered as a GitHub-style UTC activity calendar. Exact
           daily activity follows the existing recent-play visibility preference. */}
             {data.playActivity !== null && (
-              <section className="flex flex-col gap-3 border-t border-border pt-6">
+              <section className="mx-auto flex w-full max-w-[1040px] flex-col gap-3 border-t border-border pt-6">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <h2 className="flex items-center gap-2 text-sm font-black uppercase tracking-wide text-text-primary">
