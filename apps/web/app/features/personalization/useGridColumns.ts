@@ -8,6 +8,7 @@ export type DesktopColumns = (typeof DESKTOP_COLUMN_OPTIONS)[number];
 
 const MOBILE_KEY = "owogg_grid_columns_mobile";
 const DESKTOP_KEY = "owogg_grid_columns_desktop";
+const DESCRIPTIONS_KEY = "owogg_game_card_descriptions";
 const DEFAULT_MOBILE: MobileColumns = 3;
 const DEFAULT_DESKTOP: DesktopColumns = 6;
 
@@ -27,10 +28,12 @@ function readStored<T extends number>(key: string, options: readonly T[], fallba
 export function useGridColumns() {
   const [mobileColumns, setMobileColumnsState] = useState<MobileColumns>(DEFAULT_MOBILE);
   const [desktopColumns, setDesktopColumnsState] = useState<DesktopColumns>(DEFAULT_DESKTOP);
+  const [showDescriptions, setShowDescriptionsState] = useState(true);
 
   useEffect(() => {
     setMobileColumnsState(readStored(MOBILE_KEY, MOBILE_COLUMN_OPTIONS, DEFAULT_MOBILE));
     setDesktopColumnsState(readStored(DESKTOP_KEY, DESKTOP_COLUMN_OPTIONS, DEFAULT_DESKTOP));
+    setShowDescriptionsState(window.localStorage.getItem(DESCRIPTIONS_KEY) !== "false");
   }, []);
 
   const setMobileColumns = (next: MobileColumns) => {
@@ -43,5 +46,19 @@ export function useGridColumns() {
     if (typeof window !== "undefined") window.localStorage.setItem(DESKTOP_KEY, String(next));
   };
 
-  return { mobileColumns, setMobileColumns, desktopColumns, setDesktopColumns };
+  const setShowDescriptions = (next: boolean) => {
+    setShowDescriptionsState(next);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(DESCRIPTIONS_KEY, String(next));
+    }
+  };
+
+  return {
+    mobileColumns,
+    setMobileColumns,
+    desktopColumns,
+    setDesktopColumns,
+    showDescriptions,
+    setShowDescriptions,
+  };
 }

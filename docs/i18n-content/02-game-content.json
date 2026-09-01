@@ -1,13 +1,4 @@
 {
-  "categories": {
-    "all": "전체",
-    "popular": "인기",
-    "reaction": "순발력",
-    "brain": "두뇌",
-    "aim": "에임",
-    "typing": "타자",
-    "favorites": "즐겨찾기"
-  },
   "games": {
     "reactionTime": {
       "title": "반응속도 테스트",

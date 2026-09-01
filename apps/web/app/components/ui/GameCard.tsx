@@ -18,6 +18,10 @@ export type GameCardProps = Pick<
   | "bookmarkCount"
 >;
 
+interface GameCardDisplayProps {
+  showDescription?: boolean;
+}
+
 function compactCount(value: number): string {
   if (value < 1_000) return String(value);
   if (value < 1_000_000) {
@@ -43,7 +47,8 @@ export function GameCard({
   playerCount,
   bookmarkCount,
   accent = "#6366f1",
-}: GameCardProps) {
+  showDescription = true,
+}: GameCardProps & GameCardDisplayProps) {
   const { isFavorite, toggleFavorite } = usePersonalization();
   const { dict } = useI18n();
   const isFav = isFavorite(slug);
@@ -122,9 +127,11 @@ export function GameCard({
             <Sparkles className="w-4 h-4 text-brand-light opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-0.5 hidden sm:block" />
           </div>
 
-          <p className="break-keep text-[10px] sm:text-xs text-text-secondary line-clamp-2 leading-relaxed flex-1">
-            {shortDescription}
-          </p>
+          {showDescription && (
+            <p className="break-keep text-[10px] sm:text-xs text-text-secondary line-clamp-2 leading-relaxed flex-1">
+              {shortDescription}
+            </p>
+          )}
           <div className="flex min-w-0 items-center justify-between gap-2 text-[9px] font-semibold text-text-muted sm:text-[10px]">
             <p className="min-w-0 flex-1 truncate">제작자 {publisherName}</p>
             <div className="flex shrink-0 items-center gap-2 tabular-nums">

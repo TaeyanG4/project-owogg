@@ -30,7 +30,7 @@ export function publicGameToCard(game: PublicGame): PublicGameCard {
       title: game.title,
       shortDescription: game.shortDescription,
       description: game.description,
-      modes: game.catalog.modes,
+      modes: game.playModes,
       // `catalog.thumbnail` is retained only as canonical migration metadata. Runtime artwork
       // comes exclusively from the public D1/B2 media projection; an empty value makes the shared
       // thumbnail component render its deterministic text/accent fallback without a doomed HTTP
@@ -55,12 +55,12 @@ export function publicGameToCard(game: PublicGame): PublicGameCard {
     title: game.title,
     shortDescription: game.shortDescription,
     description: game.description,
-    // GENRE_MODE only declares the coarse canonical single/multi vocabulary. Do not infer local
-    // versus online multiplayer for a legacy card component that has no such source fact.
-    modes: [game.catalog.mode],
+    // The top-level projection carries the exact declared topology; the coarse legacy `mode`
+    // remains compatibility metadata and must not erase local/online distinctions in discovery.
+    modes: game.playModes,
     thumbnail: game.mediaUrl ?? "",
     categories: [],
-    tags: [],
+    tags: game.catalog.tags ?? [],
     publisherType: game.publisherType,
     publisherName: game.publisherName,
     catalogType: game.catalog.type,

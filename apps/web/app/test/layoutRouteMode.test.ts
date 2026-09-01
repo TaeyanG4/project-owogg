@@ -12,7 +12,7 @@ test("only a concrete live game route enables the gameplay shell", () => {
   assert.equal(isGamePlayPath("/ranking"), false);
 });
 
-test("gameplay keeps the desktop rail and exposes an explicit hover-revealed expand control", () => {
+test("catalog auto-expands the desktop rail while gameplay keeps a persisted manual control", () => {
   const layout = readFileSync(
     fileURLToPath(new URL("../components/layout/Layout.tsx", import.meta.url)),
     "utf8",
@@ -22,11 +22,15 @@ test("gameplay keeps the desktop rail and exposes an explicit hover-revealed exp
     "utf8",
   );
 
-  assert.doesNotMatch(layout, /overlayOnly/);
-  assert.match(sidebar, /aria-expanded=\{isDesktopExpanded\}/);
-  assert.match(sidebar, /group-hover\/sidebar:opacity-100/);
-  assert.match(sidebar, /dict\.sidebar\.moreHeading/);
-  assert.match(sidebar, /dict\.sidebar\.favorites/);
+  assert.match(layout, /isGamePlayPage=\{isGamePlayWorkspace\}/);
+  assert.match(sidebar, /onMouseEnter=\{openAutoSidebar\}/);
+  assert.match(sidebar, /GAMEPLAY_EXPANDED_KEY/);
+  assert.match(sidebar, /aria-expanded=\{expanded\}/);
+  assert.match(sidebar, /games\?view=genres/);
+  assert.match(sidebar, /games\?playMode=single/);
+  assert.match(sidebar, /games\?playMode=multi/);
+  assert.doesNotMatch(sidebar, /dict\.sidebar\.moreHeading/);
+  assert.doesNotMatch(sidebar, /dict\.sidebar\.favorites/);
   assert.match(sidebar, /dict\.sidebar\.discordServers/);
-  assert.match(sidebar, /SUPPORTED_LOCALES\.map/);
+  assert.doesNotMatch(sidebar, /SUPPORTED_LOCALES\.map/);
 });

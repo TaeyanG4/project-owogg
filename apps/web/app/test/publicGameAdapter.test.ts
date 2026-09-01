@@ -49,20 +49,26 @@ test("TAXONOMY public games preserve canonical catalog metadata in the card view
   assert.equal(card.popularityScore, 24);
 });
 
-test("GENRE_MODE USER games do not receive invented taxonomy metadata", () => {
+test("GENRE_MODE USER games preserve tags and exact play topology without invented taxonomy", () => {
   const card = publicGameToCard(
     baseGame({
       publisherType: "USER",
       publisherName: "Taeyang",
       slug: "ball-dodge",
       title: "공 피하기",
-      catalog: { type: "GENRE_MODE", genre: "arcade", mode: "multi" },
+      playModes: ["local-multi", "online-multi"],
+      catalog: {
+        type: "GENRE_MODE",
+        genre: "arcade",
+        mode: "multi",
+        tags: ["card-board", "party"],
+      },
     }),
   );
   assert.equal(card.publisherType, "USER");
   assert.equal(card.genre, "arcade");
   assert.deepEqual(card.categories, []);
-  assert.deepEqual(card.tags, []);
-  assert.deepEqual(card.modes, ["multi"]);
+  assert.deepEqual(card.tags, ["card-board", "party"]);
+  assert.deepEqual(card.modes, ["local-multi", "online-multi"]);
   assert.equal(card.thumbnail, "");
 });
