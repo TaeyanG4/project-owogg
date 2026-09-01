@@ -1,5 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   UpdateNicknameRequestSchema,
   UpdateCountryRequestSchema,
@@ -58,6 +60,35 @@ describe("Profile settings (nickname/country) client contracts", () => {
       }).success,
       false,
     );
+  });
+
+  it("profile layout uses compact identity, new banner artwork, left contributions, and right XP", () => {
+    const profile = readFileSync(
+      fileURLToPath(new URL("../routes/userProfile.tsx", import.meta.url)),
+      "utf8",
+    );
+    const dictionary = readFileSync(
+      fileURLToPath(new URL("../features/i18n/dictionary.ts", import.meta.url)),
+      "utf8",
+    );
+
+    assert.match(profile, /max-w-\[1280px\]/);
+    assert.match(profile, /h-52 overflow-hidden bg-slate-950 sm:h-60 lg:h-72/);
+    assert.match(profile, /h-24 w-24.*sm:h-28 sm:w-28 lg:h-32 lg:w-32/);
+    assert.match(profile, /PROFILE_BANNER_ART/);
+    assert.match(profile, /data-profile-experience/);
+    assert.equal(profile.match(/dict\.userProfile\.contributionsTitle/g)?.length, 1);
+    assert.ok(
+      profile.indexOf("dict.userProfile.contributionsTitle") < profile.indexOf("<main"),
+      "contribution metrics belong in the left profile information column",
+    );
+    assert.ok(
+      profile.indexOf("data-profile-experience") > profile.indexOf("<main"),
+      "experience belongs in the right profile content column",
+    );
+    assert.match(dictionary, /bannerNovaGlass: "노바 글래스"/);
+    assert.match(dictionary, /bannerSakuraNight: "사쿠라 나이트"/);
+    assert.doesNotMatch(dictionary, /bannerAurora:/);
   });
 
   it("COUNTRY_OPTIONS entries are unique two-letter codes with a Korean label", () => {

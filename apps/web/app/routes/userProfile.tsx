@@ -69,11 +69,29 @@ type LoadState = "loading" | "success" | "notFound" | "error";
 
 const PROFILE_BANNERS: ProfileBanner[] = ["AURORA", "SUNSET", "MIDNIGHT", "MINT"];
 
-const PROFILE_BANNER_CLASSES: Record<ProfileBanner, string> = {
-  AURORA: "from-violet-700 via-indigo-700 to-fuchsia-700",
-  SUNSET: "from-rose-600 via-orange-500 to-amber-400",
-  MIDNIGHT: "from-slate-950 via-blue-950 to-violet-950",
-  MINT: "from-emerald-700 via-teal-600 to-cyan-700",
+/** The persisted keys predate these designs and are intentionally stable because migration 0053
+ * is already applied to Staging D1. The visible names and artwork are the new preset contract. */
+const PROFILE_BANNER_ART: Record<ProfileBanner, { backgroundImage: string; glowClass: string }> = {
+  AURORA: {
+    backgroundImage:
+      "radial-gradient(circle at 16% 18%, rgba(196,181,253,.78), transparent 24%), radial-gradient(circle at 78% 24%, rgba(56,189,248,.52), transparent 27%), radial-gradient(circle at 64% 90%, rgba(217,70,239,.38), transparent 34%), linear-gradient(118deg, #11152d 0%, #312e81 42%, #17152f 100%)",
+    glowClass: "bg-violet-300/35",
+  },
+  SUNSET: {
+    backgroundImage:
+      "radial-gradient(circle at 22% 26%, rgba(251,207,232,.72), transparent 23%), radial-gradient(circle at 72% 18%, rgba(251,146,60,.46), transparent 28%), radial-gradient(circle at 82% 82%, rgba(244,63,94,.42), transparent 31%), linear-gradient(122deg, #25142f 0%, #7f1d4e 48%, #3b1d31 100%)",
+    glowClass: "bg-rose-300/30",
+  },
+  MIDNIGHT: {
+    backgroundImage:
+      "radial-gradient(circle at 18% 76%, rgba(14,165,233,.42), transparent 29%), radial-gradient(circle at 84% 24%, rgba(129,140,248,.48), transparent 26%), radial-gradient(circle at 52% 46%, rgba(255,255,255,.12), transparent 17%), linear-gradient(125deg, #020617 0%, #0f2b52 48%, #1e1b4b 100%)",
+    glowClass: "bg-sky-300/30",
+  },
+  MINT: {
+    backgroundImage:
+      "radial-gradient(circle at 20% 18%, rgba(153,246,228,.62), transparent 25%), radial-gradient(circle at 80% 72%, rgba(34,211,238,.42), transparent 31%), radial-gradient(circle at 58% 22%, rgba(59,130,246,.3), transparent 23%), linear-gradient(120deg, #082f49 0%, #0f766e 50%, #172554 100%)",
+    glowClass: "bg-teal-200/30",
+  },
 };
 
 /** /users/:id — the single unified "프로필" page (replaces the old split between this public
@@ -268,15 +286,15 @@ export default function UserProfileRoute() {
   };
 
   const roleAccent = data.roles.includes("ADMIN")
-    ? "border-rose-500/35"
+    ? "border-rose-400/25"
     : data.roles.includes("OPERATOR")
-      ? "border-cyan-400/35"
+      ? "border-cyan-300/25"
       : data.roles.includes("STREAMER")
-        ? "border-violet-400/35"
-        : "border-border";
+        ? "border-violet-300/25"
+        : "border-white/[0.08]";
 
   return (
-    <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-5 px-3 py-8 sm:px-5 md:px-8 md:py-10">
+    <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-4 px-4 py-7 sm:px-6 md:px-8 md:py-9">
       <Link
         to="/"
         className="flex w-fit items-center gap-2 text-xs font-bold text-text-muted transition-colors hover:text-text-primary"
@@ -286,20 +304,10 @@ export default function UserProfileRoute() {
       </Link>
 
       <article
-        className={`overflow-hidden rounded-[30px] border bg-surface-raised/65 shadow-[0_24px_90px_rgba(0,0,0,0.26)] ${roleAccent}`}
+        className={`overflow-hidden rounded-[24px] border bg-surface-raised/55 shadow-[0_22px_70px_rgba(0,0,0,0.22)] ring-1 ring-white/[0.025] ${roleAccent}`}
       >
-        <header
-          className={`relative h-44 overflow-hidden bg-gradient-to-br md:h-56 ${PROFILE_BANNER_CLASSES[data.banner]}`}
-        >
-          <div
-            className="absolute inset-0 opacity-25"
-            style={{
-              backgroundImage:
-                "linear-gradient(rgba(255,255,255,.16) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.16) 1px, transparent 1px)",
-              backgroundSize: "34px 34px",
-            }}
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-surface-raised/85 via-transparent to-white/5" />
+        <header className="relative h-52 overflow-hidden bg-slate-950 sm:h-60 lg:h-72">
+          <ProfileBannerArtwork banner={data.banner} />
           {isOwnProfile && (
             <button
               type="button"
@@ -311,10 +319,10 @@ export default function UserProfileRoute() {
           )}
         </header>
 
-        <div className="grid lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[310px_minmax(0,1fr)]">
-          <aside className="relative border-b border-border/70 px-5 pb-7 lg:-mt-20 lg:border-b-0 lg:border-r lg:px-7">
-            <div className="relative -mt-14 w-fit lg:mt-0">
-              <div className="h-28 w-28 overflow-hidden rounded-full border-4 border-surface-raised bg-surface text-3xl font-black text-brand shadow-2xl sm:h-32 sm:w-32 lg:h-40 lg:w-40">
+        <div className="grid lg:grid-cols-[250px_minmax(0,1fr)] xl:grid-cols-[270px_minmax(0,1fr)]">
+          <aside className="relative border-b border-border/60 px-5 pb-7 lg:-mt-16 lg:border-b-0 lg:border-r lg:px-6">
+            <div className="relative -mt-12 w-fit lg:mt-0">
+              <div className="h-24 w-24 overflow-hidden rounded-full border-[3px] border-surface-raised/95 bg-surface text-2xl font-black text-brand shadow-[0_12px_32px_rgba(0,0,0,0.35)] ring-1 ring-white/25 sm:h-28 sm:w-28 lg:h-32 lg:w-32">
                 {data.avatarUrl ? (
                   <img
                     src={data.avatarUrl}
@@ -336,7 +344,7 @@ export default function UserProfileRoute() {
                     setAvatarError(null);
                     setEditingAvatar((current) => !current);
                   }}
-                  className="absolute bottom-1 right-1 rounded-full border-2 border-surface-raised bg-brand p-2 text-white shadow-lg transition-transform hover:scale-105"
+                  className="absolute bottom-0 right-0 rounded-full border-2 border-surface-raised bg-brand p-1.5 text-white shadow-lg transition-transform hover:scale-105"
                 >
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
@@ -382,12 +390,12 @@ export default function UserProfileRoute() {
               </div>
             )}
 
-            <div className="mt-5">
-              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-brand-light">
+            <div className="mt-4">
+              <p className="text-[11px] font-black uppercase tracking-[0.16em] text-brand-light">
                 {dict.userProfile.eyebrow}
               </p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <h1 className="break-all text-2xl font-black text-text-primary">
+                <h1 className="break-all text-xl font-black leading-tight text-text-primary sm:text-2xl">
                   {formatPublicUserTag(data.nickname, data.id)}
                 </h1>
                 {flag && <span className="text-xl">{flag}</span>}
@@ -401,14 +409,10 @@ export default function UserProfileRoute() {
               )}
             </div>
 
-            <dl className="mt-6 space-y-3 text-xs">
+            <dl className="mt-5 space-y-3 text-[13px]">
               <ProfileFact
                 label={dict.userProfile.joinedPrefix}
                 value={data.joinedAt.split("T")[0] ?? data.joinedAt}
-              />
-              <ProfileFact
-                label={dict.userProfile.levelLabel}
-                value={`${data.progression.level}`}
               />
               {data.globalRank !== null && (
                 <ProfileFact
@@ -424,24 +428,28 @@ export default function UserProfileRoute() {
               />
             </dl>
 
-            <div className="mt-5">
-              <div className="flex items-baseline justify-between text-[10px] font-bold text-text-muted">
-                <span>{data.progression.currentLevelProgressXp.toLocaleString()} XP</span>
-                <span>{data.progression.currentLevelSpanXp.toLocaleString()} XP</span>
-              </div>
-              <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface-overlay">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-brand to-accent-yellow"
-                  style={{ width: `${data.progression.progressPercent}%` }}
+            <section className="mt-6 border-t border-border/60 pt-5">
+              <h2 className="text-[11px] font-black uppercase tracking-[0.14em] text-text-muted">
+                {dict.userProfile.contributionsTitle}
+              </h2>
+              <div className="mt-2 divide-y divide-border/50">
+                <ContributionMetric
+                  icon={<Bug className="h-4 w-4 text-rose-400" />}
+                  label={dict.userProfile.bugContributionsLabel}
+                  value={data.contributions.bugAcceptedCount}
+                />
+                <ContributionMetric
+                  icon={<Gamepad2 className="h-4 w-4 text-violet-400" />}
+                  label={dict.userProfile.createdGamesLabel}
+                  value={data.contributions.createdGameCount}
+                />
+                <ContributionMetric
+                  icon={<Compass className="h-4 w-4 text-cyan-400" />}
+                  label={dict.userProfile.introducedGamesLabel}
+                  value={data.contributions.introducedExternalGameCount}
                 />
               </div>
-              {data.longestStreak > 0 && (
-                <p className="mt-2 text-[10px] font-semibold text-text-muted">
-                  {dict.userProfile.longestStreakPrefix}: {data.longestStreak}
-                  {dict.userProfile.streakDaysSuffix}
-                </p>
-              )}
-            </div>
+            </section>
 
             {isOwnProfile && (
               <div className="mt-6 grid gap-2">
@@ -462,7 +470,7 @@ export default function UserProfileRoute() {
             )}
           </aside>
 
-          <main className="min-w-0 space-y-8 px-5 py-7 sm:px-7 lg:px-9 lg:py-9 xl:px-11">
+          <main className="min-w-0 space-y-7 px-5 py-7 sm:px-8 lg:px-10 lg:py-9">
             {editingPresentation && isOwnProfile && (
               <section className="rounded-2xl border border-brand/30 bg-brand/5 p-4 sm:p-5">
                 <div className="flex items-start justify-between gap-4">
@@ -501,9 +509,10 @@ export default function UserProfileRoute() {
                         type="button"
                         aria-pressed={presentationBanner === banner}
                         onClick={() => setPresentationBanner(banner)}
-                        className={`relative h-16 overflow-hidden rounded-xl border-2 bg-gradient-to-br ${PROFILE_BANNER_CLASSES[banner]} ${presentationBanner === banner ? "border-white ring-2 ring-brand" : "border-transparent"}`}
+                        className={`relative h-16 overflow-hidden rounded-xl border-2 bg-slate-950 transition-transform hover:-translate-y-0.5 ${presentationBanner === banner ? "border-white ring-2 ring-brand" : "border-transparent"}`}
                       >
-                        <span className="absolute inset-x-1 bottom-1 rounded-md bg-black/45 px-1 py-0.5 text-[9px] font-black text-white backdrop-blur-sm">
+                        <ProfileBannerArtwork banner={banner} compact />
+                        <span className="absolute inset-x-1 bottom-1 z-10 rounded-md bg-black/45 px-1 py-0.5 text-[9px] font-black text-white backdrop-blur-sm">
                           {bannerLabel(banner, dict)}
                         </span>
                       </button>
@@ -558,10 +567,45 @@ export default function UserProfileRoute() {
               </section>
             )}
 
+            <section
+              data-profile-experience
+              className="rounded-2xl border border-white/[0.07] bg-surface/45 px-4 py-4 shadow-inner shadow-black/10 sm:px-5"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-black uppercase tracking-[0.14em] text-text-muted">
+                    {dict.userProfile.experienceTitle}
+                  </p>
+                  <div className="mt-1.5 flex items-baseline gap-2">
+                    <span className="text-2xl font-black tabular-nums text-text-primary">
+                      {dict.userProfile.levelLabel} {data.progression.level}
+                    </span>
+                    <span className="text-xs font-bold tabular-nums text-brand-light">
+                      {data.progression.totalXp.toLocaleString()} XP
+                    </span>
+                  </div>
+                </div>
+                {data.longestStreak > 0 && (
+                  <p className="rounded-full border border-orange-400/20 bg-orange-400/10 px-3 py-1.5 text-[11px] font-bold text-orange-200">
+                    {dict.userProfile.longestStreakPrefix} {data.longestStreak}
+                    {dict.userProfile.streakDaysSuffix}
+                  </p>
+                )}
+              </div>
+              <div className="mt-4 flex items-baseline justify-between text-[11px] font-bold text-text-muted">
+                <span>{data.progression.currentLevelProgressXp.toLocaleString()} XP</span>
+                <span>{data.progression.currentLevelSpanXp.toLocaleString()} XP</span>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface-overlay">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-brand via-violet-400 to-cyan-300"
+                  style={{ width: `${data.progression.progressPercent}%` }}
+                />
+              </div>
+            </section>
+
             <section>
-              <h2 className="text-xs font-black uppercase tracking-[0.16em] text-text-muted">
-                {dict.userProfile.bioTitle}
-              </h2>
+              <h2 className="text-sm font-black text-text-primary">{dict.userProfile.bioTitle}</h2>
               {data.bioMarkdown.trim() ? (
                 <ProfileBioMarkdown markdown={data.bioMarkdown} />
               ) : (
@@ -569,29 +613,6 @@ export default function UserProfileRoute() {
                   {isOwnProfile ? dict.userProfile.bioEmptyOwner : dict.userProfile.bioEmptyViewer}
                 </p>
               )}
-            </section>
-
-            <section className="border-t border-border/70 pt-6">
-              <h2 className="text-xs font-black uppercase tracking-[0.16em] text-text-muted">
-                {dict.userProfile.contributionsTitle}
-              </h2>
-              <div className="mt-4 grid grid-cols-1 divide-y divide-border/70 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-                <ContributionMetric
-                  icon={<Bug className="h-4 w-4 text-rose-400" />}
-                  label={dict.userProfile.bugContributionsLabel}
-                  value={data.contributions.bugAcceptedCount}
-                />
-                <ContributionMetric
-                  icon={<Gamepad2 className="h-4 w-4 text-violet-400" />}
-                  label={dict.userProfile.createdGamesLabel}
-                  value={data.contributions.createdGameCount}
-                />
-                <ContributionMetric
-                  icon={<Compass className="h-4 w-4 text-cyan-400" />}
-                  label={dict.userProfile.introducedGamesLabel}
-                  value={data.contributions.introducedExternalGameCount}
-                />
-              </div>
             </section>
 
             {/* Accepted game completions rendered as a GitHub-style UTC activity calendar. Exact
@@ -801,10 +822,47 @@ function roleLabel(role: PublicProfileRole, dict: Dictionary): string {
 }
 
 function bannerLabel(banner: ProfileBanner, dict: Dictionary): string {
-  if (banner === "AURORA") return dict.userProfile.bannerAurora;
-  if (banner === "SUNSET") return dict.userProfile.bannerSunset;
-  if (banner === "MIDNIGHT") return dict.userProfile.bannerMidnight;
-  return dict.userProfile.bannerMint;
+  if (banner === "AURORA") return dict.userProfile.bannerNovaGlass;
+  if (banner === "SUNSET") return dict.userProfile.bannerSakuraNight;
+  if (banner === "MIDNIGHT") return dict.userProfile.bannerCelestial;
+  return dict.userProfile.bannerBlueLagoon;
+}
+
+function ProfileBannerArtwork({
+  banner,
+  compact = false,
+}: {
+  banner: ProfileBanner;
+  compact?: boolean;
+}) {
+  const art = PROFILE_BANNER_ART[banner];
+  return (
+    <>
+      <div
+        aria-hidden="true"
+        className="absolute inset-0"
+        style={{ backgroundImage: art.backgroundImage }}
+      />
+      <div
+        aria-hidden="true"
+        className={`absolute -right-[8%] -top-1/2 aspect-square w-[48%] rounded-full blur-3xl ${art.glowClass}`}
+      />
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 opacity-[0.12]"
+        style={{
+          backgroundImage:
+            "linear-gradient(rgba(255,255,255,.2) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.2) 1px, transparent 1px)",
+          backgroundSize: compact ? "16px 16px" : "36px 36px",
+          maskImage: "linear-gradient(115deg, black, transparent 72%)",
+        }}
+      />
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 bg-gradient-to-t from-surface-raised/80 via-transparent to-white/[0.06]"
+      />
+    </>
+  );
 }
 
 function ProfileRoleBadge({ role, label }: { role: PublicProfileRole; label: string }) {
@@ -856,14 +914,12 @@ function ContributionMetric({
   value: number;
 }) {
   return (
-    <div className="flex items-center gap-3 py-3 sm:justify-center sm:px-4 sm:py-1">
-      {icon}
-      <div>
-        <p className="text-[10px] font-bold text-text-muted">{label}</p>
-        <p className="mt-0.5 text-lg font-black tabular-nums text-text-primary">
-          {value.toLocaleString()}
-        </p>
-      </div>
+    <div className="flex items-center gap-2.5 py-2.5">
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/[0.04]">
+        {icon}
+      </span>
+      <p className="min-w-0 flex-1 text-[11px] font-bold leading-4 text-text-muted">{label}</p>
+      <p className="text-sm font-black tabular-nums text-text-primary">{value.toLocaleString()}</p>
     </div>
   );
 }

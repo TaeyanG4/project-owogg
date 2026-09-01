@@ -170,17 +170,11 @@ interface SidebarProps {
   isMobileOpen: boolean;
   onMobileClose: () => void;
   isGamePlayPage: boolean;
-  reserveExpandedWidth: boolean;
 }
 
 const GAMEPLAY_EXPANDED_KEY = "owogg_gameplay_sidebar_expanded";
 
-export function Sidebar({
-  isMobileOpen,
-  onMobileClose,
-  isGamePlayPage,
-  reserveExpandedWidth,
-}: SidebarProps) {
+export function Sidebar({ isMobileOpen, onMobileClose, isGamePlayPage }: SidebarProps) {
   const location = useLocation();
   const { dict } = useI18n();
   const { externalPlatformGamesVisible } = usePlatformFeatureSettings();
@@ -226,7 +220,6 @@ export function Sidebar({
   };
 
   const expanded = isGamePlayPage ? gameplayExpanded : autoExpanded;
-  const expandedWithinLayout = expanded && (isGamePlayPage || reserveExpandedWidth);
   const gameNavItems: NavItem[] = [
     { label: dict.sidebar.home, path: "/", icon: Home, match: "home" },
     { label: dict.sidebar.allGames, path: "/games", icon: Gamepad2, match: "games-all" },
@@ -269,8 +262,9 @@ export function Sidebar({
   return (
     <>
       <aside
+        data-expanded={expanded}
         className={`relative z-30 hidden shrink-0 bg-surface-sidebar transition-[width] duration-300 ease-out lg:block ${
-          expandedWithinLayout ? "w-56" : "w-16"
+          expanded ? "w-56" : "w-16"
         }`}
         onMouseEnter={openAutoSidebar}
         onMouseLeave={scheduleAutoCollapse}
@@ -281,9 +275,9 @@ export function Sidebar({
           }
         }}
       >
-        <div className="sticky top-16 h-[calc(100vh-4rem)] w-16">
+        <div className="h-[calc(100dvh-4rem)] w-16">
           <div
-            className={`absolute inset-y-0 left-0 flex flex-col border-r border-border bg-surface-sidebar shadow-2xl transition-[width] duration-300 ease-out ${
+            className={`fixed bottom-0 left-0 top-16 flex flex-col border-r border-border/80 bg-surface-sidebar shadow-[14px_0_36px_rgba(0,0,0,0.24)] transition-[width] duration-300 ease-out ${
               expanded ? "w-56" : "w-16"
             }`}
           >

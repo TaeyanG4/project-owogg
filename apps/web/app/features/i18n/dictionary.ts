@@ -1147,10 +1147,11 @@ export interface Dictionary {
     editProfileTitle: string;
     editProfileHint: string;
     bannerLabel: string;
-    bannerAurora: string;
-    bannerSunset: string;
-    bannerMidnight: string;
-    bannerMint: string;
+    bannerNovaGlass: string;
+    bannerSakuraNight: string;
+    bannerCelestial: string;
+    bannerBlueLagoon: string;
+    experienceTitle: string;
     bioLabel: string;
     bioPlaceholder: string;
     bioTitle: string;
@@ -2480,10 +2481,11 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       editProfileHint:
         "준비된 배너 중 하나를 고르고 CommonMark 문법으로 자기소개를 작성할 수 있습니다.",
       bannerLabel: "프로필 배너",
-      bannerAurora: "오로라",
-      bannerSunset: "선셋",
-      bannerMidnight: "미드나이트",
-      bannerMint: "민트",
+      bannerNovaGlass: "노바 글래스",
+      bannerSakuraNight: "사쿠라 나이트",
+      bannerCelestial: "셀레스티얼",
+      bannerBlueLagoon: "블루 라군",
+      experienceTitle: "경험치",
       bioLabel: "자기소개 (Markdown)",
       bioPlaceholder: "게임, 관심사, 활동을 소개해보세요.",
       bioTitle: "자기소개",
@@ -3833,10 +3835,11 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       editProfileTitle: "Profile appearance",
       editProfileHint: "Choose one of the prepared banners and write a biography using CommonMark.",
       bannerLabel: "Profile banner",
-      bannerAurora: "Aurora",
-      bannerSunset: "Sunset",
-      bannerMidnight: "Midnight",
-      bannerMint: "Mint",
+      bannerNovaGlass: "Nova Glass",
+      bannerSakuraNight: "Sakura Night",
+      bannerCelestial: "Celestial",
+      bannerBlueLagoon: "Blue Lagoon",
+      experienceTitle: "Experience",
       bioLabel: "Bio (Markdown)",
       bioPlaceholder: "Share your games, interests, and activity.",
       bioTitle: "About",
@@ -5184,10 +5187,11 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       editProfileTitle: "プロフィール表示設定",
       editProfileHint: "用意されたバナーから選択し、CommonMarkで自己紹介を作成できます。",
       bannerLabel: "プロフィールバナー",
-      bannerAurora: "オーロラ",
-      bannerSunset: "サンセット",
-      bannerMidnight: "ミッドナイト",
-      bannerMint: "ミント",
+      bannerNovaGlass: "ノヴァ・グラス",
+      bannerSakuraNight: "サクラ・ナイト",
+      bannerCelestial: "セレスティアル",
+      bannerBlueLagoon: "ブルー・ラグーン",
+      experienceTitle: "経験値",
       bioLabel: "自己紹介（Markdown）",
       bioPlaceholder: "ゲーム、興味、活動について紹介しましょう。",
       bioTitle: "自己紹介",
@@ -6480,10 +6484,11 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       editProfileTitle: "个人资料显示设置",
       editProfileHint: "从预设横幅中选择一个，并使用 CommonMark 编写自我介绍。",
       bannerLabel: "个人资料横幅",
-      bannerAurora: "极光",
-      bannerSunset: "日落",
-      bannerMidnight: "午夜",
-      bannerMint: "薄荷",
+      bannerNovaGlass: "新星琉光",
+      bannerSakuraNight: "樱夜",
+      bannerCelestial: "星穹",
+      bannerBlueLagoon: "蓝色潟湖",
+      experienceTitle: "经验值",
       bioLabel: "自我介绍（Markdown）",
       bioPlaceholder: "介绍你的游戏、兴趣和活动。",
       bioTitle: "自我介绍",

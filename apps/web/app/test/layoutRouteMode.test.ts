@@ -12,7 +12,7 @@ test("only a concrete live game route enables the gameplay shell", () => {
   assert.equal(isGamePlayPath("/ranking"), false);
 });
 
-test("catalog auto-expands the desktop rail while gameplay keeps a persisted manual control", () => {
+test("desktop pages reserve the expanded rail while gameplay keeps a persisted manual control", () => {
   const layout = readFileSync(
     fileURLToPath(new URL("../components/layout/Layout.tsx", import.meta.url)),
     "utf8",
@@ -23,8 +23,13 @@ test("catalog auto-expands the desktop rail while gameplay keeps a persisted man
   );
 
   assert.match(layout, /isGamePlayPage=\{isGamePlayWorkspace\}/);
+  assert.match(layout, /<div className="flex min-w-0 flex-1 flex-col">/);
+  assert.match(layout, /!isAdminWorkspace && !isGamePlayWorkspace && <Footer \/>/);
   assert.match(sidebar, /onMouseEnter=\{openAutoSidebar\}/);
-  assert.match(sidebar, /expanded && \(isGamePlayPage \|\| reserveExpandedWidth\)/);
+  assert.match(sidebar, /expanded \? "w-56" : "w-16"/);
+  assert.match(sidebar, /fixed bottom-0 left-0 top-16/);
+  assert.match(sidebar, /data-expanded=\{expanded\}/);
+  assert.doesNotMatch(sidebar, /reserveExpandedWidth/);
   assert.match(sidebar, /GAMEPLAY_EXPANDED_KEY/);
   assert.match(sidebar, /aria-expanded=\{expanded\}/);
   assert.match(sidebar, /games\?view=genres/);
