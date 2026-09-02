@@ -246,8 +246,8 @@ export function Sidebar({ isMobileOpen, onMobileClose, isGamePlayPage }: Sidebar
           {
             label: dict.sidebar.externalGames,
             icon: MonitorPlay,
-            badge: dict.sidebar.comingSoon,
-            disabled: true,
+            path: "/external-games",
+            match: "path",
           } satisfies NavItem,
         ]
       : []),

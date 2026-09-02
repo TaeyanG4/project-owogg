@@ -25,13 +25,14 @@ test("generic production migrations avoid Cloudflare-incompatible TEMP table DDL
     "0052_game_content_and_platform_controls.sql",
     "0053_profile_customization_and_streamer_disconnect.sql",
     "0054_profile_follows.sql",
+    "0055_external_game_introductions.sql",
   ]) {
     const sql = fs.readFileSync(new URL(`../migrations/${filename}`, import.meta.url), "utf8");
     assert.doesNotMatch(sql, /\bCREATE\s+TEMP(?:ORARY)?\s+TABLE\b/i, filename);
   }
 });
 
-test("full production migration chain applies through 0054 with profile follows and Streamer disconnect controls", () => {
+test("full production migration chain applies through 0055 with external game introductions", () => {
   const { raw } = createSqliteD1("");
   const migrationUrl = new URL("../migrations/", import.meta.url);
   const filenames = fs
@@ -82,6 +83,19 @@ test("full production migration chain applies through 0054 with profile follows 
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'user_follows'")
       .get(),
   );
+  for (const tableName of [
+    "external_games",
+    "external_game_media",
+    "external_game_bookmarks",
+    "external_game_review_audit",
+  ]) {
+    assert.ok(
+      raw
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .get(tableName),
+      tableName,
+    );
+  }
   assert.ok(
     raw
       .prepare(

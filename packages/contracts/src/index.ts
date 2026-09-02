@@ -20,3 +20,4 @@ export * from "./sandboxGames.js";
 export * from "./games.js";
 export * from "./i18n.js";
 export * from "./multiplayer.js";
+export * from "./externalGames.js";

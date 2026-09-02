@@ -5,6 +5,8 @@ export default [
   route("games", "routes/games.tsx"),
   route("games/:slug", "routes/game-slug.tsx"),
   route("games/:slug/ranking", "routes/gameRanking.tsx"),
+  route("external-games", "routes/externalGames.tsx"),
+  route("external-games/:slug", "routes/externalGameDetail.tsx"),
   route("sandbox-games/:slug", "routes/sandboxGamePlay.tsx"),
   route("ranking", "routes/ranking.tsx"),
   route("profile", "routes/profile.tsx"),

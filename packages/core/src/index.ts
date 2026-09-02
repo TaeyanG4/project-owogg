@@ -21,6 +21,7 @@ export * from "./domain/contentHash.js";
 export * from "./domain/gameEvidence.js";
 export * from "./domain/gameSession.js";
 export * from "./domain/gamePreview.js";
+export * from "./domain/externalGames.js";
 export * from "./domain/verifiedGameSession.js";
 export * from "./domain/gameCreatorScorePolicy.js";
 export * from "./ports/repositories.js";
@@ -40,6 +41,7 @@ export * from "./ports/adminGameCatalog.js";
 export * from "./ports/publicGameMetrics.js";
 export * from "./ports/publicRanking.js";
 export * from "./ports/platformFeatureSettings.js";
+export * from "./ports/externalGames.js";
 
 // Unified Game Platform foundation. sandbox* exports above remain the control-plane path for
 // registration, review, and publishing; runtime reads use RuntimeGameRegistry below.
@@ -109,6 +111,7 @@ export * from "./application/publicGameCatalog.js";
 export * from "./application/publicGameMetricsUseCases.js";
 export * from "./application/publicRankingUseCases.js";
 export * from "./application/platformFeatureSettingsUseCases.js";
+export * from "./application/externalGameUseCases.js";
 export * from "./application/gameScoreAcceptanceUseCases.js";
 export * from "./application/gameResultAcceptanceUseCases.js";
 export * from "./application/gameResultVerificationUseCases.js";

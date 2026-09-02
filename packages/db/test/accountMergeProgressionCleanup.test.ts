@@ -26,6 +26,7 @@ function createMockD1(seed: {
     discord_guild_managers: [],
     streamer_profiles: [],
     game_creator_access: [],
+    external_game_bookmarks: [],
     sessions: [],
     users: [],
   };

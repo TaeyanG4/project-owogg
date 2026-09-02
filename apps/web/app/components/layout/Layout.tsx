@@ -9,10 +9,10 @@ interface LayoutProps {
   children: ReactNode;
 }
 
-/** Only a concrete live game route gets the gameplay shell treatment (for example, no footer).
- * Catalog and ranking routes are deliberately excluded even though they share `/games`. */
+/** Only a concrete live game or external-game introduction gets the gameplay shell treatment
+ * (for example, no footer). Catalog and ranking routes remain outside this workspace shell. */
 export function isGamePlayPath(pathname: string): boolean {
-  return /^\/games\/[^/]+\/?$/.test(pathname);
+  return /^\/(?:games|external-games)\/[^/]+\/?$/.test(pathname);
 }
 
 export function Layout({ children }: LayoutProps) {

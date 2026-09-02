@@ -29,6 +29,8 @@ import {
 import { gamesRouter } from "./routes/games.js";
 import { renderRouter } from "./routes/render.js";
 import { multiplayerRouter } from "./routes/multiplayer.js";
+import { externalGamesRouter } from "./routes/externalGames.js";
+import { adminExternalGamesRouter } from "./routes/adminExternalGames.js";
 import { createContainer } from "./container.js";
 import type { ApiEnv } from "./routes/auth.js";
 
@@ -197,6 +199,7 @@ app.route("/api/admin/games", adminGamesRouter);
 app.route("/api/admin/users", adminUsersRouter);
 app.route("/api/admin/game-creators", adminGameCreatorsRouter);
 app.route("/api/admin/sandbox-games", adminSandboxGamesRouter);
+app.route("/api/admin/external-games", adminExternalGamesRouter);
 app.route("/api/dev", devGamesRouter);
 app.route("/api/me", myAccessRouter);
 // Not under /api on purpose — these serve actual game files (HTML/JS/WASM/...), not JSON, and are
@@ -207,6 +210,7 @@ app.route("/play", gameServingRouter);
 app.route("/games", publishedGameAssetsRouter);
 app.route("/preview", previewGameAssetsRouter);
 app.route("/api/games", gamesRouter);
+app.route("/api/external-games", externalGamesRouter);
 app.route("/api/render", renderRouter);
 app.route("/api/multiplayer", multiplayerRouter);
 

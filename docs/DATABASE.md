@@ -4,7 +4,7 @@
 
 마지막 검증: 2026-09-02
 
-최신 마이그레이션: `0054_profile_follows.sql`
+최신 마이그레이션: `0055_external_game_introductions.sql`
 
 기준 소스:
 
@@ -16,7 +16,7 @@
 - [`ERD.md`](ERD.md) — 도메인별 관계도와 전체 물리 테이블·호환 뷰 사전
 
 Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 권한 원천입니다. 이 문서는
-현재 `0000_initial_schema.sql`부터 `0054_profile_follows.sql`까지의 역할을 설명합니다.
+현재 `0000_initial_schema.sql`부터 `0055_external_game_introductions.sql`까지의 역할을 설명합니다.
 
 ## 마이그레이션 범위
 
@@ -54,6 +54,7 @@ Cloudflare D1의 실제 schema와 제약조건은 migration 파일이 유일한 
 | `0052`        | 게임 태그·기본 화면 모드, 제작자 편집 쿨다운, 플랫폼 운영 스위치            |
 | `0053`        | 프로필 배너·Markdown 소개·기여 원장과 Streamer 연결 해제 불변 이력          |
 | `0054`        | 방향성 관심 플레이어 관계와 팔로워·팔로잉 조회 인덱스                       |
+| `0055`        | 타 플랫폼 게임 소개 CRUD·이미지·3개 심사 슬롯·북마크·심사 감사 원장         |
 
 기존 migration은 변경, squash, 삭제하지 않습니다. 프로덕션 배포는 먼저 Repository variable
 `PRODUCTION_D1_DATABASE_ID`를 read-only 원격 D1 목록과 committed `owogg-d1` binding에 대조한 뒤,
@@ -245,8 +246,31 @@ fail-closed로 막는다. 삭제/익명화 정책이나 공식 게임 purge는 a
 ### `platform_feature_settings`
 
 `MULTIPLAYER`와 `EXTERNAL_PLATFORM_GAMES` 두 서버 소유 boolean 설정을 저장합니다. Multiplayer는 환경
-스위치와 D1 스위치를 모두 통과해야 신규 HTTP/WebSocket admission이 가능하고, 타 플랫폼 메뉴는 실제
-surface 구현 전까지 기본값 false입니다. 변경 actor와 시각을 함께 보존합니다.
+스위치와 D1 스위치를 모두 통과해야 신규 HTTP/WebSocket admission이 가능합니다. 타 플랫폼 소개 기능은
+구현되어 있지만 메뉴는 운영자가 Staging 검증 뒤 명시적으로 열 수 있도록 기본값 false를 유지합니다.
+변경 actor와 시각을 함께 보존합니다.
+
+## 타 플랫폼 게임 소개
+
+`external_games`는 OwOGG가 실행하는 `games`/`game_versions`와 분리된 CRUD 게시물 권한 원천입니다.
+`owogg.json`, 점수, XP, 게임 session 또는 runtime bundle에 참여하지 않으며 공개 화면의 플레이 버튼은
+검증된 HTTPS 외부 URL을 새 탭으로 엽니다.
+
+- `introducer_user_id`가 소개자를 정하고 공개 별명은 `users.nickname`을 조인해 표시합니다. 본인 게임과
+  제3자 게임을 모두 소개할 수 있지만 심사 제출 때 이미지·설명을 게시할 권리가 있음을 확인합니다.
+- 상태는 `DRAFT | PENDING_REVIEW | APPROVED | REJECTED`, 공개축은 `PRIVATE | PUBLIC`입니다. 사용자 한
+  명의 `PENDING_REVIEW` row만 1~3번 슬롯을 점유하며 partial unique index가 동시 요청에서도 최대 3개를
+  강제합니다. 승인·반려·제출 철회·관리자 삭제는 슬롯을 즉시 해제합니다.
+- 승인된 소개의 본문 또는 이미지를 수정하면 `DRAFT + PRIVATE`로 되돌려 기존 승인을 우회한 공개 변경을
+  막습니다. 한번 공개된 소개는 사용자가 완전 삭제할 수 없고 관리자가 비공개·soft delete로 관리합니다.
+- `external_game_media`는 B2 객체의 content hash/key와 배너 1개·스크린샷 최대 8개를 기록합니다.
+  업로드는 파일명이 아닌 PNG/JPEG/GIF/WebP/AVIF byte signature를 검사하고 파일당 5 MiB로 제한합니다.
+- `external_game_bookmarks`가 소개별 북마크 원장이고, 최초 승인 시
+  `profile_contribution_events(EXTERNAL_GAME_PUBLISHED)`를 중복 없이 추가합니다.
+- `external_game_review_audit`는 승인·반려·공개 상태 변경·관리자 삭제의 actor와 사유를 보존합니다.
+
+계정 병합은 두 계정의 활성 소개 심사 슬롯 합계·번호 충돌을 먼저 검사하고, 충돌이 없을 때 소개자와
+북마크·기여 관계를 Primary 계정으로 옮깁니다.
 
 ## 두 개의 독립 상태축
 

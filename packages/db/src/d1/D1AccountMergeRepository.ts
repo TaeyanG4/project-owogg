@@ -163,9 +163,33 @@ export class D1AccountMergeRepository implements AccountMergeRepository {
              AND secondary_game.publisher_user_id = ?
              AND primary_game.review_slot IS NOT NULL
          )
+         OR (
+           SELECT COUNT(*)
+           FROM external_games external_game
+           WHERE external_game.introducer_user_id IN (?, ?)
+             AND external_game.review_slot IS NOT NULL
+         ) > 3
+         OR EXISTS (
+           SELECT 1
+           FROM external_games primary_external_game
+           JOIN external_games secondary_external_game
+             ON secondary_external_game.review_slot = primary_external_game.review_slot
+           WHERE primary_external_game.introducer_user_id = ?
+             AND secondary_external_game.introducer_user_id = ?
+             AND primary_external_game.review_slot IS NOT NULL
+         )
          LIMIT 1`,
       )
-      .bind(primaryId, secondaryId, primaryId, secondaryId)
+      .bind(
+        primaryId,
+        secondaryId,
+        primaryId,
+        secondaryId,
+        primaryId,
+        secondaryId,
+        primaryId,
+        secondaryId,
+      )
       .first();
     if (creatorReviewRow) return "GAME_CREATOR_REVIEW_CONFLICT";
 
@@ -330,6 +354,36 @@ export class D1AccountMergeRepository implements AccountMergeRepository {
         .bind(primaryId, secondaryId, primaryId),
       this.db
         .prepare(`UPDATE sandbox_games SET developer_user_id = ? WHERE developer_user_id = ?`)
+        .bind(primaryId, secondaryId),
+      // External game introductions are a separate Creator Center domain. The conflict check
+      // above guarantees its three review-slot unique index remains valid after ownership moves.
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO external_game_bookmarks
+             (user_id, external_game_id, created_at)
+           SELECT ?, external_game_id, created_at
+             FROM external_game_bookmarks WHERE user_id = ?`,
+        )
+        .bind(primaryId, secondaryId),
+      this.db.prepare(`DELETE FROM external_game_bookmarks WHERE user_id = ?`).bind(secondaryId),
+      this.db
+        .prepare(`UPDATE external_games SET introducer_user_id = ? WHERE introducer_user_id = ?`)
+        .bind(primaryId, secondaryId),
+      this.db
+        .prepare(
+          `UPDATE external_games SET reviewed_by_admin_id = ? WHERE reviewed_by_admin_id = ?`,
+        )
+        .bind(primaryId, secondaryId),
+      this.db
+        .prepare(`UPDATE external_games SET deleted_by_admin_id = ? WHERE deleted_by_admin_id = ?`)
+        .bind(primaryId, secondaryId),
+      this.db
+        .prepare(
+          `UPDATE external_game_review_audit SET actor_admin_id = ? WHERE actor_admin_id = ?`,
+        )
+        .bind(primaryId, secondaryId),
+      this.db
+        .prepare(`UPDATE profile_contribution_events SET user_id = ? WHERE user_id = ?`)
         .bind(primaryId, secondaryId),
       // Defensive convergence for a generic USER row that has no legacy control-plane row.
       this.db

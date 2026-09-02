@@ -18,6 +18,7 @@ import {
   FileJson,
   FileText,
   Image,
+  MonitorPlay,
 } from "lucide-react";
 import { useAuth } from "../features/auth";
 import {
@@ -50,6 +51,7 @@ import {
   formatServerUploadDate,
   type AdminGamePageSize,
 } from "../components/admin/AdminGamePagination";
+import { ExternalGameAdminPanel } from "../components/externalGames/ExternalGameAdminPanel";
 
 export function meta() {
   return [
@@ -61,7 +63,7 @@ export function meta() {
 
 export default function AdminSandboxGamesRoute() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const [activeSection, setActiveSection] = useState<"OWOGG" | "USER">("OWOGG");
+  const [activeSection, setActiveSection] = useState<"OWOGG" | "USER" | "EXTERNAL">("OWOGG");
   const [queue, setQueue] = useState<SandboxGameReviewQueueResponse | null>(null);
   const [allGames, setAllGames] = useState<AdminSandboxGameListResponse | null>(null);
   const [userPage, setUserPage] = useState(1);
@@ -226,15 +228,14 @@ export default function AdminSandboxGamesRoute() {
         </div>
         <h1 className="text-2xl font-black text-text-primary">게임 관리 및 심사</h1>
         <p className="mt-1 text-xs text-text-muted">
-          OWOGG 공식 게임 게시와 사용자 제작 게임 심사를 한곳에서 관리합니다. 사용자 게임의 버전
-          승인은 공개와 별개이며, 승인 후 "공개 전환"을 해야 서비스가 시작됩니다.
+          OWOGG 공식 게임 게시, 사용자 제작 게임, 타 플랫폼 게임 소개 심사를 한곳에서 관리합니다.
         </p>
       </header>
 
       <div
         role="tablist"
         aria-label="게임 관리 구분"
-        className="grid gap-2 rounded-2xl border border-border bg-surface-raised p-2 sm:grid-cols-2"
+        className="grid gap-2 rounded-2xl border border-border bg-surface-raised p-2 sm:grid-cols-3"
       >
         <button
           type="button"
@@ -262,6 +263,19 @@ export default function AdminSandboxGamesRoute() {
         >
           <Gamepad2 className="h-4 w-4" /> 사용자 제작 게임
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSection === "EXTERNAL"}
+          onClick={() => setActiveSection("EXTERNAL")}
+          className={`flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black transition-colors ${
+            activeSection === "EXTERNAL"
+              ? "bg-cyan-500 text-slate-950 shadow-lg"
+              : "text-text-muted hover:bg-surface-overlay hover:text-text-primary"
+          }`}
+        >
+          <MonitorPlay className="h-4 w-4" /> 타 플랫폼 게임
+        </button>
       </div>
 
       {error && (
@@ -272,6 +286,8 @@ export default function AdminSandboxGamesRoute() {
 
       {activeSection === "OWOGG" ? (
         <OfficialGameManagement />
+      ) : activeSection === "EXTERNAL" ? (
+        <ExternalGameAdminPanel />
       ) : reviewAccessDenied ? (
         <section className="rounded-2xl border border-border bg-surface-raised p-5">
           <h2 className="text-sm font-black text-text-primary">사용자 제작 게임 심사</h2>

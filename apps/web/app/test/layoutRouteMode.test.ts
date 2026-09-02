@@ -4,10 +4,13 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { isGamePlayPath } from "../components/layout/Layout";
 
-test("only a concrete live game route enables the gameplay shell", () => {
+test("only a concrete live game or external introduction enables the gameplay shell", () => {
   assert.equal(isGamePlayPath("/games/reaction-time"), true);
   assert.equal(isGamePlayPath("/games/reaction-time/"), true);
+  assert.equal(isGamePlayPath("/external-games/indie-puzzle"), true);
+  assert.equal(isGamePlayPath("/external-games/indie-puzzle/"), true);
   assert.equal(isGamePlayPath("/games"), false);
+  assert.equal(isGamePlayPath("/external-games"), false);
   assert.equal(isGamePlayPath("/games/reaction-time/ranking"), false);
   assert.equal(isGamePlayPath("/ranking"), false);
 });

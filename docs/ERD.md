@@ -4,9 +4,9 @@
 
 마지막 검증: 2026-09-02
 
-최신 마이그레이션: `0054_profile_follows.sql`
+최신 마이그레이션: `0055_external_game_introductions.sql`
 
-스키마 요약: 물리 테이블 `71`, 롤링 배포 호환 뷰 `0`
+스키마 요약: 물리 테이블 `75`, 롤링 배포 호환 뷰 `0`
 
 기준 소스:
 
@@ -15,7 +15,7 @@
 - `apps/api/src/container.ts`
 - [데이터베이스 기준 문서](DATABASE.md)
 
-이 문서는 `0000_initial_schema.sql`부터 `0054_profile_follows.sql`까지를 빈 SQLite에
+이 문서는 `0000_initial_schema.sql`부터 `0055_external_game_introductions.sql`까지를 빈 SQLite에
 순서대로 적용한 **최종 D1 schema**를 기준으로 합니다. migration SQL이 유일한 schema 권한
 원천이며, 이 문서는 관계 탐색과 운영 이해를 위한 투영입니다.
 
@@ -684,7 +684,61 @@ SOOP은 안전한 callback 결박 계약이 없어 이 table을 사용하는 연
 사용합니다. 이전 등급값과 자동 심사 이력은 `streamer_legacy_*` archive table에만 보존되고 현재
 runtime authority나 관리자 조회 대상이 아닙니다.
 
-## 7. USER 게임 롤링 배포 호환 미러
+## 7. 타 플랫폼 게임 소개
+
+```mermaid
+erDiagram
+  users {
+    INTEGER id PK
+    TEXT nickname
+  }
+  external_games {
+    INTEGER id PK
+    TEXT slug UK
+    INTEGER introducer_user_id FK
+    TEXT moderation_status
+    TEXT visibility
+    INTEGER review_slot
+  }
+  external_game_media {
+    INTEGER id PK
+    INTEGER external_game_id FK
+    TEXT media_kind
+    TEXT object_key UK
+    TEXT content_hash
+  }
+  external_game_bookmarks {
+    INTEGER user_id PK, FK
+    INTEGER external_game_id PK, FK
+  }
+  external_game_review_audit {
+    INTEGER id PK
+    INTEGER external_game_id FK
+    INTEGER actor_admin_id FK
+    TEXT action
+  }
+  profile_contribution_events {
+    INTEGER id PK
+    INTEGER user_id FK
+    TEXT contribution_type
+    TEXT source_key UK
+  }
+
+  users ||--o{ external_games : introduces
+  external_games ||--o{ external_game_media : owns
+  users ||--o{ external_game_bookmarks : bookmarks
+  external_games ||--o{ external_game_bookmarks : receives
+  external_games ||--o{ external_game_review_audit : reviewed
+  users ||--o{ external_game_review_audit : acts
+  users ||--o{ profile_contribution_events : earns
+```
+
+타 플랫폼 소개는 `games`와 관계가 없는 별도 CRUD 도메인입니다. 한 소개자의 활성 `review_slot`은
+1~3 중 하나이며 partial unique index가 동시 제출을 포함해 최대 3건을 강제합니다. 승인·반려·철회는
+슬롯을 비우고, `APPROVED + PUBLIC + published_at + not deleted`인 row만 공개 API와 이미지 endpoint가
+제공합니다. 최초 승인은 안정적인 source key로 프로필 기여 원장을 한 번만 추가합니다.
+
+## 8. USER 게임 롤링 배포 호환 미러
 
 ```mermaid
 erDiagram
@@ -746,6 +800,9 @@ games (identity, ownership, visibility, live pointer)
   ├─ game_versions.manifest_key     → B2 immutable file manifest
   ├─ game_assets.object_key         → B2 logo
   └─ (game id / version id prefix)  → B2 published bundle files
+
+external_games (소개 metadata, review, visibility)
+  └─ external_game_media.object_key → B2 소개 배너/스크린샷
 ```
 
 게임 등록·업데이트·삭제는 반드시 application use case를 통해 D1/B2를 함께 변경합니다. B2 콘솔이나
@@ -775,6 +832,10 @@ D1 콘솔에서 직접 수정하면 감사 로그와 두 저장소의 일관성�
 | `discord_link_challenges`                    | Discord         | Discord에서 시작한 계정 연결 challenge                     |
 | `discord_play_contexts`                      | Discord         | 길드에서 발급한 단기 게임 실행 context                     |
 | `discord_server_registration_challenges`     | Discord         | 사용자가 관리 가능한 길드 등록 challenge                   |
+| `external_game_bookmarks`                    | External Games  | 사용자별 타 플랫폼 게임 소개 북마크 원장                   |
+| `external_game_media`                        | External Games  | B2 배너·스크린샷의 content-addressed pointer               |
+| `external_game_review_audit`                 | External Games  | 소개 승인·반려·공개 변경·삭제 관리자 감사 원장             |
+| `external_games`                             | External Games  | 소개자·내용·외부 링크·3개 심사 슬롯·공개 상태 권한 원천    |
 | `game_assets`                                | Game Platform   | 게임별 B2 자산 pointer; 현재 `LOGO` 사용                   |
 | `game_attempt_consumptions`                  | Game Platform   | user/game/version에 고정된 일회성 attempt 소비             |
 | `game_content_edit_cooldowns`                | Game Creator    | USER 설명·태그 변경의 게임별 24시간 원자 쿨다운            |

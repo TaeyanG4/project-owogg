@@ -37,6 +37,7 @@ export * from "./d1/D1MultiplayerProfileRequestRepository.js";
 export * from "./d1/D1MultiplayerInstanceRepository.js";
 export * from "./d1/D1MultiplayerMatchRepository.js";
 export * from "./d1/D1PlatformFeatureSettingsRepository.js";
+export * from "./d1/D1ExternalGameRepository.js";
 export * from "./storage/BackblazeB2GameBundleRepository.js";
 
 export * from "./storage/UnconfiguredGameBundleRepository.js";

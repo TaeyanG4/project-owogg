@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import {
   ArrowLeft,
   Loader2,
@@ -15,6 +15,7 @@ import {
   Image,
   Pencil,
   Eye,
+  MonitorPlay,
 } from "lucide-react";
 import { useAuth } from "../features/auth";
 import {
@@ -39,6 +40,7 @@ import type {
   SandboxGameVersionRecord,
 } from "@owogg/contracts";
 import { GameBundleDropzone } from "../components/game/GameBundleDropzone";
+import { ExternalGameCreatorPanel } from "../components/externalGames/ExternalGameCreatorPanel";
 
 export function meta() {
   return [
@@ -54,6 +56,8 @@ type LoadState = "loading" | "success" | "error";
  * room to be a real page rather than a buried card — see docs/AUTHORIZATION.md's Game Creator
  * program section. GAME_CREATOR is a Program/Entitlement, never a Staff Role. */
 export default function GameCreatorCenterRoute() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTool = searchParams.get("tool") === "external" ? "EXTERNAL" : "OWOGG";
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [devMe, setDevMe] = useState<GameCreatorMeResponse | null>(null);
   const [myGames, setMyGames] = useState<SandboxGameRecord[] | null>(null);
@@ -111,7 +115,7 @@ export default function GameCreatorCenterRoute() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-6 px-4 py-8 md:px-8">
+    <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-8 md:px-8">
       <Link
         to="/settings"
         className="inline-flex items-center gap-1.5 text-xs font-bold text-text-muted hover:text-text-primary"
@@ -126,8 +130,7 @@ export default function GameCreatorCenterRoute() {
         </div>
         <h1 className="text-2xl font-black text-text-primary">게임 크리에이터 센터</h1>
         <p className="mt-1 text-xs text-text-muted">
-          직접 만든 게임을 OwOGG에 업로드하고 관리합니다. 업로드본은 비공개 초안으로 저장되며, 전체
-          화면 미리보기에서 직접 확인하고 제출해야 관리자 심사가 시작됩니다.
+          직접 만든 OwOGG 게임을 관리하거나 다른 플랫폼의 좋은 게임을 소개하고 심사를 요청합니다.
         </p>
       </header>
 
@@ -137,7 +140,34 @@ export default function GameCreatorCenterRoute() {
         </p>
       )}
 
-      {devMe.hasAccess ? (
+      <div
+        role="tablist"
+        aria-label="게임 크리에이터 도구"
+        className="grid gap-2 rounded-2xl border border-border bg-surface-raised p-2 sm:grid-cols-2"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTool === "OWOGG"}
+          onClick={() => setSearchParams({})}
+          className={`flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black ${activeTool === "OWOGG" ? "bg-brand text-white" : "text-text-muted hover:bg-surface-overlay hover:text-text-primary"}`}
+        >
+          <Gamepad2 className="h-4 w-4" /> OwOGG 게임 업로드
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTool === "EXTERNAL"}
+          onClick={() => setSearchParams({ tool: "external" })}
+          className={`flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black ${activeTool === "EXTERNAL" ? "bg-cyan-500 text-slate-950" : "text-text-muted hover:bg-surface-overlay hover:text-text-primary"}`}
+        >
+          <MonitorPlay className="h-4 w-4" /> 타 플랫폼 게임 소개
+        </button>
+      </div>
+
+      {activeTool === "EXTERNAL" ? (
+        <ExternalGameCreatorPanel />
+      ) : devMe.hasAccess ? (
         <ManageGamesPanel
           myGames={myGames}
           drafts={drafts}

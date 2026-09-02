@@ -16,6 +16,8 @@
 - `apps/api/src/routes/devGames.ts`
 - `apps/api/src/routes/adminSandboxGames.ts`
 - `apps/api/src/routes/gameServing.ts`
+- `apps/api/src/routes/externalGames.ts`
+- `apps/api/src/routes/adminExternalGames.ts`
 - `apps/web/app/features/game/GameHost.tsx`
 - `packages/game-sdk/src/bridge/`
 
@@ -29,6 +31,10 @@ OwOGG에는 두 개의 **입력/control-plane**이 있지만 하나의 productio
 두 경로 모두 최종적으로 generic `games`, `game_versions`, `game_assets`와 B2 canonical/bundle을
 사용합니다. `StaticGameRegistry`, publisher별 host/runtime, `/official-games/*`는 현재 production
 경로가 아닙니다.
+
+Game Creator Center의 **타 플랫폼 게임 소개**는 위 runtime 입력과 다른 CRUD 게시 기능입니다.
+ZIP이나 `owogg.json`을 받지 않고 외부 게임 링크·설명·태그·출시일·배너/스크린샷을 심사한 뒤, 공개
+페이지에서 외부 사이트로 이동시킵니다.
 
 공개 “공식” 표시는 `GameCanonicalDocument.publisher.official` 메타데이터입니다. 소유권과 API 인가는
 D1의 서버 관리 관계만 사용하며 canonical/manifest 입력으로 판정하지 않습니다. Game Creator 경로는
@@ -70,8 +76,9 @@ OWOGG.cancel();
 drag-and-drop 또는 파일 선택 방식으로 standalone ZIP을 등록합니다. API는 elevated admin session과
 `games.moderate` permission을 확인한 뒤 publisher를 서버에서 `OWOGG`로 고정하고, bundle과 canonical을
 B2에 기록한 후 D1 live version을 활성화합니다. 같은 화면의 사용자 제작 게임 심사 기능은
-`sandbox_games.review` 권한을 별도로 검사합니다. 배포 workflow나 `games/*` source package를 사용하지
-않습니다.
+`sandbox_games.review` 권한을 별도로 검사합니다. 세 번째 **타 플랫폼 게임** 영역도 같은 권한으로
+소개 내용·외부 링크·이미지·권리 확인 메모를 검토하고 승인·반려·공개 전환·삭제를 처리합니다. 배포
+workflow나 `games/*` source package를 사용하지 않습니다.
 
 ZIP에는 `index.html`, `owogg.json`, `owogg.logo.*`가 필요합니다. 관리자와 USER 업로드는 완전히
 동일한 Game Creator Manifest v1 입력을 사용합니다. publisher와 official 표시는 manifest에 선언할 수
@@ -463,3 +470,23 @@ ID가 바뀌지 않으면 초기화하지 않습니다. 공개 리더보드의 e
 
 실제 UI 업로드 순서는 [Game Upload Guide](GAME_UPLOAD_GUIDE.md), 전체 runtime 경계는
 [Game Platform Architecture](GAME_PLATFORM_ARCHITECTURE.md)를 참조하세요.
+
+## 8. 타 플랫폼 게임 소개
+
+로그인한 사용자는 Game Creator 자격과 무관하게 Game Creator Center의 **타 플랫폼 게임 소개**에서
+CRUD 게시물을 작성할 수 있습니다. URL ID, 게임명, 플랫폼/사이트, HTTPS 플레이 링크, 출시일, 태그,
+한 줄·Markdown 소개, 게임과의 관계, 관리자용 권리 확인 메모를 저장한 뒤 선택 배너 1개와 소개
+스크린샷 1~8개를 올립니다.
+
+심사 제출 시 사용자는 본인 게임 여부와 관계없이 설명·이미지를 게시할 권리가 있고 저작권 문제가
+없음을 확인해야 합니다. 최소 스크린샷 1개가 없으면 제출할 수 없습니다. 한 사용자의
+`PENDING_REVIEW` 소개는 최대 3개이며 승인·반려·철회 시 슬롯이 비워집니다. 승인된 게시물을 수정하면
+즉시 비공개 초안으로 전환되어 다시 심사받아야 합니다.
+
+공개 목록은 최신/북마크 순과 검색을 제공하고, 상세 화면의 실행 공간에는 B2에 저장한 이미지 갤러리를
+표시합니다. 배너는 선택 사항입니다. **게임 플레이**는 OwOGG iframe이나 session을 만들지 않고 심사된
+HTTPS 링크를 `noopener noreferrer nofollow` 새 탭으로 엽니다. 소개자의 현재 공개 별명과 프로필 링크,
+출시일, 태그, 북마크 수를 함께 표시합니다.
+
+이 기능은 `external_games` 도메인만 사용합니다. `games`, `game_versions`, `owogg.json`, 점수, XP,
+도전과제, Discord 또는 멀티플레이 authority로 폴백하거나 합치지 않습니다.

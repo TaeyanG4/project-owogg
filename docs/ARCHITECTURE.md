@@ -77,7 +77,8 @@ Browser
 - 공개 게임 API, immutable bundle serving, 점수 접수, USER upload/review, 관리자 기능을 제공합니다.
 - 관리자 운영 설정은 D1의 전체 multiplayer admission 스위치와 타 플랫폼 게임 메뉴 노출 스위치를
   제공합니다. 환경의 `MULTIPLAYER_ENABLED`와 D1 값이 모두 true일 때만 새 multiplayer admission을
-  허용하며, 타 플랫폼 surface는 실제 구현 전까지 기본 비노출입니다.
+  허용합니다. 타 플랫폼 소개는 별도 D1 CRUD/B2 이미지 도메인이며 Staging 검증 전에는 메뉴 기본값
+  false를 유지합니다. OwOGG 게임 runtime·점수·XP·session에는 연결하지 않습니다.
 - route는 정책을 재구현하지 않고 core use case를 호출합니다.
 
 ## 패키지의 책임
