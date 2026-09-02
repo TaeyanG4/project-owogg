@@ -82,11 +82,20 @@ test("profile follows are directional, idempotent, paginated, and cannot target 
       .run("2026-09-02T00:00:00.000Z"),
   );
 
+  const firstFollowCreatedAt = String(
+    raw
+      .prepare(
+        "SELECT created_at FROM user_follows WHERE follower_user_id = 1 AND followed_user_id = 2",
+      )
+      .get()?.created_at,
+  );
+  const laterFollowCreatedAt = new Date(Date.parse(firstFollowCreatedAt) + 1_000).toISOString();
+
   raw
     .prepare(
       "INSERT INTO user_follows (follower_user_id, followed_user_id, created_at) VALUES (3, 2, ?)",
     )
-    .run("2026-09-02T01:00:00.000Z");
+    .run(laterFollowCreatedAt);
 
   const followers = await app.request(
     "/api/profile/public/2/followers?page=1&pageSize=10",
