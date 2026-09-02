@@ -126,7 +126,11 @@ description_zh.md
 3. 서버가 manifest/logo/path/size를 검증하고 game과 첫 generic numeric version을 생성합니다.
 4. 원본 ZIP은 retry를 위한 source archive로 보관됩니다.
 5. `GamePublicationService`가 files와 manifest를 B2에 기록합니다.
-6. publication 성공 시 version은 `READY`, review 상태는 `PENDING_REVIEW`입니다.
+6. publication 성공 시 version은 `READY`, review 상태는 `DRAFT`입니다.
+7. Game Creator Center의 `미리보기`는 짧게 만료되는 비공개 capability로 B2의 exact
+   `(gameId, versionId)` prefix를 전체 화면 iframe에서 실행합니다.
+8. iframe이 준비된 뒤 제작자가 확인하고 `심사 제출`을 눌러야만 review 상태가 `PENDING_REVIEW`로
+   바뀌고 사용자별 review slot을 사용합니다.
 
 `READY`가 화면에 보이더라도 관리자 승인을 뜻하지 않습니다.
 
@@ -148,8 +152,9 @@ description_zh.md
 - 새 버전 ZIP에도 같은 slug의 유효한 `owogg.json`이 필수입니다. slug가 다르면 거부됩니다.
 - 새 버전에 `owogg.logo.*`가 있으면 게임 logo를 갱신하며, 없으면 기존 logo를 유지합니다.
 - 승인 또는 live-version 전환 시 해당 source archive의 manifest가 canonical로 동기화됩니다.
-- 심사 중인 게임 slot은 사용자별 최대 2개입니다. slot이 모두 사용 중이면 기존 submission을
-  승인/반려/withdraw 처리한 뒤 다시 시도해야 합니다.
+- 심사 중인 게임 slot은 사용자별 최대 2개입니다. 업로드와 비공개 미리보기는 slot을 사용하지 않고,
+  exact draft를 명시적으로 심사 제출할 때 원자적으로 slot을 확보합니다. slot이 모두 사용 중이면 기존
+  submission을 승인/반려/withdraw 처리한 뒤 다시 시도해야 합니다.
 
 ### 4.1 부분 재업로드
 
@@ -162,7 +167,8 @@ USER 게임에서는 소유 제작자 또는 `sandbox_games.review` 관리자에
 동시에 갱신할 때는 전체 ZIP 업로드가 가장 안전합니다.
 
 - `owogg.json`과 핵심 속성 저장은 기존 게시 파일을 덮어쓰지 않고 현재 source ZIP을 재구성해 새
-  `PENDING_REVIEW` version을 만듭니다. 수정본은 다시 승인되어야 live로 전환할 수 있습니다.
+  `DRAFT` version을 만듭니다. 수정본도 exact B2 미리보기 확인 후 심사 제출·승인을 거쳐야 live로
+  전환할 수 있습니다.
 - 로고는 game-level asset이므로 새 version을 만들지 않고 즉시 교체합니다.
 - 설명은 지원되는 단일 `.md` 파일 또는 설명 파일·이미지를 묶은 ZIP으로 제출합니다. 단일 파일은 해당
   언어 문서만 교체하고, ZIP은 선언된 설명 문서/이미지 전체를 교체합니다. ZIP에는 영어
@@ -178,15 +184,16 @@ USER 게임에서는 소유 제작자 또는 `sandbox_games.review` 관리자에
 
 두 상태를 따로 확인합니다.
 
-| 축          | 상태                                                  | 의미                 |
-| ----------- | ----------------------------------------------------- | -------------------- |
-| Publication | `UPLOADED`, `PUBLISHING`, `READY`, `FAILED`           | bundle 저장 완전성   |
-| Review      | `PENDING_REVIEW`, `APPROVED`, `REJECTED`, `WITHDRAWN` | USER moderation 결정 |
+| 축          | 상태                                                           | 의미                      |
+| ----------- | -------------------------------------------------------------- | ------------------------- |
+| Publication | `UPLOADED`, `PUBLISHING`, `READY`, `FAILED`                    | bundle 저장 완전성        |
+| Review      | `DRAFT`, `PENDING_REVIEW`, `APPROVED`, `REJECTED`, `WITHDRAWN` | USER 확인·moderation 결정 |
 
 ```text
 READY != APPROVED
 ```
 
+- `DRAFT`: B2 publication은 끝났지만 제작자가 아직 exact version을 미리보기·심사 제출하지 않은 상태입니다.
 - `FAILED`: publication retry 대상일 수 있습니다. 관리자 republish는 원본 source archive와 같은
   version을 사용합니다.
 - `REJECTED`: review 결정이며 publication failure와 다른 축입니다.
@@ -202,9 +209,12 @@ READY != APPROVED
 - `POST /api/dev/apply`: self-service 신청(현재 policy상 닫힘)
 - `POST /api/dev/apply/:id/withdraw`: 신청 철회
 - `GET /api/dev/games`: 본인 게임 목록
+- `GET /api/dev/games/drafts`: 본인의 비공개 draft 목록
 - `POST /api/dev/games/upload`: ZIP으로 새 게임과 첫 version 등록
 - `GET /api/dev/games/:id`: 본인/admin 상세
 - `POST /api/dev/games/:id/versions`: 새 version upload
+- `POST /api/dev/games/:id/versions/:versionId/preview`: exact draft용 단기 비공개 미리보기 발급
+- `POST /api/dev/games/:id/versions/:versionId/submit`: 미리보기 capability와 일치하는 exact draft 심사 제출
 - `POST /api/dev/games/:id/description`: 단일 Markdown 또는 설명 ZIP 교체
 - `PATCH /api/dev/games/:id/basic-metadata`: 제목·소개·장르·모드·태그·기본 화면 모드 변경
 - `POST /api/dev/games/:id/manifest`: standalone `owogg.json` 교체

@@ -13,6 +13,7 @@ export const SANDBOX_GAME_FAILURE_STATUS: Record<
 > = {
   GAME_NOT_FOUND: 404,
   VERSION_NOT_FOUND: 404,
+  VERSION_NOT_DRAFT: 409,
   SLUG_TAKEN: 409,
   INVALID_SLUG: 400,
   INVALID_TITLE: 400,
@@ -34,6 +35,7 @@ export const SANDBOX_GAME_FAILURE_STATUS: Record<
   BUNDLE_EXTRACTED_TOO_LARGE: 422,
   BUNDLE_MISSING_ENTRY: 422,
   SUBMISSION_LIMIT_REACHED: 409,
+  PENDING_REVIEW_EXISTS: 409,
   NOTHING_TO_WITHDRAW: 409,
   MANIFEST_MISSING: 422,
   MANIFEST_INVALID: 422,
@@ -63,6 +65,7 @@ export const SANDBOX_GAME_FAILURE_STATUS: Record<
 export const SANDBOX_GAME_FAILURE_MESSAGE: Record<SandboxGameUseCaseFailure["code"], string> = {
   GAME_NOT_FOUND: "존재하지 않는 게임입니다.",
   VERSION_NOT_FOUND: "존재하지 않는 버전입니다.",
+  VERSION_NOT_DRAFT: "미리보기 가능한 초안 버전이 아닙니다.",
   SLUG_TAKEN: "이미 사용 중인 슬러그입니다.",
   INVALID_SLUG: "슬러그는 영문 소문자/숫자/-, 3~64자여야 합니다.",
   INVALID_TITLE: "제목은 1~60자여야 합니다.",
@@ -85,6 +88,7 @@ export const SANDBOX_GAME_FAILURE_MESSAGE: Record<SandboxGameUseCaseFailure["cod
   BUNDLE_MISSING_ENTRY: "ZIP 최상위에 index.html이 없습니다.",
   SUBMISSION_LIMIT_REACHED:
     "현재 심사 중인 게임이 2개입니다. 기존 게임의 심사가 완료되거나 제출을 철회한 뒤 다시 시도해주세요.",
+  PENDING_REVIEW_EXISTS: "이미 이 게임의 다른 버전이 심사 대기 중입니다.",
   NOTHING_TO_WITHDRAW: "철회할 심사 중인 제출이 없습니다.",
   MANIFEST_MISSING:
     "ZIP 최상위에 owogg.json이 없습니다. 모든 등록 및 버전 업로드에 Game Creator Manifest v1 파일을 포함하세요.",

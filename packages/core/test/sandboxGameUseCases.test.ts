@@ -213,19 +213,6 @@ function createFakeRepo(): SandboxGameRepository & {
       return { entries, total: games.size };
     },
     async create(input) {
-      // Mirrors D1SandboxGameRepository.create's contract: atomically pick the lowest slot (1 or
-      // 2) not already held by this developer, or return null if both are taken. A single-threaded
-      // Map can't reproduce the race the real UNIQUE INDEX guards against — that invariant is
-      // proven against real SQLite in packages/db/test/D1SandboxGameRepository.test.ts — this only
-      // needs to match the *contract* so use-case-level tests can exercise SUBMISSION_LIMIT_REACHED.
-      const takenSlots = new Set(
-        [...games.values()]
-          .filter((g) => g.developerUserId === input.developerUserId && g.reviewSlot !== null)
-          .map((g) => g.reviewSlot),
-      );
-      const slot = !takenSlots.has(1) ? 1 : !takenSlots.has(2) ? 2 : null;
-      if (slot === null) return null;
-
       const id = nextGameId++;
       const record: SandboxGameRecord = {
         id,
@@ -249,7 +236,7 @@ function createFakeRepo(): SandboxGameRepository & {
         scoreDisplaySuffix: null,
         visibility: "PRIVATE",
         liveVersionId: null,
-        reviewSlot: slot,
+        reviewSlot: null,
         deletedAt: null,
         deletedByAdminId: null,
         createdAt: input.nowIso,
@@ -333,7 +320,7 @@ function createFakeRepo(): SandboxGameRepository & {
         objectKey: input.objectKey,
         contentHash: input.contentHash,
         bundleBytes: input.bundleBytes,
-        status: "PENDING_REVIEW",
+        status: input.status,
         reviewedByAdminId: null,
         reviewedAt: null,
         rejectReason: null,
@@ -360,6 +347,58 @@ function createFakeRepo(): SandboxGameRepository & {
     },
     async listVersionsByGame(gameId) {
       return [...versions.values()].filter((v) => v.gameId === gameId);
+    },
+    async listDraftVersionsByDeveloper(developerUserId) {
+      return [...versions.values()].filter(
+        (version) =>
+          version.status === "DRAFT" &&
+          games.get(version.gameId)?.developerUserId === developerUserId,
+      );
+    },
+    async submitDraftVersion(input) {
+      const version = versions.get(input.versionId);
+      const game = games.get(input.gameId);
+      if (
+        !version ||
+        !game ||
+        version.gameId !== game.id ||
+        version.status !== "DRAFT" ||
+        game.developerUserId !== input.developerUserId ||
+        [...versions.values()].some(
+          (candidate) => candidate.gameId === game.id && candidate.status === "PENDING_REVIEW",
+        )
+      ) {
+        return null;
+      }
+
+      if (input.claimReviewSlot) {
+        const takenSlots = new Set(
+          [...games.values()]
+            .filter(
+              (candidate) =>
+                candidate.developerUserId === input.developerUserId &&
+                candidate.reviewSlot !== null,
+            )
+            .map((candidate) => candidate.reviewSlot),
+        );
+        const slot = !takenSlots.has(1) ? 1 : !takenSlots.has(2) ? 2 : null;
+        if (slot === null) return null;
+        games.set(game.id, { ...game, reviewSlot: slot, updatedAt: input.nowIso });
+      }
+
+      const submitted: SandboxGameVersionRecord = {
+        ...version,
+        status: "PENDING_REVIEW",
+      };
+      versions.set(version.id, submitted);
+      return submitted;
+    },
+    async withdrawOtherDraftVersions(gameId, submittedVersionId) {
+      for (const [id, version] of versions) {
+        if (version.gameId === gameId && id !== submittedVersionId && version.status === "DRAFT") {
+          versions.set(id, { ...version, status: "WITHDRAWN" });
+        }
+      }
     },
     async listPendingVersions(limit, offset) {
       const pending = [...versions.values()].filter((v) => v.status === "PENDING_REVIEW");
@@ -614,6 +653,40 @@ function createUseCases(
   };
 }
 
+async function submitCreatorDraft(
+  useCases: SandboxGameUseCases,
+  version: SandboxGameVersionRecord,
+  actingUserId = 1,
+) {
+  return useCases.submitDraftForReview({
+    gameId: version.gameId,
+    versionId: version.id,
+    actingUserId,
+  });
+}
+
+async function uploadMatchingCreatorDraft(
+  useCases: SandboxGameUseCases,
+  archives: ReturnType<typeof createFakeArchiveReader>,
+  game: SandboxGameRecord,
+) {
+  archives.entries = {
+    ...MINIMAL_BUNDLE,
+    [OWOGG_GAME_CREATOR_MANIFEST_FILENAME]: creatorManifestBytes({
+      slug: game.slug,
+      title: game.title,
+      genre: game.genre,
+      mode: game.mode,
+    }),
+  };
+  return useCases.uploadVersion({
+    gameId: game.id,
+    actingUserId: game.developerUserId,
+    isAdmin: false,
+    bytes: new ArrayBuffer(10),
+  });
+}
+
 async function createGameWithLiveVersion(entries?: Record<string, Uint8Array>) {
   const ctx = createUseCases(entries);
   const game = await ctx.useCases.createGame({
@@ -631,6 +704,7 @@ async function createGameWithLiveVersion(entries?: Record<string, Uint8Array>) {
     isAdmin: false,
     bytes: new ArrayBuffer(10),
   });
+  await submitCreatorDraft(ctx.useCases, version);
   await ctx.useCases.decideVersion({
     versionId: version.id,
     adminId: 99,
@@ -868,6 +942,101 @@ test("uploadVersion allows an admin to upload on the developer's behalf", async 
   assert.ok(storage.putKeys.some((k) => k.startsWith(`uploads/${game.id}/`)));
 });
 
+test("creator upload stays DRAFT until the exact READY preview is explicitly submitted", async () => {
+  const { useCases, repo } = createUseCases();
+  const game = await useCases.createGame({
+    slug: "my-game",
+    developerUserId: 1,
+    title: "Game",
+    shortDescription: null,
+    description: null,
+    genre: "puzzle",
+    mode: "single",
+  });
+  const version = await useCases.uploadVersion({
+    gameId: game.id,
+    actingUserId: 1,
+    isAdmin: false,
+    bytes: new ArrayBuffer(10),
+  });
+
+  assert.equal(version.status, "DRAFT");
+  assert.equal(version.publishStatus, "READY");
+  assert.deepEqual(await useCases.listDrafts(1), [version]);
+  assert.equal(
+    await useCases.getDraftForPreview({
+      gameId: game.id,
+      versionId: version.id,
+      actingUserId: 1,
+    }),
+    version,
+  );
+
+  const submitted = await submitCreatorDraft(useCases, version);
+  assert.equal(submitted.version.status, "PENDING_REVIEW");
+  assert.equal(submitted.game.reviewSlot, 1);
+  assert.ok(repo.auditActions.includes("VERSION_SUBMITTED"));
+});
+
+test("submitting one exact draft retires older unsubmitted drafts of the same game", async () => {
+  const { useCases, repo } = createUseCases();
+  const game = await useCases.createGame({
+    slug: "my-game",
+    developerUserId: 1,
+    title: "Game",
+    shortDescription: null,
+    description: null,
+    genre: "puzzle",
+    mode: "single",
+  });
+  const first = await useCases.uploadVersion({
+    gameId: game.id,
+    actingUserId: 1,
+    isAdmin: false,
+    bytes: new ArrayBuffer(10),
+  });
+  const second = await useCases.uploadVersion({
+    gameId: game.id,
+    actingUserId: 1,
+    isAdmin: false,
+    bytes: new ArrayBuffer(11),
+  });
+
+  await submitCreatorDraft(useCases, second);
+  assert.equal(repo.versions.get(first.id)?.status, "WITHDRAWN");
+  assert.equal(repo.versions.get(second.id)?.status, "PENDING_REVIEW");
+  assert.deepEqual(await useCases.listDrafts(1), []);
+});
+
+test("draft preview fails closed for another user", async () => {
+  const { useCases } = createUseCases();
+  const game = await useCases.createGame({
+    slug: "my-game",
+    developerUserId: 1,
+    title: "Game",
+    shortDescription: null,
+    description: null,
+    genre: "puzzle",
+    mode: "single",
+  });
+  const version = await useCases.uploadVersion({
+    gameId: game.id,
+    actingUserId: 1,
+    isAdmin: false,
+    bytes: new ArrayBuffer(10),
+  });
+
+  await assert.rejects(
+    () =>
+      useCases.getDraftForPreview({
+        gameId: game.id,
+        versionId: version.id,
+        actingUserId: 2,
+      }),
+    (error: unknown) => error instanceof SandboxGameUseCaseFailure && error.code === "NOT_OWNER",
+  );
+});
+
 test("a creator can change description or tags only once per 24 hours while admins bypass the cooldown", async () => {
   const versionEntries = (tags: string[], markdown: string) => ({
     "index.html": bytes("<h1>content cooldown</h1>"),
@@ -1067,6 +1236,7 @@ test("setVisibility to PUBLIC is rejected until a version has been approved", as
     isAdmin: false,
     bytes: new ArrayBuffer(10),
   });
+  await submitCreatorDraft(useCases, version);
   await useCases.decideVersion({
     versionId: version.id,
     adminId: 99,
@@ -1096,6 +1266,8 @@ test("decideVersion(APPROVED) sets the game's live_version_id", async () => {
     bytes: new ArrayBuffer(10),
   });
 
+  await submitCreatorDraft(useCases, version);
+
   await useCases.decideVersion({
     versionId: version.id,
     adminId: 99,
@@ -1123,6 +1295,8 @@ test("decideVersion(REJECTED) requires a non-empty reason", async () => {
     isAdmin: false,
     bytes: new ArrayBuffer(10),
   });
+
+  await submitCreatorDraft(useCases, version);
 
   await assert.rejects(
     () =>
@@ -1153,6 +1327,8 @@ test("decideVersion is final — a second decision on the same version is reject
     isAdmin: false,
     bytes: new ArrayBuffer(10),
   });
+
+  await submitCreatorDraft(useCases, version);
 
   await useCases.decideVersion({
     versionId: version.id,
@@ -2396,7 +2572,7 @@ test("a publish that fails part-way leaves the version non-READY with a recorded
   assert.ok(!storage.putKeys.some((k) => k.endsWith(".owogg-manifest.json")));
 });
 
-test("a version left non-READY by a failed publish cannot be approved or made live", async () => {
+test("a version left non-READY by a failed publish cannot be submitted or made live", async () => {
   const { useCases, storage, repo } = createUseCases();
   const game = await useCases.createGame({
     slug: "my-game",
@@ -2419,13 +2595,7 @@ test("a version left non-READY by a failed publish cannot be approved or made li
   const failed = [...repo.versions.values()].at(-1)!;
 
   await assert.rejects(
-    () =>
-      useCases.decideVersion({
-        versionId: failed.id,
-        adminId: 99,
-        decision: "APPROVED",
-        reason: null,
-      }),
+    () => submitCreatorDraft(useCases, failed),
     (err: unknown) =>
       err instanceof SandboxGameUseCaseFailure && err.code === "VERSION_NOT_PUBLISHED",
   );
@@ -2495,6 +2665,7 @@ test("setLiveVersion switches the live version and records an audit entry, witho
     isAdmin: false,
     bytes: new ArrayBuffer(20),
   });
+  await submitCreatorDraft(useCases, v2);
   await useCases.decideVersion({
     versionId: v2.id,
     adminId: 99,
@@ -2584,6 +2755,7 @@ test("revokeApproval leaves the game alone at the game level if a different vers
     isAdmin: false,
     bytes: new ArrayBuffer(20),
   });
+  await submitCreatorDraft(useCases, secondVersion);
   await useCases.decideVersion({
     versionId: secondVersion.id,
     adminId: 99,
@@ -2648,6 +2820,7 @@ test("revokeApproval refuses an already-rejected version", async () => {
     isAdmin: false,
     bytes: new ArrayBuffer(10),
   });
+  await submitCreatorDraft(useCases, version);
   await useCases.decideVersion({
     versionId: version.id,
     adminId: 99,
@@ -2786,7 +2959,7 @@ test("deletePublishedVersion falls back to the source ZIP when an interrupted pu
 
 // ── review-slot quota ─────────────────────────────────────────────────────────
 
-test("createGame claims a review slot, visible on the returned record", async () => {
+test("createGame keeps registration outside the review quota until explicit submission", async () => {
   const { useCases } = createUseCases();
   const game = await useCases.createGame({
     slug: "my-game",
@@ -2797,11 +2970,11 @@ test("createGame claims a review slot, visible on the returned record", async ()
     genre: "puzzle",
     mode: "single",
   });
-  assert.equal(game.reviewSlot, 1);
+  assert.equal(game.reviewSlot, null);
 });
 
 test("a third concurrent submission is rejected with SUBMISSION_LIMIT_REACHED", async () => {
-  const { useCases } = createUseCases();
+  const { useCases, archives, repo } = createUseCases();
   const create = (slug: string) =>
     useCases.createGame({
       slug,
@@ -2813,14 +2986,24 @@ test("a third concurrent submission is rejected with SUBMISSION_LIMIT_REACHED", 
       mode: "single",
     });
 
-  await create("game-1");
-  await create("game-2");
+  const first = await create("game-1");
+  const firstDraft = await uploadMatchingCreatorDraft(useCases, archives, first);
+  await submitCreatorDraft(useCases, firstDraft);
+
+  const second = await create("game-2");
+  const secondDraft = await uploadMatchingCreatorDraft(useCases, archives, second);
+  await submitCreatorDraft(useCases, secondDraft);
+
+  const third = await create("game-3");
+  const thirdDraft = await uploadMatchingCreatorDraft(useCases, archives, third);
 
   await assert.rejects(
-    () => create("game-3"),
+    () => submitCreatorDraft(useCases, thirdDraft),
     (err: unknown) =>
       err instanceof SandboxGameUseCaseFailure && err.code === "SUBMISSION_LIMIT_REACHED",
   );
+  assert.equal(repo.versions.get(thirdDraft.id)?.status, "DRAFT");
+  assert.equal(repo.games.get(third.id)?.reviewSlot, null);
 });
 
 test("this is not a lifetime cap: a decided game frees its slot for an unlimited number of future submissions", async () => {
@@ -2851,7 +3034,8 @@ test("this is not a lifetime cap: a decided game frees its slot for an unlimited
       isAdmin: false,
       bytes: new ArrayBuffer(10),
     });
-    // Decide it immediately so the next iteration's createGame has a free slot again.
+    await submitCreatorDraft(useCases, version);
+    // Decide it immediately so the next iteration's submission has a free slot again.
     await useCases.decideVersion({
       versionId: version.id,
       adminId: 99,
@@ -2892,6 +3076,7 @@ test("this is not a cap on total approved games: multiple already-approved games
       isAdmin: false,
       bytes: new ArrayBuffer(10),
     });
+    await submitCreatorDraft(useCases, version);
     await useCases.decideVersion({
       versionId: version.id,
       adminId: 99,
@@ -2905,7 +3090,7 @@ test("this is not a cap on total approved games: multiple already-approved games
   }
   // A 4th and 5th concurrent NEW submission still succeed, since none of the 3 approved games
   // hold a slot anymore.
-  await useCases.createGame({
+  const fourth = await useCases.createGame({
     slug: "game-4",
     developerUserId: 1,
     title: "Game",
@@ -2914,7 +3099,7 @@ test("this is not a cap on total approved games: multiple already-approved games
     genre: "puzzle",
     mode: "single",
   });
-  await useCases.createGame({
+  const fifth = await useCases.createGame({
     slug: "game-5",
     developerUserId: 1,
     title: "Game",
@@ -2923,6 +3108,12 @@ test("this is not a cap on total approved games: multiple already-approved games
     genre: "puzzle",
     mode: "single",
   });
+  const fourthDraft = await uploadMatchingCreatorDraft(useCases, archives, fourth);
+  await submitCreatorDraft(useCases, fourthDraft);
+  const fifthDraft = await uploadMatchingCreatorDraft(useCases, archives, fifth);
+  await submitCreatorDraft(useCases, fifthDraft);
+  assert.equal(repo.games.get(fourth.id)?.reviewSlot, 1);
+  assert.equal(repo.games.get(fifth.id)?.reviewSlot, 2);
 });
 
 test("REJECTED also releases the review slot, not just APPROVED", async () => {
@@ -2942,6 +3133,7 @@ test("REJECTED also releases the review slot, not just APPROVED", async () => {
     isAdmin: false,
     bytes: new ArrayBuffer(10),
   });
+  await submitCreatorDraft(useCases, version);
   await useCases.decideVersion({
     versionId: version.id,
     adminId: 99,
@@ -2969,13 +3161,15 @@ test("withdrawSubmission releases the slot and marks the pending version WITHDRA
     bytes: new ArrayBuffer(10),
   });
 
+  await submitCreatorDraft(useCases, version);
+
   const withdrawn = await useCases.withdrawSubmission({ gameId: game.id, actingUserId: 1 });
   assert.equal(withdrawn.reviewSlot, null);
   assert.equal(repo.versions.get(version.id)?.status, "WITHDRAWN");
 });
 
 test("withdrawSubmission frees the slot for a new submission", async () => {
-  const { useCases } = createUseCases();
+  const { useCases, archives, repo } = createUseCases();
   const g1 = await useCases.createGame({
     slug: "game-1",
     developerUserId: 1,
@@ -2985,7 +3179,7 @@ test("withdrawSubmission frees the slot for a new submission", async () => {
     genre: "puzzle",
     mode: "single",
   });
-  await useCases.createGame({
+  const g2 = await useCases.createGame({
     slug: "game-2",
     developerUserId: 1,
     title: "Game",
@@ -2994,6 +3188,10 @@ test("withdrawSubmission frees the slot for a new submission", async () => {
     genre: "puzzle",
     mode: "single",
   });
+  const v1 = await uploadMatchingCreatorDraft(useCases, archives, g1);
+  await submitCreatorDraft(useCases, v1);
+  const v2 = await uploadMatchingCreatorDraft(useCases, archives, g2);
+  await submitCreatorDraft(useCases, v2);
   await useCases.withdrawSubmission({ gameId: g1.id, actingUserId: 1 });
 
   const g3 = await useCases.createGame({
@@ -3005,7 +3203,9 @@ test("withdrawSubmission frees the slot for a new submission", async () => {
     genre: "puzzle",
     mode: "single",
   });
-  assert.equal(g3.reviewSlot, 1);
+  const v3 = await uploadMatchingCreatorDraft(useCases, archives, g3);
+  await submitCreatorDraft(useCases, v3);
+  assert.equal(repo.games.get(g3.id)?.reviewSlot, 1);
 });
 
 test("withdrawSubmission rejects a non-owner", async () => {
@@ -3043,6 +3243,7 @@ test("withdrawSubmission on a game with no open slot is rejected with NOTHING_TO
     isAdmin: false,
     bytes: new ArrayBuffer(10),
   });
+  await submitCreatorDraft(useCases, version);
   await useCases.decideVersion({
     versionId: version.id,
     adminId: 99,
@@ -3058,7 +3259,7 @@ test("withdrawSubmission on a game with no open slot is rejected with NOTHING_TO
 });
 
 test("different developers have independent review-slot budgets", async () => {
-  const { useCases } = createUseCases();
+  const { useCases, archives, repo } = createUseCases();
   const create = (slug: string, developerUserId: number) =>
     useCases.createGame({
       slug,
@@ -3070,11 +3271,14 @@ test("different developers have independent review-slot budgets", async () => {
       mode: "single",
     });
 
-  await create("dev-a-1", 1);
-  await create("dev-a-2", 1);
+  const a1 = await create("dev-a-1", 1);
+  await submitCreatorDraft(useCases, await uploadMatchingCreatorDraft(useCases, archives, a1));
+  const a2 = await create("dev-a-2", 1);
+  await submitCreatorDraft(useCases, await uploadMatchingCreatorDraft(useCases, archives, a2));
   // Developer 1 is now at their limit — developer 2 is unaffected.
   const b1 = await create("dev-b-1", 2);
-  assert.equal(b1.reviewSlot, 1);
+  await submitCreatorDraft(useCases, await uploadMatchingCreatorDraft(useCases, archives, b1), 2);
+  assert.equal(repo.games.get(b1.id)?.reviewSlot, 1);
 });
 
 // ── createGameFromBundle ──────────────────────────────────────────────────────
@@ -3178,9 +3382,9 @@ test("createGameFromBundle creates the game and its first version from the embed
   assert.equal(game.title, "공 피하기");
   assert.equal(game.genre, "action");
   assert.equal(game.developerUserId, 1);
-  assert.equal(game.reviewSlot, 1);
+  assert.equal(game.reviewSlot, null);
   assert.equal(version.gameId, game.id);
-  assert.equal(version.status, "PENDING_REVIEW");
+  assert.equal(version.status, "DRAFT");
   assert.equal(repo.versions.size, 1);
 });
 
@@ -3236,7 +3440,7 @@ test("createGameFromBundle rejects a manifest with a non-string genre as MANIFES
   );
 });
 
-test("replaceManifest rebuilds a new review version without mutating the existing version", async () => {
+test("replaceManifest rebuilds a new draft version without mutating the existing version", async () => {
   const { useCases, repo, storage } = createUseCases();
   const game = await useCases.createGame({
     slug: "my-game",
@@ -3268,7 +3472,7 @@ test("replaceManifest rebuilds a new review version without mutating the existin
   });
 
   assert.notEqual(revised.id, original.id);
-  assert.equal(revised.status, "PENDING_REVIEW");
+  assert.equal(revised.status, "DRAFT");
   assert.equal(repo.versions.get(original.id)?.contentHash, original.contentHash);
   const published = storage.objects.get(`games/${game.id}/${revised.id}/owogg.json`);
   assert.ok(published);
@@ -3499,9 +3703,6 @@ test("deleteGame soft-deletes the game, forces it PRIVATE, and records a DELETED
     genre: "puzzle",
     mode: "single",
   });
-  // Take this game past its review slot so deletion doesn't also exercise the withdraw path here.
-  await useCases.withdrawSubmission({ gameId: game.id, actingUserId: 1 });
-
   const deleted = await useCases.deleteGame({ gameId: game.id, actorAdminId: 9 });
 
   assert.notEqual(deleted.deletedAt, null);
@@ -3527,7 +3728,8 @@ test("deleteGame releases an open review slot and withdraws the pending version"
     isAdmin: false,
     bytes: new ArrayBuffer(10),
   });
-  assert.notEqual(game.reviewSlot, null);
+  await submitCreatorDraft(useCases, version);
+  assert.notEqual(repo.games.get(game.id)?.reviewSlot, null);
 
   const deleted = await useCases.deleteGame({ gameId: game.id, actorAdminId: 9 });
 
@@ -3536,7 +3738,7 @@ test("deleteGame releases an open review slot and withdraws the pending version"
 });
 
 test("deleteGame frees the review slot for a new submission, same as withdrawSubmission", async () => {
-  const { useCases } = createUseCases();
+  const { useCases, archives, repo } = createUseCases();
   const g1 = await useCases.createGame({
     slug: "game-1",
     developerUserId: 1,
@@ -3546,7 +3748,7 @@ test("deleteGame frees the review slot for a new submission, same as withdrawSub
     genre: "puzzle",
     mode: "single",
   });
-  await useCases.createGame({
+  const g2 = await useCases.createGame({
     slug: "game-2",
     developerUserId: 1,
     title: "Game",
@@ -3555,6 +3757,8 @@ test("deleteGame frees the review slot for a new submission, same as withdrawSub
     genre: "puzzle",
     mode: "single",
   });
+  await submitCreatorDraft(useCases, await uploadMatchingCreatorDraft(useCases, archives, g1));
+  await submitCreatorDraft(useCases, await uploadMatchingCreatorDraft(useCases, archives, g2));
   await useCases.deleteGame({ gameId: g1.id, actorAdminId: 9 });
 
   const g3 = await useCases.createGame({
@@ -3566,7 +3770,8 @@ test("deleteGame frees the review slot for a new submission, same as withdrawSub
     genre: "puzzle",
     mode: "single",
   });
-  assert.equal(g3.reviewSlot, 1);
+  await submitCreatorDraft(useCases, await uploadMatchingCreatorDraft(useCases, archives, g3));
+  assert.equal(repo.games.get(g3.id)?.reviewSlot, 1);
 });
 
 test("deleteGame is idempotent-failure: a second call returns ALREADY_DELETED, not a silent no-op", async () => {

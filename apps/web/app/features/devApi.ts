@@ -2,9 +2,12 @@ import {
   GameCreatorMeResponseSchema,
   GameCreatorApplicationRecordSchema,
   SandboxGameListResponseSchema,
+  SandboxGameDraftListResponseSchema,
   SandboxGameRecordSchema,
   SandboxGameVersionRecordSchema,
   SandboxGameUploadResponseSchema,
+  SandboxGamePreviewSessionResponseSchema,
+  SandboxGameReviewSubmitResponseSchema,
   GameLogoUpdateResponseSchema,
   type SandboxGameBasicMetadataUpdateRequest,
   type GameContentUpdateRequest,
@@ -42,9 +45,32 @@ export function fetchMyGames() {
   return apiFetch("/api/dev/games", SandboxGameListResponseSchema);
 }
 
+export function fetchMyGameDrafts() {
+  return apiFetch("/api/dev/games/drafts", SandboxGameDraftListResponseSchema);
+}
+
+export function createDevGamePreview(gameId: number, versionId: number) {
+  return apiFetch(
+    `/api/dev/games/${gameId}/versions/${versionId}/preview`,
+    SandboxGamePreviewSessionResponseSchema,
+    { method: "POST" },
+  );
+}
+
+export function submitDevGameDraft(gameId: number, versionId: number, previewToken: string) {
+  return apiFetch(
+    `/api/dev/games/${gameId}/versions/${versionId}/submit`,
+    SandboxGameReviewSubmitResponseSchema,
+    {
+      method: "POST",
+      body: JSON.stringify({ previewToken }),
+    },
+  );
+}
+
 /** Withdraws a not-yet-decided submission, freeing the review slot it was holding (see
- * SANDBOX_GAME_POLICY.MAX_CONCURRENT_REVIEW_SLOTS). A 409 SUBMISSION_LIMIT_REACHED from an upload
- * attempt is the caller's cue that this — or waiting for a decision — is needed first. */
+ * SANDBOX_GAME_POLICY.MAX_CONCURRENT_REVIEW_SLOTS). A 409 SUBMISSION_LIMIT_REACHED from an exact
+ * draft submission is the caller's cue that this — or waiting for a decision — is needed first. */
 export function withdrawDevGameSubmission(gameId: number) {
   return apiFetch(`/api/dev/games/${gameId}/withdraw`, SandboxGameRecordSchema, {
     method: "POST",

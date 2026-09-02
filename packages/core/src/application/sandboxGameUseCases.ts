@@ -64,6 +64,7 @@ import {
 export type SandboxGameUseCaseError =
   | "GAME_NOT_FOUND"
   | "VERSION_NOT_FOUND"
+  | "VERSION_NOT_DRAFT"
   | "SLUG_TAKEN"
   | "INVALID_SLUG"
   | "INVALID_TITLE"
@@ -81,8 +82,10 @@ export type SandboxGameUseCaseError =
   /** A non-admin creator already changed description content/tags within the last 24 hours. */
   | "CONTENT_EDIT_COOLDOWN"
   /** The developer already has MAX_CONCURRENT_REVIEW_SLOTS games awaiting their first review
-   * decision — see createGame. */
+   * decision — checked atomically when an exact draft is submitted. */
   | "SUBMISSION_LIMIT_REACHED"
+  /** Another version of the same game is already waiting for an admin decision. */
+  | "PENDING_REVIEW_EXISTS"
   /** withdrawSubmission was called on a game with no open slot and no pending version — there is
    * nothing left to withdraw. */
   | "NOTHING_TO_WITHDRAW"
@@ -344,6 +347,35 @@ export class SandboxGameUseCases {
     return this.repo.listVersionsByGame(gameId);
   }
 
+  async listDrafts(developerUserId: number): Promise<SandboxGameVersionRecord[]> {
+    return this.repo.listDraftVersionsByDeveloper(developerUserId);
+  }
+
+  /** Resolves the exact immutable draft a creator is about to run. The route signs the returned
+   * identity into a short-lived capability only after these ownership and publish checks pass. */
+  async getDraftForPreview(input: {
+    gameId: number;
+    versionId: number;
+    actingUserId: number;
+  }): Promise<SandboxGameVersionRecord> {
+    const game = await this.repo.findById(input.gameId);
+    if (!game) throw new SandboxGameUseCaseFailure("GAME_NOT_FOUND");
+    if (game.developerUserId !== input.actingUserId) {
+      throw new SandboxGameUseCaseFailure("NOT_OWNER");
+    }
+    if (game.deletedAt !== null) throw new SandboxGameUseCaseFailure("ALREADY_DELETED");
+
+    const version = await this.repo.findVersionById(input.versionId);
+    if (!version || version.gameId !== game.id) {
+      throw new SandboxGameUseCaseFailure("VERSION_NOT_FOUND");
+    }
+    if (version.status !== "DRAFT") throw new SandboxGameUseCaseFailure("VERSION_NOT_DRAFT");
+    if (!isPublishedVersion(version.publishStatus)) {
+      throw new SandboxGameUseCaseFailure("VERSION_NOT_PUBLISHED");
+    }
+    return version;
+  }
+
   async listPendingReview(limit: number, offset: number): Promise<SandboxGamePendingVersionsPage> {
     return this.repo.listPendingVersions(limit, offset);
   }
@@ -373,10 +405,9 @@ export class SandboxGameUseCases {
     // uses.
     if (await this.repo.slugExists(slug)) throw new SandboxGameUseCaseFailure("SLUG_TAKEN");
 
-    // repo.create claims a review slot atomically as part of the same insert (see
-    // D1SandboxGameRepository.create) — null here means both of this developer's
-    // MAX_CONCURRENT_REVIEW_SLOTS were already occupied by other still-undecided submissions.
-    const created = await this.repo.create({
+    // Registration creates a private identity only. The review slot is claimed later, together
+    // with the explicit DRAFT -> PENDING_REVIEW transition in submitDraftForReview().
+    return this.repo.create({
       slug,
       developerUserId: input.developerUserId,
       title,
@@ -388,16 +419,75 @@ export class SandboxGameUseCases {
       defaultScreenMode: input.defaultScreenMode ?? "default",
       nowIso: new Date().toISOString(),
     });
-    if (!created) throw new SandboxGameUseCaseFailure("SUBMISSION_LIMIT_REACHED");
-    return created;
+  }
+
+  /** Moves one exact, privately previewable draft into the admin queue. Upload and B2 publication
+   * deliberately happen earlier; this operation is a small D1 workflow transition only. */
+  async submitDraftForReview(input: {
+    gameId: number;
+    versionId: number;
+    actingUserId: number;
+  }): Promise<{ game: SandboxGameRecord; version: SandboxGameVersionRecord }> {
+    const game = await this.repo.findById(input.gameId);
+    if (!game) throw new SandboxGameUseCaseFailure("GAME_NOT_FOUND");
+    if (game.developerUserId !== input.actingUserId) {
+      throw new SandboxGameUseCaseFailure("NOT_OWNER");
+    }
+    if (game.deletedAt !== null) throw new SandboxGameUseCaseFailure("ALREADY_DELETED");
+
+    const version = await this.repo.findVersionById(input.versionId);
+    if (!version || version.gameId !== game.id) {
+      throw new SandboxGameUseCaseFailure("VERSION_NOT_FOUND");
+    }
+    if (version.status !== "DRAFT") throw new SandboxGameUseCaseFailure("VERSION_NOT_DRAFT");
+    if (!isPublishedVersion(version.publishStatus)) {
+      throw new SandboxGameUseCaseFailure("VERSION_NOT_PUBLISHED");
+    }
+
+    const versions = await this.repo.listVersionsByGame(game.id);
+    if (versions.some((candidate) => candidate.status === "PENDING_REVIEW")) {
+      throw new SandboxGameUseCaseFailure("PENDING_REVIEW_EXISTS");
+    }
+    // Preserve the existing first-review quota semantics. A game that has already reached any
+    // terminal review state does not reclaim an initial-submission slot on later versions.
+    const claimReviewSlot = versions.every((candidate) => candidate.status === "DRAFT");
+    const nowIso = new Date().toISOString();
+    const submitted = await this.repo.submitDraftVersion({
+      gameId: game.id,
+      versionId: version.id,
+      developerUserId: game.developerUserId,
+      claimReviewSlot,
+      nowIso,
+    });
+    if (!submitted) {
+      const refreshed = await this.repo.listVersionsByGame(game.id);
+      if (refreshed.some((candidate) => candidate.status === "PENDING_REVIEW")) {
+        throw new SandboxGameUseCaseFailure("PENDING_REVIEW_EXISTS");
+      }
+      throw new SandboxGameUseCaseFailure("SUBMISSION_LIMIT_REACHED");
+    }
+
+    await this.repo.withdrawOtherDraftVersions(game.id, submitted.id);
+    await this.repo.appendReviewAudit({
+      gameId: game.id,
+      versionId: submitted.id,
+      actorAdminId: input.actingUserId,
+      action: "VERSION_SUBMITTED",
+      reason: null,
+      metadata: null,
+      nowIso,
+    });
+    const updatedGame = await this.repo.findById(game.id);
+    if (!updatedGame) throw new SandboxGameUseCaseFailure("GAME_NOT_FOUND");
+    return { game: updatedGame, version: submitted };
   }
 
   /**
    * Uploads a new bundle version for an existing game. `actingUserId`/`isAdmin` decide
    * ownership: the game's own developer, or any admin (e.g. uploading on a developer's behalf —
-   * see docs/GAME_CREATION_GUIDE.md §3.6's "최후 수단"), may upload. Every new version starts
-   * PENDING_REVIEW regardless of whether an earlier version on the same game was already
-   * approved — the previously-approved version keeps serving until this one is decided.
+   * see docs/GAME_CREATION_GUIDE.md §3.6's "최후 수단"), may upload. Every creator upload starts
+   * as a private DRAFT; the exact published files move to PENDING_REVIEW only after an explicit
+   * preview confirmation. A previously-approved version keeps serving while a draft is prepared.
    *
    * Order matters and is deliberate:
    *   1. size limits, then full archive validation — all on the in-memory upload, so an invalid
@@ -506,6 +596,7 @@ export class SandboxGameUseCases {
         contentType: input.contentType,
         prepared: publishablePrepared,
         manifest,
+        reviewStatus: input.isAdmin ? "PENDING_REVIEW" : "DRAFT",
         ...(logoFile ? { logoFile } : {}),
       });
     } catch (error) {
@@ -878,6 +969,7 @@ export class SandboxGameUseCases {
       contentType: input.contentType,
       prepared: publishablePrepared,
       manifest,
+      reviewStatus: "DRAFT",
       logoFile,
     });
 
@@ -897,6 +989,7 @@ export class SandboxGameUseCases {
     contentType?: string | undefined;
     prepared: PreparedBundle;
     manifest: NonNullable<ReturnType<typeof extractGameCreatorManifest>>;
+    reviewStatus: "DRAFT" | "PENDING_REVIEW";
     logoFile?: PreparedBundleFile | undefined;
   }): Promise<SandboxGameVersionRecord> {
     const contentHash = await sha256Hex(input.bytes);
@@ -925,6 +1018,7 @@ export class SandboxGameUseCases {
         objectKey,
         contentHash,
         bundleBytes: input.bytes.byteLength,
+        status: input.reviewStatus,
         nowIso: new Date().toISOString(),
       });
       if (input.logoFile) {

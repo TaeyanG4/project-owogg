@@ -20,6 +20,7 @@ export * from "./domain/gameCreatorResult.js";
 export * from "./domain/contentHash.js";
 export * from "./domain/gameEvidence.js";
 export * from "./domain/gameSession.js";
+export * from "./domain/gamePreview.js";
 export * from "./domain/verifiedGameSession.js";
 export * from "./domain/gameCreatorScorePolicy.js";
 export * from "./ports/repositories.js";

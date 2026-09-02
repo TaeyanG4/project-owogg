@@ -14,11 +14,13 @@ import {
   FileText,
   Image,
   Pencil,
+  Eye,
 } from "lucide-react";
 import { useAuth } from "../features/auth";
 import {
   fetchDevMe,
   fetchMyGames,
+  fetchMyGameDrafts,
   uploadDevGameVersion,
   uploadGameFromBundle,
   withdrawDevGameSubmission,
@@ -31,7 +33,11 @@ import {
   replaceDevGameDescription,
   patchDevGameBasicMetadata,
 } from "../features/devApi";
-import type { GameCreatorMeResponse, SandboxGameRecord } from "@owogg/contracts";
+import type {
+  GameCreatorMeResponse,
+  SandboxGameRecord,
+  SandboxGameVersionRecord,
+} from "@owogg/contracts";
 import { GameBundleDropzone } from "../components/game/GameBundleDropzone";
 
 export function meta() {
@@ -51,6 +57,7 @@ export default function GameCreatorCenterRoute() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [devMe, setDevMe] = useState<GameCreatorMeResponse | null>(null);
   const [myGames, setMyGames] = useState<SandboxGameRecord[] | null>(null);
+  const [drafts, setDrafts] = useState<SandboxGameVersionRecord[]>([]);
   const [state, setState] = useState<LoadState>("loading");
   const [error, setError] = useState<string | null>(null);
 
@@ -60,8 +67,9 @@ export default function GameCreatorCenterRoute() {
       const me = await fetchDevMe();
       setDevMe(me);
       if (me.hasAccess) {
-        const games = await fetchMyGames();
+        const [games, draftVersions] = await Promise.all([fetchMyGames(), fetchMyGameDrafts()]);
         setMyGames(games.games);
+        setDrafts(draftVersions.drafts);
       }
       setState("success");
       setError(null);
@@ -118,8 +126,8 @@ export default function GameCreatorCenterRoute() {
         </div>
         <h1 className="text-2xl font-black text-text-primary">게임 크리에이터 센터</h1>
         <p className="mt-1 text-xs text-text-muted">
-          직접 만든 게임을 OwOGG에 업로드하고 관리합니다. 업로드한 게임은 관리자 심사(승인) 후에도
-          기본은 비공개이며, 관리자가 별도로 공개 전환해야 서비스가 시작됩니다.
+          직접 만든 게임을 OwOGG에 업로드하고 관리합니다. 업로드본은 비공개 초안으로 저장되며, 전체
+          화면 미리보기에서 직접 확인하고 제출해야 관리자 심사가 시작됩니다.
         </p>
       </header>
 
@@ -130,7 +138,12 @@ export default function GameCreatorCenterRoute() {
       )}
 
       {devMe.hasAccess ? (
-        <ManageGamesPanel myGames={myGames} onChanged={() => void load()} onError={setError} />
+        <ManageGamesPanel
+          myGames={myGames}
+          drafts={drafts}
+          onChanged={() => void load()}
+          onError={setError}
+        />
       ) : (
         <ApplicationPanel devMe={devMe} onChanged={() => void load()} onError={setError} />
       )}
@@ -263,10 +276,12 @@ function creatorContentEditUnlockLabel(game: SandboxGameRecord): string | null {
 
 function ManageGamesPanel({
   myGames,
+  drafts,
   onChanged,
   onError,
 }: {
   myGames: SandboxGameRecord[] | null;
+  drafts: SandboxGameVersionRecord[];
   onChanged: () => void;
   onError: (msg: string) => void;
 }) {
@@ -277,6 +292,10 @@ function ManageGamesPanel({
   const [registering, setRegistering] = useState(false);
   const [partBusy, setPartBusy] = useState<string | null>(null);
   const [editingGameId, setEditingGameId] = useState<number | null>(null);
+  const latestDraftByGame = new Map<number, SandboxGameVersionRecord>();
+  for (const draft of drafts) {
+    if (!latestDraftByGame.has(draft.gameId)) latestDraftByGame.set(draft.gameId, draft);
+  }
 
   // Drag-and-drop registration: a ZIP whose root contains a valid owogg.json v1 manifest.
   // creates the game *and* its first version in one call — see devApi.uploadGameFromBundle. This
@@ -286,9 +305,7 @@ function ManageGamesPanel({
     setRegistering(true);
     try {
       const { game } = await uploadGameFromBundle(file);
-      setNotice(
-        `"${game.title}" 게임이 등록되었습니다. 관리자 심사 후 승인되면 공개할 수 있습니다.`,
-      );
+      setNotice(`"${game.title}" 초안이 저장되었습니다. 미리보기에서 확인 후 제출해주세요.`);
       onChanged();
     } catch (err) {
       onError(err instanceof Error ? err.message : "등록에 실패했습니다.");
@@ -301,7 +318,7 @@ function ManageGamesPanel({
     setUploadingGameId(gameId);
     try {
       await uploadDevGameVersion(gameId, file);
-      setNotice("번들이 업로드되었습니다. 관리자 심사 후 승인되면 공개할 수 있습니다.");
+      setNotice("새 초안이 저장되었습니다. 미리보기에서 확인 후 제출해주세요.");
       onChanged();
     } catch (err) {
       onError(err instanceof Error ? err.message : "업로드에 실패했습니다.");
@@ -314,7 +331,7 @@ function ManageGamesPanel({
     setPartBusy(`${gameId}:manifest`);
     try {
       await replaceDevGameManifest(gameId, file);
-      setNotice("owogg.json 교체본을 새 버전으로 만들었습니다. 관리자 심사를 기다려주세요.");
+      setNotice("owogg.json 교체본을 새 초안으로 만들었습니다. 미리보기에서 확인해주세요.");
       onChanged();
     } catch (err) {
       onError(err instanceof Error ? err.message : "owogg.json 재업로드에 실패했습니다.");
@@ -340,7 +357,7 @@ function ManageGamesPanel({
     setPartBusy(`${gameId}:description`);
     try {
       await replaceDevGameDescription(gameId, file);
-      setNotice("게임 설명 교체본을 새 버전으로 만들었습니다. 관리자 심사를 기다려주세요.");
+      setNotice("게임 설명 교체본을 새 초안으로 만들었습니다. 미리보기에서 확인해주세요.");
       onChanged();
     } catch (err) {
       onError(err instanceof Error ? err.message : "게임 설명 업로드에 실패했습니다.");
@@ -439,6 +456,11 @@ function ManageGamesPanel({
                         심사 대기 중 (슬롯 {g.reviewSlot})
                       </span>
                     )}
+                    {latestDraftByGame.has(g.id) && (
+                      <span className="rounded-full bg-brand/10 px-1.5 py-0.5 font-bold text-brand-light">
+                        제출 전 초안
+                      </span>
+                    )}
                     {isCreatorContentEditLocked(g) && (
                       <span
                         className="rounded-full bg-brand/10 px-1.5 py-0.5 font-bold text-brand-light"
@@ -469,6 +491,14 @@ function ManageGamesPanel({
                   an error with no explanation (2026-08-18). */}
               {!g.deletedAt && (
                 <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                  {latestDraftByGame.get(g.id) && (
+                    <Link
+                      to={`/game-creator/games/${g.id}/versions/${latestDraftByGame.get(g.id)?.id}/preview`}
+                      className="flex items-center gap-1.5 rounded-xl bg-brand px-3 py-2 text-xs font-bold text-white hover:bg-brand-light"
+                    >
+                      <Eye className="h-3.5 w-3.5" /> 미리보기
+                    </Link>
+                  )}
                   {g.reviewSlot !== null && (
                     <button
                       type="button"
@@ -609,7 +639,7 @@ function ManageGamesPanel({
               key={game.id}
               game={game}
               onSaved={() => {
-                setNotice("수정한 속성으로 새 버전을 만들었습니다. 관리자 심사를 기다려주세요.");
+                setNotice("수정한 속성으로 새 초안을 만들었습니다. 미리보기에서 확인해주세요.");
                 setEditingGameId(null);
                 onChanged();
               }}

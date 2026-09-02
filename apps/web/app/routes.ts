@@ -25,6 +25,7 @@ export default [
   route("admin/settings/security", "routes/adminSettingsSecurity.tsx"),
   // Program/Entitlement centers — never Staff Roles, see the same doc.
   route("game-creator", "routes/gameCreatorCenter.tsx"),
+  route("game-creator/games/:gameId/versions/:versionId/preview", "routes/gameCreatorPreview.tsx"),
   route("discord", "routes/discordHub.tsx"),
   route("discord/setup", "routes/discordSetup.tsx"),
   route("discord/guide", "routes/discordGuide.tsx"),

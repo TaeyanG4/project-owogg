@@ -10,7 +10,7 @@ import type {
   SandboxGamePublishStatus,
   SandboxGameMode,
 } from "@owogg/core";
-import type { D1Database } from "./D1UserRepository.js";
+import type { D1Database, D1PreparedStatement } from "./D1UserRepository.js";
 
 const USER_GAME_SELECT = `
   SELECT
@@ -306,14 +306,13 @@ export class D1SandboxGameRepository implements SandboxGameRepository {
     tags: readonly string[];
     defaultScreenMode: "default" | "theater";
     nowIso: string;
-  }): Promise<SandboxGameRecord | null> {
+  }): Promise<SandboxGameRecord> {
     // Shared numeric ID namespace allocation:
     // 1. Statement 1 inserts into generic `games` table, allocating the shared primary key `id`
-    //    while verifying developer review slot availability atomically in a single statement.
-    // 2. Statement 2 mirrors that exact identity and claimed slot into `sandbox_games` for the
+    //    without claiming a review slot. Draft upload and review submission are separate actions.
+    // 2. Statement 2 mirrors that exact identity into `sandbox_games` for the
     //    previous Worker revision during the rolling-deploy compatibility window.
-    // 3. If both slots are already held, both statements write 0 rows atomically and create() returns null.
-    // 4. Executed in a single db.batch() call so that no interleaving is possible and failure in either
+    // 3. Executed in a single db.batch() call so that no interleaving is possible and failure in either
     //    statement rolls back the entire batch.
     const res = await this.db.batch([
       this.db
@@ -322,16 +321,7 @@ export class D1SandboxGameRepository implements SandboxGameRepository {
              (slug, publisher_type, publisher_user_id, visibility, live_version_id, created_at, updated_at,
               title, short_description, description, genre, mode, tags_json, default_screen_mode,
               xp_per_completion, review_slot)
-           SELECT ?, 'USER', ?, 'PRIVATE', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, available.slot
-           FROM (
-             SELECT MIN(s.slot) AS slot
-             FROM (SELECT 1 AS slot UNION ALL SELECT 2) s
-             WHERE s.slot NOT IN (
-               SELECT review_slot FROM games
-               WHERE publisher_type = 'USER' AND publisher_user_id = ? AND review_slot IS NOT NULL
-             )
-           ) available
-           WHERE available.slot IS NOT NULL`,
+           VALUES (?, 'USER', ?, 'PRIVATE', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
         )
         .bind(
           input.slug,
@@ -345,16 +335,15 @@ export class D1SandboxGameRepository implements SandboxGameRepository {
           input.mode,
           JSON.stringify(input.tags ?? []),
           input.defaultScreenMode ?? "default",
-          input.developerUserId,
         ),
       this.db
         .prepare(
           `INSERT INTO sandbox_games
              (id, slug, developer_user_id, title, short_description, description, genre, mode,
               tags_json, default_screen_mode, review_slot, created_at, updated_at)
-           SELECT g.id, ?, ?, ?, ?, ?, ?, ?, ?, ?, g.review_slot, ?, ?
+           SELECT g.id, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?
            FROM games g
-           WHERE g.slug = ? AND g.publisher_type = 'USER' AND g.review_slot IS NOT NULL`,
+           WHERE g.slug = ? AND g.publisher_type = 'USER'`,
         )
         .bind(
           input.slug,
@@ -374,7 +363,7 @@ export class D1SandboxGameRepository implements SandboxGameRepository {
 
     const [gamesResult, sandboxResult] = res;
     if (!gamesResult?.meta?.changes || !sandboxResult?.meta?.changes) {
-      return null; // no review slot available
+      throw new Error("draft game identity was not inserted into both control-plane tables");
     }
 
     // Deliberately NOT `WHERE rowid = last_insert_rowid()` here: that reads connection-global
@@ -527,8 +516,13 @@ export class D1SandboxGameRepository implements SandboxGameRepository {
     objectKey: string;
     contentHash: string;
     bundleBytes: number;
+    /** Optional only for rolling-deploy compatibility with the immediately previous Worker,
+     * whose use case did not pass a status and expected PENDING_REVIEW. New callers are required
+     * by the port to choose DRAFT or PENDING_REVIEW explicitly. */
+    status?: "DRAFT" | "PENDING_REVIEW";
     nowIso: string;
   }): Promise<SandboxGameVersionRecord> {
+    const reviewStatus = input.status ?? "PENDING_REVIEW";
     // A-4 shared numeric namespace:
     // 1. Generic game_versions allocates the ID.
     // 2. The legacy USER review row consumes that exact ID via last_insert_rowid() inside the same
@@ -543,17 +537,32 @@ export class D1SandboxGameRepository implements SandboxGameRepository {
              published_at, manifest_key, published_size_bytes, file_count, uploaded_at,
              moderation_status, reviewed_by_admin_id, reviewed_at, reject_reason
            ) VALUES (?, ?, ?, ?, 'UPLOADED', NULL, NULL, NULL, NULL, NULL, ?,
-             'PENDING_REVIEW', NULL, NULL, NULL)`,
+             ?, NULL, NULL, NULL)`,
         )
-        .bind(input.gameId, input.objectKey, input.contentHash, input.bundleBytes, input.nowIso),
+        .bind(
+          input.gameId,
+          input.objectKey,
+          input.contentHash,
+          input.bundleBytes,
+          input.nowIso,
+          reviewStatus,
+        ),
       this.db
         .prepare(
           `INSERT INTO sandbox_game_versions (
-             id, game_id, object_key, content_hash, bundle_bytes, uploaded_at
-           ) VALUES (last_insert_rowid(), ?, ?, ?, ?, ?)
+             id, game_id, object_key, content_hash, bundle_bytes, uploaded_at,
+             status
+           ) VALUES (last_insert_rowid(), ?, ?, ?, ?, ?, ?)
            RETURNING *`,
         )
-        .bind(input.gameId, input.objectKey, input.contentHash, input.bundleBytes, input.nowIso),
+        .bind(
+          input.gameId,
+          input.objectKey,
+          input.contentHash,
+          input.bundleBytes,
+          input.nowIso,
+          reviewStatus,
+        ),
     ]);
 
     const row = results[1]?.results?.[0] as Record<string, unknown> | undefined;
@@ -618,6 +627,156 @@ export class D1SandboxGameRepository implements SandboxGameRepository {
       .bind(gameId)
       .all<Record<string, unknown>>();
     return (res.results || []).map(mapVersionRow);
+  }
+
+  async listDraftVersionsByDeveloper(developerUserId: number): Promise<SandboxGameVersionRecord[]> {
+    const res = await this.db
+      .prepare(
+        `${USER_VERSION_SELECT}
+         WHERE g.publisher_user_id = ? AND gv.moderation_status = 'DRAFT'
+         ORDER BY gv.uploaded_at DESC, gv.id DESC`,
+      )
+      .bind(developerUserId)
+      .all<Record<string, unknown>>();
+    return (res.results || []).map(mapVersionRow);
+  }
+
+  async submitDraftVersion(input: {
+    gameId: number;
+    versionId: number;
+    developerUserId: number;
+    claimReviewSlot: boolean;
+    nowIso: string;
+  }): Promise<SandboxGameVersionRecord | null> {
+    const statements: D1PreparedStatement[] = [];
+    if (input.claimReviewSlot) {
+      statements.push(
+        this.db
+          .prepare(
+            `UPDATE game_versions
+             SET moderation_status = 'PENDING_REVIEW'
+             WHERE id = ? AND game_id = ? AND moderation_status = 'DRAFT'
+               AND NOT EXISTS (
+                 SELECT 1 FROM game_versions
+                 WHERE game_id = ? AND moderation_status = 'PENDING_REVIEW'
+               )
+               AND EXISTS (
+                 SELECT 1 FROM games owned
+                 WHERE owned.id = ? AND owned.publisher_type = 'USER'
+                   AND owned.publisher_user_id = ? AND owned.review_slot IS NULL
+                   AND EXISTS (
+                     SELECT 1 FROM (SELECT 1 AS slot UNION ALL SELECT 2)
+                     WHERE slot NOT IN (
+                       SELECT review_slot FROM games
+                       WHERE publisher_type = 'USER' AND publisher_user_id = ?
+                         AND review_slot IS NOT NULL
+                     )
+                   )
+               )`,
+          )
+          .bind(
+            input.versionId,
+            input.gameId,
+            input.gameId,
+            input.gameId,
+            input.developerUserId,
+            input.developerUserId,
+          ),
+        this.db
+          .prepare(
+            `UPDATE games
+             SET review_slot = (
+               SELECT MIN(slot) FROM (SELECT 1 AS slot UNION ALL SELECT 2)
+               WHERE slot NOT IN (
+                 SELECT review_slot FROM games
+                 WHERE publisher_type = 'USER' AND publisher_user_id = ?
+                   AND review_slot IS NOT NULL
+               )
+             ), updated_at = ?
+             WHERE id = ? AND publisher_type = 'USER' AND publisher_user_id = ?
+               AND review_slot IS NULL
+               AND EXISTS (
+                 SELECT 1 FROM game_versions
+                 WHERE id = ? AND game_id = ? AND moderation_status = 'PENDING_REVIEW'
+               )`,
+          )
+          .bind(
+            input.developerUserId,
+            input.nowIso,
+            input.gameId,
+            input.developerUserId,
+            input.versionId,
+            input.gameId,
+          ),
+        this.db
+          .prepare(
+            `UPDATE sandbox_games
+             SET review_slot = (SELECT review_slot FROM games WHERE id = ?), updated_at = ?
+             WHERE id = ? AND developer_user_id = ?
+               AND (SELECT review_slot FROM games WHERE id = ?) IS NOT NULL`,
+          )
+          .bind(input.gameId, input.nowIso, input.gameId, input.developerUserId, input.gameId),
+      );
+    } else {
+      statements.push(
+        this.db
+          .prepare(
+            `UPDATE game_versions
+             SET moderation_status = 'PENDING_REVIEW'
+             WHERE id = ? AND game_id = ? AND moderation_status = 'DRAFT'
+               AND NOT EXISTS (
+                 SELECT 1 FROM game_versions
+                 WHERE game_id = ? AND moderation_status = 'PENDING_REVIEW'
+               )`,
+          )
+          .bind(input.versionId, input.gameId, input.gameId),
+      );
+    }
+    statements.push(
+      this.db
+        .prepare(
+          `UPDATE sandbox_game_versions
+           SET status = 'PENDING_REVIEW'
+           WHERE id = ? AND game_id = ? AND status = 'DRAFT'
+             AND EXISTS (
+               SELECT 1 FROM game_versions
+               WHERE id = ? AND moderation_status = 'PENDING_REVIEW'
+             )
+             AND EXISTS (
+               SELECT 1 FROM games
+               WHERE id = ? AND (review_slot IS NOT NULL OR ? = 0)
+             )`,
+        )
+        .bind(
+          input.versionId,
+          input.gameId,
+          input.versionId,
+          input.gameId,
+          input.claimReviewSlot ? 1 : 0,
+        ),
+    );
+
+    const results = await this.db.batch(statements);
+    const genericUpdate = results[0];
+    if (!genericUpdate?.meta?.changes) return null;
+    return this.findVersionById(input.versionId);
+  }
+
+  async withdrawOtherDraftVersions(gameId: number, submittedVersionId: number): Promise<void> {
+    await this.db.batch([
+      this.db
+        .prepare(
+          `UPDATE game_versions SET moderation_status = 'WITHDRAWN'
+           WHERE game_id = ? AND id <> ? AND moderation_status = 'DRAFT'`,
+        )
+        .bind(gameId, submittedVersionId),
+      this.db
+        .prepare(
+          `UPDATE sandbox_game_versions SET status = 'WITHDRAWN'
+           WHERE game_id = ? AND id <> ? AND status = 'DRAFT'`,
+        )
+        .bind(gameId, submittedVersionId),
+    ]);
   }
 
   async listPendingVersions(

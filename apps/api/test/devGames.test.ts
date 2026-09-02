@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { app } from "../src/app.js";
 import { hashSessionToken } from "@owogg/db";
+import { verifyGamePreview } from "@owogg/core";
 
 // Auth-gating + routing smoke tests for /api/dev/* and /api/admin/game-creators,
 // /api/admin/sandbox-games. The underlying business logic (slug validation, review/visibility
@@ -13,7 +14,11 @@ import { hashSessionToken } from "@owogg/db";
 const OWOGG_SESSION_RAW_TOKEN = "valid_session";
 const OWOGG_SESSION_TOKEN_HASH = await hashSessionToken(OWOGG_SESSION_RAW_TOKEN);
 
-function createDb(options: { userId: number; isDeveloper?: boolean }) {
+function createDb(options: {
+  userId: number;
+  isDeveloper?: boolean;
+  draft?: { gameId: number; versionId: number; ownerUserId: number };
+}) {
   const { userId, isDeveloper = false } = options;
   function statement(query: string) {
     let values: unknown[] = [];
@@ -53,9 +58,89 @@ function createDb(options: { userId: number; isDeveloper?: boolean }) {
         if (query.includes("FROM admin_accounts WHERE user_id")) {
           return null; // never a managed admin in these tests
         }
+        if (options.draft && query.includes("FROM games g") && query.includes("WHERE g.id = ?")) {
+          if (Number(values[0]) !== options.draft.gameId) return null;
+          return {
+            id: options.draft.gameId,
+            slug: "private-draft",
+            developer_user_id: options.draft.ownerUserId,
+            title: "Private Draft",
+            short_description: null,
+            description: null,
+            genre: "puzzle",
+            mode: "single",
+            tags_json: "[]",
+            default_screen_mode: "default",
+            content_last_edited_at: null,
+            logo_key: null,
+            xp_per_completion: 0,
+            score_unit: null,
+            score_direction: null,
+            score_min: null,
+            score_max: null,
+            score_display_prefix: null,
+            score_display_suffix: null,
+            visibility: "PRIVATE",
+            live_version_id: null,
+            review_slot: null,
+            deleted_at: null,
+            deleted_by_admin_id: null,
+            created_at: "2026-09-02T00:00:00.000Z",
+            updated_at: "2026-09-02T00:00:00.000Z",
+          } as T;
+        }
+        if (
+          options.draft &&
+          query.includes("FROM game_versions gv") &&
+          query.includes("WHERE gv.id = ?")
+        ) {
+          if (Number(values[0]) !== options.draft.versionId) return null;
+          return {
+            id: options.draft.versionId,
+            game_id: options.draft.gameId,
+            object_key: "uploads/private-draft.zip",
+            content_hash: "a".repeat(64),
+            bundle_bytes: 100,
+            status: "DRAFT",
+            reviewed_by_admin_id: null,
+            reviewed_at: null,
+            reject_reason: null,
+            uploaded_at: "2026-09-02T00:00:00.000Z",
+            publish_status: "READY",
+            publish_error: null,
+            published_at: "2026-09-02T00:01:00.000Z",
+            manifest_key: "games/41/73/.owogg-manifest.json",
+            published_size_bytes: 200,
+            file_count: 2,
+          } as T;
+        }
         return null;
       },
       async all<T>() {
+        if (options.draft && query.includes("gv.moderation_status = 'DRAFT'")) {
+          return {
+            results: [
+              {
+                id: options.draft.versionId,
+                game_id: options.draft.gameId,
+                object_key: "uploads/private-draft.zip",
+                content_hash: "a".repeat(64),
+                bundle_bytes: 100,
+                status: "DRAFT",
+                reviewed_by_admin_id: null,
+                reviewed_at: null,
+                reject_reason: null,
+                uploaded_at: "2026-09-02T00:00:00.000Z",
+                publish_status: "READY",
+                publish_error: null,
+                published_at: "2026-09-02T00:01:00.000Z",
+                manifest_key: "games/41/73/.owogg-manifest.json",
+                published_size_bytes: 200,
+                file_count: 2,
+              },
+            ] as T[],
+          };
+        }
         return { results: [] } as { results: T[] };
       },
       async run() {
@@ -202,6 +287,87 @@ test("POST /api/dev/games/:id/versions with a complete B2 config gets past the 5
   assert.equal(res.status, 400);
   const body = (await res.json()) as { error: { code: string } };
   assert.equal(body.error.code, "INVALID_REQUEST");
+});
+
+test("draft list and preview issuance return the authenticated creator's exact READY version", async () => {
+  const draft = { gameId: 41, versionId: 73, ownerUserId: 7 };
+  const { db } = createDb({ userId: 7, isDeveloper: true, draft });
+  const env = {
+    DB: db,
+    ADMIN_USER_IDS: "1",
+    FRONTEND_URL: "http://localhost:5173",
+    GAME_SESSION_SECRET: "preview-api-test-secret",
+    B2_ENDPOINT: "https://s3.us-west-004.backblazeb2.com",
+    B2_REGION: "us-west-004",
+    B2_BUCKET_NAME: "owogg-game-bundles",
+    B2_KEY_ID: "someKeyId",
+    B2_APPLICATION_KEY: "someApplicationKey",
+  } as any;
+
+  const draftsResponse = await app.request(
+    "/api/dev/games/drafts",
+    { headers: { Cookie: "owogg_session=valid_session" } },
+    env,
+  );
+  assert.equal(draftsResponse.status, 200);
+  const draftsBody = (await draftsResponse.json()) as { drafts: Array<{ id: number }> };
+  assert.deepEqual(
+    draftsBody.drafts.map((version) => version.id),
+    [73],
+  );
+
+  const response = await app.request(
+    "/api/dev/games/41/versions/73/preview",
+    {
+      method: "POST",
+      headers: { Cookie: "owogg_session=valid_session", Origin: "http://localhost:5173" },
+    },
+    env,
+  );
+  assert.equal(response.status, 201);
+  const body = (await response.json()) as {
+    gameId: number;
+    versionId: number;
+    previewToken: string;
+    previewPath: string;
+  };
+  assert.equal(body.gameId, 41);
+  assert.equal(body.versionId, 73);
+  assert.equal(body.previewPath, `/preview/${body.previewToken}/index.html`);
+  const verified = await verifyGamePreview(body.previewToken, "preview-api-test-secret");
+  assert.equal(verified.ok, true);
+  if (verified.ok) {
+    assert.equal(verified.payload.userId, 7);
+    assert.equal(verified.payload.gameId, 41);
+    assert.equal(verified.payload.versionId, 73);
+  }
+});
+
+test("review submission requires a matching unexpired preview capability", async () => {
+  const draft = { gameId: 41, versionId: 73, ownerUserId: 7 };
+  const { db } = createDb({ userId: 7, isDeveloper: true, draft });
+  const env = {
+    DB: db,
+    ADMIN_USER_IDS: "1",
+    FRONTEND_URL: "http://localhost:5173",
+    GAME_SESSION_SECRET: "preview-api-test-secret",
+  } as any;
+  const response = await app.request(
+    "/api/dev/games/41/versions/73/submit",
+    {
+      method: "POST",
+      headers: {
+        Cookie: "owogg_session=valid_session",
+        Origin: "http://localhost:5173",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+    },
+    env,
+  );
+  assert.equal(response.status, 409);
+  const body = (await response.json()) as { error: { code: string } };
+  assert.equal(body.error.code, "PREVIEW_REQUIRED");
 });
 
 test("GET /api/admin/game-creators is denied for non-admin", async () => {

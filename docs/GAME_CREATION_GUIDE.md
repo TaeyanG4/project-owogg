@@ -181,13 +181,13 @@ ZIP을 올립니다. 모든 버전에도 유효한 `owogg.json`이 필요하고 
 
 Game Creator Center와 관리자 게임 관리 화면은 게임별로 다음 작업을 제공합니다.
 
-| 작업                    | USER 게임                                              | OWOGG 공식 게임                                  |
-| ----------------------- | ------------------------------------------------------ | ------------------------------------------------ |
-| 전체 ZIP                | 새 `PENDING_REVIEW` numeric version                    | 대상 slug 검증 후 새 READY/live version          |
-| `owogg.json`만 재업로드 | 현재 source ZIP을 재구성한 새 `PENDING_REVIEW` version | 현재 source ZIP을 재구성한 새 READY/live version |
-| 로고만 재업로드         | game-level asset 즉시 교체                             | game-level asset 즉시 교체                       |
-| 설명 Markdown/ZIP       | 설명 파일을 교체한 새 `PENDING_REVIEW` version         | 설명 파일을 교체한 새 READY/live version         |
-| 핵심 속성 폼            | 수정한 manifest로 새 `PENDING_REVIEW` version          | 수정한 manifest로 새 READY/live version          |
+| 작업                    | USER 게임                                     | OWOGG 공식 게임                                  |
+| ----------------------- | --------------------------------------------- | ------------------------------------------------ |
+| 전체 ZIP                | 새 `DRAFT` numeric version                    | 대상 slug 검증 후 새 READY/live version          |
+| `owogg.json`만 재업로드 | 현재 source ZIP을 재구성한 새 `DRAFT` version | 현재 source ZIP을 재구성한 새 READY/live version |
+| 로고만 재업로드         | game-level asset 즉시 교체                    | game-level asset 즉시 교체                       |
+| 설명 Markdown/ZIP       | 설명 파일을 교체한 새 `DRAFT` version         | 설명 파일을 교체한 새 READY/live version         |
+| 핵심 속성 폼            | 수정한 manifest로 새 `DRAFT` version          | 수정한 manifest로 새 READY/live version          |
 
 핵심 속성 폼은 `game.title`, `shortDescription`, `genre`, `mode`, `tags`와
 `presentation.defaultMode`를 다룹니다. 공개 게임 정보의 `수정하기`는 언어를 골라 제목·요약·Markdown을
@@ -280,7 +280,10 @@ manifest-only publication은 현재 구조가 아닙니다.
 ### 4.3 USER review 생명주기
 
 ```text
-PENDING_REVIEW
+DRAFT
+→ exact B2 version 비공개 전체 화면 미리보기
+→ 제작자 확인 및 명시적 심사 제출
+→ PENDING_REVIEW
 → APPROVED | REJECTED | WITHDRAWN
 APPROVED → revoke → PENDING_REVIEW
 ```
@@ -288,6 +291,10 @@ APPROVED → revoke → PENDING_REVIEW
 관리자 review API는 queue/detail, approve, reject, revoke, republish, live-version, metadata,
 visibility, delete/purge를 제공합니다. Permission과 use-case invariant가 각 동작을 제한합니다.
 특히 non-READY version은 승인할 수 없고, 승인된 version만 live로 선택할 수 있습니다.
+
+미리보기 capability는 소유권과 `DRAFT + READY`를 확인한 뒤 짧게 발급되며 gameId와 versionId에
+고정됩니다. preview asset 응답은 public availability를 사용하지 않고 해당 B2 version prefix만 읽으며
+`private, no-store`로 제공됩니다. 심사 제출 API도 같은 capability의 exact claims를 요구합니다.
 
 ```text
 Publication READY != Moderation APPROVED

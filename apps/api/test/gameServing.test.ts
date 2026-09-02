@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { zipSync, strToU8, unzipSync } from "fflate";
 import { app } from "../src/app.js";
+import { signGamePreview } from "@owogg/core";
 
 // Public game delivery: /play/:slug (mutable live-version resolver) and
 // /games/:gameId/:versionId/* (immutable published assets). These drive the real Hono app with
@@ -219,6 +220,21 @@ async function withStorage<T>(
   } finally {
     stub.restore();
   }
+}
+
+async function previewToken(
+  overrides: Partial<{ userId: number; gameId: number; versionId: number; exp: number }> = {},
+) {
+  return signGamePreview(
+    {
+      userId: overrides.userId ?? 7,
+      gameId: overrides.gameId ?? 1,
+      versionId: overrides.versionId ?? 17,
+      nonce: "api-preview-test",
+      exp: overrides.exp ?? Math.floor(Date.now() / 1000) + 300,
+    },
+    "preview-serving-secret",
+  );
 }
 
 // ── /play/:slug — live version resolution ────────────────────────────────────
@@ -593,6 +609,59 @@ test("GET a file that isn't in the bundle returns 404", async () => {
     app.request("/games/1/17/does-not-exist.js", {}, { DB: db, ...B2_ENV } as any),
   );
   assert.equal(res.status, 404);
+});
+
+// ── /preview/:token/* — exact private draft delivery ────────────────────────
+
+test("a valid gp1 capability serves only its exact B2 draft with private no-store headers", async () => {
+  const token = await previewToken();
+  const { db } = createDb({});
+  const stub = createStorageStub({ stored: publishedObjects() });
+  try {
+    const res = await app.request(`/preview/${token}/index.html`, {}, {
+      DB: db,
+      ...B2_ENV,
+      GAME_SESSION_SECRET: "preview-serving-secret",
+      FRONTEND_URL: "https://www.owogg.com",
+    } as any);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("Cache-Control"), "private, no-store, max-age=0");
+    assert.equal(res.headers.get("Referrer-Policy"), "no-referrer");
+    assert.equal(res.headers.get("X-Robots-Tag"), "noindex, nofollow, noarchive");
+    assert.equal(res.headers.get("X-Owogg-Bundle-Source"), "private-preview");
+    assert.deepEqual(stub.requestedKeys, ["games/1/17/index.html"]);
+    assert.match(await res.text(), /data-owogg-bridge="v1"/);
+  } finally {
+    stub.restore();
+  }
+});
+
+test("expired, tampered, or unconfigured preview capabilities fail closed before B2", async () => {
+  const valid = await previewToken();
+  const expired = await previewToken({ exp: Math.floor(Date.now() / 1000) - 1 });
+  const parts = valid.split(".");
+  const signature = parts[2] ?? "";
+  const tampered = `${parts[0]}.${parts[1]}.${signature.startsWith("A") ? "B" : "A"}${signature.slice(1)}`;
+  const { db } = createDb({});
+  const stub = createStorageStub({ stored: publishedObjects() });
+  try {
+    for (const [token, secret] of [
+      [expired, "preview-serving-secret"],
+      [tampered, "preview-serving-secret"],
+      [valid, undefined],
+    ] as const) {
+      const res = await app.request(`/preview/${token}/index.html`, {}, {
+        DB: db,
+        ...B2_ENV,
+        ...(secret ? { GAME_SESSION_SECRET: secret } : {}),
+      } as any);
+      assert.equal(res.status, 404);
+      assert.equal(await res.text(), "Not Found");
+    }
+    assert.deepEqual(stub.requestedKeys, []);
+  } finally {
+    stub.restore();
+  }
 });
 
 test("a traversal attempt in the asset path is rejected before any storage read", async () => {

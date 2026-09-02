@@ -16,10 +16,11 @@ export function isValidSandboxGameMode(value: unknown): value is SandboxGameMode
   return typeof value === "string" && (SANDBOX_GAME_MODES as readonly string[]).includes(value);
 }
 
-/** WITHDRAWN = the developer pulled their own submission before a decision was made — distinct
- * from REJECTED (an admin decision) even though both are terminal and both release the developer's
- * review slot (see SANDBOX_GAME_POLICY.MAX_CONCURRENT_REVIEW_SLOTS). */
+/** DRAFT = uploaded and fully published to private object storage, but not submitted to the admin
+ * review queue yet. WITHDRAWN = the developer pulled a submitted version before a decision was
+ * made — distinct from REJECTED (an admin decision). */
 export const SANDBOX_GAME_VERSION_STATUSES = [
+  "DRAFT",
   "PENDING_REVIEW",
   "APPROVED",
   "REJECTED",
@@ -27,10 +28,9 @@ export const SANDBOX_GAME_VERSION_STATUSES = [
 ] as const;
 export type SandboxGameVersionStatus = (typeof SANDBOX_GAME_VERSION_STATUSES)[number];
 
-/** Terminal review outcomes — once a version reaches one of these it never moves again, and it's
- * exactly these three (not PENDING_REVIEW) that release a game's review slot. */
+/** Terminal review outcomes — DRAFT and PENDING_REVIEW are both non-terminal workflow states. */
 export function isTerminalVersionStatus(status: SandboxGameVersionStatus): boolean {
-  return status !== "PENDING_REVIEW";
+  return status === "APPROVED" || status === "REJECTED" || status === "WITHDRAWN";
 }
 
 /**
@@ -54,6 +54,7 @@ export function isPublishedVersion(publishStatus: SandboxGamePublishStatus): boo
 }
 
 export const SANDBOX_GAME_REVIEW_ACTIONS = [
+  "VERSION_SUBMITTED",
   "VERSION_APPROVED",
   "VERSION_REJECTED",
   "VISIBILITY_CHANGED",

@@ -6,6 +6,7 @@ import {
   publishedObjectKey,
   publishedVersionPrefix,
   resolveBundleContentType,
+  verifyGamePreview,
 } from "@owogg/core";
 import { OWOGG_BROWSER_API_SOURCE } from "@owogg/game-sdk/bridge";
 import { createContainer } from "../container.js";
@@ -78,6 +79,7 @@ const LIVE_RESOLVER_MAX_AGE_SECONDS = 60;
  */
 export const gameServingRouter = new Hono<ApiEnv>();
 export const publishedGameAssetsRouter = new Hono<ApiEnv>();
+export const previewGameAssetsRouter = new Hono<ApiEnv>();
 const BROWSER_API_PATH = "/bridge/v1.js";
 const BROWSER_API_TAG = '<script src="/games/bridge/v1.js" data-owogg-bridge="v1"></script>';
 
@@ -113,6 +115,7 @@ const gameOriginHostGuard: MiddlewareHandler<ApiEnv> = async (c, next) => {
 
 gameServingRouter.use("*", gameOriginHostGuard);
 publishedGameAssetsRouter.use("*", gameOriginHostGuard);
+previewGameAssetsRouter.use("*", gameOriginHostGuard);
 
 publishedGameAssetsRouter.get(BROWSER_API_PATH, (c) =>
   c.body(OWOGG_BROWSER_API_SOURCE, 200, {
@@ -352,6 +355,30 @@ function fileResponse(
   return new Response(injectOwoggBrowserApi(file.bytes, path), { status: 200, headers });
 }
 
+/** Private preview responses are never placed in either browser or edge caches. The capability
+ * remains in the URL path only long enough to load this exact immutable draft, and Referrer-Policy
+ * prevents that path from being disclosed by document-initiated requests. */
+function previewFileResponse(
+  file: ServableBundleFile,
+  path: string,
+  frontendUrl: string,
+): Response {
+  const headers = assetResponseHeaders(
+    path,
+    {
+      contentType: file.contentType,
+      ...(file.contentEncoding ? { contentEncoding: file.contentEncoding } : {}),
+      bundleSource: "private-preview",
+    },
+    { maxAgeSeconds: 0, immutable: false },
+    frontendUrl,
+  );
+  headers.set("Cache-Control", "private, no-store, max-age=0");
+  headers.set("Referrer-Policy", "no-referrer");
+  headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+  return new Response(injectOwoggBrowserApi(file.bytes, path), { status: 200, headers });
+}
+
 function injectOwoggBrowserApi(bytes: ArrayBuffer, path: string): ArrayBuffer {
   if (path !== BUNDLE_ENTRY_PATH) return bytes;
   const html = new TextDecoder().decode(bytes);
@@ -528,6 +555,51 @@ publishedGameAssetsRouter.get("/:gameId/:versionId/:rest{.+}", async (c) => {
     file,
     path,
     versionedAssetCachePolicy(path),
+    c.env.FRONTEND_URL || DEFAULT_FRONTEND_URL,
+  );
+});
+
+// ── /preview/:token/* — exact private draft capability ──────────────────────
+
+/** No cookie or public visibility check is used here: a valid short-lived HMAC capability is the
+ * authorization. Issuance already verified creator ownership, DRAFT state, and READY publication;
+ * the token freezes gameId+versionId so every subresource comes from the same B2 version prefix. */
+previewGameAssetsRouter.get("/:token/:rest{.+}", async (c) => {
+  const secret = c.env?.GAME_SESSION_SECRET;
+  if (!secret || !c.env?.DB) return notFound(c);
+
+  const verified = await verifyGamePreview(c.req.param("token"), secret);
+  if (!verified.ok) return notFound(c);
+
+  let decodedRest: string;
+  try {
+    decodedRest = decodeURIComponent(c.req.param("rest"));
+  } catch {
+    return notFound(c);
+  }
+  const path = normalizeBundleEntryPath(decodedRest);
+  if (path === null) return notFound(c);
+
+  const { gameBundleStorageRepo, gameBundlesConfigured } = createContainer(
+    c.env.DB,
+    readB2Config(c.env),
+  );
+  if (!gameBundlesConfigured) return notFound(c);
+
+  let bytes: ArrayBuffer | null;
+  try {
+    bytes = await gameBundleStorageRepo.getObject(
+      publishedObjectKey(verified.payload.gameId, verified.payload.versionId, path),
+    );
+  } catch {
+    return notFound(c);
+  }
+  if (!bytes) return notFound(c);
+
+  const { contentType, contentEncoding } = resolveBundleContentType(path);
+  return previewFileResponse(
+    { bytes, contentType, contentEncoding },
+    path,
     c.env.FRONTEND_URL || DEFAULT_FRONTEND_URL,
   );
 });

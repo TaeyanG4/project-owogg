@@ -173,13 +173,8 @@ export interface SandboxGameRepository {
   listAll(): Promise<SandboxGameRecord[]>;
   listAllPage(limit: number, offset: number): Promise<SandboxGameAdminListPage>;
 
-  /**
-   * Creates a game AND atomically claims one of the developer's `MAX_CONCURRENT_REVIEW_SLOTS`
-   * review slots in the same operation — implementations must do this as one statement (or
-   * equivalent single-round-trip atomic operation), not a separate count-then-insert, so a race
-   * between concurrent submissions can never exceed the limit. Returns null (inserting nothing)
-   * when no slot is available; the use case turns that into SUBMISSION_LIMIT_REACHED.
-   */
+  /** Creates the private game identity without consuming a review slot. Slot allocation belongs
+   * to submitDraftVersion so uploading and reviewing remain separate workflow transitions. */
   create(input: {
     slug: string;
     developerUserId: number;
@@ -191,7 +186,7 @@ export interface SandboxGameRepository {
     tags: readonly string[];
     defaultScreenMode: "default" | "theater";
     nowIso: string;
-  }): Promise<SandboxGameRecord | null>;
+  }): Promise<SandboxGameRecord>;
 
   /** Releases a game's review slot (sets it to null). Idempotent — a no-op if the slot is already
    * null. Called once a game's submission reaches a terminal state (see isTerminalVersionStatus):
@@ -235,11 +230,26 @@ export interface SandboxGameRepository {
     objectKey: string;
     contentHash: string;
     bundleBytes: number;
+    status: "DRAFT" | "PENDING_REVIEW";
     nowIso: string;
   }): Promise<SandboxGameVersionRecord>;
 
   findVersionById(id: number): Promise<SandboxGameVersionRecord | null>;
   listVersionsByGame(gameId: number): Promise<SandboxGameVersionRecord[]>;
+  listDraftVersionsByDeveloper(developerUserId: number): Promise<SandboxGameVersionRecord[]>;
+
+  /** Atomically claims the initial review slot when required and moves one exact DRAFT version to
+   * PENDING_REVIEW. Returns null when another pending version won the race or no slot is free. */
+  submitDraftVersion(input: {
+    gameId: number;
+    versionId: number;
+    developerUserId: number;
+    claimReviewSlot: boolean;
+    nowIso: string;
+  }): Promise<SandboxGameVersionRecord | null>;
+
+  /** Retires superseded drafts after one exact version is submitted. */
+  withdrawOtherDraftVersions(gameId: number, submittedVersionId: number): Promise<void>;
 
   /** Records a publish-axis transition. Called several times across one publish (PUBLISHING, then
    * READY or FAILED), so it takes only the fields that change — a READY transition carries the

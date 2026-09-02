@@ -21,7 +21,11 @@ import { adminGameCreatorsRouter } from "./routes/adminGameCreators.js";
 import { adminSandboxGamesRouter } from "./routes/adminSandboxGames.js";
 import { devGamesRouter } from "./routes/devGames.js";
 import { myAccessRouter } from "./routes/myAccess.js";
-import { gameServingRouter, publishedGameAssetsRouter } from "./routes/gameServing.js";
+import {
+  gameServingRouter,
+  previewGameAssetsRouter,
+  publishedGameAssetsRouter,
+} from "./routes/gameServing.js";
 import { gamesRouter } from "./routes/games.js";
 import { renderRouter } from "./routes/render.js";
 import { multiplayerRouter } from "./routes/multiplayer.js";
@@ -52,11 +56,13 @@ export function resolveCommitSha(runtimeCommitSha?: string): string {
 const app = new Hono<ApiEnv>();
 
 // Middleware
-function redactLogMessage(message: string): string {
-  return message.replace(
-    /([?&](?:token|register_token|play_token|challenge|code|state)=)[^&\s]*/gi,
-    "$1[redacted]",
-  );
+export function redactLogMessage(message: string): string {
+  return message
+    .replace(/(\/preview\/)gp1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "$1[redacted]")
+    .replace(
+      /([?&](?:token|register_token|play_token|challenge|code|state)=)[^&\s]*/gi,
+      "$1[redacted]",
+    );
 }
 
 app.use(
@@ -199,6 +205,7 @@ app.route("/api/me", myAccessRouter);
 // config that points that hostname here changes later. See docs/GAME_CREATION_GUIDE.md §3.8.
 app.route("/play", gameServingRouter);
 app.route("/games", publishedGameAssetsRouter);
+app.route("/preview", previewGameAssetsRouter);
 app.route("/api/games", gamesRouter);
 app.route("/api/render", renderRouter);
 app.route("/api/multiplayer", multiplayerRouter);

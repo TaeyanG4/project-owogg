@@ -24,6 +24,35 @@ async function seedGame(repo: D1SandboxGameRepository, slug = "test-game", devel
   return created;
 }
 
+async function seedDraft(
+  repo: D1SandboxGameRepository,
+  gameId: number,
+  suffix: string,
+  nowIso = new Date().toISOString(),
+) {
+  return repo.createVersion({
+    gameId,
+    objectKey: `draft-${suffix}.zip`,
+    contentHash: `draft-${suffix}`,
+    bundleBytes: 10,
+    status: "DRAFT",
+    nowIso,
+  });
+}
+
+function submitDraft(
+  repo: D1SandboxGameRepository,
+  input: { gameId: number; versionId: number; developerUserId: number; nowIso?: string },
+) {
+  return repo.submitDraftVersion({
+    gameId: input.gameId,
+    versionId: input.versionId,
+    developerUserId: input.developerUserId,
+    claimReviewSlot: true,
+    nowIso: input.nowIso ?? new Date().toISOString(),
+  });
+}
+
 test("create + findBySlug/findById round-trip, visibility defaults to PRIVATE", async () => {
   const { db, raw } = createSqliteD1(SANDBOX_GAMES_TEST_SCHEMA);
   seedUser(raw, 1, "Dev");
@@ -733,7 +762,7 @@ test("setVersionPublishState round-trips a READY transition and then a FAILED on
 
 // ── review-slot quota (beta concurrent-submission cap) ───────────────────────
 
-test("create claims slot 1, then slot 2, for a developer's first two games", async () => {
+test("draft submission claims slot 1, then slot 2, while registration itself claims none", async () => {
   const { db, raw } = createSqliteD1(SANDBOX_GAMES_TEST_SCHEMA);
   seedUser(raw, 1, "Dev");
   const repo = new D1SandboxGameRepository(db);
@@ -741,89 +770,90 @@ test("create claims slot 1, then slot 2, for a developer's first two games", asy
   const g1 = await seedGame(repo, "game-1");
   const g2 = await seedGame(repo, "game-2");
 
-  assert.equal(g1.reviewSlot, 1);
-  assert.equal(g2.reviewSlot, 2);
+  assert.equal(g1.reviewSlot, null);
+  assert.equal(g2.reviewSlot, null);
+  assert.ok(
+    await submitDraft(repo, {
+      gameId: g1.id,
+      versionId: (await seedDraft(repo, g1.id, "1")).id,
+      developerUserId: 1,
+    }),
+  );
+  assert.ok(
+    await submitDraft(repo, {
+      gameId: g2.id,
+      versionId: (await seedDraft(repo, g2.id, "2")).id,
+      developerUserId: 1,
+    }),
+  );
+  assert.equal((await repo.findById(g1.id))?.reviewSlot, 1);
+  assert.equal((await repo.findById(g2.id))?.reviewSlot, 2);
 });
 
-test("a third concurrent submission is refused (returns null) while both slots are held", async () => {
+test("a third concurrent review submission is refused while its game and draft remain private", async () => {
   const { db, raw } = createSqliteD1(SANDBOX_GAMES_TEST_SCHEMA);
   seedUser(raw, 1, "Dev");
   const repo = new D1SandboxGameRepository(db);
 
-  await repo.create({
-    slug: "game-1",
-    developerUserId: 1,
-    title: "Game 1",
-    shortDescription: null,
-    description: null,
-    genre: "puzzle",
-    mode: "single",
-    nowIso: new Date().toISOString(),
-  });
-  await repo.create({
-    slug: "game-2",
-    developerUserId: 1,
-    title: "Game 2",
-    shortDescription: null,
-    description: null,
-    genre: "puzzle",
-    mode: "single",
-    nowIso: new Date().toISOString(),
-  });
+  const first = await seedGame(repo, "game-1");
+  const second = await seedGame(repo, "game-2");
+  const third = await seedGame(repo, "game-3");
+  assert.ok(
+    await submitDraft(repo, {
+      gameId: first.id,
+      versionId: (await seedDraft(repo, first.id, "1")).id,
+      developerUserId: 1,
+    }),
+  );
+  assert.ok(
+    await submitDraft(repo, {
+      gameId: second.id,
+      versionId: (await seedDraft(repo, second.id, "2")).id,
+      developerUserId: 1,
+    }),
+  );
+  const thirdDraft = await seedDraft(repo, third.id, "3");
 
-  const third = await repo.create({
-    slug: "game-3",
-    developerUserId: 1,
-    title: "Game 3",
-    shortDescription: null,
-    description: null,
-    genre: "puzzle",
-    mode: "single",
-    nowIso: new Date().toISOString(),
-  });
-
-  assert.equal(third, null);
-  // Crucially, the refused submission must not have been created at all — not created-without-a-slot.
-  assert.equal(await repo.findBySlug("game-3"), null);
+  assert.equal(
+    await submitDraft(repo, { gameId: third.id, versionId: thirdDraft.id, developerUserId: 1 }),
+    null,
+  );
+  assert.equal((await repo.findById(third.id))?.reviewSlot, null);
+  assert.equal((await repo.findVersionById(thirdDraft.id))?.status, "DRAFT");
 });
 
-test("concurrent create calls for the same developer never claim more than 2 slots (real race, not simulated)", async () => {
+test("concurrent draft submissions for the same developer never claim more than 2 slots", async () => {
   const { db, raw } = createSqliteD1(SANDBOX_GAMES_TEST_SCHEMA);
   seedUser(raw, 1, "Dev");
   const repo = new D1SandboxGameRepository(db);
 
-  // Five concurrent submissions fired at once — D1's single serialized query queue (see
-  // middleware/edgeCache.ts's note on docs/DATABASE.md §4) means these interleave at the
-  // statement level exactly like concurrent HTTP requests would in production, which is the
-  // scenario the INSERT ... SELECT / UNIQUE INDEX pairing exists to make safe.
+  const candidates = [];
+  for (let index = 0; index < 5; index += 1) {
+    const game = await seedGame(repo, `race-game-${index}`);
+    candidates.push({ game, version: await seedDraft(repo, game.id, `race-${index}`) });
+  }
   const results = await Promise.all(
-    Array.from({ length: 5 }, (_, i) =>
-      repo.create({
-        slug: `race-game-${i}`,
-        developerUserId: 1,
-        title: `Race Game ${i}`,
-        shortDescription: null,
-        description: null,
-        genre: "puzzle",
-        mode: "single",
-        nowIso: new Date().toISOString(),
-      }),
+    candidates.map(({ game, version }) =>
+      submitDraft(repo, { gameId: game.id, versionId: version.id, developerUserId: 1 }),
     ),
   );
 
   const succeeded = results.filter((r) => r !== null);
   assert.equal(succeeded.length, 2, "exactly 2 of 5 concurrent submissions may succeed");
-  assert.deepEqual(succeeded.map((g) => g!.reviewSlot).sort(), [1, 2]);
-
   const allGames = await repo.listByDeveloper(1);
-  assert.equal(allGames.length, 2, "the 3 refused submissions must not exist as rows at all");
+  assert.equal(allGames.length, 5, "registration remains independent from review capacity");
+  assert.deepEqual(
+    allGames.flatMap((game) => (game.reviewSlot === null ? [] : [game.reviewSlot])).sort(),
+    [1, 2],
+  );
 });
 
 test("the UNIQUE INDEX itself rejects a second row claiming an already-held slot, independent of app logic", async () => {
   const { db, raw } = createSqliteD1(SANDBOX_GAMES_TEST_SCHEMA);
   seedUser(raw, 1, "Dev");
   const repo = new D1SandboxGameRepository(db);
-  await seedGame(repo, "game-1"); // claims slot 1
+  const game = await seedGame(repo, "game-1");
+  raw.prepare("UPDATE sandbox_games SET review_slot = 1 WHERE id = ?").run(game.id);
 
   // Bypass the repository entirely and try to insert a second row with the same
   // (developer_user_id, review_slot) directly via raw SQL — this is the actual DB invariant, not
@@ -853,23 +883,42 @@ test("different developers each get their own independent 2-slot budget", async 
   seedUser(raw, 2, "DevB");
   const repo = new D1SandboxGameRepository(db);
 
-  await seedGame(repo, "a1", 1);
-  await seedGame(repo, "a2", 1);
+  const a1 = await seedGame(repo, "a1", 1);
+  const a2 = await seedGame(repo, "a2", 1);
+  assert.ok(
+    await submitDraft(repo, {
+      gameId: a1.id,
+      versionId: (await seedDraft(repo, a1.id, "a1")).id,
+      developerUserId: 1,
+    }),
+  );
+  assert.ok(
+    await submitDraft(repo, {
+      gameId: a2.id,
+      versionId: (await seedDraft(repo, a2.id, "a2")).id,
+      developerUserId: 1,
+    }),
+  );
   // DevA is now at their limit — DevB is unaffected.
   const b1 = await seedGame(repo, "b1", 2);
-  assert.equal(b1.reviewSlot, 1);
+  assert.ok(
+    await submitDraft(repo, {
+      gameId: b1.id,
+      versionId: (await seedDraft(repo, b1.id, "b1")).id,
+      developerUserId: 2,
+    }),
+  );
+  assert.equal((await repo.findById(b1.id))?.reviewSlot, 1);
 
-  const aThird = await repo.create({
-    slug: "a3",
-    developerUserId: 1,
-    title: "A3",
-    shortDescription: null,
-    description: null,
-    genre: "puzzle",
-    mode: "single",
-    nowIso: new Date().toISOString(),
-  });
-  assert.equal(aThird, null);
+  const aThird = await seedGame(repo, "a3", 1);
+  assert.equal(
+    await submitDraft(repo, {
+      gameId: aThird.id,
+      versionId: (await seedDraft(repo, aThird.id, "a3")).id,
+      developerUserId: 1,
+    }),
+    null,
+  );
 });
 
 test("releaseReviewSlot frees the slot for reuse by a later submission", async () => {
@@ -877,15 +926,37 @@ test("releaseReviewSlot frees the slot for reuse by a later submission", async (
   seedUser(raw, 1, "Dev");
   const repo = new D1SandboxGameRepository(db);
   const g1 = await seedGame(repo, "game-1");
-  await seedGame(repo, "game-2");
+  const g2 = await seedGame(repo, "game-2");
   const now = new Date().toISOString();
+
+  assert.ok(
+    await submitDraft(repo, {
+      gameId: g1.id,
+      versionId: (await seedDraft(repo, g1.id, "1")).id,
+      developerUserId: 1,
+    }),
+  );
+  assert.ok(
+    await submitDraft(repo, {
+      gameId: g2.id,
+      versionId: (await seedDraft(repo, g2.id, "2")).id,
+      developerUserId: 1,
+    }),
+  );
 
   const released = await repo.releaseReviewSlot(g1.id, now);
   assert.equal(released.reviewSlot, null);
 
   const g3 = await seedGame(repo, "game-3");
+  assert.ok(
+    await submitDraft(repo, {
+      gameId: g3.id,
+      versionId: (await seedDraft(repo, g3.id, "3")).id,
+      developerUserId: 1,
+    }),
+  );
   assert.equal(
-    g3.reviewSlot,
+    (await repo.findById(g3.id))?.reviewSlot,
     1,
     "the freed slot 1 is reused, not appended as a 3rd concurrent slot",
   );
@@ -1016,13 +1087,27 @@ test("Stage A-3: shared numeric ID namespace does not collide with existing OWOG
   assert.equal(owoggRow.slug, "reaction-time");
 });
 
-test("Stage A-3: create refusal on review slot exhaustion writes zero rows to both games and sandbox_games", async () => {
+test("Stage A-3: review slot exhaustion leaves the third registered game and draft unchanged", async () => {
   const { db, raw } = createSqliteD1(SANDBOX_GAMES_TEST_SCHEMA);
   seedUser(raw, 1, "Dev");
   const repo = new D1SandboxGameRepository(db);
 
-  await seedGame(repo, "game-1", 1);
-  await seedGame(repo, "game-2", 1);
+  const first = await seedGame(repo, "game-1", 1);
+  const second = await seedGame(repo, "game-2", 1);
+  assert.ok(
+    await submitDraft(repo, {
+      gameId: first.id,
+      versionId: (await seedDraft(repo, first.id, "1")).id,
+      developerUserId: 1,
+    }),
+  );
+  assert.ok(
+    await submitDraft(repo, {
+      gameId: second.id,
+      versionId: (await seedDraft(repo, second.id, "2")).id,
+      developerUserId: 1,
+    }),
+  );
 
   const initialGamesCount = Number(
     (raw.prepare("SELECT COUNT(*) as c FROM games").get() as { c: number }).c,
@@ -1033,28 +1118,23 @@ test("Stage A-3: create refusal on review slot exhaustion writes zero rows to bo
   assert.equal(initialGamesCount, 2);
   assert.equal(initialSandboxCount, 2);
 
-  // Third attempt should return null
-  const third = await repo.create({
-    slug: "game-3",
-    developerUserId: 1,
-    title: "Game 3",
-    shortDescription: null,
-    description: null,
-    genre: "puzzle",
-    mode: "single",
-    nowIso: new Date().toISOString(),
-  });
-  assert.equal(third, null);
+  const third = await seedGame(repo, "game-3", 1);
+  const thirdDraft = await seedDraft(repo, third.id, "3");
+  assert.equal(
+    await submitDraft(repo, { gameId: third.id, versionId: thirdDraft.id, developerUserId: 1 }),
+    null,
+  );
 
-  // Both tables must have zero new rows written
   const finalGamesCount = Number(
     (raw.prepare("SELECT COUNT(*) as c FROM games").get() as { c: number }).c,
   );
   const finalSandboxCount = Number(
     (raw.prepare("SELECT COUNT(*) as c FROM sandbox_games").get() as { c: number }).c,
   );
-  assert.equal(finalGamesCount, 2);
-  assert.equal(finalSandboxCount, 2);
+  assert.equal(finalGamesCount, 3);
+  assert.equal(finalSandboxCount, 3);
+  assert.equal((await repo.findById(third.id))?.reviewSlot, null);
+  assert.equal((await repo.findVersionById(thirdDraft.id))?.status, "DRAFT");
 });
 
 test("Stage A-3: slugExists checks global games identity namespace including OWOGG games", async () => {
@@ -1114,8 +1194,18 @@ test("Stage A-3: all write paths maintain exact parity in games identity table",
     objectKey: "uploads/parity.zip",
     contentHash: "parity-hash",
     bundleBytes: 42,
+    status: "DRAFT",
     nowIso: "2026-08-20T14:15:00.000Z",
   });
+  assert.ok(
+    await repo.submitDraftVersion({
+      gameId: game.id,
+      versionId: version.id,
+      developerUserId: 1,
+      claimReviewSlot: true,
+      nowIso: "2026-08-20T14:16:00.000Z",
+    }),
+  );
   await repo.setLiveVersion(game.id, version.id, verTime);
   gRow = raw.prepare("SELECT * FROM games WHERE id = ?").get(game.id) as Record<string, unknown>;
   assert.equal(gRow.live_version_id, version.id);

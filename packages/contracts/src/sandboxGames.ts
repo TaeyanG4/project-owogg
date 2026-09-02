@@ -8,6 +8,7 @@ export const SandboxGameVisibilitySchema = z.enum(["PRIVATE", "PUBLIC"]);
 export type SandboxGameVisibility = z.infer<typeof SandboxGameVisibilitySchema>;
 
 export const SandboxGameVersionStatusSchema = z.enum([
+  "DRAFT",
   "PENDING_REVIEW",
   "APPROVED",
   "REJECTED",
@@ -127,6 +128,11 @@ export const SandboxGameListResponseSchema = z.object({
 });
 export type SandboxGameListResponse = z.infer<typeof SandboxGameListResponseSchema>;
 
+export const SandboxGameDraftListResponseSchema = z.object({
+  drafts: z.array(SandboxGameVersionRecordSchema),
+});
+export type SandboxGameDraftListResponse = z.infer<typeof SandboxGameDraftListResponseSchema>;
+
 export const SandboxGameDetailResponseSchema = z.object({
   game: SandboxGameRecordSchema,
   versions: z.array(SandboxGameVersionRecordSchema),
@@ -142,6 +148,32 @@ export const SandboxGameUploadResponseSchema = z.object({
   version: SandboxGameVersionRecordSchema,
 });
 export type SandboxGameUploadResponse = z.infer<typeof SandboxGameUploadResponseSchema>;
+
+export const SandboxGameReviewSubmitResponseSchema = z.object({
+  game: SandboxGameRecordSchema,
+  version: SandboxGameVersionRecordSchema,
+});
+export type SandboxGameReviewSubmitResponse = z.infer<typeof SandboxGameReviewSubmitResponseSchema>;
+
+export const SandboxGamePreviewTokenSchema = z
+  .string()
+  .regex(/^gp1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+
+export const SandboxGamePreviewSessionResponseSchema = z.object({
+  gameId: z.number().int().positive(),
+  versionId: z.number().int().positive(),
+  previewToken: SandboxGamePreviewTokenSchema,
+  previewPath: z.string().regex(/^\/preview\/gp1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\/index\.html$/),
+  expiresAt: z.string().datetime(),
+});
+export type SandboxGamePreviewSessionResponse = z.infer<
+  typeof SandboxGamePreviewSessionResponseSchema
+>;
+
+export const SandboxGameReviewSubmitRequestSchema = z.object({
+  previewToken: SandboxGamePreviewTokenSchema,
+});
+export type SandboxGameReviewSubmitRequest = z.infer<typeof SandboxGameReviewSubmitRequestSchema>;
 
 // ── Admin-facing ──
 

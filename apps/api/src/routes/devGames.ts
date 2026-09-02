@@ -6,11 +6,15 @@ import {
   GameCreatorApplyRequestSchema,
   GameCreatorApplicationRecordSchema,
   SandboxGameListResponseSchema,
+  SandboxGameDraftListResponseSchema,
   SandboxGameDetailResponseSchema,
   SandboxGameRecordSchema,
   toSandboxGameRecordResponse,
   SandboxGameVersionRecordSchema,
   SandboxGameUploadResponseSchema,
+  SandboxGameReviewSubmitResponseSchema,
+  SandboxGameReviewSubmitRequestSchema,
+  SandboxGamePreviewSessionResponseSchema,
   SandboxGameBasicMetadataUpdateRequestSchema,
   GameContentUpdateRequestSchema,
   GameLogoUpdateResponseSchema,
@@ -20,6 +24,9 @@ import {
   GameCreatorUseCaseFailure,
   canApplyForGameCreator,
   hasImplicitGameCreatorAccess,
+  GAME_PREVIEW_POLICY,
+  signGamePreview,
+  verifyGamePreview,
 } from "@owogg/core";
 import type { BackblazeB2Config } from "@owogg/db";
 import { createContainer } from "../container.js";
@@ -218,6 +225,146 @@ devGamesRouter.get("/games", async (c) => {
     SandboxGameListResponseSchema.parse({ games: games.map(toSandboxGameRecordResponse) }),
     200,
   );
+});
+
+// GET /api/dev/games/drafts — private, fully-published versions that still require the creator's
+// own preview confirmation. Declared before /games/:id so "drafts" can never be parsed as an id.
+devGamesRouter.get("/games/drafts", async (c) => {
+  const session = await resolveDevSession(c);
+  if (!session) {
+    return c.json({ error: { code: "UNAUTHORIZED", message: "로그인이 필요합니다." } }, 401);
+  }
+  const { sandboxGameUseCases } = createContainer(c.env.DB);
+  const drafts = await sandboxGameUseCases.listDrafts(session.userId);
+  return c.json(SandboxGameDraftListResponseSchema.parse({ drafts }), 200);
+});
+
+// POST /api/dev/games/:id/versions/:versionId/preview — issues a short-lived path capability for
+// one exact READY draft. The token stays in the game-origin path so relative subresources inherit
+// authorization without cookies or a public catalog entry.
+devGamesRouter.post("/games/:id/versions/:versionId/preview", async (c) => {
+  const session = await resolveDevSession(c);
+  if (!session) {
+    return c.json({ error: { code: "UNAUTHORIZED", message: "로그인이 필요합니다." } }, 401);
+  }
+  if (!c.env.GAME_SESSION_SECRET) {
+    return c.json(
+      {
+        error: {
+          code: "GAME_PREVIEW_NOT_CONFIGURED",
+          message: "비공개 게임 미리보기가 아직 구성되지 않았습니다.",
+        },
+      },
+      503,
+    );
+  }
+  const container = createContainer(c.env.DB, readB2Config(c.env));
+  if (!container.gameBundlesConfigured) {
+    return c.json(
+      {
+        error: {
+          code: "GAME_BUNDLES_NOT_CONFIGURED",
+          message: "번들 저장소(Backblaze B2)가 아직 이 환경에 구성되지 않았습니다.",
+        },
+      },
+      503,
+    );
+  }
+
+  try {
+    const gameId = Number(c.req.param("id"));
+    const versionId = Number(c.req.param("versionId"));
+    const version = await container.sandboxGameUseCases.getDraftForPreview({
+      gameId,
+      versionId,
+      actingUserId: session.userId,
+    });
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const exp = nowSeconds + GAME_PREVIEW_POLICY.EXPIRY_SECONDS;
+    const token = await signGamePreview(
+      {
+        userId: session.userId,
+        gameId: version.gameId,
+        versionId: version.id,
+        nonce: crypto.randomUUID(),
+        exp,
+      },
+      c.env.GAME_SESSION_SECRET,
+    );
+    return c.json(
+      SandboxGamePreviewSessionResponseSchema.parse({
+        gameId: version.gameId,
+        versionId: version.id,
+        previewToken: token,
+        previewPath: `/preview/${token}/index.html`,
+        expiresAt: new Date(exp * 1000).toISOString(),
+      }),
+      201,
+    );
+  } catch (error) {
+    const { body, status } = failureResponse(error);
+    return c.json(body, status);
+  }
+});
+
+// POST /api/dev/games/:id/versions/:versionId/submit — the only creator path into the review
+// queue. It atomically claims the initial quota slot and submits the exact version just previewed.
+devGamesRouter.post("/games/:id/versions/:versionId/submit", async (c) => {
+  const session = await resolveDevSession(c);
+  if (!session) {
+    return c.json({ error: { code: "UNAUTHORIZED", message: "로그인이 필요합니다." } }, 401);
+  }
+  const body = await c.req.json().catch(() => null);
+  const parsed = SandboxGameReviewSubmitRequestSchema.safeParse(body);
+  if (!parsed.success || !c.env.GAME_SESSION_SECRET) {
+    return c.json(
+      {
+        error: {
+          code: "PREVIEW_REQUIRED",
+          message: "현재 초안을 미리보기에서 확인한 뒤 제출해주세요.",
+        },
+      },
+      409,
+    );
+  }
+  const gameId = Number(c.req.param("id"));
+  const versionId = Number(c.req.param("versionId"));
+  const preview = await verifyGamePreview(parsed.data.previewToken, c.env.GAME_SESSION_SECRET);
+  if (
+    !preview.ok ||
+    preview.payload.userId !== session.userId ||
+    preview.payload.gameId !== gameId ||
+    preview.payload.versionId !== versionId
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "PREVIEW_REQUIRED",
+          message: "현재 초안을 미리보기에서 다시 확인한 뒤 제출해주세요.",
+        },
+      },
+      409,
+    );
+  }
+
+  try {
+    const { sandboxGameUseCases } = createContainer(c.env.DB);
+    const submitted = await sandboxGameUseCases.submitDraftForReview({
+      gameId,
+      versionId,
+      actingUserId: session.userId,
+    });
+    return c.json(
+      SandboxGameReviewSubmitResponseSchema.parse({
+        game: toSandboxGameRecordResponse(submitted.game),
+        version: submitted.version,
+      }),
+      200,
+    );
+  } catch (error) {
+    const { body, status } = failureResponse(error);
+    return c.json(body, status);
+  }
 });
 
 // POST /api/dev/games/upload — drag-and-drop registration: a single ZIP whose root contains

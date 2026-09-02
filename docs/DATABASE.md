@@ -227,7 +227,7 @@ fail-closed로 막는다. 삭제/익명화 정책이나 공식 게임 purge는 a
 `0034` 이후 심사 상태의 권한 원천은 `game_versions`입니다. 이 테이블은 이전 Worker용 호환
 미러이며 audit 관계와 contract migration 전환 기간 때문에 물리적으로만 남아 있습니다.
 
-- review status: `PENDING_REVIEW | APPROVED | REJECTED | WITHDRAWN`
+- review status: `DRAFT | PENDING_REVIEW | APPROVED | REJECTED | WITHDRAWN`
 - reviewer, reject/revoke 사유, audit 관계
 - source archive와 publication compatibility fields
 
@@ -252,12 +252,13 @@ surface 구현 전까지 기본값 false입니다. 변경 actor와 시각을 함
 
 ```text
 Publication axis: UPLOADED → PUBLISHING → READY | FAILED
-Review axis:      PENDING_REVIEW → APPROVED | REJECTED | WITHDRAWN
+Review axis:      DRAFT → PENDING_REVIEW → APPROVED | REJECTED | WITHDRAWN
 ```
 
-`READY`는 bundle의 파일과 manifest가 완전히 publication되었다는 뜻입니다. `APPROVED`는 관리자가
-USER 버전을 검토했다는 뜻입니다. 승인 시점에 version은 이미 `READY`여야 하지만 그 역은
-성립하지 않습니다.
+`READY`는 bundle의 파일과 manifest가 완전히 publication되었다는 뜻입니다. USER 업로드는 먼저
+`DRAFT`로 남고, 소유자가 B2에 저장된 exact version을 비공개 미리보기에서 확인한 뒤 명시적으로 제출해야
+`PENDING_REVIEW`가 됩니다. `APPROVED`는 관리자가 USER 버전을 검토했다는 뜻입니다. 승인 시점에
+version은 이미 `READY`여야 하지만 그 역은 성립하지 않습니다.
 
 ```text
 READY != APPROVED

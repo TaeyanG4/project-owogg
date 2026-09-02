@@ -67,3 +67,12 @@ export function gameVersionPlayUrl(gameId: number, versionId: number): string {
   }
   return `${GAME_ORIGIN.replace(/\/+$/, "")}/games/${gameId}/${versionId}/index.html`;
 }
+
+/** Expiring private draft paths are issued by the API and already schema-validated. Keeping the
+ * host selection here ensures previews use the same dedicated game origin as public bundles. */
+export function gamePreviewUrl(previewPath: string): string {
+  if (!previewPath.startsWith("/preview/")) {
+    throw new RangeError("previewPath must be an API-issued /preview path");
+  }
+  return `${GAME_ORIGIN.replace(/\/+$/, "")}${previewPath}`;
+}
