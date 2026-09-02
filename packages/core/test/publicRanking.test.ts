@@ -26,6 +26,13 @@ test("weekly ranking starts Monday and monthly ranking starts on day one in KST"
   });
 });
 
+test("all-time ranking covers the complete persisted service history up to now", () => {
+  assert.deepEqual(resolvePublicRankingPeriod("all", NOW), {
+    startAt: "1970-01-01T00:00:00.000Z",
+    endAt: NOW.toISOString(),
+  });
+});
+
 test("service attendance dates use KST across the UTC date boundary", () => {
   const nearMidnight = new Date("2026-08-31T16:30:00.000Z");
   assert.equal(serviceDateString(nearMidnight), "2026-09-01");

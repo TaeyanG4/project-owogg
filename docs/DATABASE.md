@@ -101,11 +101,12 @@ generation과 canonical ruleset revision에 맞는 row만 읽습니다. 공개 �
 leaderboard를 초기화합니다.
 
 공개 `/api/rankings`는 새 집계 테이블을 복제하지 않고 `scores`, `xp_events`, `users`를 권한 원장으로
-직접 사용합니다. 게임 기록과 XP는 KST 일간·월요일 시작 주간·월간 경계로 제한하고,
-게임 기록은 해당 기간의 사용자별 PB를 SQL window function으로 한 건만 선택합니다. XP는 해당
-기간의 양수 ledger를 합산합니다. 연속 출석은 lazy 갱신된 오래된 값을 순위에 노출하지 않도록 KST
-오늘 또는 어제 활동한 `current_streak`만 읽습니다. 일반/스트리머 범위는 같은 계산을 사용하며,
-스트리머는 지원 플랫폼의 소유권 인증이 유효한 사용자로만 필터링합니다. 공개 identity는
+직접 사용합니다. 일반 게임 기록과 XP는 KST 일간·월요일 시작 주간·월간 경계로 제한하고,
+스트리머 범위에 한해 전체 기간도 허용합니다. 게임 기록은 해당 기간의 사용자별 PB를 SQL window
+function으로 한 건만 선택하고 XP는 해당 기간의 양수 ledger를 합산합니다. 연속 출석은 lazy 갱신된
+오래된 값을 순위에 노출하지 않도록 KST 오늘 또는 어제 활동한 `current_streak`만 읽습니다.
+일반/스트리머 범위는 같은 계산을 사용하며, 스트리머는 지원 플랫폼의 소유권 인증이 유효한 사용자로만
+필터링합니다. 공개 identity는
 현재 nickname/avatar/country를 join하며 country가 미지정·비공개·불명인 경우 API에서 `null`로 투영할 수
 있습니다. 각 행은 값과 해당 값의 달성 일자를 함께 반환합니다.
 

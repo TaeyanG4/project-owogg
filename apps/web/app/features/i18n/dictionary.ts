@@ -155,6 +155,7 @@ export interface Dictionary {
     dailyPeriod: string;
     weeklyPeriod: string;
     monthlyPeriod: string;
+    allPeriod: string;
     rankHeader: string;
     playerHeader: string;
     streamerHeader: string;
@@ -1364,6 +1365,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       dailyPeriod: "일간",
       weeklyPeriod: "주간",
       monthlyPeriod: "월간",
+      allPeriod: "전체",
       rankHeader: "순위",
       playerHeader: "플레이어",
       streamerHeader: "스트리머",
@@ -1936,7 +1938,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
           "명예의 전당(/ranking)은 일반 랭킹과 스트리머 랭킹을 같은 화면 구조로 제공합니다. 각 범위에서 게임 기록, XP, 연속 출석을 선택할 수 있습니다.",
         gameHeading: "일반 랭킹",
         gameBody:
-          "게임 기록과 XP는 KST 기준 일간·주간·월간으로 나누며, 게임 기록은 해당 기간의 사용자별 최고 기록 1건만 반영합니다. 연속 출석은 현재 유효한 일수를 표시합니다.",
+          "일반 게임 기록과 XP는 KST 기준 일간·주간·월간으로 나누며, 게임 기록은 해당 기간의 사용자별 최고 기록 1건만 반영합니다. 스트리머 랭킹은 같은 산식으로 전체 기간도 선택할 수 있고, 연속 출석은 현재 유효한 일수를 표시합니다.",
         xpHeading: "기간·달성일 기준",
         xpBodyPrefix: "각 행에는 순위 값을 달성한 년·월·일이 표시됩니다. XP 지급 방식은 ",
         xpBodyLink: "XP와 레벨 문서",
@@ -1945,7 +1947,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         streamerBodyPrefix: "YouTube / CHZZK / Twitch 중 ",
         streamerBodyStrong: "하나 이상",
         streamerBodySuffix:
-          "의 플랫폼에서 소유권 인증과 운영진 승인을 모두 받은 사용자만 노출됩니다. 게임 기록·XP·연속 출석은 일반 랭킹과 동일한 계산식과 UI를 사용하며, 승인 플랫폼 수는 순위에 영향을 주지 않습니다.",
+          "의 플랫폼에서 소유권 인증과 운영진 승인을 모두 받은 사용자만 노출됩니다. 게임 기록·XP·연속 출석은 일반 랭킹과 동일한 계산식을 사용하고 게임 기록·XP에는 전체 기간 선택이 추가되며, 승인 플랫폼 수는 순위에 영향을 주지 않습니다.",
         streamerLinkPrefix: "자세한 인증 방법은 ",
         streamerLink: "Streamer 채널 소유권 인증",
         streamerLinkSuffix: " 문서를 참고하세요.",
@@ -2709,6 +2711,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       dailyPeriod: "Daily",
       weeklyPeriod: "Weekly",
       monthlyPeriod: "Monthly",
+      allPeriod: "All-time",
       rankHeader: "Rank",
       playerHeader: "Player",
       streamerHeader: "Streamer",
@@ -3295,7 +3298,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
           "The Hall of Fame (/ranking) gives General and Streamer rankings the same layout. Each scope offers game records, XP, and attendance streaks.",
         gameHeading: "General ranking",
         gameBody:
-          "Game records and XP are split into daily, weekly, and monthly KST periods. Game records count one personal best per user within the selected period; streaks show the currently valid number of days.",
+          "General game records and XP are split into daily, weekly, and monthly KST periods. Game records count one personal best per user within the selected period. Streamer rankings also offer all-time with the same formula, while streaks show the currently valid number of days.",
         xpHeading: "Periods and achieved dates",
         xpBodyPrefix:
           "Every row shows the full date when its ranking value was reached. For how XP is granted, see the ",
@@ -3305,7 +3308,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         streamerBodyPrefix: "Only users who completed official channel ownership verification on ",
         streamerBodyStrong: "at least one",
         streamerBodySuffix:
-          " of YouTube / CHZZK / Twitch and received staff approval appear here. Game, XP, and streak rankings use the same formula and UI as General rankings, and the number of approved platforms has no effect on position.",
+          " of YouTube / CHZZK / Twitch and received staff approval appear here. Game, XP, and streak rankings use the same formula as General rankings, game and XP add an all-time period, and the number of approved platforms has no effect on position.",
         streamerLinkPrefix: "For how to verify, see the ",
         streamerLink: "Streamer channel ownership verification",
         streamerLinkSuffix: " article.",
@@ -4077,6 +4080,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       dailyPeriod: "日間",
       weeklyPeriod: "週間",
       monthlyPeriod: "月間",
+      allPeriod: "全期間",
       rankHeader: "順位",
       playerHeader: "プレイヤー",
       streamerHeader: "ストリーマー",
@@ -4661,7 +4665,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
           "殿堂（/ranking）は、通常ランキングとストリーマーランキングを同じUIで提供します。各範囲でゲーム記録、XP、連続ログインを選択できます。",
         gameHeading: "通常ランキング",
         gameBody:
-          "ゲーム記録とXPはKST基準の日間・週間・月間に分かれます。ゲーム記録は選択期間内のユーザーごとの自己ベスト1件、連続ログインは現在有効な日数を表示します。",
+          "通常ランキングのゲーム記録とXPはKST基準の日間・週間・月間に分かれ、ゲーム記録は選択期間内のユーザーごとの自己ベスト1件を反映します。ストリーマーランキングでは同じ計算式で全期間も選択でき、連続ログインは現在有効な日数を表示します。",
         xpHeading: "期間・達成日",
         xpBodyPrefix: "各行に順位値を達成した年月日を表示します。XPの付与方式は",
         xpBodyLink: "XPとレベルのドキュメント",
@@ -4670,7 +4674,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         streamerBodyPrefix: "YouTube / CHZZK / Twitch のうち",
         streamerBodyStrong: "1つ以上",
         streamerBodySuffix:
-          "のプラットフォームで所有権認証と運営承認を完了したユーザーのみが表示されます。ゲーム記録・XP・連続ログインは通常ランキングと同じ計算式とUIを使い、承認数は順位に影響しません。",
+          "のプラットフォームで所有権認証と運営承認を完了したユーザーのみが表示されます。ゲーム記録・XP・連続ログインは通常ランキングと同じ計算式を使い、ゲーム記録とXPには全期間が追加されます。承認数は順位に影響しません。",
         streamerLinkPrefix: "詳しい認証方法は",
         streamerLink: "Streamerチャンネル所有権認証",
         streamerLinkSuffix: "のドキュメントをご覧ください。",
@@ -5442,6 +5446,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
       dailyPeriod: "日榜",
       weeklyPeriod: "周榜",
       monthlyPeriod: "月榜",
+      allPeriod: "总榜",
       rankHeader: "排名",
       playerHeader: "玩家",
       streamerHeader: "主播",
@@ -5991,7 +5996,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
           "名人堂（/ranking）使用相同的界面提供普通排行榜和主播排行榜。每个范围都可选择游戏记录、XP 和连续签到。",
         gameHeading: "普通排行榜",
         gameBody:
-          "游戏记录和 XP 按 KST 划分为日、周、月。游戏记录只采用所选期间内每位用户的一条最佳成绩；连续签到显示当前有效天数。",
+          "普通排行榜的游戏记录和 XP 按 KST 划分为日、周、月，游戏记录只采用所选期间内每位用户的一条最佳成绩。主播排行榜使用相同公式并额外提供总榜，连续签到显示当前有效天数。",
         xpHeading: "周期与达成日期",
         xpBodyPrefix: "每行显示达到排名数值的完整年月日。XP 发放方式请参阅",
         xpBodyLink: "XP 与等级文档",
@@ -6000,7 +6005,7 @@ export const DICTIONARIES: Record<SupportedLocale, Dictionary> = {
         streamerBodyPrefix: "只有在 YouTube / CHZZK / Twitch 中",
         streamerBodyStrong: "至少一个",
         streamerBodySuffix:
-          "平台完成频道所有权认证并获得运营批准的用户才会显示。游戏记录、XP 和连续签到与普通排行榜使用相同的计算公式和 UI，批准平台数量不影响名次。",
+          "平台完成频道所有权认证并获得运营批准的用户才会显示。游戏记录、XP 和连续签到与普通排行榜使用相同的计算公式，游戏记录和 XP 额外提供总榜；批准平台数量不影响名次。",
         streamerLinkPrefix: "详细的认证方法请参阅",
         streamerLink: "Streamer 频道所有权认证",
         streamerLinkSuffix: "文档。",

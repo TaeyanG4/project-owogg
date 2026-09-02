@@ -10,7 +10,6 @@ import {
   RefreshCw,
   Search,
   Trophy,
-  Video,
   Zap,
 } from "lucide-react";
 import type {
@@ -24,12 +23,14 @@ import { formatPublicUserTag } from "@owogg/core";
 import { CountryFlag } from "../components/ui/CountryFlag";
 import { GameThumbnail } from "../components/ui/GameThumbnail";
 import { PlatformIcon, PlatformIconRow } from "../components/ui/PlatformIcon";
+import { RankingScopeTabs } from "../components/ranking/RankingScopeTabs";
 import { getLocalizedGameContent } from "../features/catalog/localizedGameContent";
 import { publicGameToCard } from "../features/catalog/publicGameAdapter";
 import { useI18n } from "../features/i18n/I18nContext";
 import { usePublicGames } from "../features/publicGamesApi";
 import { fetchPublicRankingApi } from "../features/rankings/api";
 import { formatRankingDate } from "../features/rankings/format";
+import { normalizeRankingPeriodForScope, rankingPeriodOptions } from "../features/rankings/periods";
 import { filterLeaderboardGames } from "../features/scores/leaderboardGames";
 import { leaderboardVariantLabel } from "../features/scores/variantLabel";
 import { STREAMER_UI_PLATFORMS } from "../features/streamers/streamerPlatforms";
@@ -99,6 +100,11 @@ export default function Ranking() {
     );
   }, [dict, gameCards, gameSearchQuery, locale]);
 
+  const selectScope = useCallback((nextScope: RankingScope) => {
+    setScope(nextScope);
+    setPeriod((current) => normalizeRankingPeriodForScope(nextScope, current));
+  }, []);
+
   const loadData = useCallback(async () => {
     if (metric === "score" && selectedGameId === "all") {
       setEntries([]);
@@ -143,11 +149,12 @@ export default function Ranking() {
     { id: "xp", label: dict.ranking.xpMode, icon: Zap },
     { id: "streak", label: dict.ranking.streakMode, icon: Flame },
   ];
-  const periodOptions: Array<{ id: RankingPeriod; label: string }> = [
-    { id: "daily", label: dict.ranking.dailyPeriod },
-    { id: "weekly", label: dict.ranking.weeklyPeriod },
-    { id: "monthly", label: dict.ranking.monthlyPeriod },
-  ];
+  const periodOptions = rankingPeriodOptions(scope, {
+    daily: dict.ranking.dailyPeriod,
+    weekly: dict.ranking.weeklyPeriod,
+    monthly: dict.ranking.monthlyPeriod,
+    all: dict.ranking.allPeriod,
+  });
   const platformOptions: Array<{ id: PlatformFilter; label: string }> = [
     { id: "ALL", label: dict.ranking.allPlatforms },
     ...STREAMER_UI_PLATFORMS.map((platform) => ({
@@ -192,30 +199,12 @@ export default function Ranking() {
           <p className="mt-1 text-sm text-text-secondary">{dict.ranking.subtitle}</p>
         </div>
 
-        <div className="flex items-center gap-1.5 rounded-2xl border border-border bg-surface-sidebar p-1.5">
-          <button
-            type="button"
-            onClick={() => setScope("general")}
-            className={`flex cursor-pointer items-center gap-2 rounded-xl px-4 py-2 text-xs font-extrabold transition-all md:text-sm ${
-              scope === "general"
-                ? "bg-brand text-white shadow-lg shadow-brand/25"
-                : "text-text-secondary hover:text-text-primary"
-            }`}
-          >
-            <Trophy className="h-4 w-4" /> {dict.ranking.gameTab}
-          </button>
-          <button
-            type="button"
-            onClick={() => setScope("streamer")}
-            className={`flex cursor-pointer items-center gap-2 rounded-xl px-4 py-2 text-xs font-extrabold transition-all md:text-sm ${
-              scope === "streamer"
-                ? "bg-purple-600 text-white shadow-lg shadow-purple-600/25"
-                : "text-text-secondary hover:text-text-primary"
-            }`}
-          >
-            <Video className="h-4 w-4" /> {dict.ranking.streamerTab}
-          </button>
-        </div>
+        <RankingScopeTabs
+          scope={scope}
+          onScopeChange={selectScope}
+          generalLabel={dict.ranking.gameTab}
+          streamerLabel={dict.ranking.streamerTab}
+        />
       </header>
 
       <section className="flex flex-col gap-4 rounded-2xl border border-border/70 bg-surface-sidebar/60 p-3 lg:flex-row lg:items-center lg:justify-between">

@@ -1,5 +1,5 @@
 /** Ranking calendar periods use the OwOGG service day (Asia/Seoul, fixed UTC+09:00). */
-export type PublicRankingPeriod = "daily" | "weekly" | "monthly";
+export type PublicRankingPeriod = "daily" | "weekly" | "monthly" | "all";
 
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
@@ -20,6 +20,13 @@ export function resolvePublicRankingPeriod(
   const year = shifted.getUTCFullYear();
   const month = shifted.getUTCMonth();
   const day = shifted.getUTCDate();
+
+  if (period === "all") {
+    return {
+      startAt: "1970-01-01T00:00:00.000Z",
+      endAt: now.toISOString(),
+    };
+  }
 
   if (period === "monthly") {
     return {
