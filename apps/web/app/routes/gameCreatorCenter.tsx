@@ -41,6 +41,10 @@ import type {
 } from "@owogg/contracts";
 import { GameBundleDropzone } from "../components/game/GameBundleDropzone";
 import { ExternalGameCreatorPanel } from "../components/externalGames/ExternalGameCreatorPanel";
+import {
+  requiresGameCreatorAccess,
+  resolveGameCreatorCenterTool,
+} from "../features/gameCreatorCenterAccess";
 
 export function meta() {
   return [
@@ -57,7 +61,8 @@ type LoadState = "loading" | "success" | "error";
  * program section. GAME_CREATOR is a Program/Entitlement, never a Staff Role. */
 export default function GameCreatorCenterRoute() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTool = searchParams.get("tool") === "external" ? "EXTERNAL" : "OWOGG";
+  const activeTool = resolveGameCreatorCenterTool(searchParams.get("tool"));
+  const needsGameCreatorAccess = requiresGameCreatorAccess(activeTool);
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [devMe, setDevMe] = useState<GameCreatorMeResponse | null>(null);
   const [myGames, setMyGames] = useState<SandboxGameRecord[] | null>(null);
@@ -84,10 +89,13 @@ export default function GameCreatorCenterRoute() {
   }, []);
 
   useEffect(() => {
-    if (!authLoading && isAuthenticated) void load();
-  }, [authLoading, isAuthenticated, load]);
+    // External introductions deliberately do not depend on /api/dev/me. A regular signed-in
+    // player must still be able to use them when they do not hold (or cannot apply for) the
+    // independent Game Creator upload entitlement.
+    if (!authLoading && isAuthenticated && needsGameCreatorAccess) void load();
+  }, [authLoading, isAuthenticated, load, needsGameCreatorAccess]);
 
-  if (authLoading || (isAuthenticated && state === "loading")) {
+  if (authLoading || (isAuthenticated && needsGameCreatorAccess && state === "loading")) {
     return <PageMessage>불러오는 중...</PageMessage>;
   }
 
@@ -99,7 +107,7 @@ export default function GameCreatorCenterRoute() {
     );
   }
 
-  if (state === "error" || !devMe) {
+  if (needsGameCreatorAccess && (state === "error" || !devMe)) {
     return (
       <PageMessage>
         <ShieldAlert className="mx-auto mb-4 h-10 w-10 text-text-muted" />
@@ -134,7 +142,7 @@ export default function GameCreatorCenterRoute() {
         </p>
       </header>
 
-      {error && (
+      {needsGameCreatorAccess && error && (
         <p className="rounded-xl border border-accent-red/30 bg-accent-red/10 px-3 py-2 text-[11px] font-semibold text-accent-red">
           {error}
         </p>
@@ -165,18 +173,18 @@ export default function GameCreatorCenterRoute() {
         </button>
       </div>
 
-      {activeTool === "EXTERNAL" ? (
+      {!needsGameCreatorAccess ? (
         <ExternalGameCreatorPanel />
-      ) : devMe.hasAccess ? (
+      ) : devMe?.hasAccess ? (
         <ManageGamesPanel
           myGames={myGames}
           drafts={drafts}
           onChanged={() => void load()}
           onError={setError}
         />
-      ) : (
+      ) : devMe ? (
         <ApplicationPanel devMe={devMe} onChanged={() => void load()} onError={setError} />
-      )}
+      ) : null}
     </div>
   );
 }

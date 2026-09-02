@@ -420,6 +420,28 @@ test("POST /api/dev/games/upload is rejected for a non-developer with FORBIDDEN,
   assert.equal(res.status, 403);
 });
 
+test("POST /api/external-games lets a plain signed-in player pass the role gate", async () => {
+  const { db } = createDb({ userId: 7, isDeveloper: false });
+  const res = await app.request(
+    "/api/external-games",
+    {
+      method: "POST",
+      headers: {
+        Cookie: "owogg_session=valid_session",
+        Origin: "http://localhost:5173",
+        "Content-Type": "application/json",
+      },
+      // Deliberately invalid content: reaching payload validation (400) proves the authenticated
+      // plain player was not rejected by the independent Game Creator upload entitlement (403).
+      body: JSON.stringify({}),
+    },
+    { DB: db, ADMIN_USER_IDS: "1", FRONTEND_URL: "http://localhost:5173" } as any,
+  );
+  assert.equal(res.status, 400);
+  const body = (await res.json()) as { error: { code: string } };
+  assert.equal(body.error.code, "INVALID_REQUEST");
+});
+
 test("POST /api/dev/games/upload returns 503 GAME_BUNDLES_NOT_CONFIGURED when B2 config is absent", async () => {
   const { db } = createDb({ userId: 7, isDeveloper: true });
   const res = await app.request(

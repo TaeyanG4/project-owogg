@@ -19,6 +19,7 @@ import { OwoWordmarkIcon } from "../ui/OwoWordmarkIcon";
 import { DiscordIcon } from "../ui/DiscordIcon";
 import { useClickOutside } from "../../hooks/useClickOutside";
 import { fetchMyAccess } from "../../features/myAccess";
+import { gameCreatorCenterEntry } from "../../features/gameCreatorCenterAccess";
 import { ApiClientError } from "../../lib/api/errors.js";
 import { retryAsync } from "../../lib/api/retry.js";
 import type { MyAccessResponse } from "@owogg/contracts";
@@ -87,21 +88,11 @@ export function Header({ onToggleMobileSidebar, isAdminWorkspace = false }: Head
     (myAccess.staffRole === "ADMIN" || myAccess.permissions.includes("admin.center.access"))
       ? { to: "/admin", label: "관리자 센터", Icon: ShieldCheck }
       : null;
-  const gameCreator = myAccess?.gameCreator;
-  // Always shown to every logged-in user, regardless of canApply — even while self-serve
-  // applications are closed (canApplyForGameCreator() currently false, §"추후 업데이트 예정"), the
-  // entry stays visible and just routes to /game-creator's own "coming soon" state, rather than
-  // disappearing and giving no indication the program exists at all.
-  const showGameCreatorEntry = !!gameCreator;
-  const gameCreatorLabel = !gameCreator
-    ? ""
-    : gameCreator.hasAccess
-      ? "게임 크리에이터 센터"
-      : gameCreator.applicationStatus === "PENDING"
-        ? "게임 크리에이터 신청 확인"
-        : "게임 크리에이터 신청";
+  // Every signed-in player can introduce an external game. Users without the independent Game
+  // Creator upload entitlement land directly on that tool instead of a closed application panel.
+  const gameCreatorEntry = gameCreatorCenterEntry(myAccess?.gameCreator);
   const showStreamerEntry = !!myAccess?.streamer.isVerified;
-  const showAccessSection = !!staffCenter || showGameCreatorEntry || showStreamerEntry;
+  const showAccessSection = !!staffCenter || !!gameCreatorEntry || showStreamerEntry;
 
   return (
     <header className="sticky top-0 z-40 w-full backdrop-blur-xl bg-surface/90 border-b border-border/80 transition-all select-none">
@@ -308,14 +299,14 @@ export function Header({ onToggleMobileSidebar, isAdminWorkspace = false }: Head
                         </Link>
                       )}
 
-                      {showGameCreatorEntry && (
+                      {gameCreatorEntry && (
                         <Link
-                          to="/game-creator"
+                          to={gameCreatorEntry.to}
                           onClick={() => setShowUserDropdown(false)}
                           className="flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-text-primary hover:bg-surface-overlay transition-colors"
                         >
                           <Gamepad2 className="w-4 h-4 text-brand-light" />
-                          <span>{gameCreatorLabel}</span>
+                          <span>{gameCreatorEntry.label}</span>
                         </Link>
                       )}
 
