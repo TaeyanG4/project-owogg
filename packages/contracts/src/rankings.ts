@@ -7,7 +7,7 @@ export type RankingScope = z.infer<typeof RankingScopeSchema>;
 export const RankingMetricSchema = z.enum(["score", "xp", "streak"]);
 export type RankingMetric = z.infer<typeof RankingMetricSchema>;
 
-export const RankingPeriodSchema = z.enum(["daily", "weekly", "monthly"]);
+export const RankingPeriodSchema = z.enum(["daily", "weekly", "monthly", "all"]);
 export type RankingPeriod = z.infer<typeof RankingPeriodSchema>;
 
 export const PublicRankingPlatformAccountSchema = z.object({
@@ -58,6 +58,13 @@ export const PublicRankingQuerySchema = z
         code: z.ZodIssueCode.custom,
         path: ["platform"],
         message: "platform is available only for streamer rankings",
+      });
+    }
+    if (query.scope !== "streamer" && query.period === "all") {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["period"],
+        message: "all-time is available only for streamer rankings",
       });
     }
     if (query.metric !== "score" && query.difficulty !== undefined) {

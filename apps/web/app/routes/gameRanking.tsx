@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, AlertCircle, CalendarDays, Medal, RefreshCw, Trophy } from "lucide-react";
 import { Link, useParams } from "react-router";
-import type { PublicGame, PublicRankingEntry, RankingPeriod } from "@owogg/contracts";
+import type { PublicGame, PublicRankingEntry, RankingPeriod, RankingScope } from "@owogg/contracts";
 import { formatPublicUserTag } from "@owogg/core";
 import { CountryFlag } from "../components/ui/CountryFlag";
 import { GameThumbnail } from "../components/ui/GameThumbnail";
+import { PlatformIconRow } from "../components/ui/PlatformIcon";
+import { RankingScopeTabs } from "../components/ranking/RankingScopeTabs";
 import { getLocalizedGameContent } from "../features/catalog/localizedGameContent";
 import { localizedDifficultyLabel } from "../features/catalog/difficultyLabels";
 import { publicGameToCard } from "../features/catalog/publicGameAdapter";
@@ -12,6 +14,7 @@ import { useI18n } from "../features/i18n/I18nContext";
 import { fetchPublicGame } from "../features/publicGamesApi";
 import { fetchPublicRankingApi } from "../features/rankings/api";
 import { formatRankingDate } from "../features/rankings/format";
+import { normalizeRankingPeriodForScope, rankingPeriodOptions } from "../features/rankings/periods";
 import { leaderboardVariantLabel } from "../features/scores/variantLabel";
 
 export function meta() {
@@ -23,13 +26,19 @@ export function meta() {
 
 type LeaderboardState = "loading" | "success" | "error";
 
-function PlayerCell({ entry }: { entry: PublicRankingEntry }) {
+function PlayerCell({ entry, scope }: { entry: PublicRankingEntry; scope: RankingScope }) {
   return (
     <Link
       to={`/users/${entry.userId}`}
       className="flex w-fit items-center gap-2 text-brand-light hover:underline"
     >
-      <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-brand/20 text-xs font-black text-brand">
+      <span
+        className={`flex h-8 w-8 items-center justify-center overflow-hidden rounded-full text-xs font-black ${
+          scope === "streamer"
+            ? "border border-purple-500/30 bg-purple-600/30 text-purple-200"
+            : "bg-brand/20 text-brand"
+        }`}
+      >
         {entry.avatarUrl ? (
           <img src={entry.avatarUrl} alt={entry.nickname} className="h-full w-full object-cover" />
         ) : (
@@ -48,6 +57,7 @@ export default function GameRankingRoute() {
   const [gameLoading, setGameLoading] = useState(true);
   const [records, setRecords] = useState<PublicRankingEntry[]>([]);
   const [status, setStatus] = useState<LeaderboardState>("loading");
+  const [scope, setScope] = useState<RankingScope>("general");
   const [period, setPeriod] = useState<RankingPeriod>("daily");
   const [selectedDifficultyId, setSelectedDifficultyId] = useState("normal");
   const card = useMemo(() => (game ? publicGameToCard(game, locale) : null), [game, locale]);
@@ -78,6 +88,11 @@ export default function GameRankingRoute() {
     setSelectedDifficultyId(game?.difficulty?.defaultLevelId ?? "normal");
   }, [game]);
 
+  const selectScope = useCallback((nextScope: RankingScope) => {
+    setScope(nextScope);
+    setPeriod((current) => normalizeRankingPeriodForScope(nextScope, current));
+  }, []);
+
   const loadData = useCallback(async () => {
     if (!game?.policy.leaderboard) return;
     if (
@@ -89,7 +104,7 @@ export default function GameRankingRoute() {
     setStatus("loading");
     try {
       const response = await fetchPublicRankingApi({
-        scope: "general",
+        scope,
         metric: "score",
         period,
         gameId: slug,
@@ -103,7 +118,7 @@ export default function GameRankingRoute() {
       setRecords([]);
       setStatus("error");
     }
-  }, [game?.difficulty, game?.policy.leaderboard, period, selectedDifficultyId, slug]);
+  }, [game?.difficulty, game?.policy.leaderboard, period, scope, selectedDifficultyId, slug]);
 
   useEffect(() => {
     void loadData();
@@ -141,11 +156,13 @@ export default function GameRankingRoute() {
     );
   }
 
-  const periods: Array<{ id: RankingPeriod; label: string }> = [
-    { id: "daily", label: dict.ranking.dailyPeriod },
-    { id: "weekly", label: dict.ranking.weeklyPeriod },
-    { id: "monthly", label: dict.ranking.monthlyPeriod },
-  ];
+  const periods = rankingPeriodOptions(scope, {
+    daily: dict.ranking.dailyPeriod,
+    weekly: dict.ranking.weeklyPeriod,
+    monthly: dict.ranking.monthlyPeriod,
+    all: dict.ranking.allPeriod,
+  });
+  const columnCount = scope === "streamer" ? 7 : 6;
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-8 md:px-8">
@@ -155,6 +172,15 @@ export default function GameRankingRoute() {
       >
         <ArrowLeft className="h-3.5 w-3.5" /> {dict.gameRanking.backToGame}
       </Link>
+
+      <div className="mb-6 flex justify-center">
+        <RankingScopeTabs
+          scope={scope}
+          onScopeChange={selectScope}
+          generalLabel={dict.ranking.gameTab}
+          streamerLabel={dict.ranking.streamerTab}
+        />
+      </div>
 
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -217,24 +243,32 @@ export default function GameRankingRoute() {
             <thead>
               <tr className="border-b border-border bg-surface-sidebar text-xs font-extrabold uppercase tracking-wider text-text-muted">
                 <th className="px-6 py-4">{dict.ranking.rankHeader}</th>
-                <th className="px-6 py-4">{dict.ranking.playerHeader}</th>
+                <th className="px-6 py-4">
+                  {scope === "streamer" ? dict.ranking.streamerHeader : dict.ranking.playerHeader}
+                </th>
                 <th className="px-6 py-4 text-center">{dict.ranking.countryHeader}</th>
                 <th className="px-6 py-4">{dict.ranking.recordHeader}</th>
                 <th className="px-6 py-4">{dict.ranking.dateHeader}</th>
                 <th className="px-6 py-4">{dict.ranking.modeHeader}</th>
+                {scope === "streamer" && (
+                  <th className="px-6 py-4 text-right">{dict.ranking.platformHeader}</th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50 text-sm font-medium text-text-primary">
               {status === "loading" && (
                 <tr>
-                  <td colSpan={6} className="animate-pulse py-16 text-center text-text-muted">
+                  <td
+                    colSpan={columnCount}
+                    className="animate-pulse py-16 text-center text-text-muted"
+                  >
                     {dict.common.loading}
                   </td>
                 </tr>
               )}
               {status === "error" && (
                 <tr>
-                  <td colSpan={6} className="py-16 text-center text-text-muted">
+                  <td colSpan={columnCount} className="py-16 text-center text-text-muted">
                     <div className="flex flex-col items-center justify-center gap-3">
                       <AlertCircle className="h-8 w-8 text-accent-red" />
                       <button
@@ -250,8 +284,10 @@ export default function GameRankingRoute() {
               )}
               {status === "success" && records.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-16 text-center text-text-muted">
-                    {dict.gamePlay.leaderboardEmpty}
+                  <td colSpan={columnCount} className="py-16 text-center text-text-muted">
+                    {scope === "streamer"
+                      ? dict.ranking.emptyStreamerTitle
+                      : dict.gamePlay.leaderboardEmpty}
                   </td>
                 </tr>
               )}
@@ -276,7 +312,7 @@ export default function GameRankingRoute() {
                       )}
                     </td>
                     <td className="px-6 py-4 font-bold text-text-primary">
-                      <PlayerCell entry={entry} />
+                      <PlayerCell entry={entry} scope={scope} />
                     </td>
                     <td className="px-6 py-4 text-center">
                       <CountryFlag
@@ -284,7 +320,11 @@ export default function GameRankingRoute() {
                         unknownLabel={dict.ranking.unknownCountry}
                       />
                     </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-base font-black text-brand-light">
+                    <td
+                      className={`whitespace-nowrap px-6 py-4 text-base font-black ${
+                        scope === "streamer" ? "text-purple-200" : "text-brand-light"
+                      }`}
+                    >
                       {entry.formattedValue}
                     </td>
                     <td className="whitespace-nowrap px-6 py-4 text-xs text-text-secondary">
@@ -293,6 +333,13 @@ export default function GameRankingRoute() {
                     <td className="whitespace-nowrap px-6 py-4 text-xs font-bold text-text-secondary">
                       {leaderboardVariantLabel(game, entry.variantId ?? "standard")}
                     </td>
+                    {scope === "streamer" && (
+                      <td className="whitespace-nowrap px-6 py-4">
+                        <div className="flex justify-end">
+                          <PlatformIconRow accounts={entry.platformAccounts} size={24} />
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
             </tbody>

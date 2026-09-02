@@ -256,3 +256,11 @@ test("public query endpoints reject invalid values instead of silently defaultin
   const rankings = await app.request("/api/rankings?metric=xp&difficulty=normal");
   assert.equal(rankings.status, 400);
 });
+
+test("all-time public rankings are accepted only for the verified Streamer scope", async () => {
+  const general = await app.request("/api/rankings?scope=general&metric=xp&period=all");
+  assert.equal(general.status, 400);
+
+  const streamer = await app.request("/api/rankings?scope=streamer&metric=xp&period=all");
+  assert.equal(streamer.status, 503, "valid query proceeds to the missing test DB boundary");
+});
