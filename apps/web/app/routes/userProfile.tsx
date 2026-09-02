@@ -40,7 +40,8 @@ import { publicGameToCard } from "../features/catalog/publicGameAdapter";
 import { GameThumbnail } from "../components/ui/GameThumbnail";
 import { GameFavoriteCard, GameActivityCard } from "../components/ui/GameLinkCard";
 import { ProfileActivityHeatmap } from "../components/profile/ProfileActivityHeatmap";
-import { ACHIEVEMENT_DEFINITIONS, formatPublicUserTag, type AchievementCode } from "@owogg/core";
+import { ACHIEVEMENT_DEFINITIONS, type AchievementCode } from "@owogg/core";
+import { formatProfileJoinedDate } from "../features/profile/presentation";
 import { ApiClientError } from "../lib/api";
 import type {
   ConnectedProvider,
@@ -55,18 +56,6 @@ export function meta() {
     { title: "플레이어 프로필 | OwOGG" },
     { name: "description", content: "OwOGG 플레이어의 공개 프로필, 기록, 도전과제를 확인하세요." },
   ];
-}
-
-/** ISO 3166-1 alpha-2 → flag emoji via regional indicator symbols. Sidesteps needing
- * localized country names (COUNTRY_OPTIONS is Korean-only) for a purely visual flag. */
-function countryFlagEmoji(code: string): string {
-  if (!/^[A-Za-z]{2}$/.test(code)) return "";
-  const base = 0x1f1e6;
-  const chars = code
-    .toUpperCase()
-    .split("")
-    .map((c) => String.fromCodePoint(base + (c.charCodeAt(0) - 65)));
-  return chars.join("");
 }
 
 type LoadState = "loading" | "success" | "notFound" | "error";
@@ -219,7 +208,6 @@ export default function UserProfileRoute() {
   if (!data) return null;
 
   const isOwnProfile = viewer?.id === data.id;
-  const flag = data.country ? countryFlagEmoji(data.country) : "";
 
   const favoriteGames = (data.favoriteGameIds ?? [])
     .map((id) => games.find((game) => game.slug === id))
@@ -407,11 +395,15 @@ export default function UserProfileRoute() {
               <p className="text-[11px] font-black uppercase tracking-[0.16em] text-brand-light">
                 {dict.userProfile.eyebrow}
               </p>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <h1 className="break-all text-xl font-black leading-tight text-text-primary sm:text-2xl">
-                  {formatPublicUserTag(data.nickname, data.id)}
+              <div className="mt-2">
+                <h1 className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 leading-tight">
+                  <span className="break-all text-xl font-black text-text-primary sm:text-2xl">
+                    {data.nickname}
+                  </span>
+                  <span className="shrink-0 text-xs font-bold tabular-nums text-text-muted">
+                    #{data.id}
+                  </span>
                 </h1>
-                {flag && <span className="text-xl">{flag}</span>}
               </div>
               {data.roles.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-1.5">
@@ -478,8 +470,11 @@ export default function UserProfileRoute() {
             <dl className="mt-5 space-y-3 text-[13px]">
               <ProfileFact
                 label={dict.userProfile.joinedPrefix}
-                value={data.joinedAt.split("T")[0] ?? data.joinedAt}
+                value={formatProfileJoinedDate(data.joinedAt)}
               />
+              {data.country && (
+                <ProfileFact label={dict.profile.countryLabel} value={data.country.toUpperCase()} />
+              )}
               {data.globalRank !== null && (
                 <ProfileFact
                   label={dict.userProfile.globalRankLabel}
